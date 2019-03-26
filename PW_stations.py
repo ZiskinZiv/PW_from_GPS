@@ -28,20 +28,29 @@ for st_name in station_names:
     df.index = pd.to_datetime(df['date'] + 'T' + df['time'])
     df.drop(columns=['date', 'time'], inplace=True)
     df_list.append(df)
+df = pd.concat(df_list, axis=1)
 print('Concatanting to Xarray...')
-ds = xr.concat([df.to_xarray() for df in df_list], dim="station")
-ds['station'] = station_names
+# ds = xr.concat([df.to_xarray() for df in df_list], dim="station")
+# ds['station'] = station_names
+df.columns = station_names
+ds = df.to_xarray()
 ds = ds.rename({'index': 'time'})
-da = ds.to_array(name='PW').squeeze(drop=True)
+# da = ds.to_array(name='PW').squeeze(drop=True)
 comp = dict(zlib=True, complevel=9)  # best compression
-encoding = {var: comp for var in da.to_dataset().data_vars}
+encoding = {var: comp for var in ds.data_vars}
 print('Saving to PW_2007-2016.nc')
-da.to_netcdf(work_path + 'PW_2007-2016.nc', 'w', encoding=encoding)
+ds.to_netcdf(work_path + 'PW_2007-2016.nc', 'w', encoding=encoding)
 print('Done!')
 # clean the data:
-da = da.where(da >= 0, np.nan)
-da = da.where(da < 100, np.nan)
+# da = da.where(da >= 0, np.nan)
+# da = da.where(da < 100, np.nan)
 
+# plot the data:
+ds.to_array(dim='station').plot(x='time',col='station',col_wrap=4)
+# hist:
+# df=ds.to_dataframe()
+sl=(df>0) & (df<50)
+df[sl].hist(bins=30, grid=False, figsize=(15,8))
 def desc_nan(data, verbose=True):
     """count only NaNs in data and returns the thier amount and the non-NaNs"""
     import numpy as np
