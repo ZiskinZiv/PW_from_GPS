@@ -87,7 +87,7 @@ def untar_read_delete_day(path):
     return ds
 
 
-def read_entire_year(base_path):
+def read_entire_year(base_path, save_path=None):
     """read all year all stations, return concateneted dataset"""
     import os
     import xarray as xr
@@ -102,5 +102,11 @@ def read_entire_year(base_path):
         ds = first_ds.combine_first(next_ds)
         # ds_list.append(untar_read_delete_day(path))
         first_ds = ds
+    if save_path is not None:
+        year = paths[0].split('/')[-2]
+        comp = dict(zlib=True, complevel=9)  # best compression
+        encoding = {var: comp for var in first_ds.data_vars}
+        first_ds.to_netcdf(save_path + 'garner_trop_' + year, 'w',
+                           encoding=encoding)
     # ds = xr.concat(ds_list, 'time')
     return first_ds
