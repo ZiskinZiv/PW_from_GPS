@@ -103,10 +103,40 @@ def read_entire_year(base_path, save_path=None):
         # ds_list.append(untar_read_delete_day(path))
         first_ds = ds
     if save_path is not None:
+        print('saving file to {}'.format(save_path))
         year = paths[0].split('/')[-2]
         comp = dict(zlib=True, complevel=9)  # best compression
         encoding = {var: comp for var in first_ds.data_vars}
-        first_ds.to_netcdf(save_path + 'garner_trop_' + year, 'w',
-                           encoding=encoding)
+        first_ds.to_netcdf(save_path + 'garner_trop_all_stations_' + year +
+                           '.nc', 'w', encoding=encoding)
+        print('Done!')
     # ds = xr.concat(ds_list, 'time')
     return first_ds
+
+
+def pick_one_station_assemble_time_series(path,
+                                          filenames='garner_trop_all_stations',
+                                          station_name=None, save_path=None):
+    """pick a GPS station in UPPERCASE (four letters) and return a timeseries
+    for all the epochs"""
+    import xarray as xr
+    if station_name is not None:
+        print('Opening all stations...')
+        all_data = xr.open_mfdataset(path + filenames + '*.nc')
+        try:
+            station = all_data[station_name]
+        except KeyError:
+            print('The station name does not exists...pls pick another.')
+            return
+        print('picked station: {}'.format(station_name))
+        station.compute()
+        if save_path is not None:
+            print('saving file to {}'.format(save_path))
+            comp = dict(zlib=True, complevel=9)  # best compression
+            encoding = {var: comp for var in station.to_dataset().data_vars}
+            station.to_netcdf(save_path + 'garner_trop_' + station +
+                              '.nc', 'w', encoding=encoding)
+            print('Done!')
+    else:
+        raise KeyError('pls pick a station...')
+    return station
