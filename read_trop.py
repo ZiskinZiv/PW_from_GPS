@@ -87,11 +87,11 @@ def untar_read_delete_day(path):
     return ds
 
 
-def read_entire_year(base_path, save_path=None):
+def read_entire_year(base_year_path, save_path=None):
     """read all year all stations, return concateneted dataset"""
     import os
-    import xarray as xr
-    paths = sorted([x[0] for x in os.walk(base_path)])
+    # import xarray as xr
+    paths = sorted([x[0] for x in os.walk(base_year_path)])
     paths.pop(0)
     # ds_list = []
     # ds = xr.Dataset()
@@ -140,3 +140,64 @@ def pick_one_station_assemble_time_series(path,
     else:
         raise KeyError('pls pick a station...')
     return station
+
+
+def check_path(path):
+    import os
+    path = str(path)
+    if not os.path.exists(path):
+        raise argparse.ArgumentTypeError(path + ' does not exist...')
+    return path
+
+
+def check_station_name(name):
+    # import os
+    name = str(name)
+    if len(name) != 4:
+        raise argparse.ArgumentTypeError(name + ' should be 4 letters...')
+    return name.upper()
+
+
+if __name__ == '__main__':
+    import argparse
+    import sys
+    import numpy as np
+    start_year = 1992
+    end_year = 2019
+    parser = argparse.ArgumentParser(description='a command line tool for combining gipsy-tpdl files')
+    optional = parser._action_groups.pop()
+    required = parser.add_argument_group('required arguments')
+    # remove this line: optional = parser...
+    required.add_argument('--path', help="a full path to read years and save nc files,\
+                          e.g., /data11/ziskin/", type=check_path)
+    required.add_argument('--mode', help="mode to operate, e.g., read_years, get_station,",
+                          type=str, choices=['read_years', 'get_station'])
+    optional.add_argument('--station', help='GPS station name, 4 UPPERCASE letters',
+                          type=check_station_name)
+#                          metavar=str(cds.start_year) + ' to ' + str(cds.end_year))
+#    optional.add_argument('--half', help='a spescific six months to download,\
+#                          e.g, 1 or 2', type=int, choices=[1, 2],
+#                          metavar='1 or 2')
+    parser._action_groups.append(optional)  # added this line
+    args = parser.parse_args()
+    # print(parser.format_help())
+#    # print(vars(args))
+    if args.path is None:
+        print('path is a required argument, run with -h...')
+        sys.exit()
+#    elif args.field is None:
+#        print('field is a required argument, run with -h...')
+#        sys.exit()
+    if args.mode == 'read_years':
+        years = np.arange(start_year, end_year + 1).astype('str')
+        for year in years:
+            year_path = args.path + '/' + year
+            read_entire_year(year_path, save_path=args.path)
+    elif args.mode == 'get_station':
+        if args.station is not None:
+            pick_one_station_assemble_time_series(args.path,
+                                                  filenames='garner_trop_all_stations',
+                                                  station_name=args.station,
+                                                  save_path=args.path)
+        else:
+            raise ValueError('need to specify station!')
