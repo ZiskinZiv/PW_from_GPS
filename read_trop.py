@@ -201,3 +201,7 @@ if __name__ == '__main__':
                                                   save_path=args.path)
         else:
             raise ValueError('need to specify station!')
+# command to wget all files and all dirs from http site:
+# nohup wget -r --user=anonymous --password='shlomiziskin@gmail.com'
+# -e robots=off --no-parent -nH --cut-dirs=2 --reject="index.html*" -U mozilla
+# http://garner.ucsd.edu/pub/solutions/gipsy/trop > nohup_wget.out&
