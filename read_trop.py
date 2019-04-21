@@ -203,7 +203,7 @@ if __name__ == '__main__':
         years = np.arange(start_year, end_year + 1).astype('str')
         for year in years:
             year_path = args.path + '/' + year
-            read_entire_year(year_path, save_path=args.path)
+            read_entire_year(year_path, save_path=args.path + '/')
     elif args.mode == 'get_station':
         if args.station is not None:
             pick_one_station_assemble_time_series(args.path,
