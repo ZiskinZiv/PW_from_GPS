@@ -42,38 +42,47 @@ def read_one_station(path, station):
                      delim_whitespace=True, header=None,
                      names=['time_tag', 'apriori', 'estimated', 'sigma',
                             'parameter'])
-    # change time_tag to proper datetime index:
-    st['time'] = datetime.datetime(2000, 1, 1, 12, 0) + pd.to_timedelta(st['time_tag'], unit='s')
-    st.drop('time_tag', axis=1, inplace=True)
-    st = st.pivot(index='time', columns='parameter')
-    # rename cols:
-    new_cols = ['_'.join([x[1], x[0]]) for x in st.columns]
-    st.columns = new_cols
-    # drop all cols but WET:
-    to_drop = [x for x in st.columns if not x.startswith('WET')]
-    st.drop(to_drop, axis=1, inplace=True)
-    # change units to cm:
-    st = st * 100
-    # rename and drop more:
-    cols = ['to_drop', 'zwd', 'sigma']
-    st.columns = cols
-    st.drop('to_drop', axis=1, inplace=True)
-    stxr = xr.DataArray(st, dims=['time', 'zwd'])
-    stxr['zwd']=['value', 'sigma']
-    stxr.name = station
+    # check for empty files:
+    if st.empty:
+        print('{}.trop is an empty file... skipping'.format(station))
+        return
+    else:
+        # change time_tag to proper datetime index:
+        st['time'] = datetime.datetime(2000, 1, 1, 12, 0) + pd.to_timedelta(st['time_tag'], unit='s')
+        st.drop('time_tag', axis=1, inplace=True)
+        st = st.pivot(index='time', columns='parameter')
+        # rename cols:
+        new_cols = ['_'.join([x[1], x[0]]) for x in st.columns]
+        st.columns = new_cols
+        # drop all cols but WET:
+        to_drop = [x for x in st.columns if not x.startswith('WET')]
+        st.drop(to_drop, axis=1, inplace=True)
+        # change units to cm:
+        st = st * 100
+        # rename and drop more:
+        cols = ['to_drop', 'zwd', 'sigma']
+        st.columns = cols
+        st.drop('to_drop', axis=1, inplace=True)
+        stxr = xr.DataArray(st, dims=['time', 'zwd'])
+        stxr['zwd'] = ['value', 'sigma']
+        stxr.name = station
     return stxr
 
-def read_all_stations_in_day(path):
+
+def read_all_stations_in_day(path, verbose=False):
     """read all the stations in a day (directory)"""
     import xarray as xr
     import glob
     names = glob.glob(path + '/*.trop')
-    station_names =[x.split('/')[-1].split('.')[0] for x in names]
+    station_names = [x.split('/')[-1].split('.')[0] for x in names]
     da_list = []
     for station in station_names:
+        if verbose:
+            print('reading station {}'.format(station))
         da_list.append(read_one_station(path + '/', station))
     ds = xr.merge(da_list)
     return ds
+
 
 def untar_read_delete_day(path):
     """untar file in directory, read all the station files to datasets
@@ -162,7 +171,7 @@ if __name__ == '__main__':
     import argparse
     import sys
     import numpy as np
-    start_year = 1992
+    start_year = 2011
     end_year = 2019
     parser = argparse.ArgumentParser(description='a command line tool for combining gipsy-tpdl files')
     optional = parser._action_groups.pop()
