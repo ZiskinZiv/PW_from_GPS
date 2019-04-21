@@ -45,7 +45,7 @@ def read_one_station(path, station):
     # check for empty files:
     if st.empty:
         print('{}.trop is an empty file... skipping'.format(station))
-        return
+        return None
     else:
         # change time_tag to proper datetime index:
         st['time'] = datetime.datetime(2000, 1, 1, 12, 0) + pd.to_timedelta(st['time_tag'], unit='s')
@@ -66,7 +66,7 @@ def read_one_station(path, station):
         stxr = xr.DataArray(st, dims=['time', 'zwd'])
         stxr['zwd'] = ['value', 'sigma']
         stxr.name = station
-    return stxr
+        return stxr
 
 
 def read_all_stations_in_day(path, verbose=False):
@@ -79,7 +79,9 @@ def read_all_stations_in_day(path, verbose=False):
     for station in station_names:
         if verbose:
             print('reading station {}'.format(station))
-        da_list.append(read_one_station(path + '/', station))
+        one_station = read_one_station(path + '/', station)
+        if one_station is not None:
+            da_list.append(one_station)
     ds = xr.merge(da_list)
     return ds
 
