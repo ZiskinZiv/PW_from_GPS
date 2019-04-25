@@ -125,29 +125,64 @@ def read_entire_year(base_year_path, save_path=None):
     return first_ds
 
 
-def pick_one_station_assemble_time_series(path,
-                                          filenames='garner_trop_all_stations',
-                                          station_name=None, save_path=None):
+def assemble_stations(path, filenames='garner_trop_all_stations',
+                      station_name=None, save_path=None):
     """pick a GPS station in UPPERCASE (four letters) and return a timeseries
     for all the epochs"""
     import xarray as xr
-    if station_name is not None:
-        print('Opening all stations...')
-        all_data = xr.open_mfdataset(path + filenames + '*.nc')
+
+    def read_one_file_at_atime(path, filenames, station_name):
+        import glob
+        st_list = []
+        for data_file in sorted(glob.glob(path + filenames + '*.nc')):
+            print('opening {}'.format(data_file.split('/')[-1]))
+            data = xr.open_dataset(data_file)
+            try:
+                print('reading station {}'.format(station_name))
+                station = data[station_name]
+                st_list.append(station)
+            except KeyError:
+                print('The station {} does not exists in file {}.'.format(station_name, data_file.split('/')[-1]))
+                continue
+        station_con = xr.concat(st_list, 'time')
+        return station_con
+        
+
+    def read_one_station(data, station_name):
+        station_name = str(station_name)
         try:
             station = all_data[station_name]
         except KeyError:
-            print('The station name does not exists...pls pick another.')
-            return
-        print('picked station: {}'.format(station_name))
-        station.compute()
-        if save_path is not None:
-            print('saving file to {}'.format(save_path))
-            comp = dict(zlib=True, complevel=9)  # best compression
-            encoding = {var: comp for var in station.to_dataset().data_vars}
-            station.to_netcdf(save_path + 'garner_trop_' + station +
-                              '.nc', 'w', encoding=encoding)
-            print('Done!')
+            print('The station {} does not exists...'.format(station_name))
+            return None
+        return station
+
+    if station_name is not None:
+        # print('Opening all stations...')
+        # all_data = xr.open_mfdataset(path + filenames + '*.nc', parallel=True)
+        if isinstance(station_name, list):
+            for name in station_name:
+                # station = read_one_station(all_data, name)
+                station = read_one_file_at_atime(path, filenames, name)
+                if station is not None and save_path is not None:
+                    print('saving file to {}'.format(save_path))
+                    comp = dict(zlib=True, complevel=9)  # best compression
+                    encoding = {var: comp for var in station.to_dataset().data_vars}
+                    station.to_netcdf(save_path + 'garner_trop_' + station_name
+                                      + '.nc', 'w', encoding=encoding)
+                    print('Done!')
+                return station
+        else:
+            # station = read_one_station(all_data, station_name)
+            station = read_one_file_at_atime(path, filenames, station_name)
+            if station is not None and save_path is not None:
+                    print('saving file to {}'.format(save_path))
+                    comp = dict(zlib=True, complevel=9)  # best compression
+                    encoding = {var: comp for var in station.to_dataset().data_vars}
+                    station.to_netcdf(save_path + 'garner_trop_' + station_name
+                                      + '.nc', 'w', encoding=encoding)
+                    print('Done!')
+            return station
     else:
         raise KeyError('pls pick a station...')
     return station
@@ -163,10 +198,17 @@ def check_path(path):
 
 def check_station_name(name):
     # import os
-    name = str(name)
-    if len(name) != 4:
-        raise argparse.ArgumentTypeError(name + ' should be 4 letters...')
-    return name.upper()
+    if isinstance(name, list):
+        names = [str(x).upper() for x in name]
+        for nm in names:
+            if len(nm) != 4:
+                raise argparse.ArgumentTypeError('{} should be 4 letters...'.format(nm))
+        return names
+    else:
+        name = str(name).upper()
+        if len(name) != 4:
+            raise argparse.ArgumentTypeError(name + ' should be 4 letters...')
+        return name
 
 
 if __name__ == '__main__':
@@ -206,10 +248,8 @@ if __name__ == '__main__':
             read_entire_year(year_path, save_path=args.path + '/')
     elif args.mode == 'get_station':
         if args.station is not None:
-            pick_one_station_assemble_time_series(args.path,
-                                                  filenames='garner_trop_all_stations',
-                                                  station_name=args.station,
-                                                  save_path=args.path)
+            assemble_stations(args.path, filenames='garner_trop_all_stations',
+                              station_name=args.station, save_path=args.path)
         else:
             raise ValueError('need to specify station!')
 # command to wget all files and all dirs from http site:
