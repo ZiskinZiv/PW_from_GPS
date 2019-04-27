@@ -142,11 +142,10 @@ def assemble_stations(path, filenames='garner_trop_all_stations',
                 station = data[station_name]
                 st_list.append(station)
             except KeyError:
-                print('The station {} does not exists in file {}.'.format(station_name, data_file.split('/')[-1]))
+                print('The station {} does not exists in file {}'.format(station_name, data_file.split('/')[-1]))
                 continue
         station_con = xr.concat(st_list, 'time')
         return station_con
-        
 
     def read_one_station(data, station_name):
         station_name = str(station_name)
@@ -161,6 +160,7 @@ def assemble_stations(path, filenames='garner_trop_all_stations',
         # print('Opening all stations...')
         # all_data = xr.open_mfdataset(path + filenames + '*.nc', parallel=True)
         if isinstance(station_name, list):
+            print('Running stations: {}'.format(', '.join(station_name)))
             for name in station_name:
                 # station = read_one_station(all_data, name)
                 station = read_one_file_at_atime(path, filenames, name)
@@ -168,10 +168,10 @@ def assemble_stations(path, filenames='garner_trop_all_stations',
                     print('saving file to {}'.format(save_path))
                     comp = dict(zlib=True, complevel=9)  # best compression
                     encoding = {var: comp for var in station.to_dataset().data_vars}
-                    station.to_netcdf(save_path + 'garner_trop_' + station_name
+                    station.to_netcdf(save_path + 'garner_trop_' + name
                                       + '.nc', 'w', encoding=encoding)
                     print('Done!')
-                return station
+                # return station
         else:
             # station = read_one_station(all_data, station_name)
             station = read_one_file_at_atime(path, filenames, station_name)
@@ -199,11 +199,11 @@ def check_path(path):
 def check_station_name(name):
     # import os
     if isinstance(name, list):
-        names = [str(x).upper() for x in name]
-        for nm in names:
+        name = [str(x).upper() for x in name]
+        for nm in name:
             if len(nm) != 4:
                 raise argparse.ArgumentTypeError('{} should be 4 letters...'.format(nm))
-        return names
+        return name
     else:
         name = str(name).upper()
         if len(name) != 4:
@@ -225,7 +225,8 @@ if __name__ == '__main__':
                           e.g., /data11/ziskin/", type=check_path)
     required.add_argument('--mode', help="mode to operate, e.g., read_years, get_station,",
                           type=str, choices=['read_years', 'get_station'])
-    optional.add_argument('--station', help='GPS station name, 4 UPPERCASE letters',
+    optional.add_argument('--station', nargs='+',
+                          help='GPS station name, 4 UPPERCASE letters',
                           type=check_station_name)
 #                          metavar=str(cds.start_year) + ' to ' + str(cds.end_year))
 #    optional.add_argument('--half', help='a spescific six months to download,\
