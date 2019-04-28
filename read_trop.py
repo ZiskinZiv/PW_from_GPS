@@ -144,8 +144,10 @@ def assemble_stations(path, filenames='garner_trop_all_stations',
             except KeyError:
                 print('The station {} does not exists in file {}'.format(station_name, data_file.split('/')[-1]))
                 continue
-        station_con = xr.concat(st_list, 'time')
-        return station_con
+        if st_list:
+            station_con = xr.concat(st_list, 'time')
+            return station_con
+        return None
 
     def read_one_station(data, station_name):
         station_name = str(station_name)
