@@ -116,18 +116,37 @@ def filter_stations(path, group_name='israeli', save=False):
 #        intersection = set.intersection(*map(set, time_list))
 #        intr = sorted(list(intersection))
 #        return intr
-
+def read_ims(path, filename):
+    import pandas as pd
+    """parse ims stations meta-data"""
+    ims = pd.read_excel(path + 'IMS_10mins_meta_data.xlsx',
+                        sheet_name='מטה-דטה', skiprows=1)
+    # drop two last cols and two last rows:
+    ims = ims.drop(ims.columns[[-1, -2]], axis=1)
+    ims = ims.drop(ims.tail(2).index)
+    cols = ['#', 'ID', 'name_hebrew', 'name_english', 'east', 'west', 'lon',
+            'lat', 'alt', 'starting_date', 'variables', 'model',
+            'eq_position', 'wind_meter_height', 'notes']
+    ims.columns = cols
+    ims.index = ims['#'].astype(int)
+    ims = ims.drop('#', axis=1)
+    return ims
 
 def plot_stations_on_map(path, stations_df):
     import geopandas as gpd
     isr = gpd.read_file(path +'israel_demog2012.shp')
+    isr.crs = {'init' :'epsg:4326'}
     stations = gpd.GeoDataFrame(stations_df,
                                 geometry=gpd.points_from_xy(stations_df.LON,
-                                                            stations_df.LAT))
-    ax=isr.plot()
-    gdf.plot(ax=ax,color='red')
-    for x, y, label in zip(stations_df.LON, stations_df.LAT, stations_df.index):
+                                                            stations_df.LAT),
+                                                            crs=isr.crs)
+    stations_isr = gpd.sjoin(stations, isr, op='within')
+    ax = isr.plot()
+    stations_isr.plot(ax=ax, color='red')
+    for x, y, label in zip(stations_isr.LON, stations_isr.LAT, stations_isr.index):
         ax.annotate(label, xy=(x, y), xytext=(3, 3), textcoords="offset points")
+    return stations_isr
+
 
 def Zscore_xr(da, dim='time'):
     """input is a dattarray of data and output is a dattarray of Zscore
