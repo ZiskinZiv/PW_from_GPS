@@ -116,6 +116,8 @@ def filter_stations(path, group_name='israeli', save=False):
 #        intersection = set.intersection(*map(set, time_list))
 #        intr = sorted(list(intersection))
 #        return intr
+
+
 def read_ims(path, filename):
     import pandas as pd
     """parse ims stations meta-data"""
@@ -130,22 +132,91 @@ def read_ims(path, filename):
     ims.columns = cols
     ims.index = ims['#'].astype(int)
     ims = ims.drop('#', axis=1)
+    # fix lat, lon cols:
+    ims['lat'] = ims['lat'].str.replace(u'\xba', '').astype(float)
+    ims['lon'] = ims['lon'].str.replace(u'\xba', '').astype(float)
+    # fix alt col:
+    ims['alt'] = ims['alt'].replace('~', '', regex=True).astype(float)
+    # fix starting date col:
+    ims['starting_date'] = pd.to_datetime(ims['starting_date'])
     return ims
 
-def plot_stations_on_map(path, stations_df):
+
+def produce_geo_ims(path, filename, plot=True):
     import geopandas as gpd
-    isr = gpd.read_file(path +'israel_demog2012.shp')
-    isr.crs = {'init' :'epsg:4326'}
+    isr = gpd.read_file(path + 'israel_demog2012.shp')
+    isr.crs = {'init': 'epsg:4326'}
+    ims = read_ims(path, filename)
+    geo_ims = gpd.GeoDataFrame(ims, geometry=gpd.points_from_xy(ims.lon,
+                                                                ims.lat),
+                               crs=isr.crs)
+    if plot:
+        ax = isr.plot()
+        geo_ims.plot(ax=ax, column='alt', cmap='Reds', edgecolor='black',
+                     legend=True)
+    return geo_ims
+
+
+def produce_geo_gps_stations(path, plot=True):
+    import geopandas as gpd
+    stations_df = pd.read_csv('stations.txt', index_col='NAME',
+                              delim_whitespace=True)
+    isr = gpd.read_file(path + 'israel_demog2012.shp')
+    isr.crs = {'init': 'epsg:4326'}
     stations = gpd.GeoDataFrame(stations_df,
                                 geometry=gpd.points_from_xy(stations_df.LON,
                                                             stations_df.LAT),
-                                                            crs=isr.crs)
+                                crs=isr.crs)
     stations_isr = gpd.sjoin(stations, isr, op='within')
-    ax = isr.plot()
-    stations_isr.plot(ax=ax, color='red')
-    for x, y, label in zip(stations_isr.LON, stations_isr.LAT, stations_isr.index):
-        ax.annotate(label, xy=(x, y), xytext=(3, 3), textcoords="offset points")
+    if plot:
+        ax = isr.plot()
+        stations_isr.plot(ax=ax, column='ALT', cmap='Greens',
+                          edgecolor='black', legend=True)
+        for x, y, label in zip(stations_isr.LON, stations_isr.LAT,
+                               stations_isr.index):
+            ax.annotate(label, xy=(x, y), xytext=(3, 3),
+                        textcoords="offset points")
     return stations_isr
+
+
+def get_minimum_distance(geo_ims, geo_gps, path, plot=True):
+    def min_dist(point, gpd2):
+        gpd2['Dist'] = gpd2.apply(
+                    lambda row: point.distance(
+                            row.geometry), axis=1)
+        geoseries = gpd2.iloc[gpd2['Dist'].values.argmin()]
+        return geoseries
+    min_list = []
+    for gps_rows in geo_gps.iterrows():
+        ims_min_series = min_dist(gps_rows[1]['geometry'], geo_ims)
+        min_list.append(ims_min_series[['ID', 'name_hebrew', 'lon', 'lat',
+                                        'alt', 'starting_date']])
+    geo_df = pd.concat(min_list, axis=1).T
+    geo_df['lat'] = geo_df['lat'].astype(float)
+    geo_df['lon'] = geo_df['lon'].astype(float)
+    geo_df['alt'] = geo_df['alt'].astype(float)
+    geo_df.index = geo_gps.index
+    if plot:
+        import geopandas as gpd
+        isr = gpd.read_file(path + 'israel_demog2012.shp')
+        isr.crs = {'init': 'epsg:4326'}
+        geo_gps_new = gpd.GeoDataFrame(geo_df,
+                                       geometry=gpd.points_from_xy(geo_df.lon,
+                                                                   geo_df.lat),
+                                       crs=isr.crs)
+        ax = isr.plot()
+        geo_gps.plot(ax=ax, color='green',
+                     edgecolor='black', legend=True)
+        for x, y, label in zip(geo_gps.LON, geo_gps.LAT,
+                               geo_gps.ALT):
+            ax.annotate(label, xy=(x, y), xytext=(3, 3),
+                        textcoords="offset points")
+        geo_gps_new.plot(ax=ax, color='red', edgecolor='black', legend=True)
+        for x, y, label in zip(geo_gps_new.lon, geo_gps_new.lat,
+                               geo_gps_new.alt):
+            ax.annotate(label, xy=(x, y), xytext=(3, 3),
+                        textcoords="offset points")
+    return geo_df
 
 
 def Zscore_xr(da, dim='time'):
