@@ -121,32 +121,53 @@ def filter_stations(path, group_name='israeli', save=False):
 def read_ims(path, filename):
     import pandas as pd
     """parse ims stations meta-data"""
-    ims = pd.read_excel(path + 'IMS_10mins_meta_data.xlsx',
-                        sheet_name='מטה-דטה', skiprows=1)
-    # drop two last cols and two last rows:
-    ims = ims.drop(ims.columns[[-1, -2]], axis=1)
-    ims = ims.drop(ims.tail(2).index)
-    cols = ['#', 'ID', 'name_hebrew', 'name_english', 'east', 'west', 'lon',
-            'lat', 'alt', 'starting_date', 'variables', 'model',
-            'eq_position', 'wind_meter_height', 'notes']
-    ims.columns = cols
-    ims.index = ims['#'].astype(int)
-    ims = ims.drop('#', axis=1)
-    # fix lat, lon cols:
-    ims['lat'] = ims['lat'].str.replace(u'\xba', '').astype(float)
-    ims['lon'] = ims['lon'].str.replace(u'\xba', '').astype(float)
-    # fix alt col:
-    ims['alt'] = ims['alt'].replace('~', '', regex=True).astype(float)
-    # fix starting date col:
-    ims['starting_date'] = pd.to_datetime(ims['starting_date'])
+    if '10mins' in filename:
+        ims = pd.read_excel(path + filename,
+                            sheet_name='מטה-דטה', skiprows=1)
+        # drop two last cols and two last rows:
+        ims = ims.drop(ims.columns[[-1, -2]], axis=1)
+        ims = ims.drop(ims.tail(2).index)
+        cols = ['#', 'ID', 'name_hebrew', 'name_english', 'east', 'west',
+                'lon', 'lat', 'alt', 'starting_date', 'variables', 'model',
+                'eq_position', 'wind_meter_height', 'notes']
+        ims.columns = cols
+        ims.index = ims['#'].astype(int)
+        ims = ims.drop('#', axis=1)
+        # fix lat, lon cols:
+        ims['lat'] = ims['lat'].str.replace(u'\xba', '').astype(float)
+        ims['lon'] = ims['lon'].str.replace(u'\xba', '').astype(float)
+        # fix alt col:
+        ims['alt'] = ims['alt'].replace('~', '', regex=True).astype(float)
+        # fix starting date col:
+        ims['starting_date'] = pd.to_datetime(ims['starting_date'])
+    else:
+        ims = pd.read_excel(path + filename,
+                            sheet_name='תחנות אקלים', skiprows=1)
+        cols = ['ID', 'name_hebrew', 'name_english', 'station_type', 'east',
+                'west', 'lon', 'lat', 'alt', 'starting_date', 'closing_date',
+                'date_range']
+        ims.columns = cols
+        # ims.index = ims['ID'].astype(int)
+        # ims = ims.drop('ID', axis=1)
+        # fix lat, lon cols:
+        ims['lat'] = ims['lat'].str.replace(u'\xba', '').astype(float)
+        ims['lon'] = ims['lon'].str.replace(u'\xba', '').astype(float)
+        # fix alt col:
+        ims['alt'] = ims['alt'].replace('~', '', regex=True).astype(float)
+        # fix starting date, closing_date col:
+        ims['starting_date'] = pd.to_datetime(ims['starting_date'])
+        ims['closing_date'] = pd.to_datetime(ims['closing_date'])
     return ims
 
 
-def produce_geo_ims(path, filename, plot=True):
+def produce_geo_ims(path, filename, closed_stations=False, plot=True):
     import geopandas as gpd
+    import numpy as np
     isr = gpd.read_file(path + 'israel_demog2012.shp')
     isr.crs = {'init': 'epsg:4326'}
     ims = read_ims(path, filename)
+    if closed_stations:
+        ims = ims[np.isnat(ims.closing_date)]
     geo_ims = gpd.GeoDataFrame(ims, geometry=gpd.points_from_xy(ims.lon,
                                                                 ims.lat),
                                crs=isr.crs)
@@ -185,17 +206,34 @@ def get_minimum_distance(geo_ims, geo_gps, path, plot=True):
                     lambda row: point.distance(
                             row.geometry), axis=1)
         geoseries = gpd2.iloc[gpd2['Dist'].values.argmin()]
+        geoseries.loc['distance'] = gpd2['Dist'].values.min()
         return geoseries
     min_list = []
     for gps_rows in geo_gps.iterrows():
         ims_min_series = min_dist(gps_rows[1]['geometry'], geo_ims)
-        min_list.append(ims_min_series[['ID', 'name_hebrew', 'lon', 'lat',
-                                        'alt', 'starting_date']])
+        min_list.append(ims_min_series[['ID', 'name_hebrew', 'name_english',
+                                        'lon', 'lat', 'alt', 'starting_date',
+                                        'distance']])
     geo_df = pd.concat(min_list, axis=1).T
     geo_df['lat'] = geo_df['lat'].astype(float)
     geo_df['lon'] = geo_df['lon'].astype(float)
     geo_df['alt'] = geo_df['alt'].astype(float)
     geo_df.index = geo_gps.index
+    stations_meta = ims_api_get_meta()
+    # select ims_stations that appear in the geo_df (closest to gps stations):
+    ims_selected = stations_meta.loc[stations_meta.stationId.isin(geo_df.ID.values.tolist())]
+    # get the channel of temperature measurment of the selected stations: 
+    cid = []
+    for index, row in geo_df.iterrows():
+        channel = [irow['TD_channel'] for ind, irow in ims_selected.iterrows()
+                   if irow['stationId'] == row['ID']]
+        if channel:
+            cid.append(channel[0])
+        else:
+            cid.append(None)
+    # put the channel_id in the geo_df so later i can d/l the exact channel
+    # for each stations needed for the gps station:
+    geo_df['channel_id'] = cid
     if plot:
         import geopandas as gpd
         isr = gpd.read_file(path + 'israel_demog2012.shp')
@@ -218,6 +256,64 @@ def get_minimum_distance(geo_ims, geo_gps, path, plot=True):
                         textcoords="offset points")
     return geo_df
 
+
+def ims_api_get_meta(active_only=True):
+    import requests
+    import pandas as pd
+    """temperature is channelId 11"""
+    myToken = 'f058958a-d8bd-47cc-95d7-7ecf98610e47'
+    headers = {'Authorization': 'ApiToken ' + myToken}
+    r = requests.get('https://api.ims.gov.il/v1/envista/stations/',
+                     headers=headers)
+    stations_10mins = pd.DataFrame(r.json())
+    # filter inactive stations:
+    if active_only:
+        stations_10mins = stations_10mins[stations_10mins.active]
+    # arrange lat lon nicely and add channel num for dry temp:
+    lat_ = []
+    lon_ = []
+    TD_channelId = []
+    for index, row in stations_10mins.iterrows():
+        lat_.append(row['location']['latitude'])
+        lon_.append(row['location']['longitude'])
+        channel = [x['channelId'] for x in row.monitors if x['name'] ==
+                   'TD']
+        if channel:
+            TD_channelId.append(channel[0])
+        else:
+            TD_channelId.append(None)
+    stations_10mins['lat'] = lat_
+    stations_10mins['lon'] = lon_
+    stations_10mins['TD_channel'] = TD_channelId
+    stations_10mins.drop(['location', 'StationTarget', 'stationsTag'],
+                         axis=1, inplace=True)
+    return stations_10mins
+
+
+def parse_ims_to_df(raw_data):
+    """gets ims station raw data, i.e., r.json()['data'] and returns
+    a pandas dataframe"""
+    import pandas as pd
+    df = pd.DataFrame(raw_data)
+    df.index = pd.to_datetime(df.datetime)
+    # init an empty list dict:
+    fields = {k: [] for k in df.channels.iloc[0][0].keys()}
+    for index, row in df.iterrows():
+        for k in fields.keys():
+            fields[k].append(row.channels[0][k])
+    for k in fields.keys():
+        df[k] = fields[k]
+    df.drop(['channels', 'datetime'], axis=1, inplace=True)
+    df.drop(['alias', 'description'], axis=1, inplace=True)
+    return df
+
+
+def download_ims_data(geo_df):
+    # pick station and time span
+    # download
+    # call parse_ims_to_df
+    # concatanate and save to nc
+    return
 
 def Zscore_xr(da, dim='time'):
     """input is a dattarray of data and output is a dattarray of Zscore
