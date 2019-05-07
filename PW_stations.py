@@ -234,6 +234,10 @@ def get_minimum_distance(geo_ims, geo_gps, path, plot=True):
     # put the channel_id in the geo_df so later i can d/l the exact channel
     # for each stations needed for the gps station:
     geo_df['channel_id'] = cid
+    geo_df['channel_id'] = geo_df['channel_id'].fillna(0).astype(int)
+    geo_df['ID'] = geo_df.ID.astype(int)
+    geo_df['distance'] = geo_df.distance.astype(float)
+    geo_df['starting_date'] = pd.to_datetime(geo_df.starting_date)
     if plot:
         import geopandas as gpd
         isr = gpd.read_file(path + 'israel_demog2012.shp')
@@ -294,26 +298,161 @@ def parse_ims_to_df(raw_data):
     """gets ims station raw data, i.e., r.json()['data'] and returns
     a pandas dataframe"""
     import pandas as pd
-    df = pd.DataFrame(raw_data)
-    df.index = pd.to_datetime(df.datetime)
+    datetimes = [x['datetime'] for x in raw_data]
+    data = [x['channels'][0] for x in raw_data]
+    df = pd.DataFrame.from_records(data, index=pd.to_datetime(datetimes,
+                                                              utc=True))
     # init an empty list dict:
-    fields = {k: [] for k in df.channels.iloc[0][0].keys()}
-    for index, row in df.iterrows():
-        for k in fields.keys():
-            fields[k].append(row.channels[0][k])
-    for k in fields.keys():
-        df[k] = fields[k]
-    df.drop(['channels', 'datetime'], axis=1, inplace=True)
+#    fields = {k: [] for k in df.channels.iloc[0][0].keys()}
+#    for index, row in df.iterrows():
+#        for k in fields.keys():
+#            fields[k].append(row.channels[0][k])
+#    for k in fields.keys():
+#        df[k] = fields[k]
+#    df.drop(['channels', 'datetime'], axis=1, inplace=True)
     df.drop(['alias', 'description'], axis=1, inplace=True)
     return df
 
 
-def download_ims_data(geo_df):
+def download_ims_data(geo_df, path, end_date='2019-04-15'):
+    import requests
+    import glob
+
+    def to_dataarray(df, index, row):
+        import pandas as pd
+        ds = df.to_xarray()
+        ds['time'] = pd.to_datetime(ds.time)
+        channel_name = ds.name.isel(time=0).values
+        channel_id = ds.id.isel(time=0).values
+        ds = ds.drop(['id', 'name'])
+        da = ds.to_array(dim='TD', name=str(index))
+        da.attrs['channel_id'] = channel_id.item()
+        da.attrs['channel_name'] = channel_name.item()
+        da.attrs['station_name'] = row.name_english
+        da.attrs['station_id'] = row.ID
+        da.attrs['station_lat'] = row.lat
+        da.attrs['station_lon'] = row.lon
+        da.attrs['station_alt'] = row.alt
+        return da
+
+    def get_dates_list(starting_date, end_date):
+        """divide the date span into full 1 years and a remainder, tolist"""
+        import numpy as np
+        import pandas as pd
+        end_date = pd.to_datetime(end_date)
+        s_year = starting_date.year
+        e_year = end_date.year
+        years = np.arange(s_year, e_year + 1)
+        dates = [starting_date.replace(year=x) for x in years]
+        if (end_date - dates[-1]).days > 0:
+            dates.append(end_date)
+        return dates
+
+    myToken = 'f058958a-d8bd-47cc-95d7-7ecf98610e47'
+    headers = {'Authorization': 'ApiToken ' + myToken}
+    already_dl = []
+    for paths in glob.glob(path+'*_TD.nc'):
+        already_dl.append(paths.split('/')[-1].split('.')[0].split('_')[0])
+    to_download = list(set(geo_df.index.values.tolist()).difference(set(already_dl)))
+    if to_download:
+        geo_df = geo_df.loc[to_download]
+    for index, row in geo_df.iterrows():
+        # get a list of dates to download: (1 year old parts)
+        dates = get_dates_list(row.starting_date, end_date)
+        # get station id and channel id(only dry temperature):
+        name = row.name_english
+        station_id = row.ID
+        channel_id = row.channel_id
+        # if tempertue is not measuered in station , skip:
+        if channel_id == 0:
+            continue
+        print ('Getting IMS data for {} station(ID={}) from channel {}'.format(name, station_id, channel_id))
+        # loop over one year time span and download:
+        df_list = []
+        for i in range(len(dates) - 1):
+            first_date = dates[i].strftime('%Y/%m/%d')
+            last_date = dates[i + 1].strftime('%Y/%m/%d')
+            print('proccesing dates: {} to {}'.format(first_date, last_date))
+            dl_command = ('https://api.ims.gov.il/v1/envista/stations/' +
+                          str(station_id) + '/data/' + str(channel_id) +
+                          '?from=' + first_date + '&to=' + last_date)
+            r = requests.get(dl_command, headers=headers)
+            if r.status_code == 204:  # i.e., no content:
+                print('no content for this search, skipping...')
+                break
+            print('parsing to dataframe...')
+            df_list.append(parse_ims_to_df(r.json()['data']))
+        print('concatanating df and transforming to xarray...')
+        df_all = pd.concat(df_list)
+        # only valid results:
+        df_valid = df_all[df_all['valid']]
+        df_valid.index.name = 'time'
+        da = to_dataarray(df_valid, index, row)
+        filename = index + '_TD.nc'
+        comp = dict(zlib=True, complevel=9)  # best compression
+        encoding = {var: comp for var in da.to_dataset().data_vars}
+        print('saving to {} to {}'.format(filename, path))
+        da.to_netcdf(path + filename, 'w', encoding=encoding)
+        print('done!')
+    #    return df_list
     # pick station and time span
     # download
     # call parse_ims_to_df
     # concatanate and save to nc
     return
+
+
+def post_proccess_ims(da):
+    """fill in the missing time data for the ims temperature stations"""
+    import pandas as pd
+    import numpy as np
+    import xarray as xr
+    da = da.sel(TD='value')
+    da = da.reset_coords(drop=True)
+    # first compute the climatology and the anomalies:
+    print('computing anomalies:')
+    climatology = da.groupby('time.month').mean('time')
+    anom = da.groupby('time.month') - climatology
+    # then comupte the diurnal cycle:
+    print('computing diurnal change:')
+    diurnal = anom.groupby('time.hour').mean('time')
+    # assemble old and new time and comupte the difference:
+    print('assembeling missing data:')
+    old_time = pd.to_datetime(da.time.values)
+    new_time = pd.date_range(da.time.min().item(), da.time.max().item(),
+                             freq='10min')
+    missing_time = pd.to_datetime(sorted(set(new_time).difference(set(old_time))))
+    missing_data = np.empty((missing_time.shape))
+    print('proccessing missing data...')
+    for i in range(len(missing_data)):
+        # replace data as to monthly long term mean and diurnal hour:
+        missing_data[i] = (climatology.sel(month=missing_time[i].month) +
+                           diurnal.sel(hour=missing_time[i].hour))
+    series = pd.Series(data=missing_data, index=missing_time)
+    series.index.name='time'
+    mda = series.to_xarray()
+    mda.name = da.name
+    new_data = xr.concat([mda, da], 'time')
+    new_data = new_data.sortby('time')
+    print('done!')
+    return new_data
+
+
+def kappa(T, k2=17.0, k3=3.776e5):
+    """T in celsious"""
+    Tm = (273.15 + T) * 0.72 + 70.2
+    Rv = 461.52  # J*Kg^-1*K^-1
+    k = 1e-6 * (k3 / Tm + k2) * Rv
+    k = 1.0 / k
+    return k
+
+def kappa_yuval(T, k2=64.79, k3=3.776e5):
+    """T in celsious"""
+    Tm = (273.15 + T) * 0.72 + 70.2
+    Rv = 461.52  # J*Kg^-1*K^-1
+    k = 1e-6 * (k3 / Tm + k2 / Rv)
+    k = 1.0 / k
+    return k
 
 def Zscore_xr(da, dim='time'):
     """input is a dattarray of data and output is a dattarray of Zscore
