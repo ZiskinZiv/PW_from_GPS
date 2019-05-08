@@ -403,7 +403,7 @@ def download_ims_data(geo_df, path, end_date='2019-04-15'):
     return
 
 
-def post_proccess_ims(da, clim_period='month'):
+def post_proccess_ims(da, unique_index=True, clim_period='month'):
     """fill in the missing time data for the ims temperature stations
     clim_period is the fine tuning of the data replaced, options are:
         month, weekofyear, dayofyear"""
@@ -411,6 +411,9 @@ def post_proccess_ims(da, clim_period='month'):
     import pandas as pd
     import numpy as np
     import xarray as xr
+    if unique_index:
+        da = get_unique_index(da)
+        print('dropped non-unique datetime index.')
     da = da.sel(TD='value')
     da = da.reset_coords(drop=True)
     if clim_period == 'month':
