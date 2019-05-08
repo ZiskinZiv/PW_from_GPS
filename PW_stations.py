@@ -18,6 +18,7 @@ PW_stations_path = work_path + '1minute/'
 stations = pd.read_csv('stations.txt', header=0, delim_whitespace=True,
                        index_col='NAME')
 
+
 def proc_1minute(path):
     stations = pd.read_csv(path + 'Zstations', header=0,
                            delim_whitespace=True)
@@ -402,17 +403,29 @@ def download_ims_data(geo_df, path, end_date='2019-04-15'):
     return
 
 
-def post_proccess_ims(da):
-    """fill in the missing time data for the ims temperature stations"""
+def post_proccess_ims(da, clim_period='month'):
+    """fill in the missing time data for the ims temperature stations
+    clim_period is the fine tuning of the data replaced, options are:
+        month, weekofyear, dayofyear"""
+
     import pandas as pd
     import numpy as np
     import xarray as xr
     da = da.sel(TD='value')
     da = da.reset_coords(drop=True)
+    if clim_period == 'month':
+        grpby = 'time.month'
+        print('long term monthly mean data replacment selected')
+    elif clim_period == 'weekofyear':
+        print('long term weekly mean data replacment selected')
+        grpby = 'time.weekofyear'
+    elif clim_period == 'dayofyear':
+        print('long term daily mean data replacment selected')
+        grpby = 'time.dayofyear'
     # first compute the climatology and the anomalies:
     print('computing anomalies:')
-    climatology = da.groupby('time.month').mean('time')
-    anom = da.groupby('time.month') - climatology
+    climatology = da.groupby(grpby).mean('time')
+    anom = da.groupby(grpby) - climatology
     # then comupte the diurnal cycle:
     print('computing diurnal change:')
     diurnal = anom.groupby('time.hour').mean('time')
@@ -426,10 +439,12 @@ def post_proccess_ims(da):
     print('proccessing missing data...')
     for i in range(len(missing_data)):
         # replace data as to monthly long term mean and diurnal hour:
-        missing_data[i] = (climatology.sel(month=missing_time[i].month) +
+        # missing_data[i] = (climatology.sel(month=missing_time[i].month) +
+        missing_data[i] = (climatology.sel({clim_period: getattr(missing_time[i],
+                                                                 clim_period)}) +
                            diurnal.sel(hour=missing_time[i].hour))
     series = pd.Series(data=missing_data, index=missing_time)
-    series.index.name='time'
+    series.index.name = 'time'
     mda = series.to_xarray()
     mda.name = da.name
     new_data = xr.concat([mda, da], 'time')
@@ -440,25 +455,37 @@ def post_proccess_ims(da):
 
 def kappa(T, k2=17.0, k3=3.776e5):
     """T in celsious"""
-    Tm = (273.15 + T) * 0.72 + 70.2
+    # [k2] = mbar^-1, [k3] =
+    Tm = (273.15 + T) * 0.72 + 70.2  # K
     Rv = 461.52  # J*Kg^-1*K^-1
     k = 1e-6 * (k3 / Tm + k2) * Rv
     k = 1.0 / k
     return k
 
+
 def kappa_yuval(T, k2=64.79, k3=3.776e5):
     """T in celsious"""
-    Tm = (273.15 + T) * 0.72 + 70.2
+    # [k2] = mbar^-1, [k3] =
+    Tm = (273.15 + T) * 0.72 + 70.2  # K
     Rv = 461.52  # J*Kg^-1*K^-1
     k = 1e-6 * (k3 / Tm + k2 / Rv)
     k = 1.0 / k
     return k
+
+
+def get_unique_index(da, dim='time'):
+    import numpy as np
+    _, index = np.unique(da[dim], return_index=True)
+    da = da.isel({dim: index})
+    return da
+
 
 def Zscore_xr(da, dim='time'):
     """input is a dattarray of data and output is a dattarray of Zscore
     for the dim"""
     z = (da - da.mean(dim=dim)) / da.std(dim=dim)
     return z
+
 
 def desc_nan(data, verbose=True):
     """count only NaNs in data and returns the thier amount and the non-NaNs"""
