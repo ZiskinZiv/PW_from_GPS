@@ -63,7 +63,11 @@ def read_stations_to_dataset(path, group_name='israeli', save=False,
     import glob
     if names is None:
         stations = []
-        file_list_with_path = sorted(glob.glob(path + 'garner_trop_' + '[!all_stations]*.nc'))
+        file_list_with_path = sorted(
+                glob.glob(
+                        path
+                        + 'garner_trop_'
+                        + '[!all_stations]*.nc'))
         for filename in file_list_with_path:
             st_name = filename.split('/')[-1].split('.')[0].split('_')[-1]
             print('Reading station {}'.format(st_name))
@@ -222,8 +226,9 @@ def get_minimum_distance(geo_ims, geo_gps, path, plot=True):
     geo_df.index = geo_gps.index
     stations_meta = ims_api_get_meta()
     # select ims_stations that appear in the geo_df (closest to gps stations):
-    ims_selected = stations_meta.loc[stations_meta.stationId.isin(geo_df.ID.values.tolist())]
-    # get the channel of temperature measurment of the selected stations: 
+    ims_selected = stations_meta.loc[stations_meta.stationId.isin(
+            geo_df.ID.values.tolist())]
+    # get the channel of temperature measurment of the selected stations:
     cid = []
     for index, row in geo_df.iterrows():
         channel = [irow['TD_channel'] for ind, irow in ims_selected.iterrows()
@@ -303,14 +308,6 @@ def parse_ims_to_df(raw_data):
     data = [x['channels'][0] for x in raw_data]
     df = pd.DataFrame.from_records(data, index=pd.to_datetime(datetimes,
                                                               utc=True))
-    # init an empty list dict:
-#    fields = {k: [] for k in df.channels.iloc[0][0].keys()}
-#    for index, row in df.iterrows():
-#        for k in fields.keys():
-#            fields[k].append(row.channels[0][k])
-#    for k in fields.keys():
-#        df[k] = fields[k]
-#    df.drop(['channels', 'datetime'], axis=1, inplace=True)
     df.drop(['alias', 'description'], axis=1, inplace=True)
     return df
 
@@ -354,7 +351,8 @@ def download_ims_data(geo_df, path, end_date='2019-04-15'):
     already_dl = []
     for paths in glob.glob(path+'*_TD.nc'):
         already_dl.append(paths.split('/')[-1].split('.')[0].split('_')[0])
-    to_download = list(set(geo_df.index.values.tolist()).difference(set(already_dl)))
+        to_download = list(set(geo_df.index.values.tolist()
+                               ).difference(set(already_dl)))
     if to_download:
         geo_df = geo_df.loc[to_download]
     for index, row in geo_df.iterrows():
@@ -367,7 +365,11 @@ def download_ims_data(geo_df, path, end_date='2019-04-15'):
         # if tempertue is not measuered in station , skip:
         if channel_id == 0:
             continue
-        print ('Getting IMS data for {} station(ID={}) from channel {}'.format(name, station_id, channel_id))
+        print(
+            'Getting IMS data for {} station(ID={}) from channel {}'.format(
+                name,
+                station_id,
+                channel_id))
         # loop over one year time span and download:
         df_list = []
         for i in range(len(dates) - 1):
@@ -437,7 +439,10 @@ def post_proccess_ims(da, unique_index=True, clim_period='month'):
     old_time = pd.to_datetime(da.time.values)
     new_time = pd.date_range(da.time.min().item(), da.time.max().item(),
                              freq='10min')
-    missing_time = pd.to_datetime(sorted(set(new_time).difference(set(old_time))))
+    missing_time = pd.to_datetime(
+        sorted(
+            set(new_time).difference(
+                set(old_time))))
     missing_data = np.empty((missing_time.shape))
     print('proccessing missing data...')
     for i in range(len(missing_data)):
