@@ -185,20 +185,20 @@ def produce_geo_ims(path, filename, closed_stations=False, plot=True):
 
 def produce_geo_gps_stations(path, plot=True):
     import geopandas as gpd
-    stations_df = pd.read_csv('stations.txt', index_col='NAME',
+    stations_df = pd.read_csv('stations_parameters.txt', index_col='name',
                               delim_whitespace=True)
     isr = gpd.read_file(path + 'israel_demog2012.shp')
     isr.crs = {'init': 'epsg:4326'}
     stations = gpd.GeoDataFrame(stations_df,
-                                geometry=gpd.points_from_xy(stations_df.LON,
-                                                            stations_df.LAT),
+                                geometry=gpd.points_from_xy(stations_df.lon,
+                                                            stations_df.lat),
                                 crs=isr.crs)
     stations_isr = gpd.sjoin(stations, isr, op='within')
     if plot:
         ax = isr.plot()
-        stations_isr.plot(ax=ax, column='ALT', cmap='Greens',
+        stations_isr.plot(ax=ax, column='elevation', cmap='Greens',
                           edgecolor='black', legend=True)
-        for x, y, label in zip(stations_isr.LON, stations_isr.LAT,
+        for x, y, label in zip(stations_isr.lon, stations_isr.lat,
                                stations_isr.index):
             ax.annotate(label, xy=(x, y), xytext=(3, 3),
                         textcoords="offset points")
@@ -244,6 +244,10 @@ def get_minimum_distance(geo_ims, geo_gps, path, plot=True):
     geo_df['ID'] = geo_df.ID.astype(int)
     geo_df['distance'] = geo_df.distance.astype(float)
     geo_df['starting_date'] = pd.to_datetime(geo_df.starting_date)
+    geo_df['gps_lat'] = geo_gps.lat
+    geo_df['gps_lon'] = geo_gps.lon
+    geo_df['gps_alt'] = geo_gps.elevation
+    geo_df['alt_diff'] = geo_df.alt - geo_gps.elevation
     if plot:
         import geopandas as gpd
         isr = gpd.read_file(path + 'israel_demog2012.shp')
@@ -255,8 +259,8 @@ def get_minimum_distance(geo_ims, geo_gps, path, plot=True):
         ax = isr.plot()
         geo_gps.plot(ax=ax, color='green',
                      edgecolor='black', legend=True)
-        for x, y, label in zip(geo_gps.LON, geo_gps.LAT,
-                               geo_gps.ALT):
+        for x, y, label in zip(geo_gps.lon, geo_gps.lat,
+                               geo_gps.elevation):
             ax.annotate(label, xy=(x, y), xytext=(3, 3),
                         textcoords="offset points")
         geo_gps_new.plot(ax=ax, color='red', edgecolor='black', legend=True)
@@ -405,7 +409,8 @@ def download_ims_data(geo_df, path, end_date='2019-04-15'):
     return
 
 
-def post_proccess_ims(da, unique_index=True, clim_period='month'):
+def post_proccess_ims(da, unique_index=True, clim_period='dayofyear',
+                      resample_method='ffill'):
     """fill in the missing time data for the ims temperature stations
     clim_period is the fine tuning of the data replaced, options are:
         month, weekofyear, dayofyear"""
@@ -457,26 +462,38 @@ def post_proccess_ims(da, unique_index=True, clim_period='month'):
     mda.name = da.name
     new_data = xr.concat([mda, da], 'time')
     new_data = new_data.sortby('time')
+    print('resampling to 5 mins using {}'.format(resample_method))
+    new_data = new_data.resample(time='5min').ffill()
     print('done!')
     return new_data
 
 
+def produce_T_dataset(path, save=True, unique_index=True,
+                      clim_period='dayofyear', resample_method='ffill'):
+    import glob
+    da_list = []
+    for file_and_path in glob.glob(path + '*TD.nc'):
+        da = xr.open_dataarray(file_and_path)
+        print('post-proccessing temperature data for {} station'.format(da.name))
+        da_list.append(post_proccess_ims(da, unique_index, clim_period,
+                                         resample_method))
+    ds = xr.merge(da_list)
+    if save:
+        filename = 'IMS_TD_israeli_for_gps.nc'
+        print('saving {} to {}'.format(filename, path))
+        comp = dict(zlib=True, complevel=9)  # best compression
+        encoding = {var: comp for var in ds.data_vars}
+        ds.to_netcdf(path + filename, 'w', encoding=encoding)
+        print('Done!')
+    return ds
+
+
 def kappa(T, k2=17.0, k3=3.776e5):
-    """T in celsious"""
+    """T in celsious, anton says k2=22.1 is better"""
     # [k2] = mbar^-1, [k3] =
     Tm = (273.15 + T) * 0.72 + 70.2  # K
     Rv = 461.52  # J*Kg^-1*K^-1
     k = 1e-6 * (k3 / Tm + k2) * Rv
-    k = 1.0 / k
-    return k
-
-
-def kappa_yuval(T, k2=64.79, k3=3.776e5):
-    """T in celsious"""
-    # [k2] = mbar^-1, [k3] =
-    Tm = (273.15 + T) * 0.72 + 70.2  # K
-    Rv = 461.52  # J*Kg^-1*K^-1
-    k = 1e-6 * (k3 / Tm + k2 / Rv)
     k = 1.0 / k
     return k
 
