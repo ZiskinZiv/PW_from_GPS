@@ -414,7 +414,7 @@ def post_proccess_ims(da, unique_index=True, clim_period='dayofyear',
     """fill in the missing time data for the ims temperature stations
     clim_period is the fine tuning of the data replaced, options are:
         month, weekofyear, dayofyear"""
-
+    # da should be dattaarray and not dataset!
     import pandas as pd
     import numpy as np
     import xarray as xr
@@ -462,10 +462,22 @@ def post_proccess_ims(da, unique_index=True, clim_period='dayofyear',
     mda.name = da.name
     new_data = xr.concat([mda, da], 'time')
     new_data = new_data.sortby('time')
+    # copy attrs:
+    new_data.attrs = da.attrs
+    new_data.attrs['description'] = 'data was resampled to 5 mins from '\
+                                    + 'original 10 mins and then '\
+                                    + resample_method + ', missing data was '\
+                                    'replaced by using ' + clim_period \
+                                    + ' mean and hourly signal.'
+    # put new_data and missing data into a dataset:
+    dataset = new_data.to_dataset(name=new_data.name)
+    dataset[new_data.name + '_missing'] = mda.rename({'time': 'missing_time'})
+    # resample to 5min with resample_method: (interpolate is very slow)
     print('resampling to 5 mins using {}'.format(resample_method))
-    new_data = new_data.resample(time='5min').ffill()
+    # don't resample the missing data:
+    dataset = dataset.resample(time='5min').ffill()
     print('done!')
-    return new_data
+    return dataset
 
 
 def produce_T_dataset(path, save=True, unique_index=True,
@@ -486,6 +498,18 @@ def produce_T_dataset(path, save=True, unique_index=True,
         ds.to_netcdf(path + filename, 'w', encoding=encoding)
         print('Done!')
     return ds
+
+
+def fix_T_height(path, geo_df, lapse_rate=6.5):
+    """fix the temperature diffrence due to different height between the IMS
+    and GPS stations"""
+    # use lapse rate of 6.5 K/km = 6.5e-3 K/m
+    import xarray as xr
+    Tds = xr.open_dataset(path + 'IMS_TD_israeli_for_gps.nc')
+    stations = [x for x in Tds.data_vars.keys() if 'missing' not in x]
+#    for station in stations:
+#        Tds[station] = 
+    return Tds
 
 
 def kappa(T, k2=17.0, k3=3.776e5):
