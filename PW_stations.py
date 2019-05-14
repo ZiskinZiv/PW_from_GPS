@@ -16,8 +16,12 @@ elif sys.platform == 'darwin':  # mac os
     work_path = '/Users/shlomi/Documents/PW_yuval/'
 PW_stations_path = work_path + '1minute/'
 stations = pd.read_csv('stations.txt', header=0, delim_whitespace=True,
-                       index_col='NAME')
+                       index_col='name')
 
+# TODO: streamline the call for geo_df function
+# TODO: mange paths to spesific computers.
+# TODO: redo the filter stations on all computers(laptop and home)
+# TODO: copy the israel_dem file to all computers
 
 def proc_1minute(path):
     stations = pd.read_csv(path + 'Zstations', header=0,
@@ -57,6 +61,23 @@ def proc_1minute(path):
     return
 
 
+#def get_geo_data_from_gps_stations(gps_names):
+#    import requests
+#    from bs4 import BeautifulSoup as bs
+#    user = "anonymous"
+#    passwd = "shlomiziskin@gmail.com"
+#    # Make a request to the endpoint using the correct auth values
+#    auth_values = (user, passwd)
+#    response = requests.get(url, auth=auth_values)
+#    soup = bs(response.text, "lxml")
+#    allLines = soup.text.split('\n')
+#    X = [x for x in allLines if 'X coordinate' in x][0].split()[-1]
+#    Y = [x for x in allLines if 'Y coordinate' in x][0].split()[-1]
+#    Z = [x for x in allLines if 'Z coordinate' in x][0].split()[-1]
+# 
+## Convert JSON to dict and print
+#print(response.json())
+    
 def read_stations_to_dataset(path, group_name='israeli', save=False,
                              names=None):
     import xarray as xr
@@ -64,10 +85,10 @@ def read_stations_to_dataset(path, group_name='israeli', save=False,
     if names is None:
         stations = []
         file_list_with_path = sorted(
-                glob.glob(
-                        path
-                        + 'garner_trop_'
-                        + '[!all_stations]*.nc'))
+            glob.glob(
+                path
+                + 'garner_trop_'
+                + '[!all_stations]*.nc'))
         for filename in file_list_with_path:
             st_name = filename.split('/')[-1].split('.')[0].split('_')[-1]
             print('Reading station {}'.format(st_name))
@@ -95,9 +116,12 @@ def filter_stations(path, group_name='israeli', save=False):
         print('filtering station {}'.format(station))
         # first , remove negative values:
         ds[station] = ds[station].where(ds[station].sel(zwd='value') > 0)
-        # get zscore of data:
-        zscore = Zscore_xr(ds[station].sel(zwd='value'), dim='time')
-        ds[station] = ds[station].where(np.abs(zscore) < 5)
+        # get zscore of data and errors:
+        zscore_val = Zscore_xr(ds[station].sel(zwd='value'), dim='time')
+        zscore_sig = Zscore_xr(ds[station].sel(zwd='sigma'), dim='time')
+        # filter for zscore <5 for data and <3 for error:
+        ds[station] = ds[station].where(np.abs(zscore_val) < 5)
+        ds[station] = ds[station].where(np.abs(zscore_sig) < 3)
     if save:
         filename = filename + '_filtered.nc'
         print('saving {} to {}'.format(filename, path))
@@ -107,7 +131,7 @@ def filter_stations(path, group_name='israeli', save=False):
         print('Done!')
     return ds
 
-#def overlap_time_xr(*args, union=False):
+# def overlap_time_xr(*args, union=False):
 #    """return the intersection of datetime objects from time field in *args"""
 #    # caution: for each arg input is xarray with dim:time
 #    time_list = []
@@ -165,7 +189,8 @@ def read_ims(path, filename):
     return ims
 
 
-def produce_geo_ims(path, filename, closed_stations=False, plot=True):
+def produce_geo_ims(path, filename='IMS_10mins_meta_data.xlsx',
+                    closed_stations=False, plot=True):
     import geopandas as gpd
     import numpy as np
     isr = gpd.read_file(path + 'israel_demog2012.shp')
@@ -183,10 +208,19 @@ def produce_geo_ims(path, filename, closed_stations=False, plot=True):
     return geo_ims
 
 
-def produce_geo_gps_stations(path, plot=True):
+def produce_geo_gps_stations(path, file='stations.txt', plot=True):
     import geopandas as gpd
-    stations_df = pd.read_csv('stations_parameters.txt', index_col='name',
+    import xarray as xr
+    stations_df = pd.read_csv(file, index_col='name',
                               delim_whitespace=True)
+    isr_dem = xr.open_rasterio(path + 'israel_dem.tif')
+    alt_list = []
+    for index, row in stations_df.iterrows():
+        lat = row['lat']
+        lon = row['lon']
+        alt = isr_dem.sel(band=1, x=lon, y=lat, method='nearest').values.item()
+        alt_list.append(float(alt))
+    stations_df['alt'] = alt_list
     isr = gpd.read_file(path + 'israel_demog2012.shp')
     isr.crs = {'init': 'epsg:4326'}
     stations = gpd.GeoDataFrame(stations_df,
@@ -196,7 +230,7 @@ def produce_geo_gps_stations(path, plot=True):
     stations_isr = gpd.sjoin(stations, isr, op='within')
     if plot:
         ax = isr.plot()
-        stations_isr.plot(ax=ax, column='elevation', cmap='Greens',
+        stations_isr.plot(ax=ax, column='alt', cmap='Greens',
                           edgecolor='black', legend=True)
         for x, y, label in zip(stations_isr.lon, stations_isr.lat,
                                stations_isr.index):
@@ -208,8 +242,8 @@ def produce_geo_gps_stations(path, plot=True):
 def get_minimum_distance(geo_ims, geo_gps, path, plot=True):
     def min_dist(point, gpd2):
         gpd2['Dist'] = gpd2.apply(
-                    lambda row: point.distance(
-                            row.geometry), axis=1)
+            lambda row: point.distance(
+                row.geometry), axis=1)
         geoseries = gpd2.iloc[gpd2['Dist'].values.argmin()]
         geoseries.loc['distance'] = gpd2['Dist'].values.min()
         return geoseries
@@ -227,7 +261,7 @@ def get_minimum_distance(geo_ims, geo_gps, path, plot=True):
     stations_meta = ims_api_get_meta()
     # select ims_stations that appear in the geo_df (closest to gps stations):
     ims_selected = stations_meta.loc[stations_meta.stationId.isin(
-            geo_df.ID.values.tolist())]
+        geo_df.ID.values.tolist())]
     # get the channel of temperature measurment of the selected stations:
     cid = []
     for index, row in geo_df.iterrows():
@@ -246,8 +280,8 @@ def get_minimum_distance(geo_ims, geo_gps, path, plot=True):
     geo_df['starting_date'] = pd.to_datetime(geo_df.starting_date)
     geo_df['gps_lat'] = geo_gps.lat
     geo_df['gps_lon'] = geo_gps.lon
-    geo_df['gps_alt'] = geo_gps.elevation
-    geo_df['alt_diff'] = geo_df.alt - geo_gps.elevation
+    geo_df['gps_alt'] = geo_gps.alt
+    geo_df['alt_diff'] = geo_df.alt - geo_gps.alt
     if plot:
         import geopandas as gpd
         isr = gpd.read_file(path + 'israel_demog2012.shp')
@@ -260,7 +294,7 @@ def get_minimum_distance(geo_ims, geo_gps, path, plot=True):
         geo_gps.plot(ax=ax, color='green',
                      edgecolor='black', legend=True)
         for x, y, label in zip(geo_gps.lon, geo_gps.lat,
-                               geo_gps.elevation):
+                               geo_gps.alt):
             ax.annotate(label, xy=(x, y), xytext=(3, 3),
                         textcoords="offset points")
         geo_gps_new.plot(ax=ax, color='red', edgecolor='black', legend=True)
@@ -505,11 +539,68 @@ def fix_T_height(path, geo_df, lapse_rate=6.5):
     and GPS stations"""
     # use lapse rate of 6.5 K/km = 6.5e-3 K/m
     import xarray as xr
+    lr = 1e-3 * lapse_rate  # convert to K/m
     Tds = xr.open_dataset(path + 'IMS_TD_israeli_for_gps.nc')
     stations = [x for x in Tds.data_vars.keys() if 'missing' not in x]
-#    for station in stations:
-#        Tds[station] = 
-    return Tds
+    ds_list = []
+    for st in stations:
+        try:
+            alt_diff = geo_df.loc[st, 'alt_diff']
+            # correction is lapse_rate in K/m times alt_diff in meteres
+            # if alt_diff is positive, T should be higher and vice versa
+            Tds[st].attrs['description'] += ' The data was fixed using {} K/km '\
+                                            'lapse rate bc the difference'\
+                                            ' between the temperature station '\
+                                            'and the gps station is {}'\
+                                            .format(lapse_rate, alt_diff)
+            ds_list.append(Tds[st] + lr * alt_diff)
+        except KeyError:
+            print('{} station not found in gps data'.format(st))
+        continue
+    ds = xr.merge(ds_list)
+    # copy attrs:
+    for da in ds:
+        ds[da].attrs = Tds[da].attrs
+    return ds
+
+
+def produce_IPW(ims_path, gps_path, geo_df, savepath=None,
+                lapse_rate=6.5, k2=17.0):
+    import xarray as xr
+    print('fixing T data for height diffrences...')
+    Tds = fix_T_height(ims_path, geo_df, lapse_rate)
+    print('producing kappa multiplier to T data...')
+    Tds = kappa(Tds, k2=k2)
+    garner_zwd = xr.open_dataset(gps_path +
+                                 'garner_israeli_stations_filtered.nc')
+    print('producing IPW fields:')
+    ipw_list = []
+    for st in Tds:
+        try:
+            # IPW = kappa(T) * Zenith Wet Delay:
+            ipw = Tds[st] * garner_zwd[st.upper()]
+            ipw.name = st.upper()
+            ipw.attrs['gps_lat'] = geo_df.loc[st, 'gps_lat']
+            ipw.attrs['gps_lon'] = geo_df.loc[st, 'gps_lon']
+            ipw.attrs['gps_alt'] = geo_df.loc[st, 'gps_alt']
+            ipw_list.append(ipw)
+        except KeyError:
+            print('{} station not found in garner gps data'.format(st))
+        continue
+    ds = xr.merge(ipw_list)
+    ds = ds.rename({'zwd': 'ipw'})
+    ds['ipw'].attrs['name'] = 'IPW'
+    ds['ipw'].attrs['long_name'] = 'Integrated Precipitable Water'
+    ds['ipw'].attrs['units'] = 'cm'
+    print('Done!')
+    if savepath is not None:
+        filename = 'IPW_israeli_from_gps.nc'
+        print('saving {} to {}'.format(filename, savepath))
+        comp = dict(zlib=True, complevel=9)  # best compression
+        encoding = {var: comp for var in ds.data_vars}
+        ds.to_netcdf(savepath + filename, 'w', encoding=encoding)
+        print('Done!')
+    return ds
 
 
 def kappa(T, k2=17.0, k3=3.776e5):

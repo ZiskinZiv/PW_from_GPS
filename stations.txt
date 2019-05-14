@@ -1,4 +1,4 @@
-NAME	ALT	LAT	LON
+name	alt	lat	lon
 yosh	0.2	32.104	35.21
 jslm	36.8	31.771	35.202
 tela	40.6	32.068	34.781
