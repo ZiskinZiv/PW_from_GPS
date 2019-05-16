@@ -7,21 +7,20 @@ Created on Mon Mar 25 15:50:20 2019
 """
 
 import pandas as pd
-import sys
-import xarray as xr
 import numpy as np
-if sys.platform == 'linux':
-    work_path = '/home/shlomi/Desktop/DATA/Work Files/PW_yuval/'
-elif sys.platform == 'darwin':  # mac os
-    work_path = '/Users/shlomi/Documents/PW_yuval/'
-PW_stations_path = work_path + '1minute/'
+
+garner_path = work_yuval / 'garner'
+ims_path = work_yuval / 'IMS_T'
+gis_path = work_yuval / 'gis'
+PW_stations_path = work_yuval / '1minute'
 stations = pd.read_csv('stations.txt', header=0, delim_whitespace=True,
                        index_col='name')
 
 # TODO: streamline the call for geo_df function
-# TODO: mange paths to spesific computers.
+# TODO: mange paths to spesific computers.linux home and mac left
 # TODO: redo the filter stations on all computers(laptop and home)
 # TODO: copy the israel_dem file to all computers
+
 
 def proc_1minute(path):
     stations = pd.read_csv(path + 'Zstations', header=0,
@@ -151,7 +150,7 @@ def read_ims(path, filename):
     import pandas as pd
     """parse ims stations meta-data"""
     if '10mins' in filename:
-        ims = pd.read_excel(path + filename,
+        ims = pd.read_excel(path / filename,
                             sheet_name='מטה-דטה', skiprows=1)
         # drop two last cols and two last rows:
         ims = ims.drop(ims.columns[[-1, -2]], axis=1)
@@ -193,7 +192,7 @@ def produce_geo_ims(path, filename='IMS_10mins_meta_data.xlsx',
                     closed_stations=False, plot=True):
     import geopandas as gpd
     import numpy as np
-    isr = gpd.read_file(path + 'israel_demog2012.shp')
+    isr = gpd.read_file(path / 'israel_demog2012.shp')
     isr.crs = {'init': 'epsg:4326'}
     ims = read_ims(path, filename)
     if closed_stations:
@@ -213,7 +212,7 @@ def produce_geo_gps_stations(path, file='stations.txt', plot=True):
     import xarray as xr
     stations_df = pd.read_csv(file, index_col='name',
                               delim_whitespace=True)
-    isr_dem = xr.open_rasterio(path + 'israel_dem.tif')
+    isr_dem = xr.open_rasterio(path / 'israel_dem.tif')
     alt_list = []
     for index, row in stations_df.iterrows():
         lat = row['lat']
@@ -221,7 +220,7 @@ def produce_geo_gps_stations(path, file='stations.txt', plot=True):
         alt = isr_dem.sel(band=1, x=lon, y=lat, method='nearest').values.item()
         alt_list.append(float(alt))
     stations_df['alt'] = alt_list
-    isr = gpd.read_file(path + 'israel_demog2012.shp')
+    isr = gpd.read_file(path / 'israel_demog2012.shp')
     isr.crs = {'init': 'epsg:4326'}
     stations = gpd.GeoDataFrame(stations_df,
                                 geometry=gpd.points_from_xy(stations_df.lon,
@@ -284,7 +283,7 @@ def get_minimum_distance(geo_ims, geo_gps, path, plot=True):
     geo_df['alt_diff'] = geo_df.alt - geo_gps.alt
     if plot:
         import geopandas as gpd
-        isr = gpd.read_file(path + 'israel_demog2012.shp')
+        isr = gpd.read_file(path / 'israel_demog2012.shp')
         isr.crs = {'init': 'epsg:4326'}
         geo_gps_new = gpd.GeoDataFrame(geo_df,
                                        geometry=gpd.points_from_xy(geo_df.lon,
@@ -516,9 +515,8 @@ def post_proccess_ims(da, unique_index=True, clim_period='dayofyear',
 
 def produce_T_dataset(path, save=True, unique_index=True,
                       clim_period='dayofyear', resample_method='ffill'):
-    import glob
     da_list = []
-    for file_and_path in glob.glob(path + '*TD.nc'):
+    for file_and_path in path.glob('*TD.nc'):
         da = xr.open_dataarray(file_and_path)
         print('post-proccessing temperature data for {} station'.format(da.name))
         da_list.append(post_proccess_ims(da, unique_index, clim_period,
@@ -529,7 +527,7 @@ def produce_T_dataset(path, save=True, unique_index=True,
         print('saving {} to {}'.format(filename, path))
         comp = dict(zlib=True, complevel=9)  # best compression
         encoding = {var: comp for var in ds.data_vars}
-        ds.to_netcdf(path + filename, 'w', encoding=encoding)
+        ds.to_netcdf(path / filename, 'w', encoding=encoding)
         print('Done!')
     return ds
 
@@ -540,7 +538,7 @@ def fix_T_height(path, geo_df, lapse_rate=6.5):
     # use lapse rate of 6.5 K/km = 6.5e-3 K/m
     import xarray as xr
     lr = 1e-3 * lapse_rate  # convert to K/m
-    Tds = xr.open_dataset(path + 'IMS_TD_israeli_for_gps.nc')
+    Tds = xr.open_dataset(path / 'IMS_TD_israeli_for_gps.nc')
     stations = [x for x in Tds.data_vars.keys() if 'missing' not in x]
     ds_list = []
     for st in stations:
@@ -564,14 +562,31 @@ def fix_T_height(path, geo_df, lapse_rate=6.5):
     return ds
 
 
-def produce_IPW(ims_path, gps_path, geo_df, savepath=None,
-                lapse_rate=6.5, k2=17.0):
+def produce_geo_df(gis_path=gis_path):
+    print('getting IMS temperature stations metadata...')
+    ims = produce_geo_ims(gis_path, filename='IMS_10mins_meta_data.xlsx',
+                          closed_stations=False, plot=False)
+    print('getting GPS stations ZWD from garner...')
+    gps = produce_geo_gps_stations(gis_path, file='stations.txt', plot=False)
+    print('combining temperature and GPS stations into one dataframe...')
+    geo_df = get_minimum_distance(ims, gps, gis_path, plot=False)
+    print('Done!')
+    return geo_df
+
+
+def produce_IPW(geo_df, ims_path=ims_path, gps_path=garner_path, savepath=None,
+                lapse_rate=6.5, k2=17.0, k3=3.776e5, plot=True, hist=True):
     import xarray as xr
-    print('fixing T data for height diffrences...')
+    """IPW = kappa[kg/m^3] * ZWD[cm]"""
+    print('fixing T data for height diffrences with {} K/km lapse rate'.format(
+            lapse_rate))
     Tds = fix_T_height(ims_path, geo_df, lapse_rate)
-    print('producing kappa multiplier to T data...')
-    Tds = kappa(Tds, k2=k2)
-    garner_zwd = xr.open_dataset(gps_path +
+    print(
+        'producing kappa multiplier to T data with k2: {}, and k3: {}.'.format(
+            k2,
+            k3))
+    Tds = kappa(Tds, k2=k2, k3=k3)
+    garner_zwd = xr.open_dataset(gps_path /
                                  'garner_israeli_stations_filtered.nc')
     print('producing IPW fields:')
     ipw_list = []
@@ -591,25 +606,37 @@ def produce_IPW(ims_path, gps_path, geo_df, savepath=None,
     ds = ds.rename({'zwd': 'ipw'})
     ds['ipw'].attrs['name'] = 'IPW'
     ds['ipw'].attrs['long_name'] = 'Integrated Precipitable Water'
-    ds['ipw'].attrs['units'] = 'cm'
+    ds['ipw'].attrs['units'] = 'kg / m^2'
     print('Done!')
     if savepath is not None:
         filename = 'IPW_israeli_from_gps.nc'
         print('saving {} to {}'.format(filename, savepath))
         comp = dict(zlib=True, complevel=9)  # best compression
         encoding = {var: comp for var in ds.data_vars}
-        ds.to_netcdf(savepath + filename, 'w', encoding=encoding)
+        ds.to_netcdf(savepath / filename, 'w', encoding=encoding)
         print('Done!')
+    if plot:
+        ds.sel(ipw='value').to_array(dim='station').sortby('station').plot(
+            x='time',
+            col='station',
+            col_wrap=4,
+            figsize=(15, 8))
+    if hist:
+        ds.sel(ipw='value').to_dataframe().hist(bins=100, grid=False,
+                                                figsize=(15, 8))
     return ds
 
 
 def kappa(T, k2=17.0, k3=3.776e5):
     """T in celsious, anton says k2=22.1 is better"""
-    # [k2] = mbar^-1, [k3] =
+    # [k2] = K / mbar, [k3] = K^2 / mbar
+    # 100 Pa = 1 mbar
     Tm = (273.15 + T) * 0.72 + 70.2  # K
-    Rv = 461.52  # J*Kg^-1*K^-1
-    k = 1e-6 * (k3 / Tm + k2) * Rv
-    k = 1.0 / k
+    Rv = 461.52  # [Rv] = J / (kg * K) = (Pa * m^3) / (kg * K)
+    # (1e-2 mbar * m^3) / (kg * K)
+    k = 1e-6 * (k3 / Tm + k2) * Rv  
+    k = 1.0 / k  # [k] = 100 * kg / m^3 =  kg/ (m^2 * cm)
+    # 1 kg/m^2 IPW = 1 mm PW
     return k
 
 
