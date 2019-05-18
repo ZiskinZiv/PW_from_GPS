@@ -16,8 +16,8 @@ PW_stations_path = work_yuval / '1minute'
 stations = pd.read_csv('stations.txt', header=0, delim_whitespace=True,
                        index_col='name')
 
-# TODO: streamline the call for geo_df function
-# TODO: mange paths to spesific computers.linux home and mac left
+# TODO: streamline the call for geo_df function DONE
+# TODO: mange paths to spesific computers. mac left
 # TODO: redo the filter stations on all computers(laptop and home)
 # TODO: copy the israel_dem file to all computers
 
@@ -80,16 +80,10 @@ def proc_1minute(path):
 def read_stations_to_dataset(path, group_name='israeli', save=False,
                              names=None):
     import xarray as xr
-    import glob
     if names is None:
         stations = []
-        file_list_with_path = sorted(
-            glob.glob(
-                path
-                + 'garner_trop_'
-                + '[!all_stations]*.nc'))
-        for filename in file_list_with_path:
-            st_name = filename.split('/')[-1].split('.')[0].split('_')[-1]
+        for filename in sorted(path.glob('garner_trop_[!all_stations]*.nc')):
+            st_name = filename.as_posix().split('/')[-1].split('.')[0].split('_')[-1]
             print('Reading station {}'.format(st_name))
             da = xr.open_dataarray(filename)
             da = da.dropna('time')
@@ -98,7 +92,7 @@ def read_stations_to_dataset(path, group_name='israeli', save=False,
     if save:
         savefile = 'garner_' + group_name + '_stations.nc'
         print('saving {} to {}'.format(savefile, path))
-        ds.to_netcdf(path + savefile, 'w')
+        ds.to_netcdf(path / savefile, 'w')
         print('Done!')
     return ds
 
@@ -106,9 +100,9 @@ def read_stations_to_dataset(path, group_name='israeli', save=False,
 def filter_stations(path, group_name='israeli', save=False):
     """filter bad values in trop products stations"""
     import xarray as xr
-    filename = 'garner_' + group_name + '_stations'
+    filename = 'garner_' + group_name + '_stations.nc'
     print('Reading {}.nc from {}'.format(filename, path))
-    ds = xr.open_dataset(path + filename + '.nc')
+    ds = xr.open_dataset(path / filename)
     ds['zwd'].attrs['units'] = 'Zenith Wet Delay in cm'
     stations = [x for x in ds.data_vars.keys()]
     for station in stations:
@@ -126,7 +120,7 @@ def filter_stations(path, group_name='israeli', save=False):
         print('saving {} to {}'.format(filename, path))
         comp = dict(zlib=True, complevel=9)  # best compression
         encoding = {var: comp for var in ds.data_vars}
-        ds.to_netcdf(path + filename, 'w', encoding=encoding)
+        ds.to_netcdf(path / filename, 'w', encoding=encoding)
         print('Done!')
     return ds
 
@@ -515,6 +509,7 @@ def post_proccess_ims(da, unique_index=True, clim_period='dayofyear',
 
 def produce_T_dataset(path, save=True, unique_index=True,
                       clim_period='dayofyear', resample_method='ffill'):
+    import xarray as xr
     da_list = []
     for file_and_path in path.glob('*TD.nc'):
         da = xr.open_dataarray(file_and_path)
