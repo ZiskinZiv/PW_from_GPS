@@ -12,11 +12,12 @@ import numpy as np
 garner_path = work_yuval / 'garner'
 ims_path = work_yuval / 'IMS_T'
 gis_path = work_yuval / 'gis'
+sound_path = work_yuval / 'sounding'
 PW_stations_path = work_yuval / '1minute'
 stations = pd.read_csv('stations.txt', header=0, delim_whitespace=True,
                        index_col='name')
 
-# TODO: streamline the call for geo_df function DONE
+# TODO: copy meta-data of IPW procces to dataarrays
 # TODO: mange paths to spesific computers. mac left
 # TODO: redo the filter stations on all computers(laptop and home)
 # TODO: copy the israel_dem file to all computers
@@ -546,6 +547,7 @@ def fix_T_height(path, geo_df, lapse_rate=6.5):
                                             ' between the temperature station '\
                                             'and the gps station is {}'\
                                             .format(lapse_rate, alt_diff)
+            Tds[st].attrs['lapse_rate_fix'] = lapse_rate
             ds_list.append(Tds[st] + lr * alt_diff)
         except KeyError:
             print('{} station not found in gps data'.format(st))
@@ -569,8 +571,10 @@ def produce_geo_df(gis_path=gis_path):
     return geo_df
 
 
-def produce_IPW(geo_df, ims_path=ims_path, gps_path=garner_path, savepath=None,
-                lapse_rate=6.5, k2=17.0, k3=3.776e5, plot=True, hist=True):
+def produce_IPW_for_all(geo_df, ims_path=ims_path, gps_path=garner_path,
+                        savepath=None, lapse_rate=6.5, Tmul=0.72,
+                        T_offset=70.2, k2=17.0, k3=3.776e5,
+                        plot=True, hist=True):
     import xarray as xr
     """IPW = kappa[kg/m^3] * ZWD[cm]"""
     print('fixing T data for height diffrences with {} K/km lapse rate'.format(
@@ -580,7 +584,9 @@ def produce_IPW(geo_df, ims_path=ims_path, gps_path=garner_path, savepath=None,
         'producing kappa multiplier to T data with k2: {}, and k3: {}.'.format(
             k2,
             k3))
-    Tds = kappa(Tds, k2=k2, k3=k3)
+    Tds = kappa(Tds, Tmul, T_offset, k2, k3)
+    kappa_dict = dict(zip(['T_multiplier', 'T_offset', 'k2', 'k3'],
+                          [Tmul, T_offset, k2, k3]))
     garner_zwd = xr.open_dataset(gps_path /
                                  'garner_israeli_stations_filtered.nc')
     print('producing IPW fields:')
@@ -593,6 +599,8 @@ def produce_IPW(geo_df, ims_path=ims_path, gps_path=garner_path, savepath=None,
             ipw.attrs['gps_lat'] = geo_df.loc[st, 'gps_lat']
             ipw.attrs['gps_lon'] = geo_df.loc[st, 'gps_lon']
             ipw.attrs['gps_alt'] = geo_df.loc[st, 'gps_alt']
+            for k, v in kappa_dict.items():
+                ipw.attrs[k] = v
             ipw_list.append(ipw)
         except KeyError:
             print('{} station not found in garner gps data'.format(st))
@@ -622,17 +630,102 @@ def produce_IPW(geo_df, ims_path=ims_path, gps_path=garner_path, savepath=None,
     return ds
 
 
-def kappa(T, k2=17.0, k3=3.776e5):
+def kappa(T, Tmul=0.72, T_offset=70.2, k2=17.0, k3=3.776e5):
     """T in celsious, anton says k2=22.1 is better"""
     # [k2] = K / mbar, [k3] = K^2 / mbar
     # 100 Pa = 1 mbar
-    Tm = (273.15 + T) * 0.72 + 70.2  # K
+    Tm = (273.15 + T) * Tmul + T_offset  # K
     Rv = 461.52  # [Rv] = J / (kg * K) = (Pa * m^3) / (kg * K)
     # (1e-2 mbar * m^3) / (kg * K)
     k = 1e-6 * (k3 / Tm + k2) * Rv  
     k = 1.0 / k  # [k] = 100 * kg / m^3 =  kg/ (m^2 * cm)
     # 1 kg/m^2 IPW = 1 mm PW
     return k
+
+
+def dim_intersection(da_list, dim='time'):
+    import pandas as pd
+    setlist = [set(x.dropna(dim)[dim].values) for x in da_list]
+    u = list(set.intersection(*setlist))
+    # new_dim = list(set(a.dropna(dim)[dim].values).intersection(
+    #     set(b.dropna(dim)[dim].values)))
+    if dim == 'time':
+        new_dim = sorted(pd.to_datetime(u))
+    else:
+        new_dim = sorted(u)
+    return new_dim
+
+
+def minimize_kappa_tela_sound(sound_path=sound_path, gps=garner_path,
+                              ims_path=ims_path, station='TELA', bounds=None,
+                              x0=None, times=None):
+    from skopt import gp_minimize
+    import xarray as xr
+    from sklearn.metrics import mean_squared_error
+    import numpy as np
+
+    def func_to_min(x):
+        Tmul = x[0]
+        Toff = x[1]
+        k2 = x[2]
+        k = kappa(Ts, Tmul=Tmul, T_offset=Toff, k2=k2)
+        res = sound - k * zwd_gps
+        rmse = np.sqrt(mean_squared_error(sound, k * zwd_gps))
+        loss = np.abs(np.mean(res)) + rmse
+        return loss
+
+    # load gerner zwd data:
+    zwd_gps = xr.open_dataset(gps / 'garner_israeli_stations_filtered.nc')
+    zwd_gps = zwd_gps[station].sel(zwd='value')
+    zwd_gps.load()
+    # load bet dagan sounding data:
+    sound = xr.open_dataarray(sound_path / 'PW_bet_dagan_soundings.nc')
+    sound = sound.where(sound > 0, drop=True)
+    sound.load()
+    # load surface temperature data:
+    Tds = xr.open_dataset(ims_path / 'IMS_TD_israeli_for_gps.nc')
+    Ts = Tds[station.lower()]
+    Ts.load()
+    # intersect the datetimes:
+    new_time = dim_intersection([zwd_gps, sound, Ts], 'time')
+    zwd_gps = zwd_gps.sel(time=new_time)
+    sound = sound.sel(time=new_time)
+    Ts = Ts.sel(time=new_time)
+    if times is not None:
+        zwd_gps = zwd_gps.sel(time=slice(times[0], times[1]))
+        sound = sound.sel(time=slice(times[0], times[1]))
+        Ts = Ts.sel(time=slice(times[0], times[1]))
+    zwd_gps = zwd_gps.values
+    sound = sound.values
+    Ts = Ts.values
+    if bounds is None:
+        # default boundries:
+        bounds = {}
+        bounds['Tmul'] = (0.0, 1.5)
+        bounds['Toff'] = (0.0, 200.0)
+        bounds['k2'] = (1.0, 100.0)
+    if x0 is None:
+        # default x0
+        x0 = {}
+        x0['Tmul'] = 0.72
+        x0['Toff'] = 70.0
+        x0['k2'] = 17.0
+    if isinstance(x0, dict):
+        x0_list = [x0.get('Tmul'), x0.get('Toff'), x0.get('k2')]
+        print('Running minimization with initial X:')
+        for k, v in x0.items():
+            print(k + ': ', v)
+    if not x0:
+        x0_list = None
+        print('Running minimization with NO initial X...')
+    print('Running minimization with the following bounds:')
+    for k, v in bounds.items():
+        print(k + ': ', v)
+    bounds_list = [bounds.get('Tmul'), bounds.get('Toff'), bounds.get('k2')]
+    res = gp_minimize(func_to_min, dimensions=bounds_list,
+                      x0=x0_list, n_jobs=-1, random_state=42,
+                      verbose=False)
+    return res
 
 
 def get_unique_index(da, dim='time'):
@@ -647,6 +740,104 @@ def Zscore_xr(da, dim='time'):
     for the dim"""
     z = (da - da.mean(dim=dim)) / da.std(dim=dim)
     return z
+
+
+def check_anton_tela_station(anton_path, ims_path=ims_path):
+    import pandas as pd
+    from datetime import datetime, timedelta
+    from pandas.errors import EmptyDataError
+    import xarray as xr
+    df_list = []
+    for file in anton_path.glob('tela*.txt'):
+        day = int(''.join([x for x in file.as_posix() if x.isdigit()]))
+        year = 2015
+        dt = pd.to_datetime(datetime(year, 1, 1) + timedelta(day - 1))
+        try:
+            df = pd.read_csv(file, index_col=0, delim_whitespace=True,
+                             header=None)
+            df.columns = ['zwd']
+            df.index = dt + pd.to_timedelta(df.index * 60, unit='min')
+            df_list.append(df)
+        except EmptyDataError:
+            print('found empty file...')
+            continue
+    df_all = pd.concat(df_list)
+    df_all = df_all.sort_index()
+    df_all.index.name = 'time'
+    ds = df_all.to_xarray()
+    ds = ds.rename({'zwd': 'TELA'})
+    Tds = xr.open_dataset(ims_path / 'IMS_TD_israeli_for_gps.nc')
+    k = kappa(Tds.tela, k2=22.1)
+    ds = k * ds
+    return ds
+
+
+def compare_to_sounding(sound_path=sound_path, gps=garner_path, station='TELA',
+                        times=None):
+    import xarray as xr
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    from sklearn.metrics import mean_squared_error
+    if not isinstance(gps, xr.Dataset):
+        pw_gps = xr.open_dataset(gps / 'IPW_israeli_from_gps.nc')
+    else:
+        pw_gps = gps
+    if [x for x in pw_gps.coords if x == 'ipw']:
+        pw_gps = pw_gps[station].sel(ipw='value')
+    else:
+        pw_gps = pw_gps[station]
+    pw_gps.load()
+    sound = xr.open_dataarray(sound_path / 'PW_bet_dagan_soundings.nc')
+    # drop 0 pw - not physical
+    sound = sound.where(sound > 0, drop=True)
+    sound.load()
+    new_time = list(set(pw_gps.dropna('time').time.values).intersection(
+        set(sound.dropna('time').time.values)))
+    new_dt = sorted(pd.to_datetime(new_time))
+    # selecting requires time...
+    print('selecting intersected datetime...')
+    pw_gps = pw_gps.sel(time=new_dt)
+    sound = sound.sel(time=new_dt)
+    pw = pw_gps.to_dataset(name=station).reset_coords(drop=True)
+    pw['sound'] = sound
+    pw['resid'] = pw['sound'] - pw[station]
+    pw.load()
+    print('Done!')
+    if times is not None:
+        pw = pw.sel(time=slice(times[0], times[1]))
+    fig, ax = plt.subplots(1, 2, figsize=(20, 4),
+                           gridspec_kw={'width_ratios': [3, 1]})
+    pw[[station, 'sound']].to_dataframe().plot(ax=ax[0], style='.')
+    sns.distplot(pw['resid'].values, bins=100, color='c', label='residuals', ax=ax[1])
+    # pw['resid'].plot.hist(bins=100, color='c', edgecolor='k', alpha=0.65,
+    #                      ax=ax[1])
+    rmean = pw['resid'].mean().values
+    rstd = pw['resid'].std().values
+    rmedian = pw['resid'].median().values
+    rmse = np.sqrt(mean_squared_error(pw['sound'], pw[station]))
+    plt.axvline(rmean, color='r', linestyle='dashed', linewidth=1)
+    # plt.axvline(rmedian, color='b', linestyle='dashed', linewidth=1)
+    _, max_ = plt.ylim()
+    plt.text(rmean + rmean / 10, max_ - max_ / 10,
+             'Mean: {:.2f}, RMSE: {:.2f}'.format(rmean,rmse))
+    fig.tight_layout()
+    # plt.text(rmedian + rmedian / 10, max_ - max_ / 10,
+    #          'Mean: {:.2f}'.format(rmedian))    
+    return pw
+
+
+def from_opt_to_comparison(result=None, times=None, bounds=None, x0=None):
+    if result is None:
+        print('minimizing the hell out of the function!...')
+        result = minimize_kappa_tela_sound(times=times, bounds=bounds, x0=x0)
+    geo_df = produce_geo_df()
+    Tmul = result.x[0]
+    T_offset = result.x[1]
+    k2 = result.x[2]
+    ipw = produce_IPW_for_all(geo_df, Tmul=Tmul, T_offset=T_offset, k2=k2,
+                              plot=False, hist=False)
+    pw = compare_to_sounding(gps=ipw, times=times)
+    return pw, result
 
 
 def desc_nan(data, verbose=True):

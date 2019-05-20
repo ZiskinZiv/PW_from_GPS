@@ -53,6 +53,8 @@ def proccess_sounding_json(savepath):
     pw.attrs['station_lon'] = st_lon
     pw.attrs['station_alt'] = st_alt
     pw = pw.sortby('time')
+    # drop 0 pw - not physical
+    pw = pw.where(pw > 0, drop=True)
     pw.to_netcdf(savepath / 'PW_bet_dagan_soundings.nc')
     return pw
 
