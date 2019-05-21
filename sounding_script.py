@@ -14,6 +14,8 @@ def proccess_sounding_json(savepath):
     import xarray as xr
     # loop over lines lists in each year:
     pw_years = []
+    df_years = []
+    bad_line = []
     for file in savepath.glob('bet_dagan*.json'):
         year = file.as_posix().split('.')[0].split('_')[-1]
         print('Opening json file year: {}'.format(year))
@@ -22,15 +24,31 @@ def proccess_sounding_json(savepath):
         # loop over the lines list:
         pw_list = []
         dt_list = []
+        df_list = []
         for lines in lines_list:
             # print('.')
             try:
                 pw = float([x for x in lines if '[mm]' in x][0].split(':')[-1])
                 dt = [x for x in lines if 'Observation time' in
                       x][0].split(':')[-1].split()[0]
-                # The %y (as opposed to %Y) is to read 2-digit year (%Y=4-digit)
+                # The %y (as opposed to %Y) is to read 2-digit year
+                # (%Y=4-digit)
+                header_line = [
+                    x for x in range(
+                        len(lines)) if '40179  Bet Dagan Observations'
+                    in lines[x]][0] + 3
+                end_line = [x for x in range(len(lines)) if
+                            'Station information and sounding indices'
+                            in lines[x]][0]
+                header = lines[header_line].split()
+                units = lines[header_line + 1].split()
+                df = pd.DataFrame(
+                    [x.split() for x in lines[header_line + 3:end_line]],
+                    columns=header)
+                df = df.astype(float)
                 dt_list.append(pd.to_datetime(dt, format='%y%m%d/%H%M'))
                 pw_list.append(pw)
+                df_list.append(df)
                 st_num = int([x for x in lines if 'Station number' in
                               x][0].split(':')[-1])
                 st_lat = float([x for x in lines if 'Station latitude' in
@@ -41,11 +59,25 @@ def proccess_sounding_json(savepath):
                                 x][0].split(':')[-1])
             except IndexError:
                 print('no data found in lines entry...')
+                bad_line.append(lines)
+                continue
+            except AssertionError:
+                bad_line.append(lines)
                 continue
         pw_year = xr.DataArray(pw_list, dims=['time'])
+        df_year = [xr.DataArray(x,dims=['mpoint', 'var']) for x in df_list]
+        df_year = xr.concat(df_year, 'time')
+        df_year['time'] = dt_list
+        df_year['var'] = header
         pw_year['time'] = dt_list
         pw_years.append(pw_year)
+        df_years.append(df_year)
     pw = xr.concat(pw_years, 'time')
+    da = xr.concat(df_years, 'time')
+    da.attrs['description'] = 'BET_DAGAN soundings full profile'
+    units_dict = dict(zip(header, units))
+    for k, v in units_dict.items():
+        da.attrs[k] = v
     pw.attrs['description'] = 'BET_DAGAN soundings of precipatable water'
     pw.attrs['units'] = 'mm'  # eqv. kg/m^2
     pw.attrs['station_number'] = st_num
@@ -53,10 +85,12 @@ def proccess_sounding_json(savepath):
     pw.attrs['station_lon'] = st_lon
     pw.attrs['station_alt'] = st_alt
     pw = pw.sortby('time')
+    da = da.sortby('time')
     # drop 0 pw - not physical
     pw = pw.where(pw > 0, drop=True)
     pw.to_netcdf(savepath / 'PW_bet_dagan_soundings.nc')
-    return pw
+    da.to_netcdf(savepath / 'ALL_bet_dagan_soundings.nc')
+    return pw, da, bad_line
 
 
 def get_sounding_data(savepath, start_date='2005-01-01',
