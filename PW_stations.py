@@ -974,6 +974,7 @@ def compare_to_sounding(sound_path=sound_path, gps=garner_path, station='TELA',
     import matplotlib.pyplot as plt
     import seaborn as sns
     from sklearn.metrics import mean_squared_error
+    sns.set_style('darkgrid')
     if not isinstance(gps, xr.Dataset):
         pw_gps = xr.open_dataset(gps / 'IPW_israeli_from_gps.nc')
     else:
@@ -1021,6 +1022,9 @@ def compare_to_sounding(sound_path=sound_path, gps=garner_path, station='TELA',
     plt.text(rmean + rmean / 10, max_ - max_ / 10,
              'Mean: {:.2f}, RMSE: {:.2f}'.format(rmean,rmse))
     fig.tight_layout()
+    pw['season']=pw['time.season']
+    pw['hour']=pw['time.hour'].astype(str)
+    # maybe month ?
     # plt.text(rmedian + rmedian / 10, max_ - max_ / 10,
     #          'Mean: {:.2f}'.format(rmedian))    
     return pw
