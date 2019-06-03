@@ -33,7 +33,6 @@ def all_orbitals_download(save_dir, minimum_year=None):
     for year in dirs:
         print(year)
         cwd, listing = htmllistparse.fetch_listing(command + year, timeout=30)
-        days = [f.name for f in listing if '/' in f.name]
         files = [f.name for f in listing if f.size is not None]
 #        2017-01-28.eo.gz
 #        2017-01-28.shad.gz
@@ -47,11 +46,11 @@ def all_orbitals_download(save_dir, minimum_year=None):
         for suff in suffixes:
             found = [f for f in files if suff in f.split('.')[1] and '_' not in f]
             if found:
-                filename = found[0]
-                print('Downloading {} to {}.'.format(filename, savepath))
-                r = requests.get(command + year + filename)
-                with open(savepath/filename, 'wb') as file:
-                    file.write(r.content)
+                for filename in found:
+                    print('Downloading {} to {}.'.format(filename, savepath))
+                    r = requests.get(command + year + filename)
+                    with open(savepath/filename, 'wb') as file:
+                        file.write(r.content)
     return
 
 
@@ -158,7 +157,7 @@ if __name__ == '__main__':
     required.add_argument('--path', help="a main path to save station rinex, the tool will create a folder in this path named as the station." +
                           " files, e.g., /home/ziskin/garner/", type=check_path)
     required.add_argument('--mode', help="choose either rinex or orbital",
-                          choice=['rinex', 'orbital'])
+                          choices=['rinex', 'orbital'])
     optional.add_argument('--station', help="GPS station name four lowercase letters,",
                           type=check_station_name)
     optional.add_argument('--myear', help='minimum year to begin search in garner site.',
