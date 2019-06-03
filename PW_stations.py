@@ -575,7 +575,7 @@ def produce_geo_df(gis_path=gis_path):
 
 def produce_IPW_for_all(geo_df, ims_path=ims_path, gps_path=garner_path,
                         savepath=None, lapse_rate=6.5, Tmul=0.72,
-                        T_offset=70.2, k2=17.0, k3=3.776e5,
+                        T_offset=70.2, k2=22.1, k3=3.776e5,
                         plot=True, hist=True):
     import xarray as xr
     """IPW = kappa[kg/m^3] * ZWD[cm]"""
@@ -652,8 +652,9 @@ def check_Tm_func(Tmul_num=10, Ts_num=6, Toff_num=15):
     return da
 
 
-def kappa(T, Tmul=0.72, T_offset=70.2, k2=17.0, k3=3.776e5):
+def kappa(T, Tmul=0.72, T_offset=70.2, k2=22.1, k3=3.776e5):
     """T in celsious, anton says k2=22.1 is better"""
+    # original k2=17.0 bevis 1992 etal.
     # [k2] = K / mbar, [k3] = K^2 / mbar
     # 100 Pa = 1 mbar
     Tm = (273.15 + T) * Tmul + T_offset  # K
@@ -687,7 +688,7 @@ def dim_intersection(da_list, dim='time', dropna=True):
 
 def minimize_kappa_tela_sound(sound_path=sound_path, gps=garner_path,
                               ims_path=ims_path, station='TELA', bounds=None,
-                              x0=None, times=None):
+                              x0=None, times=None, season=None):
     from skopt import gp_minimize
     import xarray as xr
     from sklearn.metrics import mean_squared_error
@@ -696,8 +697,8 @@ def minimize_kappa_tela_sound(sound_path=sound_path, gps=garner_path,
     def func_to_min(x):
         Tmul = x[0]
         Toff = x[1]
-        k2 = x[2]
-        k = kappa(Ts, Tmul=Tmul, T_offset=Toff, k2=k2)
+        # k2 = x[2]
+        k = kappa(Ts, Tmul=Tmul, T_offset=Toff)  #, k2=k2)
         res = sound - k * zwd_gps
         rmse = np.sqrt(mean_squared_error(sound, k * zwd_gps))
         loss = np.abs(np.mean(res)) + rmse
@@ -724,23 +725,29 @@ def minimize_kappa_tela_sound(sound_path=sound_path, gps=garner_path,
         zwd_gps = zwd_gps.sel(time=slice(times[0], times[1]))
         sound = sound.sel(time=slice(times[0], times[1]))
         Ts = Ts.sel(time=slice(times[0], times[1]))
+    if season is not None:
+        print('Minimizing for season : {}'.format(season))
+        zwd_gps = zwd_gps.sel(time=zwd_gps['time.season'] == season)
+        sound = sound.sel(time=sound['time.season'] == season)
+        Ts = Ts.sel(time=Ts['time.season'] == season)
+
     zwd_gps = zwd_gps.values
     sound = sound.values
     Ts = Ts.values
     if bounds is None:
         # default boundries:
         bounds = {}
-        bounds['Tmul'] = (0.0, 1.0)
-        bounds['Toff'] = (0.0, 150.0)
-        bounds['k2'] = (1.0, 150.0)
+        bounds['Tmul'] = (0.1, 1.0)
+        bounds['Toff'] = (0.0, 110.0)
+        # bounds['k2'] = (1.0, 150.0)
     if x0 is None:
         # default x0
         x0 = {}
         x0['Tmul'] = 0.5
         x0['Toff'] = 90.0
-        x0['k2'] = 17.0
+        # x0['k2'] = 17.0
     if isinstance(x0, dict):
-        x0_list = [x0.get('Tmul'), x0.get('Toff'), x0.get('k2')]
+        x0_list = [x0.get('Tmul'), x0.get('Toff')]  # , x0.get('k2')]
         print('Running minimization with initial X:')
         for k, v in x0.items():
             print(k + ': ', v)
@@ -750,7 +757,7 @@ def minimize_kappa_tela_sound(sound_path=sound_path, gps=garner_path,
     print('Running minimization with the following bounds:')
     for k, v in bounds.items():
         print(k + ': ', v)
-    bounds_list = [bounds.get('Tmul'), bounds.get('Toff'), bounds.get('k2')]
+    bounds_list = [bounds.get('Tmul'), bounds.get('Toff')]  # , bounds.get('k2')]
     res = gp_minimize(func_to_min, dimensions=bounds_list,
                       x0=x0_list, n_jobs=-1, random_state=42,
                       verbose=False)
@@ -952,19 +959,22 @@ def process_data_from_sounding(sound_path=sound_path):
     return result
 
 
-def from_opt_to_comparison(result=None, times=None, bounds=None, x0=None):
+def from_opt_to_comparison(result=None, times=None, bounds=None, x0=None,
+                           season=None):
     """ call optimization and comapring alltogather. can run optimization
     separetly and plugin the result to compare"""
     if result is None:
         print('minimizing the hell out of the function!...')
-        result = minimize_kappa_tela_sound(times=times, bounds=bounds, x0=x0)
+        result = minimize_kappa_tela_sound(times=times, bounds=bounds, x0=x0,
+                                           season=season)
     geo_df = produce_geo_df()
     Tmul = result.x[0]
     T_offset = result.x[1]
-    k2 = result.x[2]
-    ipw = produce_IPW_for_all(geo_df, Tmul=Tmul, T_offset=T_offset, k2=k2,
+    # k2 = result.x[2]
+    ipw = produce_IPW_for_all(geo_df, Tmul=Tmul, T_offset=T_offset,
                               plot=False, hist=False)
-    pw = compare_to_sounding(gps=ipw, times=times)
+    pw = compare_to_sounding(gps=ipw, times=times, season=season)
+    pw.attrs['result from fitted model'] = result.x
     return pw, result
 
 
@@ -1009,7 +1019,12 @@ def compare_to_sounding(sound_path=sound_path, gps=garner_path, station='TELA',
     fig, ax = plt.subplots(1, 2, figsize=(20, 4),
                            gridspec_kw={'width_ratios': [3, 1]})
     pw[[station, 'sound']].to_dataframe().plot(ax=ax[0], style='.')
-    sns.distplot(pw['resid'].values, bins=100, color='c', label='residuals', ax=ax[1])
+    sns.distplot(
+        pw['resid'].values,
+        bins=100,
+        color='c',
+        label='residuals',
+        ax=ax[1])
     # pw['resid'].plot.hist(bins=100, color='c', edgecolor='k', alpha=0.65,
     #                      ax=ax[1])
     rmean = pw['resid'].mean().values
@@ -1020,13 +1035,69 @@ def compare_to_sounding(sound_path=sound_path, gps=garner_path, station='TELA',
     # plt.axvline(rmedian, color='b', linestyle='dashed', linewidth=1)
     _, max_ = plt.ylim()
     plt.text(rmean + rmean / 10, max_ - max_ / 10,
-             'Mean: {:.2f}, RMSE: {:.2f}'.format(rmean,rmse))
+             'Mean: {:.2f}, RMSE: {:.2f}'.format(rmean, rmse))
     fig.tight_layout()
-    pw['season']=pw['time.season']
-    pw['hour']=pw['time.hour'].astype(str)
+    if season is None:
+        pw['season'] = pw['time.season']
+        pw['hour'] = pw['time.hour'].astype(str)
+        pw['hour'] = pw.hour.where(pw.hour != '12', 'noon')
+        pw['hour'] = pw.hour.where(pw.hour != '0', 'midnight')
+        df = pw.to_dataframe()
+    #    g = sns.relplot(
+    #        data=df,
+    #        x='sound',
+    #        y='TELA',
+    #        col='season',
+    #        hue='hour',
+    #        kind='scatter',
+    #        style='season')
+    #    if times is not None:
+    #        plt.subplots_adjust(top=0.85)
+    #        g.fig.suptitle('Time: ' + times[0] + ' to ' + times[1], y=0.98)
+        h_order = ['noon', 'midnight']
+        s_order = ['DJF', 'JJA', 'SON', 'MAM']
+        g = sns.lmplot(
+            data=df,
+            x='sound',
+            y='TELA',
+            col='season',
+            hue='season',
+            row='hour',
+            row_order=h_order,
+            col_order=s_order)
+        g.set(ylim=(0, 50), xlim=(0, 50))
+        if times is not None:
+            plt.subplots_adjust(top=0.9)
+            g.fig.suptitle('Time: ' + times[0] + ' to ' + times[1], y=0.98)
+        g = sns.FacetGrid(data=df, col='season', hue='season', row='hour',
+                          row_order=h_order, col_order=s_order)
+        g.fig.set_size_inches(15, 8)
+        g = (g.map(sns.distplot, "resid"))
+        rmeans = []
+        rmses = []
+        for hour in h_order:
+            for season in s_order:
+                sliced_pw = pw.sel(
+                    time=pw['time.season'] == season).where(
+                    pw.hour != hour).dropna('time')
+                rmses.append(
+                    np.sqrt(
+                        mean_squared_error(
+                            sliced_pw['sound'],
+                            sliced_pw[station])))
+                rmeans.append(sliced_pw['resid'].mean().values)
+        for i, ax in enumerate(g.axes.flat):
+            ax.axvline(rmeans[i], color='k', linestyle='dashed', linewidth=1)
+            _, max_ = ax.get_ylim()
+            ax.text(rmeans[i] + rmeans[i] / 10, max_ - max_ / 10,
+                    'Mean: {:.2f}, RMSE: {:.2f}'.format(rmeans[i], rmses[i]))
+        # g.set(xlim=(-5, 5))
+        if times is not None:
+            plt.subplots_adjust(top=0.9)
+            g.fig.suptitle('Time: ' + times[0] + ' to ' + times[1], y=0.98)
     # maybe month ?
     # plt.text(rmedian + rmedian / 10, max_ - max_ / 10,
-    #          'Mean: {:.2f}'.format(rmedian))    
+    #          'Mean: {:.2f}'.format(rmedian))
     return pw
 
 
