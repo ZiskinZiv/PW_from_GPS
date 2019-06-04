@@ -7,7 +7,7 @@ Created on Thu May 30 11:46:25 2019
 """
 
 
-def all_orbitals_download(save_dir, minimum_year=None):
+def all_orbitals_download(save_dir, minimum_year=None, hr_only=None):
     import htmllistparse
     import requests
     import os
@@ -42,15 +42,26 @@ def all_orbitals_download(save_dir, minimum_year=None):
 #        2017-01-28.frame.gz
 #        2017-01-28.pos.gz
 #        2017-01-28.wlpb.gz
-        suffixes = ['eo', 'shad', 'ant', 'tdp', 'frame', 'pos', 'wlpb']
-        for suff in suffixes:
-            found = [f for f in files if suff in f.split('.')[1] and '_' not in f]
-            if found:
-                for filename in found:
-                    print('Downloading {} to {}.'.format(filename, savepath))
-                    r = requests.get(command + year + filename)
-                    with open(savepath/filename, 'wb') as file:
-                        file.write(r.content)
+        if hr_only is None:
+            suffixes = ['eo', 'shad', 'ant', 'tdp', 'frame', 'pos', 'wlpb']
+            for suff in suffixes:
+                found = [f for f in files if suff in f.split('.')[1] and '_' not in f]
+                if found:
+                    for filename in found:
+                        print('Downloading {} to {}.'.format(filename, savepath))
+                        r = requests.get(command + year + filename)
+                        with open(savepath/filename, 'wb') as file:
+                            file.write(r.content)
+        else:
+            pre_found = [f for f in files if '_' in f]
+            if pre_found:
+                found = [f for f in pre_found if f.split('.')[0].split('_')[1] == 'hr']
+                if found:
+                    for filename in found:
+                        print('Downloading {} to {}.'.format(filename, savepath))
+                        r = requests.get(command + year + filename)
+                        with open(savepath/filename, 'wb') as file:
+                            file.write(r.content)
     return
 
 
@@ -162,6 +173,8 @@ if __name__ == '__main__':
                           type=check_station_name)
     optional.add_argument('--myear', help='minimum year to begin search in garner site.',
                           type=check_year)
+    optional.add_argument('--hr_only', help='download only _hr files...',
+                          choices=['True'])
 #                          metavar=str(cds.start_year) + ' to ' + str(cds.end_year))
 #    optional.add_argument('--half', help='a spescific six months to download,\
 #                          e.g, 1 or 2', type=int, choices=[1, 2],
@@ -191,9 +204,15 @@ if __name__ == '__main__':
     elif args.mode == 'orbital':
         path = Path(args.path)
         if args.myear is not None:
-            all_orbitals_download(path, minimum_year=args.myear)
+            if args.hr_only is not None:
+                all_orbitals_download(path, minimum_year=args.myear,
+                                      hr_only=True)
+            else:
+                all_orbitals_download(path, minimum_year=args.myear)
         else:
-            all_orbitals_download(path)
+            if args.hr_only is not None:
+                all_orbitals_download(path, hr_only=True)
+            else:
+                all_orbitals_download(path)
     else:
         raise ValueError('must choose mode!')
-
