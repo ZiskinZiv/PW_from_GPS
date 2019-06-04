@@ -17,12 +17,8 @@ PW_stations_path = work_yuval / '1minute'
 stations = pd.read_csv('stations.txt', header=0, delim_whitespace=True,
                        index_col='name')
 
-# TODO: day and night IPW calculation seperatalry 15 yrs, or 3 years and comaprison by day/night
-# TODO: calculation by season same with seasons
-# TODO: copy meta-data of IPW procces to dataarrays
-# TODO: mange paths to spesific computers. mac left
-# TODO: redo the filter stations on all computers(laptop and home)
-# TODO: copy the israel_dem file to all computers
+# TODO: continue analyzing sounding data for tm ts formulas for season,hour
+# TODO: check noon midnight correctness
 
 
 def proc_1minute(path):
@@ -573,12 +569,13 @@ def produce_geo_df(gis_path=gis_path):
     return geo_df
 
 
-def produce_IPW_for_all(geo_df, ims_path=ims_path, gps_path=garner_path,
-                        savepath=None, lapse_rate=6.5, Tmul=0.72,
-                        T_offset=70.2, k2=22.1, k3=3.776e5,
-                        plot=True, hist=True):
+def produce_IPW_field(geo_df, ims_path=ims_path, gps_path=garner_path,
+                      savepath=None, lapse_rate=6.5, Tmul=0.72,
+                      T_offset=70.2, k2=22.1, k3=3.776e5, station=None,
+                      plot=True, hist=True):
     import xarray as xr
-    """IPW = kappa[kg/m^3] * ZWD[cm]"""
+    """produce IPW field from zwd and T, for one station or all stations"""
+    # IPW = kappa[kg/m^3] * ZWD[cm]
     print('fixing T data for height diffrences with {} K/km lapse rate'.format(
             lapse_rate))
     Tds = fix_T_height(ims_path, geo_df, lapse_rate)
@@ -591,44 +588,63 @@ def produce_IPW_for_all(geo_df, ims_path=ims_path, gps_path=garner_path,
                           [Tmul, T_offset, k2, k3]))
     garner_zwd = xr.open_dataset(gps_path /
                                  'garner_israeli_stations_filtered.nc')
-    print('producing IPW fields:')
-    ipw_list = []
-    for st in Tds:
+    if station is not None:
+        print('producing IPW field for station: {}'.format(station))
         try:
-            # IPW = kappa(T) * Zenith Wet Delay:
-            ipw = Tds[st] * garner_zwd[st.upper()]
-            ipw.name = st.upper()
-            ipw.attrs['gps_lat'] = geo_df.loc[st, 'gps_lat']
-            ipw.attrs['gps_lon'] = geo_df.loc[st, 'gps_lon']
-            ipw.attrs['gps_alt'] = geo_df.loc[st, 'gps_alt']
+            ipw = Tds[station] * garner_zwd[station.upper()]
+            ipw.name = station.upper()
+            ipw.attrs['gps_lat'] = geo_df.loc[station, 'gps_lat']
+            ipw.attrs['gps_lon'] = geo_df.loc[station, 'gps_lon']
+            ipw.attrs['gps_alt'] = geo_df.loc[station, 'gps_alt']
             for k, v in kappa_dict.items():
                 ipw.attrs[k] = v
-            ipw_list.append(ipw)
         except KeyError:
-            print('{} station not found in garner gps data'.format(st))
-        continue
-    ds = xr.merge(ipw_list)
-    ds = ds.rename({'zwd': 'ipw'})
-    ds['ipw'].attrs['name'] = 'IPW'
-    ds['ipw'].attrs['long_name'] = 'Integrated Precipitable Water'
-    ds['ipw'].attrs['units'] = 'kg / m^2'
-    print('Done!')
-    if savepath is not None:
-        filename = 'IPW_israeli_from_gps.nc'
-        print('saving {} to {}'.format(filename, savepath))
-        comp = dict(zlib=True, complevel=9)  # best compression
-        encoding = {var: comp for var in ds.data_vars}
-        ds.to_netcdf(savepath / filename, 'w', encoding=encoding)
+            raise('{} station not found in garner gps data'.format(station))
+        ds = ipw.to_dataset(name=ipw.name)
+        ds = ds.rename({'zwd': 'ipw'})
+        ds['ipw'].attrs['name'] = 'IPW'
+        ds['ipw'].attrs['long_name'] = 'Integrated Precipitable Water'
+        ds['ipw'].attrs['units'] = 'kg / m^2'
         print('Done!')
-    if plot:
-        ds.sel(ipw='value').to_array(dim='station').sortby('station').plot(
-            x='time',
-            col='station',
-            col_wrap=4,
-            figsize=(15, 8))
-    if hist:
-        ds.sel(ipw='value').to_dataframe().hist(bins=100, grid=False,
-                                                figsize=(15, 8))
+    else:
+        print('producing IPW fields:')
+        ipw_list = []
+        for st in Tds:
+            try:
+                # IPW = kappa(T) * Zenith Wet Delay:
+                ipw = Tds[st] * garner_zwd[st.upper()]
+                ipw.name = st.upper()
+                ipw.attrs['gps_lat'] = geo_df.loc[st, 'gps_lat']
+                ipw.attrs['gps_lon'] = geo_df.loc[st, 'gps_lon']
+                ipw.attrs['gps_alt'] = geo_df.loc[st, 'gps_alt']
+                for k, v in kappa_dict.items():
+                    ipw.attrs[k] = v
+                ipw_list.append(ipw)
+            except KeyError:
+                print('{} station not found in garner gps data'.format(st))
+            continue
+        ds = xr.merge(ipw_list)
+        ds = ds.rename({'zwd': 'ipw'})
+        ds['ipw'].attrs['name'] = 'IPW'
+        ds['ipw'].attrs['long_name'] = 'Integrated Precipitable Water'
+        ds['ipw'].attrs['units'] = 'kg / m^2'
+        print('Done!')
+        if savepath is not None:
+            filename = 'IPW_israeli_from_gps.nc'
+            print('saving {} to {}'.format(filename, savepath))
+            comp = dict(zlib=True, complevel=9)  # best compression
+            encoding = {var: comp for var in ds.data_vars}
+            ds.to_netcdf(savepath / filename, 'w', encoding=encoding)
+            print('Done!')
+        if plot:
+            ds.sel(ipw='value').to_array(dim='station').sortby('station').plot(
+                x='time',
+                col='station',
+                col_wrap=4,
+                figsize=(15, 8))
+        if hist:
+            ds.sel(ipw='value').to_dataframe().hist(bins=100, grid=False,
+                                                    figsize=(15, 8))
     return ds
 
 
@@ -698,10 +714,16 @@ def minimize_kappa_tela_sound(sound_path=sound_path, gps=garner_path,
         Tmul = x[0]
         Toff = x[1]
         # k2 = x[2]
-        k = kappa(Ts, Tmul=Tmul, T_offset=Toff)  #, k2=k2)
+        # Ta = Tmul * (Ts + 273.15) + Toff
+        Ts_k = Ts + 273.15
+        Ta = Tmul * (Ts_k) + Toff
+        added_loss = np.mean((np.where(Ta > Ts_k, 1.0, 0.0))) * 100.0
+        k = kappa(Ts, Tmul=Tmul, T_offset=Toff)  # , k2=k2)
         res = sound - k * zwd_gps
         rmse = np.sqrt(mean_squared_error(sound, k * zwd_gps))
         loss = np.abs(np.mean(res)) + rmse
+        print('loss:{}, added_loss:{}'.format(loss, added_loss))
+        loss += added_loss
         return loss
 
     # load gerner zwd data:
@@ -712,7 +734,7 @@ def minimize_kappa_tela_sound(sound_path=sound_path, gps=garner_path,
     sound = xr.open_dataarray(sound_path / 'PW_bet_dagan_soundings.nc')
     sound = sound.where(sound > 0, drop=True)
     sound.load()
-    # load surface temperature data:
+    # load surface temperature data in C:
     Tds = xr.open_dataset(ims_path / 'IMS_TD_israeli_for_gps.nc')
     Ts = Tds[station.lower()]
     Ts.load()
@@ -929,7 +951,7 @@ def check_anton_tela_station(anton_path, ims_path=ims_path):
     return ds
 
 
-def process_data_from_sounding(sound_path=sound_path):
+def process_data_from_sounding(sound_path=sound_path, savepath=None):
     import xarray as xr
     da = xr.open_dataarray(sound_path / 'ALL_bet_dagan_soundings.nc')
     pw = xr.open_dataarray(sound_path / 'PW_bet_dagan_soundings.nc')
@@ -955,6 +977,17 @@ def process_data_from_sounding(sound_path=sound_path):
     result['ts'] = ts
     result['tpw'].attrs['description'] = 'BET_DAGAN percipatable water calculated from sounding by me'
     result['tpw'].attrs['units'] = 'mm'
+    result['season'] = result['time.season']
+    result['hour'] = result['time.hour'].astype(str)
+    result['hour'] = result.hour.where(result.hour != '12', 'noon')
+    result['hour'] = result.hour.where(result.hour != '0', 'midnight')
+    result = result.dropna('time')
+    if savepath is not None:
+        filename = 'bet_dagan_sounding_pw_Ts_Tk.nc'
+        print('saving {} to {}'.format(filename, savepath))
+        comp = dict(zlib=True, complevel=9)  # best compression
+        encoding = {var: comp for var in result}
+        result.to_netcdf(savepath / filename, 'w', encoding=encoding)
     print('Done!')
     return result
 
@@ -971,8 +1004,8 @@ def from_opt_to_comparison(result=None, times=None, bounds=None, x0=None,
     Tmul = result.x[0]
     T_offset = result.x[1]
     # k2 = result.x[2]
-    ipw = produce_IPW_for_all(geo_df, Tmul=Tmul, T_offset=T_offset,
-                              plot=False, hist=False)
+    ipw = produce_IPW_field(geo_df, Tmul=Tmul, T_offset=T_offset,
+                            plot=False, hist=False, station='tela')
     pw = compare_to_sounding(gps=ipw, times=times, season=season)
     pw.attrs['result from fitted model'] = result.x
     return pw, result
@@ -1099,6 +1132,32 @@ def compare_to_sounding(sound_path=sound_path, gps=garner_path, station='TELA',
     # plt.text(rmedian + rmedian / 10, max_ - max_ / 10,
     #          'Mean: {:.2f}'.format(rmedian))
     return pw
+
+
+def analyze_sounding_and_formulate(sound_path=sound_path):
+    import xarray as xr
+    import numpy as np
+    ds = xr.open_dataset(sound_path / 'bet_dagan_sounding_pw_Ts_Tk.nc')
+    h_order = ['noon', 'midnight']
+    s_order = ['DJF', 'JJA', 'SON', 'MAM']
+    Tmul = []
+    Toff = []
+    residuals = []
+    for hour in h_order:
+        for season in s_order:
+            x = ds.ts.sel(time=ds['time.season'] == season).where(
+                ds.hour != hour).dropna('time')
+            y = ds.tm.sel(time=ds['time.season'] == season).where(
+                ds.hour != hour).dropna('time')
+            [tmul, toff] = np.polyfit(x.values, y.values, 1)
+            new_tm = tmul * x + toff
+            new_tm.name = 'predicted_tm'
+            resid = new_tm - y
+            resid.name = 'resid'
+            residuals.append(resid)
+            Tmul.append(tmul)
+            Toff.append(toff)
+    return residuals, Tmul, Toff
 
 
 def desc_nan(data, verbose=True):
