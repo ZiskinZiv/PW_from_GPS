@@ -1067,7 +1067,7 @@ def compare_to_sounding(sound_path=sound_path, gps=garner_path, station='TELA',
     # pw['resid'].plot.hist(bins=100, color='c', edgecolor='k', alpha=0.65,
     #                      ax=ax[1])
     rmean = pw['resid'].mean().values
-    rstd = pw['resid'].std().values
+    rstd = pw['resid'].std().valuesgirls
     rmedian = pw['resid'].median().values
     rmse = np.sqrt(mean_squared_error(pw['sound'], pw[station]))
     plt.axvline(rmean, color='r', linestyle='dashed', linewidth=1)
@@ -1146,23 +1146,28 @@ def analyze_sounding_and_formulate(sound_path=sound_path):
     import matplotlib.pyplot as plt
     import seaborn as sns
     from sklearn.metrics import mean_squared_error
+    sns.set_style('darkgrid')
     ds = xr.open_dataset(sound_path / 'bet_dagan_sounding_pw_Ts_Tk.nc')
     fig, axes = plt.subplots(1, 2, figsize=(10, 7))
     fig.suptitle(
         'Water vapor weighted mean atmospheric temperature vs. bet dagan sounding station surface temperature')
     [a, b] = np.polyfit(ds.ts.values, ds.tm.values, 1)
     # sns.regplot(ds.ts.values, ds.tm.values, ax=axes[0])
-    axes[0].scatter(x=ds.ts.values, y=ds.tm.values, marker='.')
+    axes[0].scatter(x=ds.ts.values, y=ds.tm.values, marker='.', s=10)
     linex = np.array([ds.ts.min().item(), ds.ts.max().item()])
     liney = a * linex + b
     axes[0].plot(linex, liney, c='r')
     min_, max_ = axes[0].get_ylim()
-    axes[0].text(min_ + min_ / 20, max_ - max_ / 100,
-                 'a: {:.2f}, b: {:.2f}'.format(a, b))
+    axes[0].text(0.01, 0.9, 'a: {:.2f}, b: {:.2f}'.format(a, b),transform=axes[0].transAxes, color='black',
+                            fontsize=12)
+    axes[0].text(0.1, 0.85, 'n={}'.format(len(ds.ts.values)),
+                            verticalalignment='top', horizontalalignment='center',
+                            transform=axes[0].transAxes, color='green',
+                            fontsize=12)
     axes[0].set_xlabel('Ts [K]')
     axes[0].set_ylabel('Tm [K]')
     resid = ds.tm.values - ds.ts.values * a - b
-    sns.distplot(resid, bins=100, color='c', label='residuals', ax=axes[1])
+    sns.distplot(resid, bins=25, color='c', label='residuals', ax=axes[1])
     rmean = np.mean(resid)
     rmse = np.sqrt(mean_squared_error(ds.tm.values, ds.ts.values * a + b))
     _, max_ = axes[1].get_ylim()
@@ -1192,14 +1197,19 @@ def analyze_sounding_and_formulate(sound_path=sound_path):
             resid = new_tm - y.values
             rmses.append(np.sqrt(mean_squared_error(y.values, new_tm)))
             residuals.append(resid)
-            axes[i, j].scatter(x=x.values, y=y.values, marker='.')
+            axes[i, j].text(0.15, 0.85, 'n={}'.format(len(x.values)),
+                            verticalalignment='top', horizontalalignment='center',
+                            transform=axes[i, j].transAxes, color='green',
+                            fontsize=12)
+            axes[i, j].scatter(x=x.values, y=y.values, marker='.', s=10)
             axes[i, j].set_title('season:{} ,hour:{}'.format(season, hour))
             linex = np.array([x.min().item(), x.max().item()])
             liney = tmul * linex + toff
             axes[i, j].plot(linex, liney, c='r')
+            axes[i, j].plot(x.values, x.values, c='k')
             min_, max_ = axes[i, j].get_ylim()
-            axes[i, j].text(min_ + min_ / 20, max_ - max_ / 100,
-                         'a: {:.2f}, b: {:.2f}'.format(tmul, toff))
+            axes[i, j].text(0.015, 0.9, 'a: {:.2f}, b: {:.2f}'.format(tmul, toff),transform=axes[i, j].transAxes, color='black',
+                            fontsize=12)
             axes[i, j].set_xlabel('Ts [K]')
             axes[i, j].set_ylabel('Tm [K]')
 #            Tmul.append(tmul)
@@ -1208,7 +1218,7 @@ def analyze_sounding_and_formulate(sound_path=sound_path):
     fig, axes = plt.subplots(2, 4, sharey=True, sharex=True, figsize=(20, 15))
     for i, hour in enumerate(h_order):
         for j, season in enumerate(s_order):
-            sns.distplot(residuals[cnt], bins=100, color='c',
+            sns.distplot(residuals[cnt], bins=25, color='c',
                          label='residuals', ax=axes[i, j])
             rmean = np.mean(residuals[cnt])
             _, max_ = axes[i, j].get_ylim()
