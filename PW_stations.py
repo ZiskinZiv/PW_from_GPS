@@ -569,6 +569,10 @@ def produce_geo_df(gis_path=gis_path):
     return geo_df
 
 
+def produce_single_station_IPW(zwd, Tds, Tcoeffs):
+    return
+
+
 def produce_IPW_field(geo_df, ims_path=ims_path, gps_path=garner_path,
                       savepath=None, lapse_rate=6.5, Tmul=0.72,
                       T_offset=70.2, k2=22.1, k3=3.776e5, station=None,
@@ -993,7 +997,7 @@ def process_data_from_sounding(sound_path=sound_path, savepath=None):
 
 
 def from_opt_to_comparison(result=None, times=None, bounds=None, x0=None,
-                           season=None):
+                           season=None, Tmul=None, T_offset=None):
     """ call optimization and comapring alltogather. can run optimization
     separetly and plugin the result to compare"""
     if result is None:
@@ -1001,13 +1005,15 @@ def from_opt_to_comparison(result=None, times=None, bounds=None, x0=None,
         result = minimize_kappa_tela_sound(times=times, bounds=bounds, x0=x0,
                                            season=season)
     geo_df = produce_geo_df()
-    Tmul = result.x[0]
-    T_offset = result.x[1]
-    # k2 = result.x[2]
-    ipw = produce_IPW_field(geo_df, Tmul=Tmul, T_offset=T_offset,
-                            plot=False, hist=False, station='tela')
-    pw = compare_to_sounding(gps=ipw, times=times, season=season)
-    pw.attrs['result from fitted model'] = result.x
+    if result:
+        Tmul = result.x[0]
+        T_offset = result.x[1]
+    if Tmul is not None and T_offset is not None:
+        # k2 = result.x[2]
+        ipw = produce_IPW_field(geo_df, Tmul=Tmul, T_offset=T_offset,
+                                plot=False, hist=False, station='tela')
+        pw = compare_to_sounding(gps=ipw, times=times, season=season)
+        pw.attrs['result from fitted model'] = result.x
     return pw, result
 
 
@@ -1137,27 +1143,91 @@ def compare_to_sounding(sound_path=sound_path, gps=garner_path, station='TELA',
 def analyze_sounding_and_formulate(sound_path=sound_path):
     import xarray as xr
     import numpy as np
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    from sklearn.metrics import mean_squared_error
     ds = xr.open_dataset(sound_path / 'bet_dagan_sounding_pw_Ts_Tk.nc')
+    fig, axes = plt.subplots(1, 2, figsize=(10, 7))
+    fig.suptitle(
+        'Water vapor weighted mean atmospheric temperature vs. bet dagan sounding station surface temperature')
+    [a, b] = np.polyfit(ds.ts.values, ds.tm.values, 1)
+    # sns.regplot(ds.ts.values, ds.tm.values, ax=axes[0])
+    axes[0].scatter(x=ds.ts.values, y=ds.tm.values, marker='.')
+    linex = np.array([ds.ts.min().item(), ds.ts.max().item()])
+    liney = a * linex + b
+    axes[0].plot(linex, liney, c='r')
+    min_, max_ = axes[0].get_ylim()
+    axes[0].text(min_ + min_ / 20, max_ - max_ / 100,
+                 'a: {:.2f}, b: {:.2f}'.format(a, b))
+    axes[0].set_xlabel('Ts [K]')
+    axes[0].set_ylabel('Tm [K]')
+    resid = ds.tm.values - ds.ts.values * a - b
+    sns.distplot(resid, bins=100, color='c', label='residuals', ax=axes[1])
+    rmean = np.mean(resid)
+    rmse = np.sqrt(mean_squared_error(ds.tm.values, ds.ts.values * a + b))
+    _, max_ = axes[1].get_ylim()
+    axes[1].text(rmean + rmean / 10, max_ - max_ / 10,
+                 'Mean: {:.2f}, RMSE: {:.2f}'.format(rmean, rmse))
+    axes[1].axvline(rmean, color='r', linestyle='dashed', linewidth=1)
+    axes[1].set_xlabel('Residuals [K]')
+    fig.tight_layout()
     h_order = ['noon', 'midnight']
     s_order = ['DJF', 'JJA', 'SON', 'MAM']
-    Tmul = []
-    Toff = []
+#    Tmul = []
+#    Toff = []
     residuals = []
-    for hour in h_order:
-        for season in s_order:
+    rmses = []
+    result = np.empty((len(h_order), len(s_order), 2))
+    fig, axes = plt.subplots(2, 4, sharey=True, sharex=True, figsize=(20, 15))
+    for i, hour in enumerate(h_order):
+        for j, season in enumerate(s_order):
             x = ds.ts.sel(time=ds['time.season'] == season).where(
-                ds.hour != hour).dropna('time')
+                ds.hour == hour).dropna('time')
             y = ds.tm.sel(time=ds['time.season'] == season).where(
-                ds.hour != hour).dropna('time')
+                ds.hour == hour).dropna('time')
             [tmul, toff] = np.polyfit(x.values, y.values, 1)
-            new_tm = tmul * x + toff
-            new_tm.name = 'predicted_tm'
-            resid = new_tm - y
-            resid.name = 'resid'
+            result[i, j, 0] = tmul
+            result[i, j, 1] = toff
+            new_tm = tmul * x.values + toff
+            resid = new_tm - y.values
+            rmses.append(np.sqrt(mean_squared_error(y.values, new_tm)))
             residuals.append(resid)
-            Tmul.append(tmul)
-            Toff.append(toff)
-    return residuals, Tmul, Toff
+            axes[i, j].scatter(x=x.values, y=y.values, marker='.')
+            axes[i, j].set_title('season:{} ,hour:{}'.format(season, hour))
+            linex = np.array([x.min().item(), x.max().item()])
+            liney = tmul * linex + toff
+            axes[i, j].plot(linex, liney, c='r')
+            min_, max_ = axes[i, j].get_ylim()
+            axes[i, j].text(min_ + min_ / 20, max_ - max_ / 100,
+                         'a: {:.2f}, b: {:.2f}'.format(tmul, toff))
+            axes[i, j].set_xlabel('Ts [K]')
+            axes[i, j].set_ylabel('Tm [K]')
+#            Tmul.append(tmul)
+#            Toff.append(toff)
+    cnt = 0
+    fig, axes = plt.subplots(2, 4, sharey=True, sharex=True, figsize=(20, 15))
+    for i, hour in enumerate(h_order):
+        for j, season in enumerate(s_order):
+            sns.distplot(residuals[cnt], bins=100, color='c',
+                         label='residuals', ax=axes[i, j])
+            rmean = np.mean(residuals[cnt])
+            _, max_ = axes[i, j].get_ylim()
+            axes[i, j].text(rmean + rmean / 10, max_ - max_ / 10,
+                            'Mean: {:.2f}, RMSE: {:.2f}'.format(rmean,
+                                                                rmses[cnt]))
+            axes[i, j].axvline(rmean, color='r', linestyle='dashed',
+                               linewidth=1)
+            axes[i, j].set_xlabel('Residuals [K]')
+            axes[i, j].set_title('season:{} ,hour:{}'.format(season, hour))
+            cnt += 1
+    fig.tight_layout()
+    results = xr.DataArray(result, dims=['hour', 'season', 'parameter'])
+    results['hour'] = h_order
+    results['season'] = s_order
+    results['parameter'] = ['slope', 'intercept']
+    results.attrs['all_data_slope'] = a
+    results.attrs['all_data_intercept'] = b
+    return results
 
 
 def desc_nan(data, verbose=True):
