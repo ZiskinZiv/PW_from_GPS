@@ -569,8 +569,30 @@ def produce_geo_df(gis_path=gis_path):
     return geo_df
 
 
-def produce_single_station_IPW(zwd, Tds, Tcoeffs):
-    return
+def produce_single_station_IPW(zwd, Tds, Tcoeffs, k2=22.1, k3=3.776e5):
+    """input is zwd from gipsy or garner, Tds is the temperature of the
+    station, Tcoeffs is the Ts-Tm relationsship dataarray"""
+    if len(Tcoeffs.dims) == 1 and 'parameter' in Tcoeffs.dims:
+        print('Found whole data Ts-Tm relationship.')
+        Tmul = Tcoeffs.sel(parameter='slope')
+        Toff = Tcoeffs.sel(parameter='intercept')
+        Tds = kappa(Tds, Tmul, Toff, k2, k3)
+        ipw = Tds * zwd
+        ipw.name = zwd.name
+        kappa_dict = dict(zip(['T_multiplier', 'T_offset', 'k2', 'k3'],
+                          [Tmul, Toff, k2, k3]))
+        for k, v in kappa_dict.items():
+            ipw.attrs[k] = v
+        ipw = ipw.rename({'zwd': 'ipw'})
+        ipw.attrs['name'] = 'IPW'
+        ipw.attrs['long_name'] = 'Integrated Precipitable Water'
+        ipw.attrs['units'] = 'kg / m^2'
+        print('Done!')
+    if (len(Tcoeffs.dims) == 3 and 'parameter' and 'hour' and 'season'
+            in Tcoeffs.dims):
+        print('Found season and hour Ts-Tm relationship slice.')
+        
+    return ipw
 
 
 def produce_IPW_field(geo_df, ims_path=ims_path, gps_path=garner_path,
