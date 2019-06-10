@@ -99,6 +99,7 @@ def read_stations_to_dataset(path, group_name='israeli', save=False,
 def filter_stations(path, group_name='israeli', save=False):
     """filter bad values in trop products stations"""
     import xarray as xr
+    from aux_gps import Zscore_xr
     filename = 'garner_' + group_name + '_stations.nc'
     print('Reading {}.nc from {}'.format(filename, path))
     ds = xr.open_dataset(path / filename)
@@ -137,67 +138,6 @@ def filter_stations(path, group_name='israeli', save=False):
 #        intersection = set.intersection(*map(set, time_list))
 #        intr = sorted(list(intersection))
 #        return intr
-
-
-def read_ims(path, filename):
-    import pandas as pd
-    """parse ims stations meta-data"""
-    if '10mins' in filename:
-        ims = pd.read_excel(path / filename,
-                            sheet_name='מטה-דטה', skiprows=1)
-        # drop two last cols and two last rows:
-        ims = ims.drop(ims.columns[[-1, -2]], axis=1)
-        ims = ims.drop(ims.tail(2).index)
-        cols = ['#', 'ID', 'name_hebrew', 'name_english', 'east', 'west',
-                'lon', 'lat', 'alt', 'starting_date', 'variables', 'model',
-                'eq_position', 'wind_meter_height', 'notes']
-        ims.columns = cols
-        ims.index = ims['#'].astype(int)
-        ims = ims.drop('#', axis=1)
-        # fix lat, lon cols:
-        ims['lat'] = ims['lat'].str.replace(u'\xba', '').astype(float)
-        ims['lon'] = ims['lon'].str.replace(u'\xba', '').astype(float)
-        # fix alt col:
-        ims['alt'] = ims['alt'].replace('~', '', regex=True).astype(float)
-        # fix starting date col:
-        ims['starting_date'] = pd.to_datetime(ims['starting_date'])
-    else:
-        ims = pd.read_excel(path + filename,
-                            sheet_name='תחנות אקלים', skiprows=1)
-        cols = ['ID', 'name_hebrew', 'name_english', 'station_type', 'east',
-                'west', 'lon', 'lat', 'alt', 'starting_date', 'closing_date',
-                'date_range']
-        ims.columns = cols
-        # ims.index = ims['ID'].astype(int)
-        # ims = ims.drop('ID', axis=1)
-        # fix lat, lon cols:
-        ims['lat'] = ims['lat'].str.replace(u'\xba', '').astype(float)
-        ims['lon'] = ims['lon'].str.replace(u'\xba', '').astype(float)
-        # fix alt col:
-        ims['alt'] = ims['alt'].replace('~', '', regex=True).astype(float)
-        # fix starting date, closing_date col:
-        ims['starting_date'] = pd.to_datetime(ims['starting_date'])
-        ims['closing_date'] = pd.to_datetime(ims['closing_date'])
-    return ims
-
-
-def produce_geo_ims(path, filename='IMS_10mins_meta_data.xlsx',
-                    closed_stations=False, plot=True):
-    import geopandas as gpd
-    import numpy as np
-    isr = gpd.read_file(path / 'israel_demog2012.shp')
-    isr.crs = {'init': 'epsg:4326'}
-    ims = read_ims(path, filename)
-    if closed_stations:
-        ims = ims[np.isnat(ims.closing_date)]
-    geo_ims = gpd.GeoDataFrame(ims, geometry=gpd.points_from_xy(ims.lon,
-                                                                ims.lat),
-                               crs=isr.crs)
-    if plot:
-        ax = isr.plot()
-        geo_ims.plot(ax=ax, column='alt', cmap='Reds', edgecolor='black',
-                     legend=True)
-    return geo_ims
 
 
 def produce_geo_gps_stations(path, file='stations.txt', plot=True):
@@ -297,144 +237,6 @@ def get_minimum_distance(geo_ims, geo_gps, path, plot=True):
     return geo_df
 
 
-def ims_api_get_meta(active_only=True):
-    import requests
-    import pandas as pd
-    """temperature is channelId 11"""
-    myToken = 'f058958a-d8bd-47cc-95d7-7ecf98610e47'
-    headers = {'Authorization': 'ApiToken ' + myToken}
-    r = requests.get('https://api.ims.gov.il/v1/envista/stations/',
-                     headers=headers)
-    stations_10mins = pd.DataFrame(r.json())
-    # filter inactive stations:
-    if active_only:
-        stations_10mins = stations_10mins[stations_10mins.active]
-    # arrange lat lon nicely and add channel num for dry temp:
-    lat_ = []
-    lon_ = []
-    TD_channelId = []
-    for index, row in stations_10mins.iterrows():
-        lat_.append(row['location']['latitude'])
-        lon_.append(row['location']['longitude'])
-        channel = [x['channelId'] for x in row.monitors if x['name'] ==
-                   'TD']
-        if channel:
-            TD_channelId.append(channel[0])
-        else:
-            TD_channelId.append(None)
-    stations_10mins['lat'] = lat_
-    stations_10mins['lon'] = lon_
-    stations_10mins['TD_channel'] = TD_channelId
-    stations_10mins.drop(['location', 'StationTarget', 'stationsTag'],
-                         axis=1, inplace=True)
-    return stations_10mins
-
-
-def parse_ims_to_df(raw_data):
-    """gets ims station raw data, i.e., r.json()['data'] and returns
-    a pandas dataframe"""
-    import pandas as pd
-    datetimes = [x['datetime'] for x in raw_data]
-    data = [x['channels'][0] for x in raw_data]
-    df = pd.DataFrame.from_records(data, index=pd.to_datetime(datetimes,
-                                                              utc=True))
-    df.drop(['alias', 'description'], axis=1, inplace=True)
-    return df
-
-
-def download_ims_data(geo_df, path, end_date='2019-04-15'):
-    import requests
-    import glob
-
-    def to_dataarray(df, index, row):
-        import pandas as pd
-        ds = df.to_xarray()
-        ds['time'] = pd.to_datetime(ds.time)
-        channel_name = ds.name.isel(time=0).values
-        channel_id = ds.id.isel(time=0).values
-        ds = ds.drop(['id', 'name'])
-        da = ds.to_array(dim='TD', name=str(index))
-        da.attrs['channel_id'] = channel_id.item()
-        da.attrs['channel_name'] = channel_name.item()
-        da.attrs['station_name'] = row.name_english
-        da.attrs['station_id'] = row.ID
-        da.attrs['station_lat'] = row.lat
-        da.attrs['station_lon'] = row.lon
-        da.attrs['station_alt'] = row.alt
-        return da
-
-    def get_dates_list(starting_date, end_date):
-        """divide the date span into full 1 years and a remainder, tolist"""
-        import numpy as np
-        import pandas as pd
-        end_date = pd.to_datetime(end_date)
-        s_year = starting_date.year
-        e_year = end_date.year
-        years = np.arange(s_year, e_year + 1)
-        dates = [starting_date.replace(year=x) for x in years]
-        if (end_date - dates[-1]).days > 0:
-            dates.append(end_date)
-        return dates
-
-    myToken = 'f058958a-d8bd-47cc-95d7-7ecf98610e47'
-    headers = {'Authorization': 'ApiToken ' + myToken}
-    already_dl = []
-    for paths in glob.glob(path+'*_TD.nc'):
-        already_dl.append(paths.split('/')[-1].split('.')[0].split('_')[0])
-        to_download = list(set(geo_df.index.values.tolist()
-                               ).difference(set(already_dl)))
-    if to_download:
-        geo_df = geo_df.loc[to_download]
-    for index, row in geo_df.iterrows():
-        # get a list of dates to download: (1 year old parts)
-        dates = get_dates_list(row.starting_date, end_date)
-        # get station id and channel id(only dry temperature):
-        name = row.name_english
-        station_id = row.ID
-        channel_id = row.channel_id
-        # if tempertue is not measuered in station , skip:
-        if channel_id == 0:
-            continue
-        print(
-            'Getting IMS data for {} station(ID={}) from channel {}'.format(
-                name,
-                station_id,
-                channel_id))
-        # loop over one year time span and download:
-        df_list = []
-        for i in range(len(dates) - 1):
-            first_date = dates[i].strftime('%Y/%m/%d')
-            last_date = dates[i + 1].strftime('%Y/%m/%d')
-            print('proccesing dates: {} to {}'.format(first_date, last_date))
-            dl_command = ('https://api.ims.gov.il/v1/envista/stations/' +
-                          str(station_id) + '/data/' + str(channel_id) +
-                          '?from=' + first_date + '&to=' + last_date)
-            r = requests.get(dl_command, headers=headers)
-            if r.status_code == 204:  # i.e., no content:
-                print('no content for this search, skipping...')
-                break
-            print('parsing to dataframe...')
-            df_list.append(parse_ims_to_df(r.json()['data']))
-        print('concatanating df and transforming to xarray...')
-        df_all = pd.concat(df_list)
-        # only valid results:
-        df_valid = df_all[df_all['valid']]
-        df_valid.index.name = 'time'
-        da = to_dataarray(df_valid, index, row)
-        filename = index + '_TD.nc'
-        comp = dict(zlib=True, complevel=9)  # best compression
-        encoding = {var: comp for var in da.to_dataset().data_vars}
-        print('saving to {} to {}'.format(filename, path))
-        da.to_netcdf(path + filename, 'w', encoding=encoding)
-        print('done!')
-    #    return df_list
-    # pick station and time span
-    # download
-    # call parse_ims_to_df
-    # concatanate and save to nc
-    return
-
-
 def post_proccess_ims(da, unique_index=True, clim_period='dayofyear',
                       resample_method='ffill'):
     """fill in the missing time data for the ims temperature stations
@@ -444,6 +246,7 @@ def post_proccess_ims(da, unique_index=True, clim_period='dayofyear',
     import pandas as pd
     import numpy as np
     import xarray as xr
+    from aux_gps import get_unique_index
     if unique_index:
         da = get_unique_index(da)
         print('dropped non-unique datetime index.')
@@ -506,26 +309,6 @@ def post_proccess_ims(da, unique_index=True, clim_period='dayofyear',
     return dataset
 
 
-def produce_T_dataset(path, save=True, unique_index=True,
-                      clim_period='dayofyear', resample_method='ffill'):
-    import xarray as xr
-    da_list = []
-    for file_and_path in path.glob('*TD.nc'):
-        da = xr.open_dataarray(file_and_path)
-        print('post-proccessing temperature data for {} station'.format(da.name))
-        da_list.append(post_proccess_ims(da, unique_index, clim_period,
-                                         resample_method))
-    ds = xr.merge(da_list)
-    if save:
-        filename = 'IMS_TD_israeli_for_gps.nc'
-        print('saving {} to {}'.format(filename, path))
-        comp = dict(zlib=True, complevel=9)  # best compression
-        encoding = {var: comp for var in ds.data_vars}
-        ds.to_netcdf(path / filename, 'w', encoding=encoding)
-        print('Done!')
-    return ds
-
-
 def fix_T_height(path, geo_df, lapse_rate=6.5):
     """fix the temperature diffrence due to different height between the IMS
     and GPS stations"""
@@ -572,15 +355,18 @@ def produce_geo_df(gis_path=gis_path):
 def produce_single_station_IPW(zwd, Tds, Tcoeffs, k2=22.1, k3=3.776e5):
     """input is zwd from gipsy or garner, Tds is the temperature of the
     station, Tcoeffs is the Ts-Tm relationsship dataarray"""
+    import xarray as xr
+    zwd.load()
+    Tds.load()
     if len(Tcoeffs.dims) == 1 and 'parameter' in Tcoeffs.dims:
         print('Found whole data Ts-Tm relationship.')
         Tmul = Tcoeffs.sel(parameter='slope')
         Toff = Tcoeffs.sel(parameter='intercept')
-        Tds = kappa(Tds, Tmul, Toff, k2, k3)
-        ipw = Tds * zwd
+        kappa_ds = kappa(Tds, Tmul, Toff, k2, k3)
+        ipw = kappa_ds * zwd
         ipw.name = zwd.name
         kappa_dict = dict(zip(['T_multiplier', 'T_offset', 'k2', 'k3'],
-                          [Tmul, Toff, k2, k3]))
+                              [Tmul, Toff, k2, k3]))
         for k, v in kappa_dict.items():
             ipw.attrs[k] = v
         ipw = ipw.rename({'zwd': 'ipw'})
@@ -591,7 +377,48 @@ def produce_single_station_IPW(zwd, Tds, Tcoeffs, k2=22.1, k3=3.776e5):
     if (len(Tcoeffs.dims) == 3 and 'parameter' and 'hour' and 'season'
             in Tcoeffs.dims):
         print('Found season and hour Ts-Tm relationship slice.')
-        
+        hours = dict(zip([12, 0], ['noon', 'midnight']))
+        seasons = Tcoeffs.season.values.tolist()
+        kappa_list = []
+        Tcoeffs_list = []
+        Tcoeffs_vals = []
+        for hr_num in hours.keys():
+            for season in seasons:
+                print(
+                    'working on season {}, hour {}'.format(
+                        season, hours[hr_num]))
+                Tmul = Tcoeffs.sel(season=season, hour=hours[hr_num],
+                                   parameter='slope')
+                Toff = Tcoeffs.sel(season=season, hour=hours[hr_num],
+                                   parameter='intercept')
+                season_slice = Tds.sel(time=Tds['time.season'] == season)
+                hour_slice = season_slice.sel(time=season_slice['time.hour']
+                                              == hr_num,
+                                              method='nearest').dropna('time')
+#                kappa_part = kappa(
+#                    Tds.sel(
+#                        time=Tds['time.season'] == season).where(
+#                        Tds['time.hour'] == hr_num).dropna('time'))
+                kappa_part = kappa(hour_slice)
+                kappa_keys = ['T_multiplier', 'T_offset', 'k2', 'k3']
+                kappa_keys = [x + '_' + season + '_' + hours[hr_num] for x in
+                              kappa_keys]
+                Tcoeffs_list.append(kappa_keys)
+                Tcoeffs_vals.append([Tmul.values.item(), Toff.values.item(),
+                                     k2, k3])
+                kappa_list.append(kappa_part)
+        kappa_ds = xr.concat(kappa_list, 'time')
+        ipw = kappa_ds * zwd
+        ipw.name = zwd.name
+        kappa_dict = dict(zip([item for sublist in Tcoeffs_list for item in sublist],
+                              [item for sublist in Tcoeffs_vals for item in sublist]))
+        for k, v in kappa_dict.items():
+            ipw.attrs[k] = v
+        ipw = ipw.rename({'zwd': 'ipw'})
+        ipw.attrs['name'] = 'IPW'
+        ipw.attrs['long_name'] = 'Integrated Precipitable Water'
+        ipw.attrs['units'] = 'kg / m^2'
+        print('Done!')
     return ipw
 
 
@@ -702,30 +529,10 @@ def kappa(T, Tmul=0.72, T_offset=70.2, k2=22.1, k3=3.776e5):
     Tm = (273.15 + T) * Tmul + T_offset  # K
     Rv = 461.52  # [Rv] = J / (kg * K) = (Pa * m^3) / (kg * K)
     # (1e-2 mbar * m^3) / (kg * K)
-    k = 1e-6 * (k3 / Tm + k2) * Rv  
+    k = 1e-6 * (k3 / Tm + k2) * Rv
     k = 1.0 / k  # [k] = 100 * kg / m^3 =  kg/ (m^2 * cm)
     # 1 kg/m^2 IPW = 1 mm PW
     return k
-
-
-def dim_intersection(da_list, dim='time', dropna=True):
-    import pandas as pd
-    if dropna:
-        setlist = [set(x.dropna(dim)[dim].values) for x in da_list]
-    else:
-        setlist = [set(x[dim].values) for x in da_list]
-    empty_list = [x for x in setlist if not x]
-    if empty_list:
-        print('NaN dim drop detected, check da...')
-        return
-    u = list(set.intersection(*setlist))
-    # new_dim = list(set(a.dropna(dim)[dim].values).intersection(
-    #     set(b.dropna(dim)[dim].values)))
-    if dim == 'time':
-        new_dim = sorted(pd.to_datetime(u))
-    else:
-        new_dim = sorted(u)
-    return new_dim
 
 
 def minimize_kappa_tela_sound(sound_path=sound_path, gps=garner_path,
@@ -735,6 +542,7 @@ def minimize_kappa_tela_sound(sound_path=sound_path, gps=garner_path,
     import xarray as xr
     from sklearn.metrics import mean_squared_error
     import numpy as np
+    from aux_gps import dim_intersection
 
     def func_to_min(x):
         Tmul = x[0]
@@ -812,141 +620,6 @@ def minimize_kappa_tela_sound(sound_path=sound_path, gps=garner_path,
     return res
 
 
-def get_unique_index(da, dim='time'):
-    import numpy as np
-    _, index = np.unique(da[dim], return_index=True)
-    da = da.isel({dim: index})
-    return da
-
-
-def Zscore_xr(da, dim='time'):
-    """input is a dattarray of data and output is a dattarray of Zscore
-    for the dim"""
-    z = (da - da.mean(dim=dim)) / da.std(dim=dim)
-    return z
-
-
-def es(T):
-    """ARM function for water vapor saturation pressure"""
-    # T in celsius:
-    import numpy as np
-    es = 6.1094 * np.exp(17.625 * T / (T + 243.04))
-    # es in hPa
-    return es
-
-
-def Tm(sounding):
-    """ calculate the atmospheric mean temperature with pp as water
-    vapor partial pressure and T deg in C. eq is Tm=int(pp/T)dz/int(pp/T^2)dz
-    h is the heights vactor"""
-    import numpy as np
-    sounding = sounding.dropna('mpoint')
-    tempc = sounding.sel(var='TEMP')
-    h = sounding.sel(var='HGHT')
-    vp = VaporPressure(tempc)
-    tempk = tempc + 273.15
-    Tm = np.trapz(vp / tempk, h) / np.trapz(vp / tempk**2, h)
-    return Tm
-
-
-def precipitable_water(sounding):
-    """Calculate Total Precipitable Water (TPW) for sounding.
-    TPW is defined as the total column-integrated water vapour. I
-    calculate it from the dew point temperature because this is the
-    fundamental moisture variable in this module (even though it is RH
-    that is usually measured directly)
-    """
-    import numpy as np
-    sounding = sounding.dropna('mpoint')
-    tempk = sounding.sel(var='TEMP') + 273.15
-    prespa = sounding.sel(var='PRES') * 100
-    mixrkg = sounding.sel(var='MIXR') / 1000.0
-    dwptc = sounding.sel(var='DWPT')
-    hghtm = sounding.sel(var='HGHT')
-    # Get Water Vapour Mixing Ratio, by calculation
-    # from dew point temperature
-    vprespa = VaporPressure(dwptc)
-    # mixrkg = MixRatio(vprespa, prespa)
-
-    # Calculate density of air (accounting for moisture)
-    rho = DensHumid(tempk, prespa, vprespa)
-
-    # Trapezoidal rule to approximate TPW (units kg/m^2==mm)
-
-    tpw = np.trapz(mixrkg * rho, hghtm)
-    return tpw
-
-
-def MixRatio(e, p):
-    """Mixing ratio of water vapour
-    INPUTS
-    e (Pa) Water vapor pressure
-    p (Pa) Ambient pressure
-    RETURNS
-    qv (kg kg^-1) Water vapor mixing ratio`
-    """
-    Epsilon = 0.622  # Epsilon=Rs_da/Rs_v; The ratio of the gas constants
-    return Epsilon * e / (p - e)
-
-
-def DensHumid(tempk, pres, e):
-    """Density of moist air.
-    This is a bit more explicit and less confusing than the method below.
-    INPUTS:
-    tempk: Temperature (K)
-    pres: static pressure (Pa)
-    mixr: mixing ratio (kg/kg)
-    OUTPUTS:
-    rho_air (kg/m^3)
-    SOURCE: http://en.wikipedia.org/wiki/Density_of_air
-    """
-    Rs_v = 461.51  # Specific gas const for water vapour, J kg^{-1} K^{-1}
-    Rs_da = 287.05  # Specific gas const for dry air, J kg^{-1} K^{-1}
-    pres_da = pres - e
-    rho_da = pres_da / (Rs_da * tempk)
-    rho_wv = e/(Rs_v * tempk)
-
-    return rho_da + rho_wv
-
-
-def VaporPressure(tempc, phase="liquid"):
-    import numpy as np
-    """Water vapor pressure over liquid water or ice.
-    INPUTS:
-    tempc: (C) OR dwpt (C), if SATURATION vapour pressure is desired.
-    phase: ['liquid'],'ice'. If 'liquid', do simple dew point. If 'ice',
-    return saturation vapour pressure as follows:
-    Tc>=0: es = es_liquid
-    Tc <0: es = es_ice
-    RETURNS: e_sat  (Pa)
-    SOURCE: http://cires.colorado.edu/~voemel/vp.html (#2:
-    CIMO guide (WMO 2008), modified to return values in Pa)
-    This formulation is chosen because of its appealing simplicity,
-    but it performs very well with respect to the reference forms
-    at temperatures above -40 C. At some point I'll implement Goff-Gratch
-    (from the same resource).
-    """
-
-    over_liquid = 6.112 * np.exp(17.67 * tempc / (tempc + 243.12)) * 100.
-    over_ice = 6.112 * np.exp(22.46 * tempc / (tempc + 272.62)) * 100.
-    # return where(tempc<0,over_ice,over_liquid)
-
-    if phase == "liquid":
-        # return 6.112*exp(17.67*tempc/(tempc+243.12))*100.
-        return over_liquid
-    elif phase == "ice":
-        # return 6.112*exp(22.46*tempc/(tempc+272.62))*100.
-        return np.where(tempc < 0, over_ice, over_liquid)
-    else:
-        raise NotImplementedError
-
-
-def ea(T, rh):
-    """water vapor pressure function using ARM function for sat."""
-    # rh is relative humidity in %
-    return es(T) * rh / 100.0
-
-
 def check_anton_tela_station(anton_path, ims_path=ims_path):
     import pandas as pd
     from datetime import datetime, timedelta
@@ -977,47 +650,6 @@ def check_anton_tela_station(anton_path, ims_path=ims_path):
     return ds
 
 
-def process_data_from_sounding(sound_path=sound_path, savepath=None):
-    import xarray as xr
-    da = xr.open_dataarray(sound_path / 'ALL_bet_dagan_soundings.nc')
-    pw = xr.open_dataarray(sound_path / 'PW_bet_dagan_soundings.nc')
-    new_time = dim_intersection([da, pw], 'time', dropna=False)
-    da = da.sel(time=new_time)
-    pw = pw.sel(time=new_time)
-    pw.load()
-    da.load()
-    print('calculating...')
-    ts_list = [da.sel(mpoint=0, var='TEMP', time=x) + 273.15 for x in da.time]
-    tpw_list = [precipitable_water(da.sel(time=x)) for x in da.time]
-    tm_list = [Tm(da.sel(time=x)) for x in da.time]
-    tpw = xr.DataArray(tpw_list, dims='time')
-    tm = xr.DataArray(tm_list, dims='time')
-    tm.attrs['description'] = 'mean atmospheric temperature calculated by water vapor pressure weights'
-    tm.attrs['units'] = 'K'
-    ts = xr.concat(ts_list, 'time')
-    ts.attrs['description'] = 'Surface temperature from BET DAGAN soundings'
-    ts.attrs['units'] = 'K'
-    result = pw.to_dataset(name='pw')
-    result['tpw'] = tpw
-    result['tm'] = tm
-    result['ts'] = ts
-    result['tpw'].attrs['description'] = 'BET_DAGAN percipatable water calculated from sounding by me'
-    result['tpw'].attrs['units'] = 'mm'
-    result['season'] = result['time.season']
-    result['hour'] = result['time.hour'].astype(str)
-    result['hour'] = result.hour.where(result.hour != '12', 'noon')
-    result['hour'] = result.hour.where(result.hour != '0', 'midnight')
-    result = result.dropna('time')
-    if savepath is not None:
-        filename = 'bet_dagan_sounding_pw_Ts_Tk.nc'
-        print('saving {} to {}'.format(filename, savepath))
-        comp = dict(zlib=True, complevel=9)  # best compression
-        encoding = {var: comp for var in result}
-        result.to_netcdf(savepath / filename, 'w', encoding=encoding)
-    print('Done!')
-    return result
-
-
 def from_opt_to_comparison(result=None, times=None, bounds=None, x0=None,
                            season=None, Tmul=None, T_offset=None):
     """ call optimization and comapring alltogather. can run optimization
@@ -1045,8 +677,9 @@ def compare_to_sounding(sound_path=sound_path, gps=garner_path, station='TELA',
     import matplotlib.pyplot as plt
     import seaborn as sns
     from sklearn.metrics import mean_squared_error
+    from pathlib import Path
     sns.set_style('darkgrid')
-    if not isinstance(gps, xr.Dataset):
+    if isinstance(gps, Path):
         pw_gps = xr.open_dataset(gps / 'IPW_israeli_from_gps.nc')
     else:
         pw_gps = gps
@@ -1089,7 +722,7 @@ def compare_to_sounding(sound_path=sound_path, gps=garner_path, station='TELA',
     # pw['resid'].plot.hist(bins=100, color='c', edgecolor='k', alpha=0.65,
     #                      ax=ax[1])
     rmean = pw['resid'].mean().values
-    rstd = pw['resid'].std().valuesgirls
+    rstd = pw['resid'].std().values
     rmedian = pw['resid'].median().values
     rmse = np.sqrt(mean_squared_error(pw['sound'], pw[station]))
     plt.axvline(rmean, color='r', linestyle='dashed', linewidth=1)
@@ -1180,12 +813,23 @@ def analyze_sounding_and_formulate(sound_path=sound_path):
     liney = a * linex + b
     axes[0].plot(linex, liney, c='r')
     min_, max_ = axes[0].get_ylim()
-    axes[0].text(0.01, 0.9, 'a: {:.2f}, b: {:.2f}'.format(a, b),transform=axes[0].transAxes, color='black',
-                            fontsize=12)
-    axes[0].text(0.1, 0.85, 'n={}'.format(len(ds.ts.values)),
-                            verticalalignment='top', horizontalalignment='center',
-                            transform=axes[0].transAxes, color='green',
-                            fontsize=12)
+    axes[0].text(
+        0.01,
+        0.9,
+        'a: {:.2f}, b: {:.2f}'.format(
+            a,
+            b),
+        transform=axes[0].transAxes,
+        color='black',
+        fontsize=12)
+    axes[0].text(0.1,
+                 0.85,
+                 'n={}'.format(len(ds.ts.values)),
+                 verticalalignment='top',
+                 horizontalalignment='center',
+                 transform=axes[0].transAxes,
+                 color='green',
+                 fontsize=12)
     axes[0].set_xlabel('Ts [K]')
     axes[0].set_ylabel('Tm [K]')
     resid = ds.tm.values - ds.ts.values * a - b
@@ -1230,8 +874,8 @@ def analyze_sounding_and_formulate(sound_path=sound_path):
             axes[i, j].plot(linex, liney, c='r')
             axes[i, j].plot(x.values, x.values, c='k')
             min_, max_ = axes[i, j].get_ylim()
-            axes[i, j].text(0.015, 0.9, 'a: {:.2f}, b: {:.2f}'.format(tmul, toff),transform=axes[i, j].transAxes, color='black',
-                            fontsize=12)
+            axes[i, j].text(0.015, 0.9, 'a: {:.2f}, b: {:.2f}'.format(
+                tmul, toff), transform=axes[i, j].transAxes, color='black', fontsize=12)
             axes[i, j].set_xlabel('Ts [K]')
             axes[i, j].set_ylabel('Tm [K]')
 #            Tmul.append(tmul)
@@ -1260,43 +904,3 @@ def analyze_sounding_and_formulate(sound_path=sound_path):
     results.attrs['all_data_slope'] = a
     results.attrs['all_data_intercept'] = b
     return results
-
-
-def desc_nan(data, verbose=True):
-    """count only NaNs in data and returns the thier amount and the non-NaNs"""
-    import numpy as np
-    import xarray as xr
-
-    def nan_da(data):
-        nans = np.count_nonzero(np.isnan(data.values))
-        non_nans = np.count_nonzero(~np.isnan(data.values))
-        if verbose:
-            print(str(type(data)))
-            print(data.name + ': non-NaN entries: ' + str(non_nans) + ' of total ' +
-                  str(data.size) + ', shape:' + str(data.shape) + ', type:' +
-                  str(data.dtype))
-            print('Dimensions:')
-        dim_nn_list = []
-        for dim in data.dims:
-            dim_len = data[dim].size
-            dim_non_nans = np.int(data.dropna(dim)[dim].count())
-            dim_nn_list.append(dim_non_nans)
-            if verbose:
-                print(dim + ': non-NaN labels: ' +
-                      str(dim_non_nans) + ' of total ' + str(dim_len))
-        return non_nans
-    if isinstance(data, xr.DataArray):
-        nn_dict = nan_da(data)
-        return nn_dict
-    elif isinstance(data, np.ndarray):
-        nans = np.count_nonzero(np.isnan(data))
-        non_nans = np.count_nonzero(~np.isnan(data))
-        if verbose:
-            print(str(type(data)))
-            print('non-NaN entries: ' + str(non_nans) + ' of total ' +
-                  str(data.size) + ', shape:' + str(data.shape) + ', type:' +
-                  str(data.dtype))
-    elif isinstance(data, xr.Dataset):
-        for varname in data.data_vars.keys():
-            non_nans = nan_da(data[varname])
-    return non_nans
