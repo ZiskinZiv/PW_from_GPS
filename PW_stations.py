@@ -352,16 +352,20 @@ def produce_geo_df(gis_path=gis_path):
     return geo_df
 
 
-def produce_single_station_IPW(zwd, Tds, Tcoeffs, k2=22.1, k3=3.776e5):
+def produce_single_station_IPW(zwd, Tds, Tcoeffs=None, k2=22.1, k3=3.776e5):
     """input is zwd from gipsy or garner, Tds is the temperature of the
     station, Tcoeffs is the Ts-Tm relationsship dataarray"""
     import xarray as xr
     zwd.load()
     Tds.load()
+    if Tcoeffs is None:
+        # Bevis 1992 relationship:
+        Tcoeffs = xr.DataArray([0.72, 70.0], dims=['parameter'])
+        Tcoeffs['parameter'] = ['slope', 'intercept']
     if len(Tcoeffs.dims) == 1 and 'parameter' in Tcoeffs.dims:
         print('Found whole data Ts-Tm relationship.')
-        Tmul = Tcoeffs.sel(parameter='slope')
-        Toff = Tcoeffs.sel(parameter='intercept')
+        Tmul = Tcoeffs.sel(parameter='slope').values.item()
+        Toff = Tcoeffs.sel(parameter='intercept').values.item()
         kappa_ds = kappa(Tds, Tmul, Toff, k2, k3)
         ipw = kappa_ds * zwd
         ipw.name = zwd.name
@@ -393,8 +397,7 @@ def produce_single_station_IPW(zwd, Tds, Tcoeffs, k2=22.1, k3=3.776e5):
                                    parameter='intercept')
                 season_slice = Tds.sel(time=Tds['time.season'] == season)
                 hour_slice = season_slice.sel(time=season_slice['time.hour']
-                                              == hr_num,
-                                              method='nearest').dropna('time')
+                                              == hr_num).dropna('time')
 #                kappa_part = kappa(
 #                    Tds.sel(
 #                        time=Tds['time.season'] == season).where(
@@ -802,7 +805,7 @@ def analyze_sounding_and_formulate(sound_path=sound_path):
     import seaborn as sns
     from sklearn.metrics import mean_squared_error
     sns.set_style('darkgrid')
-    ds = xr.open_dataset(sound_path / 'bet_dagan_sounding_pw_Ts_Tk.nc')
+    ds = xr.open_dataset(sound_path / 'bet_dagan_sounding_pw_Ts_Tk1.nc')
     fig, axes = plt.subplots(1, 2, figsize=(10, 7))
     fig.suptitle(
         'Water vapor weighted mean atmospheric temperature vs. bet dagan sounding station surface temperature')
