@@ -9,7 +9,87 @@ Created on Thu May 16 14:24:40 2019
 sound_path = work_yuval / 'sounding'
 
 
-def plot_skew(sound_path=sound_path, date='2018-01-16T12:00'):
+def compare_interpolated_to_real(Tint, date='2014-03-02T12:00',
+                                 sound_path=sound_path):
+    from metpy.plots import SkewT
+    from metpy.units import units
+    import pandas as pd
+    import xarray as xr
+    import matplotlib.pyplot as plt
+    da = xr.open_dataarray(sound_path / 'ALL_bet_dagan_soundings.nc')
+    p = da.sel(time=date, var='PRES').values * units.hPa
+    dt = pd.to_datetime(da.sel(time=date).time.values)
+    T = da.sel(time=dt, var='TEMP').values * units.degC
+    Tm = Tint.sel(time=dt).values * units.degC
+    pm = Tint['pressure'].values * units.hPa
+    fig = plt.figure(figsize=(9, 9))
+    title = da.attrs['description'] + ' ' + dt.strftime('%Y-%m-%d')
+    skew = SkewT(fig)
+    skew.plot(p, T, 'r', linewidth=2)
+    skew.plot(pm, Tm, 'g', linewidth=2)
+    skew.ax.set_title(title)
+    skew.ax.legend(['Original', 'Interpolated'])
+    return
+
+
+def average_meteogram(sound_path=sound_path, savepath=None):
+    import xarray as xr
+    import numpy as np
+    from scipy.interpolate import interp1d
+    da = xr.open_dataarray(sound_path / 'ALL_bet_dagan_soundings.nc')
+    # pressure = np.linspace(1010, 20, 80)
+    height = da.sel(var='HGHT').isel(time=0).dropna('mpoint').values
+    T_list = []
+    for i in range(da.time.size):
+        x = da.isel(time=i).sel(var='HGHT').dropna('mpoint').values
+        y = da.isel(time=i).sel(var='TEMP').dropna('mpoint').values
+        x = x[0: len(y)]
+        f = interp1d(x, y, kind='linear', fill_value='extrapolate')
+        T_list.append(f(height))
+    T = xr.DataArray(T_list, dims=['time', 'height'])
+    ds = T.to_dataset(name='temperature')
+    ds['height'] = height
+    ds['time'] = da.time
+    ds['temperature'].attrs['units'] = 'degC'
+    ds['temperature'] = ds['temperature'].where(ds['temperature'].isel(height=0)>-13,drop=True)
+    ds['height'].attrs['units'] = 'm'
+    ts_list = [ds['temperature'].isel(height=0).sel(time=x) + 273.15 for x in
+               ds.time]
+    tm_list = [Tm(ds['temperature'].sel(time=x), from_raw_sounding=False)
+               for x in ds.time]
+    tm = xr.DataArray(tm_list, dims='time')
+    tm.attrs['description'] = 'mean atmospheric temperature calculated by water vapor pressure weights'
+    tm.attrs['units'] = 'K'
+    ts = xr.concat(ts_list, 'time')
+    ts.attrs['description'] = 'Surface temperature from BET DAGAN soundings'
+    ts.attrs['units'] = 'K'
+    hours = [12, 0]
+    hr_dict = {12: 'noon', 0: 'midnight'}
+    seasons = ['DJF', 'SON', 'MAM', 'JJA']
+    for season in seasons:
+        for hour in hours:
+            da = ds['temperature'].sel(time=ds['time.season'] == season).where(
+                ds['time.hour'] == hour).dropna('time').mean('time')
+            name = ['T', season, hr_dict[hour]]
+            ds['_'.join(name)] = da
+    ds['season'] = ds['time.season']
+    ds['hour'] = ds['time.hour'].astype(str)
+    ds['hour'] = ds.hour.where(ds.hour != '12', 'noon')
+    ds['hour'] = ds.hour.where(ds.hour != '0', 'midnight')
+    ds['ts'] = ts
+    ds['tm'] = tm
+    ds = ds.dropna('time')
+    if savepath is not None:
+        filename = 'bet_dagan_sounding_pw_Ts_Tk1.nc'
+        print('saving {} to {}'.format(filename, savepath))
+        comp = dict(zlib=True, complevel=9)  # best compression
+        encoding = {var: comp for var in ds}
+        ds.to_netcdf(savepath / filename, 'w', encoding=encoding)
+    print('Done!')
+    return ds
+
+
+def plot_skew(sound_path=sound_path, date='2018-01-16T12:00', two=False):
     from metpy.plots import SkewT
     from metpy.units import units
     import matplotlib.pyplot as plt
@@ -17,18 +97,34 @@ def plot_skew(sound_path=sound_path, date='2018-01-16T12:00'):
     import xarray as xr
     da = xr.open_dataarray(sound_path / 'ALL_bet_dagan_soundings.nc')
     p = da.sel(time=date, var='PRES').values * units.hPa
-    T = da.sel(time=date, var='TEMP').values * units.degC
-    Td = da.sel(time=date, var='DWPT').values * units.degC
-    Vp = VaporPressure(da.sel(time=date, var='TEMP').values) * units.Pa
     dt = pd.to_datetime(da.sel(time=date).time.values)
-    fig = plt.figure(figsize=(9, 9))
-    title = da.attrs['description'] + ' ' + dt.strftime('%Y-%m-%d %H:%M')
-    skew = SkewT(fig)
-    skew.plot(p, T, 'r', linewidth=2)
-    skew.plot(p, Td, 'g', linewidth=2)
-    # skew.ax.plot(p, Vp, 'k', linewidth=2)
-    skew.ax.set_title(title)
-    skew.ax.legend(['Temp', 'Dewpoint'])
+    if not two:
+        T = da.sel(time=date, var='TEMP').values * units.degC
+        Td = da.sel(time=date, var='DWPT').values * units.degC
+        Vp = VaporPressure(da.sel(time=date, var='TEMP').values) * units.Pa
+        dt = pd.to_datetime(da.sel(time=date).time.values)
+        fig = plt.figure(figsize=(9, 9))
+        title = da.attrs['description'] + ' ' + dt.strftime('%Y-%m-%d %H:%M')
+        skew = SkewT(fig)
+        skew.plot(p, T, 'r', linewidth=2)
+        skew.plot(p, Td, 'g', linewidth=2)
+        # skew.ax.plot(p, Vp, 'k', linewidth=2)
+        skew.ax.set_title(title)
+        skew.ax.legend(['Temp', 'Dewpoint'])
+    elif two:
+        dt1 = pd.to_datetime(dt.strftime('%Y-%m-%dT00:00'))
+        dt2 = pd.to_datetime(dt.strftime('%Y-%m-%dT12:00'))
+        T1 = da.sel(time=dt1, var='TEMP').values * units.degC
+        T2 = da.sel(time=dt2, var='TEMP').values * units.degC
+        fig = plt.figure(figsize=(9, 9))
+        title = da.attrs['description'] + ' ' + dt.strftime('%Y-%m-%d')
+        skew = SkewT(fig)
+        skew.plot(p, T1, 'r', linewidth=2)
+        skew.plot(p, T2, 'b', linewidth=2)
+        # skew.ax.plot(p, Vp, 'k', linewidth=2)
+        skew.ax.set_title(title)
+        skew.ax.legend(['Temp at ' + dt1.strftime('%H:%M'),
+                        'Temp at ' + dt2.strftime('%H:%M')])
     return
 
 
@@ -226,17 +322,24 @@ def process_data_from_sounding(sound_path=sound_path, savepath=None):
 #    return es
 
 
-def Tm(sounding):
+def Tm(da, from_raw_sounding=True):
     """ calculate the atmospheric mean temperature with pp as water
     vapor partial pressure and T deg in C. eq is Tm=int(pp/T)dz/int(pp/T^2)dz
     h is the heights vactor"""
     import numpy as np
-    sounding = sounding.dropna('mpoint')
-    tempc = sounding.sel(var='TEMP')
-    h = sounding.sel(var='HGHT')
-    vp = VaporPressure(tempc, units='hPa')
-    tempk = tempc + 273.15
-    Tm = np.trapz(vp / tempk, h) / np.trapz(vp / tempk**2, h)
+    if from_raw_sounding:
+        da = da.dropna('mpoint')
+        tempc = da.sel(var='TEMP')
+        h = da.sel(var='HGHT')
+        vp = VaporPressure(tempc, units='hPa')
+        tempk = tempc + 273.15
+        Tm = np.trapz(vp / tempk, h) / np.trapz(vp / tempk**2, h)
+    else:
+        tempc = da
+        h = da['height']
+        vp = VaporPressure(tempc, units='hPa')
+        tempk = tempc + 273.15
+        Tm = np.trapz(vp / tempk, h) / np.trapz(vp / tempk**2, h)
     return Tm
 
 
