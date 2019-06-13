@@ -805,13 +805,20 @@ def analyze_sounding_and_formulate(sound_path=sound_path):
     import seaborn as sns
     from sklearn.metrics import mean_squared_error
     sns.set_style('darkgrid')
-    ds = xr.open_dataset(sound_path / 'bet_dagan_sounding_pw_Ts_Tk1.nc')
+    # ds = xr.open_dataset(sound_path / 'bet_dagan_sounding_pw_Ts_Tk1.nc')
+    ds = xr.open_dataset(sound_path / 'bet_dagan_sounding_pw_Ts_Tk_with_clouds.nc')
+    ds = ds.reset_coords(drop=True)
     fig, axes = plt.subplots(1, 2, figsize=(10, 7))
     fig.suptitle(
         'Water vapor weighted mean atmospheric temperature vs. bet dagan sounding station surface temperature')
     [a, b] = np.polyfit(ds.ts.values, ds.tm.values, 1)
     # sns.regplot(ds.ts.values, ds.tm.values, ax=axes[0])
-    axes[0].scatter(x=ds.ts.values, y=ds.tm.values, marker='.', s=10)
+    df = ds.ts.dropna('time').to_dataframe()
+    df['tm'] = ds.tm.dropna('time')
+    df['clouds'] = ds.any_cld.dropna('time')
+    sns.scatterplot(data=df, x='ts', y='tm', hue='clouds', marker='.', s=100,
+                    ax=axes[0])
+    # axes[0].scatter(x=ds.ts.values, y=ds.tm.values, marker='.', s=10)
     linex = np.array([ds.ts.min().item(), ds.ts.max().item()])
     liney = a * linex + b
     axes[0].plot(linex, liney, c='r')
@@ -859,6 +866,8 @@ def analyze_sounding_and_formulate(sound_path=sound_path):
                 ds.hour == hour).dropna('time')
             y = ds.tm.sel(time=ds['time.season'] == season).where(
                 ds.hour == hour).dropna('time')
+            cld = ds.any_cld.sel(time=ds['time.season'] == season).where(
+                ds.hour == hour).dropna('time')
             [tmul, toff] = np.polyfit(x.values, y.values, 1)
             result[i, j, 0] = tmul
             result[i, j, 1] = toff
@@ -870,7 +879,12 @@ def analyze_sounding_and_formulate(sound_path=sound_path):
                             verticalalignment='top', horizontalalignment='center',
                             transform=axes[i, j].transAxes, color='green',
                             fontsize=12)
-            axes[i, j].scatter(x=x.values, y=y.values, marker='.', s=10)
+            df = x.to_dataframe()
+            df['tm'] = y
+            df['clouds'] = cld
+            sns.scatterplot(data=df, x='ts', y='tm', hue='clouds', marker='.',
+                            s=100, ax=axes[i, j])
+            # axes[i, j].scatter(x=x.values, y=y.values, marker='.', s=10)
             axes[i, j].set_title('season:{} ,hour:{}'.format(season, hour))
             linex = np.array([x.min().item(), x.max().item()])
             liney = tmul * linex + toff
