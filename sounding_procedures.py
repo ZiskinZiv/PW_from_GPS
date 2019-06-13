@@ -9,6 +9,43 @@ Created on Thu May 16 14:24:40 2019
 sound_path = work_yuval / 'sounding'
 
 
+def classify_clouds_from_sounding(sound_path=sound_path):
+    import xarray as xr
+    import numpy as np
+    da = xr.open_dataarray(sound_path / 'ALL_bet_dagan_soundings.nc')
+    ds = da.to_dataset(dim='var')
+    cld_list = []
+    for date in ds.time:
+        h = ds['HGHT'].sel(time=date).dropna('mpoint').values
+        T = ds['TEMP'].sel(time=date).dropna('mpoint').values
+        dwT = ds['DWPT'].sel(time=date).dropna('mpoint').values
+        h = h[0: len(dwT)]
+        cld = np.empty(da.mpoint.size, dtype='float')
+        cld[:] = np.nan
+        T = T[0: len(dwT)]
+        try:
+            dT = np.abs(T - dwT)
+        except ValueError:
+            print('valueerror')
+            cld_list.append(cld)
+            continue
+        found = h[dT < 0.5]
+        found_pos = np.where(dT < 0.5)[0]
+        if found.any():
+            for i in range(len(found)):
+                if found[i] < 2000:
+                    cld[found_pos[i]] = 1.0  # 'LOW' clouds
+                elif found[i] < 7000 and found[i] > 2000:
+                    cld[found_pos[i]] = 2.0  # 'MIDDLE' clouds
+                elif found[i] < 13000 and found[i] > 7000:
+                    cld[found_pos[i]] = 3.0  # 'HIGH' clouds
+        cld_list.append(cld)
+    ds['CLD'] = ds['HGHT'].copy(deep=False, data=cld_list)
+    ds.to_netcdf(sound_path / 'ALL_bet_dagan_soundings_with_clouds.nc', 'w')
+    print('ALL_bet_dagan_soundings_with_clouds.nc saved to {}'.format(sound_path))
+    return ds
+
+
 def compare_interpolated_to_real(Tint, date='2014-03-02T12:00',
                                  sound_path=sound_path):
     from metpy.plots import SkewT
@@ -274,17 +311,29 @@ def process_data_from_sounding(sound_path=sound_path, savepath=None):
     station caluculated ipw"""
     import xarray as xr
     from aux_gps import dim_intersection
-    da = xr.open_dataarray(sound_path / 'ALL_bet_dagan_soundings.nc')
+    import numpy as np
+    # da = xr.open_dataarray(sound_path / 'ALL_bet_dagan_soundings.nc')
+    ds = xr.open_dataset(sound_path / 'ALL_bet_dagan_soundings_with_clouds.nc')
     pw = xr.open_dataarray(sound_path / 'PW_bet_dagan_soundings.nc')
-    new_time = dim_intersection([da, pw], 'time', dropna=False)
-    da = da.sel(time=new_time)
+    new_time = dim_intersection([ds, pw], 'time', dropna=False)
+    ds = ds.sel(time=new_time)
     pw = pw.sel(time=new_time)
     pw.load()
-    da.load()
+    ds.load()
+    da = ds.to_array(dim='var')
     print('calculating...')
-    ts_list = [da.sel(mpoint=0, var='TEMP', time=x) + 273.15 for x in da.time]
-    tpw_list = [precipitable_water(da.sel(time=x)) for x in da.time]
-    tm_list = [Tm(da.sel(time=x)) for x in da.time]
+    ts_list = []
+    tpw_list = []
+    tm_list = []
+    cld_list = []
+    for date in ds.time:
+        ts_list.append(ds['TEMP'].sel(mpoint=0, time=date) + 273.15)
+        tpw_list.append(precipitable_water(da.sel(time=date)))
+        tm_list.append(Tm(da.sel(time=date)))
+        if np.isnan(ds.CLD.sel(time=date)).all():
+            cld_list.append(0)
+        else:
+            cld_list.append(1)
     tpw = xr.DataArray(tpw_list, dims='time')
     tm = xr.DataArray(tm_list, dims='time')
     tm.attrs['description'] = 'mean atmospheric temperature calculated by water vapor pressure weights'
@@ -302,9 +351,11 @@ def process_data_from_sounding(sound_path=sound_path, savepath=None):
     result['hour'] = result['time.hour'].astype(str)
     result['hour'] = result.hour.where(result.hour != '12', 'noon')
     result['hour'] = result.hour.where(result.hour != '0', 'midnight')
+
+    result['any_cld'] = xr.DataArray(cld_list, dims='time')
     result = result.dropna('time')
     if savepath is not None:
-        filename = 'bet_dagan_sounding_pw_Ts_Tk.nc'
+        filename = 'bet_dagan_sounding_pw_Ts_Tk_with_clouds.nc'
         print('saving {} to {}'.format(filename, savepath))
         comp = dict(zlib=True, complevel=9)  # best compression
         encoding = {var: comp for var in result}
@@ -328,12 +379,14 @@ def Tm(da, from_raw_sounding=True):
     h is the heights vactor"""
     import numpy as np
     if from_raw_sounding:
-        da = da.dropna('mpoint')
-        tempc = da.sel(var='TEMP')
-        h = da.sel(var='HGHT')
+        tempc = da.sel(var='TEMP').dropna('mpoint').reset_coords(drop=True)
+        h = da.sel(var='HGHT').dropna('mpoint').reset_coords(drop=True)
         vp = VaporPressure(tempc, units='hPa')
         tempk = tempc + 273.15
-        Tm = np.trapz(vp / tempk, h) / np.trapz(vp / tempk**2, h)
+        try:
+            Tm = np.trapz(vp / tempk, h) / np.trapz(vp / tempk**2, h)
+        except ValueError:
+            return np.nan
     else:
         tempc = da
         h = da['height']
@@ -343,7 +396,7 @@ def Tm(da, from_raw_sounding=True):
     return Tm
 
 
-def precipitable_water(sounding):
+def precipitable_water(da):
     """Calculate Total Precipitable Water (TPW) for sounding.
     TPW is defined as the total column-integrated water vapour. I
     calculate it from the dew point temperature because this is the
@@ -351,12 +404,17 @@ def precipitable_water(sounding):
     that is usually measured directly)
     """
     import numpy as np
-    sounding = sounding.dropna('mpoint')
-    tempk = sounding.sel(var='TEMP') + 273.15
-    prespa = sounding.sel(var='PRES') * 100
-    mixrkg = sounding.sel(var='MIXR') / 1000.0
-    dwptc = sounding.sel(var='DWPT')
-    hghtm = sounding.sel(var='HGHT')
+    tempk = da.sel(var='TEMP').dropna('mpoint').reset_coords(drop=True) + 273.15  # in K
+    prespa = da.sel(var='PRES').dropna('mpoint').reset_coords(drop=True) * 100   # in Pa
+    mixrkg = da.sel(var='MIXR').dropna('mpoint').reset_coords(drop=True) / 1000.0  # kg/kg
+    dwptc = da.sel(var='DWPT').dropna('mpoint').reset_coords(drop=True)
+    hghtm = da.sel(var='HGHT').dropna('mpoint').reset_coords(drop=True)
+    min_size = min([tempk.size, prespa.size, mixrkg.size, dwptc.size, hghtm.size])
+    tempk = tempk.sel(mpoint=slice(0, min_size - 1))
+    prespa = prespa.sel(mpoint=slice(0, min_size - 1))
+    mixrkg = mixrkg.sel(mpoint=slice(0, min_size - 1))
+    dwptc = dwptc.sel(mpoint=slice(0, min_size - 1))
+    hghtm = hghtm.sel(mpoint=slice(0, min_size - 1))
     # Get Water Vapour Mixing Ratio, by calculation
     # from dew point temperature
     vprespa = VaporPressure(dwptc)
@@ -364,10 +422,12 @@ def precipitable_water(sounding):
 
     # Calculate density of air (accounting for moisture)
     rho = DensHumid(tempk, prespa, vprespa)
-
+    # print('rho: {}, mix: {}, h: {}'.format(rho.shape,mixrkg.shape, hghtm.shape))
     # Trapezoidal rule to approximate TPW (units kg/m^2==mm)
-
-    tpw = np.trapz(mixrkg * rho, hghtm)
+    try:
+        tpw = np.trapz(mixrkg * rho, hghtm)
+    except ValueError:
+        return np.nan
     return tpw
 
 
