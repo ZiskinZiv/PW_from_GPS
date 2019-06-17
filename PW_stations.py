@@ -358,6 +358,11 @@ def produce_single_station_IPW(zwd, Tds, Tcoeffs=None, k2=22.1, k3=3.776e5):
     import xarray as xr
     zwd.load()
     Tds.load()
+    hours = dict(zip([12, 0], ['noon', 'midnight']))
+    if 'season' in Tcoeffs.dims:
+        seasons = Tcoeffs.season.values.tolist()
+    if 'any_cld' in Tcoeffs.dims:
+        any_clds = Tcoeffs.any_cld.values.tolist()
     if Tcoeffs is None:
         # Bevis 1992 relationship:
         Tcoeffs = xr.DataArray([0.72, 70.0], dims=['parameter'])
@@ -378,31 +383,40 @@ def produce_single_station_IPW(zwd, Tds, Tcoeffs=None, k2=22.1, k3=3.776e5):
         ipw.attrs['long_name'] = 'Integrated Precipitable Water'
         ipw.attrs['units'] = 'kg / m^2'
         print('Done!')
-    if (len(Tcoeffs.dims) == 3 and 'parameter' and 'hour' and 'season'
-            in Tcoeffs.dims):
-        print('Found season and hour Ts-Tm relationship slice.')
-        hours = dict(zip([12, 0], ['noon', 'midnight']))
-        seasons = Tcoeffs.season.values.tolist()
+    elif len(Tcoeffs.dims) == 2 and Tcoeffs.dims == tuple(['hour', 'parameter']):
+        print('Found hour Ts-Tm relationship slice.')
+    elif len(Tcoeffs.dims) == 2 and Tcoeffs.dims == tuple(['season', 'parameter']):
+        print('Found season Ts-Tm relationship slice.')
+    elif len(Tcoeffs.dims) == 2 and Tcoeffs.dims == tuple(['any_cld', 'parameter']):
+        print('Found clouds Ts-Tm relationship slice.')
+    elif (len(Tcoeffs.dims) == 3 and Tcoeffs.dims ==
+          tuple(['any_cld', 'season', 'parameter'])):
+        print('Found clouds and season Ts-Tm relationship slice.')
+    elif (len(Tcoeffs.dims) == 3 and Tcoeffs.dims ==
+          tuple(['any_cld', 'hour', 'parameter'])):
+        print('Found clouds and hour Ts-Tm relationship slice.')
+    elif (len(Tcoeffs.dims) == 3 and Tcoeffs.dims ==
+          tuple(['hour', 'season', 'parameter'])):
+        print('Found hour and season Ts-Tm relationship slice.')
         kappa_list = []
         Tcoeffs_list = []
         Tcoeffs_vals = []
         for hr_num in hours.keys():
             for season in seasons:
-                print(
-                    'working on season {}, hour {}'.format(
+                print('working on season {}, hour {}'.format(
                         season, hours[hr_num]))
                 Tmul = Tcoeffs.sel(season=season, hour=hours[hr_num],
                                    parameter='slope')
                 Toff = Tcoeffs.sel(season=season, hour=hours[hr_num],
                                    parameter='intercept')
-                season_slice = Tds.sel(time=Tds['time.season'] == season)
-                hour_slice = season_slice.sel(time=season_slice['time.hour']
-                                              == hr_num).dropna('time')
+                sliced = Tds.where(Tds['time.season'] == season).dropna(
+                        'time').where(Tds['time.hour'] == hr_num).dropna('time')
+                
 #                kappa_part = kappa(
 #                    Tds.sel(
 #                        time=Tds['time.season'] == season).where(
 #                        Tds['time.hour'] == hr_num).dropna('time'))
-                kappa_part = kappa(hour_slice)
+                kappa_part = kappa(sliced)
                 kappa_keys = ['T_multiplier', 'T_offset', 'k2', 'k3']
                 kappa_keys = [x + '_' + season + '_' + hours[hr_num] for x in
                               kappa_keys]
@@ -422,6 +436,7 @@ def produce_single_station_IPW(zwd, Tds, Tcoeffs=None, k2=22.1, k3=3.776e5):
         ipw.attrs['long_name'] = 'Integrated Precipitable Water'
         ipw.attrs['units'] = 'kg / m^2'
         print('Done!')
+    ipw = ipw.reset_coords(drop=True)
     return ipw
 
 
@@ -798,6 +813,199 @@ def compare_to_sounding(sound_path=sound_path, gps=garner_path, station='TELA',
     return pw
 
 
+def linear_T_from_sounding(sound_path=sound_path, categories=None):
+    import xarray as xr
+    ds = xr.open_dataset(sound_path / 'bet_dagan_sounding_pw_Ts_Tk_with_clouds.nc')
+    ds = ds.reset_coords(drop=True)
+    s_order = ['DJF', 'JJA', 'SON', 'MAM']
+    h_order = ['noon', 'midnight']
+    cld_order = [0, 1]
+    if categories is None:
+        results = formulate_plot(ds)
+    if categories is not None:
+        if not isinstance(categories, list):
+            categories = [categories]
+        if set(categories + ['season', 'hour', 'clouds']) != set(['season',
+                                                                  'hour',
+                                                                  'clouds']):
+            raise ValueError('choices for categories are: season, hour, clouds')
+        if len(categories) == 1:
+            if 'season' in categories:
+                dd = {'season': s_order}
+            elif 'hour' in categories:
+                dd = {'hour': h_order}
+            elif 'clouds' in categories:
+                dd = {'any_cld': cld_order}
+        elif len(categories) == 2:
+            if 'season' in categories and 'hour' in categories:
+                dd = {'hour': h_order, 'season': s_order}
+            elif 'season' in categories and 'clouds' in categories:
+                dd = {'any_cld': cld_order, 'season': s_order}
+            elif 'clouds' in categories and 'hour' in categories:
+                dd = {'hour': h_order, 'any_cld': cld_order}
+        elif len(categories) == 3:
+            if 'season' in categories and 'hour' in categories and 'clouds' in categories:
+                dd = {'hour': h_order, 'any_cld': cld_order, 'season': s_order}
+        results = formulate_plot(ds, dd)
+    return results
+
+
+def formulate_plot(ds, dim_dict=None):
+    import xarray as xr
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    from sklearn.metrics import mean_squared_error
+    sns.set_style('darkgrid')
+    if dim_dict is None:
+        fig, axes = plt.subplots(1, 2, figsize=(10, 7))
+        fig.suptitle(
+                    'Water vapor weighted mean atmospheric temperature vs. bet dagan sounding station surface temperature')
+        [a, b] = np.polyfit(ds.ts.values, ds.tm.values, 1)
+        result = np.empty((2))
+        result[0] = a
+        result[1] = b
+        # sns.regplot(ds.ts.values, ds.tm.values, ax=axes[0])
+        df = ds.ts.dropna('time').to_dataframe()
+        df['tm'] = ds.tm.dropna('time')
+        df['clouds'] = ds.any_cld.dropna('time')
+        g = sns.scatterplot(data=df, x='ts', y='tm', hue='clouds', marker='.', s=100,
+                            ax=axes[0])
+        g.legend(loc='best')
+        # axes[0].scatter(x=ds.ts.values, y=ds.tm.values, marker='.', s=10)
+        linex = np.array([ds.ts.min().item(), ds.ts.max().item()])
+        liney = a * linex + b
+        axes[0].plot(linex, liney, c='r')
+        min_, max_ = axes[0].get_ylim()
+        axes[0].text(0.01, 0.9, 'a: {:.2f}, b: {:.2f}'.format(a, b),
+                     transform=axes[0].transAxes, color='black', fontsize=12)
+        axes[0].text(0.1, 0.85, 'n={}'.format(len(ds.ts.values)),
+                     verticalalignment='top', horizontalalignment='center',
+                     transform=axes[0].transAxes, color='green', fontsize=12)
+        axes[0].set_xlabel('Ts [K]')
+        axes[0].set_ylabel('Tm [K]')
+        resid = ds.tm.values - ds.ts.values * a - b
+        sns.distplot(resid, bins=25, color='c', label='residuals', ax=axes[1])
+        rmean = np.mean(resid)
+        rmse = np.sqrt(mean_squared_error(ds.tm.values, ds.ts.values * a + b))
+        _, max_ = axes[1].get_ylim()
+        axes[1].text(rmean + rmean / 10, max_ - max_ / 10,
+                     'Mean: {:.2f}, RMSE: {:.2f}'.format(rmean, rmse))
+        axes[1].axvline(rmean, color='r', linestyle='dashed', linewidth=1)
+        axes[1].set_xlabel('Residuals [K]')
+        fig.tight_layout()
+        results = xr.DataArray(result, dims=['parameter'])
+        results['parameter'] = ['slope', 'intercept']
+    elif dim_dict is not None:
+        keys = [x for x in dim_dict.keys()]
+        size = len(keys)
+        if size == 1:
+            key = keys[0]
+            other_keys = [*set(['any_cld', 'hour', 'season']).difference([key])]
+            vals = dim_dict[key]
+            result = np.empty((len(vals), 2))
+            residuals = []
+            rmses = []
+            fig, axes = plt.subplots(1, len(vals), sharey=True, sharex=True,
+                                     figsize=(15, 8))
+            for i, val in enumerate(vals):
+                x = ds.ts.where(ds[key] == val).dropna('time')
+                y = ds.tm.where(ds[key] == val).dropna('time')
+                other_val0 = ds[other_keys[0]].where(ds[key] == val).dropna('time')
+                other_val1 = ds[other_keys[1]].where(ds[key] == val).dropna('time')
+                [tmul, toff] = np.polyfit(x.values, y.values, 1)
+                result[i, 0] = tmul
+                result[i, 1] = toff
+                new_tm = tmul * x.values + toff
+                resid = new_tm - y.values
+                rmses.append(np.sqrt(mean_squared_error(y.values, new_tm)))
+                residuals.append(resid)
+                axes[i].text(0.15, 0.85, 'n={}'.format(len(x.values)),
+                             verticalalignment='top',
+                             horizontalalignment='center',
+                             transform=axes[i].transAxes, color='green',
+                             fontsize=12)
+                df = x.to_dataframe()
+                df['tm'] = y
+                df[other_keys[0]] = other_val0
+                df[other_keys[1]] = other_val1
+                g = sns.scatterplot(data=df, x='ts', y='tm', marker='.', s=100,
+                                    ax=axes[i], hue=other_keys[0],
+                                    style=other_keys[1])
+                g.legend(loc='upper right')
+                # axes[i, j].scatter(x=x.values, y=y.values, marker='.', s=10)
+                axes[i].set_title('{}:{}'.format(key, val))
+                linex = np.array([x.min().item(), x.max().item()])
+                liney = tmul * linex + toff
+                axes[i].plot(linex, liney, c='r')
+                axes[i].plot(x.values, x.values, c='k', alpha=0.2)
+                min_, max_ = axes[i].get_ylim()
+                axes[i].text(0.015, 0.9, 'a: {:.2f}, b: {:.2f}'.format(
+                             tmul, toff), transform=axes[i].transAxes,
+                             color='black', fontsize=12)
+                axes[i].set_xlabel('Ts [K]')
+                axes[i].set_ylabel('Tm [K]')
+                fig.tight_layout()
+            results = xr.DataArray(result, dims=[key, 'parameter'])
+            results['parameter'] = ['slope', 'intercept']
+            results[key] = vals
+        elif size == 2:
+            other_keys = [*set(['any_cld', 'hour', 'season']).difference(keys)]
+            vals = [dim_dict[key] for key in dim_dict.keys()]
+            result = np.empty((len(vals[0]), len(vals[1]), 2))
+            residuals = []
+            rmses = []
+            fig, axes = plt.subplots(len(vals[0]), len(vals[1]), sharey=True,
+                                     sharex=True, figsize=(15, 8))
+            for i, val0 in enumerate(vals[0]):
+                for j, val1 in enumerate(vals[1]):
+                    x = ds.ts.where(ds[keys[0]] == val0).dropna(
+                            'time').where(ds[keys[1]] == val1).dropna('time')
+                    y = ds.tm.where(ds[keys[0]] == val0).dropna(
+                            'time').where(ds[keys[1]] == val1).dropna('time')
+                    other_val = ds[other_keys[0]].where(ds[keys[0]] == val0).dropna(
+                            'time').where(ds[keys[1]] == val1).dropna('time')
+                    [tmul, toff] = np.polyfit(x.values, y.values, 1)
+                    result[i, j, 0] = tmul
+                    result[i, j, 1] = toff
+                    new_tm = tmul * x.values + toff
+                    resid = new_tm - y.values
+                    rmses.append(np.sqrt(mean_squared_error(y.values, new_tm)))
+                    residuals.append(resid)
+                    axes[i, j].text(0.15, 0.85, 'n={}'.format(len(x.values)),
+                                    verticalalignment='top',
+                                    horizontalalignment='center',
+                                    transform=axes[i, j].transAxes,
+                                    color='green', fontsize=12)
+                    df = x.to_dataframe()
+                    df['tm'] = y
+                    df[other_keys[0]] = other_val
+                    g = sns.scatterplot(data=df, x='ts', y='tm', marker='.',
+                                        s=100, ax=axes[i, j],
+                                        hue=other_keys[0])
+                    g.legend(loc='upper right')
+                    # axes[i, j].scatter(x=x.values, y=y.values, marker='.', s=10)
+                    # axes[i, j].set_title('{}:{}'.format(key, val))
+                    linex = np.array([x.min().item(), x.max().item()])
+                    liney = tmul * linex + toff
+                    axes[i, j].plot(linex, liney, c='r')
+                    axes[i, j].plot(x.values, x.values, c='k', alpha=0.2)
+                    min_, max_ = axes[i, j].get_ylim()
+                    axes[i, j].text(0.015, 0.9, 'a: {:.2f}, b: {:.2f}'.format(
+                                 tmul, toff), transform=axes[i, j].transAxes,
+                                 color='black', fontsize=12)
+                    axes[i, j].set_xlabel('Ts [K]')
+                    axes[i, j].set_ylabel('Tm [K]')
+                    axes[i, j].set_title('{}:{}, {}:{}'.format(keys[0], val0,
+                                                               keys[1], val1))
+                    fig.tight_layout()
+            results = xr.DataArray(result, dims=keys + ['parameter'])
+            results['parameter'] = ['slope', 'intercept']
+            results[keys[0]] = vals[0]
+            results[keys[1]] = vals[1]
+    return results
+
+
 def analyze_sounding_and_formulate(sound_path=sound_path):
     import xarray as xr
     import numpy as np
@@ -816,8 +1024,9 @@ def analyze_sounding_and_formulate(sound_path=sound_path):
     df = ds.ts.dropna('time').to_dataframe()
     df['tm'] = ds.tm.dropna('time')
     df['clouds'] = ds.any_cld.dropna('time')
-    sns.scatterplot(data=df, x='ts', y='tm', hue='clouds', marker='.', s=100,
-                    ax=axes[0])
+    g = sns.scatterplot(data=df, x='ts', y='tm', hue='clouds', marker='.', s=100,
+                        ax=axes[0])
+    g.legend(loc='best')
     # axes[0].scatter(x=ds.ts.values, y=ds.tm.values, marker='.', s=10)
     linex = np.array([ds.ts.min().item(), ds.ts.max().item()])
     liney = a * linex + b
@@ -852,8 +1061,46 @@ def analyze_sounding_and_formulate(sound_path=sound_path):
     axes[1].axvline(rmean, color='r', linestyle='dashed', linewidth=1)
     axes[1].set_xlabel('Residuals [K]')
     fig.tight_layout()
+    # plot of just hours:
     h_order = ['noon', 'midnight']
+    result = np.empty((len(h_order), 2))
+    residuals = []
+    rmses = []
+    fig, axes = plt.subplots(1, 2, sharey=True, sharex=True, figsize=(8, 6))
+    for i, hour in enumerate(h_order):
+        x = ds.ts.where(ds.hour == hour).dropna('time')
+        y = ds.tm.where(ds.hour == hour).dropna('time')
+        cld = ds.any_cld.where(ds.hour == hour).dropna('time')
+        [tmul, toff] = np.polyfit(x.values, y.values, 1)
+        result[i, 0] = tmul
+        result[i, 1] = toff
+        new_tm = tmul * x.values + toff
+        resid = new_tm - y.values
+        rmses.append(np.sqrt(mean_squared_error(y.values, new_tm)))
+        residuals.append(resid)
+        axes[i].text(0.15, 0.85, 'n={}'.format(len(x.values)),
+                     verticalalignment='top', horizontalalignment='center',
+                     transform=axes[i].transAxes, color='green', fontsize=12)
+        df = x.to_dataframe()
+        df['tm'] = y
+        df['clouds'] = cld
+        g = sns.scatterplot(data=df, x='ts', y='tm', hue='clouds',
+                            marker='.', s=100, ax=axes[i])
+        g.legend(loc='upper right')
+        # axes[i, j].scatter(x=x.values, y=y.values, marker='.', s=10)
+        axes[i].set_title('hour:{}'.format(hour))
+        linex = np.array([x.min().item(), x.max().item()])
+        liney = tmul * linex + toff
+        axes[i].plot(linex, liney, c='r')
+        axes[i].plot(x.values, x.values, c='k', alpha=0.2)
+        min_, max_ = axes[i].get_ylim()
+        axes[i].text(0.015, 0.9, 'a: {:.2f}, b: {:.2f}'.format(
+                     tmul, toff), transform=axes[i].transAxes, color='black',
+                     fontsize=12)
+        axes[i].set_xlabel('Ts [K]')
+        axes[i].set_ylabel('Tm [K]')
     s_order = ['DJF', 'JJA', 'SON', 'MAM']
+    # plot of hours and seasons:
 #    Tmul = []
 #    Toff = []
     residuals = []
@@ -882,14 +1129,15 @@ def analyze_sounding_and_formulate(sound_path=sound_path):
             df = x.to_dataframe()
             df['tm'] = y
             df['clouds'] = cld
-            sns.scatterplot(data=df, x='ts', y='tm', hue='clouds', marker='.',
-                            s=100, ax=axes[i, j])
+            g = sns.scatterplot(data=df, x='ts', y='tm', hue='clouds',
+                                marker='.', s=100, ax=axes[i, j])
+            g.legend(loc='upper right')
             # axes[i, j].scatter(x=x.values, y=y.values, marker='.', s=10)
             axes[i, j].set_title('season:{} ,hour:{}'.format(season, hour))
             linex = np.array([x.min().item(), x.max().item()])
             liney = tmul * linex + toff
             axes[i, j].plot(linex, liney, c='r')
-            axes[i, j].plot(x.values, x.values, c='k')
+            axes[i, j].plot(x.values, x.values, c='k', alpha=0.2)
             min_, max_ = axes[i, j].get_ylim()
             axes[i, j].text(0.015, 0.9, 'a: {:.2f}, b: {:.2f}'.format(
                 tmul, toff), transform=axes[i, j].transAxes, color='black', fontsize=12)
