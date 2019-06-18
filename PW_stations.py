@@ -383,20 +383,42 @@ def produce_single_station_IPW(zwd, Tds, Tcoeffs=None, k2=22.1, k3=3.776e5):
         ipw.attrs['long_name'] = 'Integrated Precipitable Water'
         ipw.attrs['units'] = 'kg / m^2'
         print('Done!')
-    elif len(Tcoeffs.dims) == 2 and Tcoeffs.dims == tuple(['hour', 'parameter']):
+    elif len(Tcoeffs.dims) == 2 and set(Tcoeffs.dims) == set(['hour', 'parameter']):
         print('Found hour Ts-Tm relationship slice.')
-    elif len(Tcoeffs.dims) == 2 and Tcoeffs.dims == tuple(['season', 'parameter']):
+    elif len(Tcoeffs.dims) == 2 and set(Tcoeffs.dims) == set(['season', 'parameter']):
         print('Found season Ts-Tm relationship slice.')
-    elif len(Tcoeffs.dims) == 2 and Tcoeffs.dims == tuple(['any_cld', 'parameter']):
+    elif len(Tcoeffs.dims) == 2 and set(Tcoeffs.dims) == set(['any_cld', 'parameter']):
         print('Found clouds Ts-Tm relationship slice.')
-    elif (len(Tcoeffs.dims) == 3 and Tcoeffs.dims ==
-          tuple(['any_cld', 'season', 'parameter'])):
+    elif (len(Tcoeffs.dims) == 3 and set(Tcoeffs.dims) ==
+          set(['any_cld', 'season', 'parameter'])):
         print('Found clouds and season Ts-Tm relationship slice.')
-    elif (len(Tcoeffs.dims) == 3 and Tcoeffs.dims ==
-          tuple(['any_cld', 'hour', 'parameter'])):
+    elif (len(Tcoeffs.dims) == 3 and set(Tcoeffs.dims) ==
+          set(['any_cld', 'hour', 'parameter'])):
         print('Found clouds and hour Ts-Tm relationship slice.')
-    elif (len(Tcoeffs.dims) == 3 and Tcoeffs.dims ==
-          tuple(['hour', 'season', 'parameter'])):
+        # no way to find clouds in historical data ??
+        kappa_list = []
+        Tcoeffs_list = []
+        Tcoeffs_vals = []
+        for hr_num in hours.keys():
+            for any_cld in any_clds:
+                print('working on any_cld {}, hour {}'.format(
+                        any_cld, hours[hr_num]))
+                Tmul = Tcoeffs.sel(any_cld=any_cld, hour=hours[hr_num],
+                                   parameter='slope')
+                Toff = Tcoeffs.sel(any_cld=any_cld, hour=hours[hr_num],
+                                   parameter='intercept')
+                sliced = Tds.where(Tds['time.season'] == season).dropna(
+                        'time').where(Tds['time.hour'] == hr_num).dropna('time')
+                kappa_part = kappa(sliced)
+                kappa_keys = ['T_multiplier', 'T_offset', 'k2', 'k3']
+                kappa_keys = [x + '_' + season + '_' + hours[hr_num] for x in
+                              kappa_keys]
+                Tcoeffs_list.append(kappa_keys)
+                Tcoeffs_vals.append([Tmul.values.item(), Toff.values.item(),
+                                     k2, k3])
+                kappa_list.append(kappa_part)
+    elif (len(Tcoeffs.dims) == 3 and set(Tcoeffs.dims) ==
+          set(['hour', 'season', 'parameter'])):
         print('Found hour and season Ts-Tm relationship slice.')
         kappa_list = []
         Tcoeffs_list = []
@@ -411,11 +433,6 @@ def produce_single_station_IPW(zwd, Tds, Tcoeffs=None, k2=22.1, k3=3.776e5):
                                    parameter='intercept')
                 sliced = Tds.where(Tds['time.season'] == season).dropna(
                         'time').where(Tds['time.hour'] == hr_num).dropna('time')
-                
-#                kappa_part = kappa(
-#                    Tds.sel(
-#                        time=Tds['time.season'] == season).where(
-#                        Tds['time.hour'] == hr_num).dropna('time'))
                 kappa_part = kappa(sliced)
                 kappa_keys = ['T_multiplier', 'T_offset', 'k2', 'k3']
                 kappa_keys = [x + '_' + season + '_' + hours[hr_num] for x in
@@ -424,18 +441,18 @@ def produce_single_station_IPW(zwd, Tds, Tcoeffs=None, k2=22.1, k3=3.776e5):
                 Tcoeffs_vals.append([Tmul.values.item(), Toff.values.item(),
                                      k2, k3])
                 kappa_list.append(kappa_part)
-        kappa_ds = xr.concat(kappa_list, 'time')
-        ipw = kappa_ds * zwd
-        ipw.name = zwd.name
-        kappa_dict = dict(zip([item for sublist in Tcoeffs_list for item in sublist],
-                              [item for sublist in Tcoeffs_vals for item in sublist]))
-        for k, v in kappa_dict.items():
-            ipw.attrs[k] = v
-        ipw = ipw.rename({'zwd': 'ipw'})
-        ipw.attrs['name'] = 'IPW'
-        ipw.attrs['long_name'] = 'Integrated Precipitable Water'
-        ipw.attrs['units'] = 'kg / m^2'
-        print('Done!')
+    kappa_ds = xr.concat(kappa_list, 'time')
+    ipw = kappa_ds * zwd
+    ipw.name = zwd.name
+    kappa_dict = dict(zip([item for sublist in Tcoeffs_list for item in sublist],
+                          [item for sublist in Tcoeffs_vals for item in sublist]))
+    for k, v in kappa_dict.items():
+        ipw.attrs[k] = v
+    ipw = ipw.rename({'zwd': 'ipw'})
+    ipw.attrs['name'] = 'IPW'
+    ipw.attrs['long_name'] = 'Integrated Precipitable Water'
+    ipw.attrs['units'] = 'kg / m^2'
+    print('Done!')
     ipw = ipw.reset_coords(drop=True)
     return ipw
 
