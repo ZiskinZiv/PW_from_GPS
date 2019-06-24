@@ -655,6 +655,36 @@ def minimize_kappa_tela_sound(sound_path=sound_path, gps=garner_path,
     return res
 
 
+def read_zwd_from_tdp_final(tdp_path, st_name='TELA', scatter_plot=True):
+    import pandas as pd
+    from pandas.errors import EmptyDataError
+    from aux_gps import get_unique_index
+    import matplotlib.pyplot as plt
+    df_list = []
+    for file in sorted(tdp_path.glob('*.txt')):
+        just_date = file.as_posix().split('/')[-1].split('.')[0]
+        dt = pd.to_datetime(just_date)
+        try:
+            df = pd.read_csv(file, index_col=0, delim_whitespace=True,
+                             header=None)
+            df.columns = ['zwd']
+            df.index = dt + pd.to_timedelta(df.index * 60, unit='min')
+            df_list.append(df)
+        except EmptyDataError:
+            print('found empty file...')
+            continue
+    df_all = pd.concat(df_list)
+    df_all = df_all.sort_index()
+    df_all.index.name = 'time'
+    ds = df_all.to_xarray()
+    ds = ds.rename({'zwd': st_name})
+    ds = get_unique_index(ds)
+    ds[st_name] = ds[st_name].where(ds[st_name] > 0, drop=True)
+    if scatter_plot:
+        plt.scatter(x=ds.time.values, y=ds.TELA.values, marker='.', s=10)
+    return ds
+
+
 def check_anton_tela_station(anton_path, ims_path=ims_path):
     import pandas as pd
     from datetime import datetime, timedelta
