@@ -6,6 +6,62 @@ Created on Mon Jun 10 17:22:51 2019
 @author: ziskin
 """
 ims_path = work_yuval / 'IMS_T'
+gis_path = work_yuval / 'gis'
+
+
+def get_meta_data_hourly_ims_climate_database(ds):
+    import pandas as pd
+    name_list = []
+    for name, da in ds.data_vars.items():
+        data = [name.split('_')[0], da.attrs['station_id'], da.attrs['lat'],
+                da.attrs['lon'], da.attrs['height']]
+        name_list.append(data)
+    df = pd.DataFrame(name_list)
+    df.columns = ['name', 'id', 'lat', 'lon', 'height']
+    return df
+
+
+def read_hourly_ims_climate_database(path=ims_path / 'ground', var='tas',
+                                     times=('1996', '2019')):
+    """downloaded from tau...ds is a dataset of all stations,
+    times is a time period"""
+    import pandas as pd
+    import xarray as xr
+    import numpy as np
+    da_list = []
+    for file in sorted(path.glob('*.csv')):
+        name = file.as_posix().split('/')[-1].split('_')[0]
+        sid = file.as_posix().split('/')[-1].split('_')[1]
+        array_name = '_'.join([name, sid])
+        print('reading {} station...'.format(array_name))
+        df = pd.read_csv(file, index_col='time')
+        df.index = pd.to_datetime(df.index)
+        df.drop(labels=['Unnamed: 0', 'name'], axis=1, inplace=True)
+        lat = df.loc[:, 'lat'][0]
+        lon = df.loc[:, 'lon'][0]
+        height = df.loc[:, 'height'][0]
+        df.drop(labels=['lat', 'lon', 'height'], axis=1, inplace=True)
+        da = df.to_xarray().to_array(dim='var')
+        da.name = array_name
+        da.attrs['station_id'] = sid
+        da.attrs['lat'] = lat
+        da.attrs['lon'] = lon
+        da.attrs['height'] = height
+        da_list.append(da)
+    ds = xr.merge(da_list)
+    print('Done!')
+    if var is not None:
+        ds = ds.sel({'var': var})
+        print('selecting {} variables'.format(var))
+        if times is not None:
+            print('selecting times from {} to {}'.format(times[0], times[1]))
+            ds = ds.sel(time=slice(times[0], times[1]))
+            to_drop_list = []
+            for name, da in ds.data_vars.items():
+                if (np.isnan(da) == True).all().item():
+                    to_drop_list.append(name)
+            ds = ds.drop(to_drop_list)
+    return ds
 
 
 def read_ims(path, filename):
