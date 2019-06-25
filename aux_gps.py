@@ -7,6 +7,11 @@ Created on Mon Jun 10 14:33:19 2019
 """
 
 
+def print_saved_file(name, path):
+    print(name + ' was saved to ' + str(path))
+    return
+
+
 def dim_intersection(da_list, dim='time', dropna=True):
     import pandas as pd
     if dropna:
