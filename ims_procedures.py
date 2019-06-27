@@ -5,6 +5,7 @@ Created on Mon Jun 10 17:22:51 2019
 
 @author: ziskin
 """
+from PW_startup import *
 ims_path = work_yuval / 'IMS_T'
 gis_path = work_yuval / 'gis'
 
@@ -216,8 +217,10 @@ def download_ims_single_station(stationid, savepath=ims_path,
         da.attrs['station_name'] = meta['name']
         da.attrs['station_id'] = meta['id']
         da.attrs['active'] = meta['active']
-        da.attrs['station_lat'] = meta['loc']['latitude']
-        da.attrs['station_lon'] = meta['loc']['longitude']
+        da.attrs['station_lat'] = str(meta['loc']['latitude'])
+        da.attrs['station_lon'] = str(meta['loc']['longitude'])
+        for key, value in da.attrs.items():
+            print(key, value)
         return da
 
     def get_dates_list(start_date, end_date):
