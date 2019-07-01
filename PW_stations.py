@@ -289,26 +289,35 @@ def produce_single_station_IPW(zwd, Tds, mda=None, model=None, k2=22.1,
     station, mda is the Ts-Tm relationsship ml models dataarray, model is
     the ml model chosen."""
     import xarray as xr
-    from sklearn.linear_model import LinearRegression
     zwd.load()
     Tds.load()
     hours = dict(zip([12, 0], ['noon', 'midnight']))
+    if mda is None:
+        # Bevis 1992 relationship:
+        kappa_ds = kappa_ml(Tds, model=None, k2=k2, k3=k3)
+        ipw = kappa_ds * zwd
+        try:
+            ipw.name = zwd.name
+        except AttributeError:
+            print('zwd has no name attribute ?')
+        try:
+            ipw = ipw.rename({'zwd': 'ipw'})
+        except ValueError:
+            print('zwd name not found, ok?')
+        ipw.attrs['name'] = 'IPW'
+        ipw.attrs['long_name'] = 'Integrated Precipitable Water'
+        ipw.attrs['units'] = 'kg / m^2'
+        print('Done!')
+        return ipw
     if 'season' in mda.dims:
         seasons = mda.season.values.tolist()
     if 'any_cld' in mda.dims:
         any_clds = mda.any_cld.values.tolist()
-    if mda is None:
-        # Bevis 1992 relationship:
-        X = np.array([0, 1]).reshape(-1, 1)
-        y = np.array([70, 70 + 0.72])
-        lr = LinearRegression()
-        lr.fit(X, y)
-        models = lr
     if len(mda.dims) == 1 and 'name' in mda.dims:
         print('Found whole data Ts-Tm relationship.')
 #        Tmul = mda.sel(parameter='slope').values.item()
 #        Toff = mda.sel(parameter='intercept').values.item()
-        kappa_ds = kappa_ml(Tds, model=mda.sel(name=model), k2, k3)
+        kappa_ds = kappa_ml(Tds, model=mda.sel(name=model), k2=k2, k3=k3)
         ipw = kappa_ds * zwd
         ipw.name = zwd.name
 #        kappa_dict = dict(zip(['T_multiplier', 'T_offset', 'k2', 'k3'],
@@ -637,14 +646,16 @@ def read_zwd_from_tdp_final(tdp_path, st_name='TELA', scatter_plot=True):
     ds = get_unique_index(ds)
     ds[st_name] = ds[st_name].where(ds[st_name] > 0, drop=True)
     if scatter_plot:
-        plt.scatter(x=ds.time.values, y=ds.TELA.values, marker='.', s=10)
+        ds[st_name].plot.line(marker='.', linewidth=0.)
+        # plt.scatter(x=ds.time.values, y=ds.TELA.values, marker='.', s=10)
     return ds
 
 
-def check_anton_tela_station(anton_path, ims_path=ims_path):
+def check_anton_tela_station(anton_path, ims_path=ims_path, plot=True):
     import pandas as pd
     from datetime import datetime, timedelta
     from pandas.errors import EmptyDataError
+    import matplotlib.pyplot as plt
     import xarray as xr
     df_list = []
     for file in anton_path.glob('tela*.txt'):
@@ -665,6 +676,12 @@ def check_anton_tela_station(anton_path, ims_path=ims_path):
     df_all.index.name = 'time'
     ds = df_all.to_xarray()
     ds = ds.rename({'zwd': 'TELA'})
+    new_time = pd.date_range(pd.to_datetime(ds.time.min().values),
+                             pd.to_datetime(ds.time.max().values), freq='5min')
+    ds = ds.reindex(time=new_time)
+    if plot:
+        ds['TELA'].plot.line(marker='.', linewidth=0.)
+        # plt.scatter(x=ds.time.values, y=ds.TELA.values, marker='.', s=10)
     # Tds = xr.open_dataset(ims_path / 'IMS_TD_israeli_for_gps.nc')
     # k = kappa(Tds.tela, k2=22.1)
     # ds = k * ds
@@ -1126,242 +1143,244 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
             da['name'] = model_names
             da[keys[0]] = vals[0]
             da[keys[1]] = vals[1]
+        else:
+            raise ValueError('size of categories must be <=2')
     return da
 
 
-def analyze_sounding_and_formulate(sound_path=sound_path,
-                                   model_names = ['TSEN', 'LR'],
-                                   res_save='LR'):
-    import xarray as xr
-    import numpy as np
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-    from sklearn.metrics import mean_squared_error
-    sns.set_style('darkgrid')
-    # colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
-    colors = ['red', 'green', 'magenta', 'cyan', 'orange', 'teal',
-              'gray', 'purple']
-    if res_save not in model_names:
-        raise KeyError('saved result should me in model names!')
-    if len(model_names) > len(colors):
-        raise ValueError('Cannot support more than {} models simultenously!'.format(len(colors)))
-    ml = ML_Switcher()
-    models = [ml.pick_model(x) for x in model_names]
-    # md = dict(zip(model_names, models))
-    # ds = xr.open_dataset(sound_path / 'bet_dagan_sounding_pw_Ts_Tk1.nc')
-    ds = xr.open_dataset(sound_path / 'bet_dagan_sounding_pw_Ts_Tk_with_clouds.nc')
-    ds = ds.reset_coords(drop=True)
-    fig, axes = plt.subplots(1, 2, figsize=(10, 7))
-    fig.suptitle(
-        'Water vapor weighted mean atmospheric temperature vs. bet dagan sounding station surface temperature')
-    X = ds.ts.values.reshape(-1, 1)
-    y = ds.tm.values
-    [model.fit(X, y) for model in models]
-    predict = [model.predict(X) for model in models]
-    coefs = [model.coef_[0] for model in models]
-    inters = [model.intercept_ for model in models]
-    # [a, b] = np.polyfit(ds.ts.values, ds.tm.values, 1)
-    # sns.regplot(ds.ts.values, ds.tm.values, ax=axes[0])
-    df = ds.ts.dropna('time').to_dataframe()
-    df['tm'] = ds.tm.dropna('time')
-    df['clouds'] = ds.any_cld.dropna('time')
-    g = sns.scatterplot(data=df, x='ts', y='tm', hue='clouds', marker='.', s=100,
-                        ax=axes[0])
-    g.legend(loc='best')
-    # axes[0].scatter(x=ds.ts.values, y=ds.tm.values, marker='.', s=10)
-    # linex = np.array([ds.ts.min().item(), ds.ts.max().item()])
-    # liney = a * linex + b
-    # axes[0].plot(linex, liney, c='r')
-    # [(i, j) for i, j in enumerate(mylist)]
-    [axes[0].plot(X, newy, c=colors[i]) for i, newy in enumerate(predict)]
-    min_, max_ = axes[0].get_ylim()
-    pos = np.linspace(0.95, 0.6, 8)
-    [axes[0].text(0.01,
-                  pos[i],
-                  '{} a: {:.2f}, b: {:.2f}'.format(model_names[i], coefs[i],
-                                                   inters[i]),
-                  transform=axes[0].transAxes,
-                  color=colors[i],
-                  fontsize=12) for i in range(len(coefs))]
-#    axes[0].text(0.01, 0.9, 'a_lr: {:.2f}, b_lr: {:.2f}'.format(lr.coef_[0],lr.intercept_),
-#        transform=axes[0].transAxes, color='red', fontsize=12)
-#    axes[0].text(0.01, 0.85, 'a_tsen: {:.2f}, b_tsen: {:.2f}'.format(tsen.coef_[0],tsen.intercept_),
-#        transform=axes[0].transAxes, color='green', fontsize=12)
-    axes[0].text(0.1,
-                 0.8,
-                 'n={}'.format(len(ds.ts.values)),
-                 verticalalignment='top',
-                 horizontalalignment='center',
-                 transform=axes[0].transAxes,
-                 color='blue',
-                 fontsize=12)
-    axes[0].set_xlabel('Ts [K]')
-    axes[0].set_ylabel('Tm [K]')
-    resid = predict[0] - y  # ds.tm.values - ds.ts.values * a - b
-    sns.distplot(resid, bins=25, color='c', label='residuals', ax=axes[1])
-    rmean = np.mean(resid)
-    # rmse = np.sqrt(mean_squared_error(ds.tm.values, ds.ts.values * a + b))
-    rmse = np.sqrt(mean_squared_error(predict[0], y))
-    _, max_ = axes[1].get_ylim()
-    axes[1].text(rmean + rmean / 10, max_ - max_ / 10,
-                 'Mean: {:.2f}, RMSE: {:.2f}'.format(rmean, rmse))
-    axes[1].axvline(rmean, color='r', linestyle='dashed', linewidth=1)
-    axes[1].set_xlabel('Residuals [K]')
-    fig.tight_layout()
-    da_all = xr.DataArray(models, dims=['name'])
-    da_all['name'] = model_names
-    da_all.name = 'all_data_trained_models'
-    # plot of just hours:
-    h_order = ['noon', 'midnight']
-    trained = []
-    # result = np.empty((len(h_order), 2))
-    # residuals = []
-    # rmses = []
-    fig, axes = plt.subplots(1, 2, sharey=True, sharex=True, figsize=(8, 6))
-    for i, hour in enumerate(h_order):
-        ts = ds.ts.where(ds.hour == hour).dropna('time')
-        tm = ds.tm.where(ds.hour == hour).dropna('time')
-        X = ts.values.reshape(-1, 1)
-        y = tm.values
-        cld = ds.any_cld.where(ds.hour == hour).dropna('time')
-        models = [ml.pick_model(x) for x in model_names]
-        [model.fit(X, y) for model in models]
-        predict = [model.predict(X) for model in models]
-        coefs = [model.coef_[0] for model in models]
-        inters = [model.intercept_ for model in models]
-        # [tmul, toff] = np.polyfit(x.values, y.values, 1)
-        # result[i, 0] = tmul
-        # result[i, 1] = toff
-        # new_tm = tmul * x.values + toff
-        # resid = new_tm - y.values
-        # rmses.append(np.sqrt(mean_squared_error(y.values, new_tm)))
-        # residuals.append(resid)
-        axes[i].text(0.15, 0.7, 'n={}'.format(ts.size),
-                     verticalalignment='top', horizontalalignment='center',
-                     transform=axes[i].transAxes, color='blue', fontsize=12)
-        df = ts.to_dataframe()
-        df['tm'] = tm
-        df['clouds'] = cld
-        g = sns.scatterplot(data=df, x='ts', y='tm', hue='clouds',
-                            marker='.', s=100, ax=axes[i])
-        g.legend(loc='upper right')
-        # axes[i, j].scatter(x=x.values, y=y.values, marker='.', s=10)
-        axes[i].set_title('hour:{}'.format(hour))
-        # linex = np.array([x.min().item(), x.max().item()])
-        # liney = tmul * linex + toff
-        # axes[i].plot(linex, liney, c='r')
-        [axes[i].plot(X, newy, c=colors[j]) for j, newy in enumerate(predict)]
-        axes[i].plot(ts.values, ts.values, c='k', alpha=0.2)
-        min_, max_ = axes[i].get_ylim()
-        [axes[i].text(0.01,
-                      pos[j],
-                      '{} a: {:.2f}, b: {:.2f}'.format(model_names[j],
-                                                       coefs[j],
-                                                       inters[j]),
-                      transform=axes[i].transAxes,
-                      color=colors[j],
-                      fontsize=12) for j in range(len(coefs))]
-        axes[i].set_xlabel('Ts [K]')
-        axes[i].set_ylabel('Tm [K]')
-        trained.append(models)
-    da_hour = xr.DataArray(trained, dims=['hour', 'name'])
-    da_hour['name'] = model_names
-    da_hour['hour'] = h_order
-    da_hour.name = 'hour_data_trained_models'
-    s_order = ['DJF', 'JJA', 'SON', 'MAM']
-    # plot of hours and seasons:
-#    Tmul = []
-#    Toff = []
-    trained = []
-#    residuals = []
-#    rmses = []
-#    result = np.empty((len(h_order), len(s_order), 2))
-    fig, axes = plt.subplots(2, 4, sharey=True, sharex=True, figsize=(20, 15))
-    for i, hour in enumerate(h_order):
-        for j, season in enumerate(s_order):
-            ts = ds.ts.sel(time=ds['time.season'] == season).where(
-                ds.hour == hour).dropna('time')
-            tm = ds.tm.sel(time=ds['time.season'] == season).where(
-                ds.hour == hour).dropna('time')
-            cld = ds.any_cld.sel(time=ds['time.season'] == season).where(
-                ds.hour == hour).dropna('time')
-            X = ts.values.reshape(-1, 1)
-            y = tm.values
-            models = [ml.pick_model(x) for x in model_names]
-            [model.fit(X, y) for model in models]
-            predict = [model.predict(X) for model in models]
-            coefs = [model.coef_[0] for model in models]
-            inters = [model.intercept_ for model in models]
-            # [tmul, toff] = np.polyfit(x.values, y.values, 1)
-#            result[i, j, 0] = tmul
-#            result[i, j, 1] = toff
-#            new_tm = tmul * x.values + toff
-#            resid = new_tm - y.values
-#            rmses.append(np.sqrt(mean_squared_error(y.values, new_tm)))
-#            residuals.append(resid)
-            axes[i, j].text(0.15, 0.7, 'n={}'.format(ts.size),
-                            verticalalignment='top', horizontalalignment='center',
-                            transform=axes[i, j].transAxes, color='blue',
-                            fontsize=12)
-            df = ts.to_dataframe()
-            df['tm'] = tm
-            df['clouds'] = cld
-            g = sns.scatterplot(data=df, x='ts', y='tm', hue='clouds',
-                                marker='.', s=100, ax=axes[i, j])
-            g.legend(loc='upper right')
-            # axes[i, j].scatter(x=x.values, y=y.values, marker='.', s=10)
-            axes[i, j].set_title('season:{} ,hour:{}'.format(season, hour))
-            # linex = np.array([x.min().item(), x.max().item()])
-            # liney = tmul * linex + toff
-            # axes[i, j].plot(linex, liney, c='r')
-            [axes[i, j].plot(X, newy, c=colors[k]) for k, newy
-             in enumerate(predict)]
-            axes[i, j].plot(ts.values, ts.values, c='k', alpha=0.2)
-            min_, max_ = axes[i, j].get_ylim()
-#            axes[i, j].text(0.015, 0.9, 'a: {:.2f}, b: {:.2f}'.format(
-#                tmul, toff), transform=axes[i, j].transAxes, color='black', fontsize=12)
-            [axes[i, j].text(0.01,
-             pos[k],
-              '{} a: {:.2f}, b: {:.2f}'.format(model_names[k],
-                                               coefs[k],
-                                               inters[k]),
-              transform=axes[i, j].transAxes,
-              color=colors[k],
-              fontsize=12) for k in range(len(coefs))]
-            axes[i, j].set_xlabel('Ts [K]')
-            axes[i, j].set_ylabel('Tm [K]')
-            trained.append(models)
-#            Tmul.append(tmul)
-#            Toff.append(toff)
-    da_hour_season = xr.DataArray(trained, dims=['hour', 'season', 'name'])
-    da_hour_season['name'] = model_names
-    da_hour_season['hour'] = h_order
-    da_hour_season['season'] = s_order
-    da_hour_season.name = 'hour_season_data_trained_models'
-#    cnt = 0
+#def analyze_sounding_and_formulate(sound_path=sound_path,
+#                                   model_names = ['TSEN', 'LR'],
+#                                   res_save='LR'):
+#    import xarray as xr
+#    import numpy as np
+#    import matplotlib.pyplot as plt
+#    import seaborn as sns
+#    from sklearn.metrics import mean_squared_error
+#    sns.set_style('darkgrid')
+#    # colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+#    colors = ['red', 'green', 'magenta', 'cyan', 'orange', 'teal',
+#              'gray', 'purple']
+#    if res_save not in model_names:
+#        raise KeyError('saved result should me in model names!')
+#    if len(model_names) > len(colors):
+#        raise ValueError('Cannot support more than {} models simultenously!'.format(len(colors)))
+#    ml = ML_Switcher()
+#    models = [ml.pick_model(x) for x in model_names]
+#    # md = dict(zip(model_names, models))
+#    # ds = xr.open_dataset(sound_path / 'bet_dagan_sounding_pw_Ts_Tk1.nc')
+#    ds = xr.open_dataset(sound_path / 'bet_dagan_sounding_pw_Ts_Tk_with_clouds.nc')
+#    ds = ds.reset_coords(drop=True)
+#    fig, axes = plt.subplots(1, 2, figsize=(10, 7))
+#    fig.suptitle(
+#        'Water vapor weighted mean atmospheric temperature vs. bet dagan sounding station surface temperature')
+#    X = ds.ts.values.reshape(-1, 1)
+#    y = ds.tm.values
+#    [model.fit(X, y) for model in models]
+#    predict = [model.predict(X) for model in models]
+#    coefs = [model.coef_[0] for model in models]
+#    inters = [model.intercept_ for model in models]
+#    # [a, b] = np.polyfit(ds.ts.values, ds.tm.values, 1)
+#    # sns.regplot(ds.ts.values, ds.tm.values, ax=axes[0])
+#    df = ds.ts.dropna('time').to_dataframe()
+#    df['tm'] = ds.tm.dropna('time')
+#    df['clouds'] = ds.any_cld.dropna('time')
+#    g = sns.scatterplot(data=df, x='ts', y='tm', hue='clouds', marker='.', s=100,
+#                        ax=axes[0])
+#    g.legend(loc='best')
+#    # axes[0].scatter(x=ds.ts.values, y=ds.tm.values, marker='.', s=10)
+#    # linex = np.array([ds.ts.min().item(), ds.ts.max().item()])
+#    # liney = a * linex + b
+#    # axes[0].plot(linex, liney, c='r')
+#    # [(i, j) for i, j in enumerate(mylist)]
+#    [axes[0].plot(X, newy, c=colors[i]) for i, newy in enumerate(predict)]
+#    min_, max_ = axes[0].get_ylim()
+#    pos = np.linspace(0.95, 0.6, 8)
+#    [axes[0].text(0.01,
+#                  pos[i],
+#                  '{} a: {:.2f}, b: {:.2f}'.format(model_names[i], coefs[i],
+#                                                   inters[i]),
+#                  transform=axes[0].transAxes,
+#                  color=colors[i],
+#                  fontsize=12) for i in range(len(coefs))]
+##    axes[0].text(0.01, 0.9, 'a_lr: {:.2f}, b_lr: {:.2f}'.format(lr.coef_[0],lr.intercept_),
+##        transform=axes[0].transAxes, color='red', fontsize=12)
+##    axes[0].text(0.01, 0.85, 'a_tsen: {:.2f}, b_tsen: {:.2f}'.format(tsen.coef_[0],tsen.intercept_),
+##        transform=axes[0].transAxes, color='green', fontsize=12)
+#    axes[0].text(0.1,
+#                 0.8,
+#                 'n={}'.format(len(ds.ts.values)),
+#                 verticalalignment='top',
+#                 horizontalalignment='center',
+#                 transform=axes[0].transAxes,
+#                 color='blue',
+#                 fontsize=12)
+#    axes[0].set_xlabel('Ts [K]')
+#    axes[0].set_ylabel('Tm [K]')
+#    resid = predict[0] - y  # ds.tm.values - ds.ts.values * a - b
+#    sns.distplot(resid, bins=25, color='c', label='residuals', ax=axes[1])
+#    rmean = np.mean(resid)
+#    # rmse = np.sqrt(mean_squared_error(ds.tm.values, ds.ts.values * a + b))
+#    rmse = np.sqrt(mean_squared_error(predict[0], y))
+#    _, max_ = axes[1].get_ylim()
+#    axes[1].text(rmean + rmean / 10, max_ - max_ / 10,
+#                 'Mean: {:.2f}, RMSE: {:.2f}'.format(rmean, rmse))
+#    axes[1].axvline(rmean, color='r', linestyle='dashed', linewidth=1)
+#    axes[1].set_xlabel('Residuals [K]')
+#    fig.tight_layout()
+#    da_all = xr.DataArray(models, dims=['name'])
+#    da_all['name'] = model_names
+#    da_all.name = 'all_data_trained_models'
+#    # plot of just hours:
+#    h_order = ['noon', 'midnight']
+#    trained = []
+#    # result = np.empty((len(h_order), 2))
+#    # residuals = []
+#    # rmses = []
+#    fig, axes = plt.subplots(1, 2, sharey=True, sharex=True, figsize=(8, 6))
+#    for i, hour in enumerate(h_order):
+#        ts = ds.ts.where(ds.hour == hour).dropna('time')
+#        tm = ds.tm.where(ds.hour == hour).dropna('time')
+#        X = ts.values.reshape(-1, 1)
+#        y = tm.values
+#        cld = ds.any_cld.where(ds.hour == hour).dropna('time')
+#        models = [ml.pick_model(x) for x in model_names]
+#        [model.fit(X, y) for model in models]
+#        predict = [model.predict(X) for model in models]
+#        coefs = [model.coef_[0] for model in models]
+#        inters = [model.intercept_ for model in models]
+#        # [tmul, toff] = np.polyfit(x.values, y.values, 1)
+#        # result[i, 0] = tmul
+#        # result[i, 1] = toff
+#        # new_tm = tmul * x.values + toff
+#        # resid = new_tm - y.values
+#        # rmses.append(np.sqrt(mean_squared_error(y.values, new_tm)))
+#        # residuals.append(resid)
+#        axes[i].text(0.15, 0.7, 'n={}'.format(ts.size),
+#                     verticalalignment='top', horizontalalignment='center',
+#                     transform=axes[i].transAxes, color='blue', fontsize=12)
+#        df = ts.to_dataframe()
+#        df['tm'] = tm
+#        df['clouds'] = cld
+#        g = sns.scatterplot(data=df, x='ts', y='tm', hue='clouds',
+#                            marker='.', s=100, ax=axes[i])
+#        g.legend(loc='upper right')
+#        # axes[i, j].scatter(x=x.values, y=y.values, marker='.', s=10)
+#        axes[i].set_title('hour:{}'.format(hour))
+#        # linex = np.array([x.min().item(), x.max().item()])
+#        # liney = tmul * linex + toff
+#        # axes[i].plot(linex, liney, c='r')
+#        [axes[i].plot(X, newy, c=colors[j]) for j, newy in enumerate(predict)]
+#        axes[i].plot(ts.values, ts.values, c='k', alpha=0.2)
+#        min_, max_ = axes[i].get_ylim()
+#        [axes[i].text(0.01,
+#                      pos[j],
+#                      '{} a: {:.2f}, b: {:.2f}'.format(model_names[j],
+#                                                       coefs[j],
+#                                                       inters[j]),
+#                      transform=axes[i].transAxes,
+#                      color=colors[j],
+#                      fontsize=12) for j in range(len(coefs))]
+#        axes[i].set_xlabel('Ts [K]')
+#        axes[i].set_ylabel('Tm [K]')
+#        trained.append(models)
+#    da_hour = xr.DataArray(trained, dims=['hour', 'name'])
+#    da_hour['name'] = model_names
+#    da_hour['hour'] = h_order
+#    da_hour.name = 'hour_data_trained_models'
+#    s_order = ['DJF', 'JJA', 'SON', 'MAM']
+#    # plot of hours and seasons:
+##    Tmul = []
+##    Toff = []
+#    trained = []
+##    residuals = []
+##    rmses = []
+##    result = np.empty((len(h_order), len(s_order), 2))
 #    fig, axes = plt.subplots(2, 4, sharey=True, sharex=True, figsize=(20, 15))
 #    for i, hour in enumerate(h_order):
 #        for j, season in enumerate(s_order):
-#            sns.distplot(residuals[cnt], bins=25, color='c',
-#                         label='residuals', ax=axes[i, j])
-#            rmean = np.mean(residuals[cnt])
-#            _, max_ = axes[i, j].get_ylim()
-#            axes[i, j].text(rmean + rmean / 10, max_ - max_ / 10,
-#                            'Mean: {:.2f}, RMSE: {:.2f}'.format(rmean,
-#                                                                rmses[cnt]))
-#            axes[i, j].axvline(rmean, color='r', linestyle='dashed',
-#                               linewidth=1)
-#            axes[i, j].set_xlabel('Residuals [K]')
+#            ts = ds.ts.sel(time=ds['time.season'] == season).where(
+#                ds.hour == hour).dropna('time')
+#            tm = ds.tm.sel(time=ds['time.season'] == season).where(
+#                ds.hour == hour).dropna('time')
+#            cld = ds.any_cld.sel(time=ds['time.season'] == season).where(
+#                ds.hour == hour).dropna('time')
+#            X = ts.values.reshape(-1, 1)
+#            y = tm.values
+#            models = [ml.pick_model(x) for x in model_names]
+#            [model.fit(X, y) for model in models]
+#            predict = [model.predict(X) for model in models]
+#            coefs = [model.coef_[0] for model in models]
+#            inters = [model.intercept_ for model in models]
+#            # [tmul, toff] = np.polyfit(x.values, y.values, 1)
+##            result[i, j, 0] = tmul
+##            result[i, j, 1] = toff
+##            new_tm = tmul * x.values + toff
+##            resid = new_tm - y.values
+##            rmses.append(np.sqrt(mean_squared_error(y.values, new_tm)))
+##            residuals.append(resid)
+#            axes[i, j].text(0.15, 0.7, 'n={}'.format(ts.size),
+#                            verticalalignment='top', horizontalalignment='center',
+#                            transform=axes[i, j].transAxes, color='blue',
+#                            fontsize=12)
+#            df = ts.to_dataframe()
+#            df['tm'] = tm
+#            df['clouds'] = cld
+#            g = sns.scatterplot(data=df, x='ts', y='tm', hue='clouds',
+#                                marker='.', s=100, ax=axes[i, j])
+#            g.legend(loc='upper right')
+#            # axes[i, j].scatter(x=x.values, y=y.values, marker='.', s=10)
 #            axes[i, j].set_title('season:{} ,hour:{}'.format(season, hour))
-#            cnt += 1
-#    fig.tight_layout()
-#    results = xr.DataArray(result, dims=['hour', 'season', 'parameter'])
-#    results['hour'] = h_order
-#    results['season'] = s_order
-#    results['parameter'] = ['slope', 'intercept']
-    # results.attrs['all_data_slope'] = a
-    # results.attrs['all_data_intercept'] = b
-    return 
+#            # linex = np.array([x.min().item(), x.max().item()])
+#            # liney = tmul * linex + toff
+#            # axes[i, j].plot(linex, liney, c='r')
+#            [axes[i, j].plot(X, newy, c=colors[k]) for k, newy
+#             in enumerate(predict)]
+#            axes[i, j].plot(ts.values, ts.values, c='k', alpha=0.2)
+#            min_, max_ = axes[i, j].get_ylim()
+##            axes[i, j].text(0.015, 0.9, 'a: {:.2f}, b: {:.2f}'.format(
+##                tmul, toff), transform=axes[i, j].transAxes, color='black', fontsize=12)
+#            [axes[i, j].text(0.01,
+#             pos[k],
+#              '{} a: {:.2f}, b: {:.2f}'.format(model_names[k],
+#                                               coefs[k],
+#                                               inters[k]),
+#              transform=axes[i, j].transAxes,
+#              color=colors[k],
+#              fontsize=12) for k in range(len(coefs))]
+#            axes[i, j].set_xlabel('Ts [K]')
+#            axes[i, j].set_ylabel('Tm [K]')
+#            trained.append(models)
+##            Tmul.append(tmul)
+##            Toff.append(toff)
+#    da_hour_season = xr.DataArray(trained, dims=['hour', 'season', 'name'])
+#    da_hour_season['name'] = model_names
+#    da_hour_season['hour'] = h_order
+#    da_hour_season['season'] = s_order
+#    da_hour_season.name = 'hour_season_data_trained_models'
+##    cnt = 0
+##    fig, axes = plt.subplots(2, 4, sharey=True, sharex=True, figsize=(20, 15))
+##    for i, hour in enumerate(h_order):
+##        for j, season in enumerate(s_order):
+##            sns.distplot(residuals[cnt], bins=25, color='c',
+##                         label='residuals', ax=axes[i, j])
+##            rmean = np.mean(residuals[cnt])
+##            _, max_ = axes[i, j].get_ylim()
+##            axes[i, j].text(rmean + rmean / 10, max_ - max_ / 10,
+##                            'Mean: {:.2f}, RMSE: {:.2f}'.format(rmean,
+##                                                                rmses[cnt]))
+##            axes[i, j].axvline(rmean, color='r', linestyle='dashed',
+##                               linewidth=1)
+##            axes[i, j].set_xlabel('Residuals [K]')
+##            axes[i, j].set_title('season:{} ,hour:{}'.format(season, hour))
+##            cnt += 1
+##    fig.tight_layout()
+##    results = xr.DataArray(result, dims=['hour', 'season', 'parameter'])
+##    results['hour'] = h_order
+##    results['season'] = s_order
+##    results['parameter'] = ['slope', 'intercept']
+#    # results.attrs['all_data_slope'] = a
+#    # results.attrs['all_data_intercept'] = b
+#    return 
 
 
 class ML_Switcher(object):
