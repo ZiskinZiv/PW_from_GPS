@@ -42,7 +42,7 @@ def proccess_hourly_ims_climate_database(path=ims_path, var='tas',
 
 
 def read_hourly_ims_climate_database(path=ims_path / 'ground',
-                                     savepath=ims_path):
+                                     savepath=None):
     """downloaded from tau...ds is a dataset of all stations,
     times is a time period"""
     import pandas as pd
@@ -74,7 +74,7 @@ def read_hourly_ims_climate_database(path=ims_path / 'ground',
         comp = dict(zlib=True, complevel=9)  # best compression
         encoding = {var: comp for var in ds.data_vars}
         ds.to_netcdf(savepath / 'hourly_ims.nc', 'w', encoding=encoding)
-        print_saved_file('hourly_ims.nc', path)
+        print_saved_file('hourly_ims.nc', savepath)
     return ds
 
 
