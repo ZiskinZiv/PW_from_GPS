@@ -283,7 +283,7 @@ def produce_geo_df(gis_path=gis_path):
     return geo_df
 
 
-def produce_single_station_IPW(zwd, Tds, mda=None, model=None, k2=22.1,
+def produce_single_station_IPW(zwd, Tds, mda=None, model_name='LR', k2=22.1,
                                k3=3.776e5):
     """input is zwd from gipsy or garner, Tds is the temperature of the
     station, mda is the Ts-Tm relationsship ml models dataarray, model is
@@ -307,6 +307,7 @@ def produce_single_station_IPW(zwd, Tds, mda=None, model=None, k2=22.1,
         ipw.attrs['name'] = 'IPW'
         ipw.attrs['long_name'] = 'Integrated Precipitable Water'
         ipw.attrs['units'] = 'kg / m^2'
+        ipw.attrs['description'] = 'whole data Tm formulation using Bevis etal. 1992'
         print('Done!')
         return ipw
     if 'season' in mda.dims:
@@ -317,22 +318,43 @@ def produce_single_station_IPW(zwd, Tds, mda=None, model=None, k2=22.1,
         print('Found whole data Ts-Tm relationship.')
 #        Tmul = mda.sel(parameter='slope').values.item()
 #        Toff = mda.sel(parameter='intercept').values.item()
-        kappa_ds = kappa_ml(Tds, model=mda.sel(name=model), k2=k2, k3=k3)
+        m = mda.sel(name=model_name).values.item()
+        kappa_ds = kappa_ml(Tds, model=m, k2=k2, k3=k3)
         ipw = kappa_ds * zwd
-        ipw.name = zwd.name
-#        kappa_dict = dict(zip(['T_multiplier', 'T_offset', 'k2', 'k3'],
-#                              [Tmul, Toff, k2, k3]))
-#        for k, v in kappa_dict.items():
-#            ipw.attrs[k] = v
-        ipw = ipw.rename({'zwd': 'ipw'})
+        try:
+            ipw.name = zwd.name
+        except AttributeError:
+            print('zwd has no name attribute ?')
+        try:
+            ipw = ipw.rename({'zwd': 'ipw'})
+        except ValueError:
+            print('zwd name not found, ok?')
         ipw.attrs['name'] = 'IPW'
         ipw.attrs['long_name'] = 'Integrated Precipitable Water'
         ipw.attrs['units'] = 'kg / m^2'
+        ipw.attrs['description'] = 'whole data Tm formulation using {} model'.format(model_name)
         print('Done!')
+        return ipw
     elif len(mda.dims) == 2 and set(mda.dims) == set(['hour', 'name']):
         print('Found hour Ts-Tm relationship slice.')
+        kappa_list = []
+        for hr_num in hours.keys():
+            print('working on hour {}'.format(hours[hr_num]))
+            sliced = Tds.where(Tds['time.hour'] == hr_num).dropna('time')
+            m = mda.sel(name=model_name, hour=hours[hr_num]).values.item()
+            kappa_part = kappa_ml(sliced, model=m)
+            kappa_list.append(kappa_part)
+        des_attrs= 'hourly data Tm formulation using {} model'.format(model_name)
     elif len(mda.dims) == 2 and set(mda.dims) == set(['season', 'name']):
         print('Found season Ts-Tm relationship slice.')
+        kappa_list = []
+        for season in seasons:
+            print('working on season {}'.format(season))
+            sliced = Tds.where(Tds['time.season'] == season).dropna('time')
+            m = mda.sel(name=model_name, season=season).values.item()
+            kappa_part = kappa_ml(sliced, model=m)
+            kappa_list.append(kappa_part)
+        des_attrs= 'seasonly data Tm formulation using {} model'.format(model_name)
     elif len(mda.dims) == 2 and set(mda.dims) == set(['any_cld', 'name']):
         print('Found clouds Ts-Tm relationship slice.')
     elif (len(mda.dims) == 3 and set(mda.dims) ==
@@ -356,7 +378,7 @@ def produce_single_station_IPW(zwd, Tds, mda=None, model=None, k2=22.1,
                 sliced = Tds.where(Tds['time.season'] == season).dropna(
                         'time').where(Tds['time.hour'] == hr_num).dropna('time')
                 m = mda.sel(any_cld=any_cld, hour=hours[hr_num],
-                            name=model)
+                            name=model_name)
                 kappa_part = kappa_ml(sliced, model=m)
                 kappa_keys = ['T_multiplier', 'T_offset', 'k2', 'k3']
                 kappa_keys = [x + '_' + season + '_' + hours[hr_num] for x in
@@ -365,41 +387,39 @@ def produce_single_station_IPW(zwd, Tds, mda=None, model=None, k2=22.1,
                 mda_vals.append([Tmul.values.item(), Toff.values.item(),
                                      k2, k3])
                 kappa_list.append(kappa_part)
-    elif (len(models.dims) == 3 and set(models.dims) ==
+    elif (len(mda.dims) == 3 and set(mda.dims) ==
           set(['hour', 'season', 'name'])):
         print('Found hour and season Ts-Tm relationship slice.')
         kappa_list = []
-        mda_list = []
-        mda_vals = []
         for hr_num in hours.keys():
             for season in seasons:
                 print('working on season {}, hour {}'.format(
                         season, hours[hr_num]))
-                Tmul = mda.sel(season=season, hour=hours[hr_num],
-                                   parameter='slope')
-                Toff = mda.sel(season=season, hour=hours[hr_num],
-                                   parameter='intercept')
                 sliced = Tds.where(Tds['time.season'] == season).dropna(
                         'time').where(Tds['time.hour'] == hr_num).dropna('time')
-                kappa_part = kappa(sliced)
-                kappa_keys = ['T_multiplier', 'T_offset', 'k2', 'k3']
-                kappa_keys = [x + '_' + season + '_' + hours[hr_num] for x in
-                              kappa_keys]
-                mda_list.append(kappa_keys)
-                mda_vals.append([Tmul.values.item(), Toff.values.item(),
-                                     k2, k3])
+                m = mda.sel(name=model_name, hour=hours[hr_num],
+                            season=season).values.item()
+                kappa_part = kappa_ml(sliced, model=m)
                 kappa_list.append(kappa_part)
+        des_attrs= 'hourly and seasonly data Tm formulation using {} model'.format(model_name)
     kappa_ds = xr.concat(kappa_list, 'time')
     ipw = kappa_ds * zwd
-    ipw.name = zwd.name
-    kappa_dict = dict(zip([item for sublist in mda_list for item in sublist],
-                          [item for sublist in mda_vals for item in sublist]))
-    for k, v in kappa_dict.items():
-        ipw.attrs[k] = v
-    ipw = ipw.rename({'zwd': 'ipw'})
+    try:
+        ipw.name = zwd.name
+    except AttributeError:
+        print('zwd has no name attribute ?')
+    try:
+        ipw = ipw.rename({'zwd': 'ipw'})
+    except ValueError:
+        print('zwd name not found, ok?')
+#    kappa_dict = dict(zip([item for sublist in mda_list for item in sublist],
+#                          [item for sublist in mda_vals for item in sublist]))
+#    for k, v in kappa_dict.items():
+#        ipw.attrs[k] = v
     ipw.attrs['name'] = 'IPW'
     ipw.attrs['long_name'] = 'Integrated Precipitable Water'
     ipw.attrs['units'] = 'kg / m^2'
+    ipw.attrs['description'] = des_attrs
     print('Done!')
     ipw = ipw.reset_coords(drop=True)
     return ipw
@@ -512,7 +532,13 @@ def kappa_ml(T, model=None, k2=22.1, k3=3.776e5):
     if model is None:
         Tm = (273.15 + T) * 0.72 + 70.0  # K Bevis 1992 model
     else:
-        Tm = model.predict((273.15 + T))
+        # Tm = T.copy(deep=False)
+        Tnp = T.dropna('time').values.reshape(-1, 1)
+        # T = T.values.reshape(-1, 1)
+        Tm = T.dropna('time').copy(deep=False,
+                                   data=model.predict((273.15 + Tnp)))
+        Tm = Tm.reindex(time=T['time'])
+        # Tm = model.predict((273.15 + T))
     Rv = 461.52  # [Rv] = J / (kg * K) = (Pa * m^3) / (kg * K)
     # (1e-2 mbar * m^3) / (kg * K)
     k = 1e-6 * (k3 / Tm + k2) * Rv
@@ -710,7 +736,7 @@ def from_opt_to_comparison(result=None, times=None, bounds=None, x0=None,
 
 
 def compare_to_sounding(sound_path=sound_path, gps=garner_path, station='TELA',
-                        times=None, season=None, hour=None):
+                        times=None, season=None, hour=None, title=None):
     """ipw comparison to bet-dagan sounding, gps can be the ipw dataset"""
     import xarray as xr
     import matplotlib.pyplot as plt
@@ -749,8 +775,20 @@ def compare_to_sounding(sound_path=sound_path, gps=garner_path, station='TELA',
         pw = pw.sel(time=pw['time.season'] == season)
     if hour is not None:
         pw = pw.sel(time=pw['time.hour'] == hour)
+    if title is None:
+        sup = sup = 'ipw is created using Bevis Tm formulation'
+    if title is not None:
+        if title == 'hour':
+            sup = 'ipw is created using hourly Tm segmentation and formulation'
+        elif title == 'season':
+            sup = 'ipw is created using seasonly Tm segmentation and formulation'
+        elif title == 'whole':
+            sup = 'ipw is created using whole Tm formulation'
+        elif title == 'hour_season':
+            sup = 'ipw is created using seasonly and hourly Tm segmentation and formulation'
     fig, ax = plt.subplots(1, 2, figsize=(20, 4),
                            gridspec_kw={'width_ratios': [3, 1]})
+    fig.suptitle(sup)
     pw[[station, 'sound']].to_dataframe().plot(ax=ax[0], style='.')
     sns.distplot(
         pw['resid'].values,
