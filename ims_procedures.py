@@ -8,6 +8,122 @@ Created on Mon Jun 10 17:22:51 2019
 from PW_startup import *
 ims_path = work_yuval / 'IMS_T'
 gis_path = work_yuval / 'gis'
+ims_10mins_path = ims_path / '10mins'
+
+
+def GP_modeling_ims(time='2013-10-19T10:00:00', var='TD', plot=True,
+                    gis_path=gis_path):
+    # TODO: try 1d modeling first, like T=f(lat)
+    from sklearn.gaussian_process import GaussianProcessRegressor
+    import numpy as np
+    # from aux_gps import scale_xr
+    da = create_lat_lon_mesh()
+    geo_snap = geo_pandas_time_snapshot(var=var, datetime=time, plot=False)
+    for i, row in geo_snap.iterrows():
+        lat = da.sel(lat=row['lat'], method='nearest').lat.values
+        lon = da.sel(lon=row['lon'], method='nearest').lon.values
+        da.loc[{'lat': lat, 'lon': lon}] = row['TD']
+    # da_scaled = scale_xr(da)
+    c = np.linspace(min(da.lat.values), max(da.lat.values), da.shape[0])
+    r = np.linspace(min(da.lon.values), max(da.lon.values), da.shape[1])
+    rr, cc = np.meshgrid(r, c)
+    vals = ~np.isnan(da.values)
+    gp = GaussianProcessRegressor(alpha=0.01, n_restarts_optimizer=5,
+                                  normalize_y=True)
+    X = np.column_stack([rr[vals], cc[vals]])
+    # y = da_scaled.values[vals]
+    y = da.values[vals]
+    gp.fit(X, y)
+    rr_cc_as_cols = np.column_stack([rr.flatten(), cc.flatten()])
+    interpolated = gp.predict(rr_cc_as_cols).reshape(da.values.shape)
+    da_inter = da.copy(data=interpolated)
+    if plot:
+        da_inter.plot(yincrease=False)
+    return da_inter
+
+
+def create_lat_lon_mesh(lats=[29.5, 33.5], lons=[34, 36],
+                        points_per_degree=1000):
+    import xarray as xr
+    import numpy as np
+    lat = np.arange(lats[0], lats[1], 1.0 / points_per_degree)
+    lon = np.arange(lons[0], lons[1], 1.0 / points_per_degree)
+    nans = np.nan * np.ones((len(lat), len(lon)))
+    da = xr.DataArray(nans, dims=['lat', 'lon'])
+    da['lat'] = lat
+    da['lon'] = lon
+    return da
+
+
+def read_save_ims_10mins(path=ims_10mins_path, var='TD'):
+    import xarray as xr
+    search_str = '*' + var + '*.nc'
+    da_list = []
+    for file_and_path in path.glob(search_str):
+        da = xr.open_dataarray(file_and_path)
+        print('reading ims 10mins {} data for {} station'.format(var, da.name))
+        da_list.append(da)
+    print('merging...')
+    ds = xr.merge(da_list)
+    comp = dict(zlib=True, complevel=9)  # best compression
+    encoding = {var: comp for var in ds.data_vars}
+    filename = 'ims_' + var + '_10mins.nc'
+    print('saving...')
+    ds.to_netcdf(path / filename, 'w', encoding=encoding)
+    print('{} was saved to {}.'.format(filename, path))
+    return ds
+
+
+def geo_pandas_time_snapshot(path=ims_10mins_path, var='TD',
+                             datetime='2013-10-19T10:00:00',
+                             gis_path=gis_path, plot=True):
+    import xarray as xr
+    import pandas as pd
+    import geopandas as gpd
+    import matplotlib.pyplot as plt
+    # TODO: add simple df support
+    # first, read ims_10mins data for choice var:
+    filename = 'ims_' + var + '_10mins.nc'
+    ds = xr.open_dataset(path / filename)
+    ds = ds.sel(time=datetime)
+    meta = read_ims_metadata_from_files(path=gis_path,
+                                        filename='IMS_10mins_meta_data.xlsx')
+    meta.index = meta.ID.astype('int')
+    meta.drop('ID', axis=1, inplace=True)
+    meta.sort_index(inplace=True)
+    cols_list = []
+    for dvar in ds.data_vars.values():
+        value = dvar.values.item()
+        id_ = dvar.attrs['station_id']
+        try:
+            lat = meta.loc[id_, 'lat']
+            lon = meta.loc[id_, 'lon']
+            alt = meta.loc[id_, 'alt']
+        except KeyError:
+            lat = dvar.attrs['station_lat']
+            lon = dvar.attrs['station_lon']
+            alt = None
+        name = dvar.name
+        var_ = dvar.attrs['channel_name']
+        cols = [pd.to_datetime(datetime), name, id_, lat, lon, alt,
+                var_, value]
+        cols_list.append(cols)
+    df = pd.DataFrame(cols_list)
+    df.columns = ['time', 'name', 'id', 'lat', 'lon', 'alt', 'var_name', var_]
+    df.dropna(inplace=True)
+    df = df.astype({'lat': 'float64', 'lon': 'float64'})
+    # geopandas part:
+    isr = gpd.read_file(gis_path / 'israel_demog2012.shp')
+    isr.crs = {'init': 'epsg:4326'}
+    geo_snap = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.lon,
+                                                                df.lat),
+                                crs=isr.crs)
+    if plot:
+        ax = isr.plot()
+        geo_snap.plot(ax=ax, column=var_, cmap='viridis', edgecolor='black',
+                      legend=True)
+        plt.title(var_ + ' in ' + datetime)
+    return geo_snap
 
 
 def get_meta_data_hourly_ims_climate_database(ds):
@@ -181,6 +297,7 @@ def download_ims_single_station(stationid, savepath=ims_path,
     import requests
     import pandas as pd
     # TODO: add all channels download...
+
     def parse_ims_to_df(raw_data, ch_name):
         """gets ims station raw data, i.e., r.json()['data'] and returns
         a pandas dataframe"""
@@ -336,7 +453,7 @@ def download_ims_single_station(stationid, savepath=ims_path,
                 break
             print('parsing to dataframe...')
             df_list.append(parse_ims_to_df(r.json()['data'], None))
-    return 
+    return
 
 #def download_ims_data(geo_df, path, end_date='2019-04-15'):
 #    import requests
@@ -433,14 +550,14 @@ def download_ims_single_station(stationid, savepath=ims_path,
 
 
 def produce_T_dataset(path, save=True, unique_index=True,
-                      clim_period='dayofyear', resample_method='ffill'):
+                      clim_period='dayofyear'):
     import xarray as xr
     da_list = []
     for file_and_path in path.glob('*TD.nc'):
         da = xr.open_dataarray(file_and_path)
         print('post-proccessing temperature data for {} station'.format(da.name))
-        da_list.append(post_proccess_ims(da, unique_index, clim_period,
-                                         resample_method))
+        da_list.append(fill_missing_single_ims_station(da, unique_index,
+                                                       clim_period))
     ds = xr.merge(da_list)
     if save:
         filename = 'IMS_TD_israeli_for_gps.nc'
