@@ -6,6 +6,23 @@ Created on Mon Jun 10 14:33:19 2019
 @author: ziskin
 """
 
+def scale_xr(da, upper=1.0, lower=0.0, unscale=False):
+    if not unscale:
+        dh = da.max()
+        dl = da.min()
+        da_scaled = (((da-dl)*(upper-lower))/(dh-dl)) + lower
+        da_scaled.attrs = da.attrs
+        da_scaled.attrs['scaled'] = True
+        da_scaled.attrs['lower'] = dl.item()
+        da_scaled.attrs['upper'] = dh.item()
+    if unscale and da.attrs['scaled']:
+        dh = da.max()
+        dl = da.min()
+        upper = da.attrs['upper']
+        lower = da.attrs['lower']
+        da_scaled = (((da-dl)*(upper-lower))/(dh-dl)) + lower
+    return da_scaled
+
 
 def print_saved_file(name, path):
     print(name + ' was saved to ' + str(path))
