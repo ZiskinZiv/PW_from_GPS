@@ -15,6 +15,7 @@ def GP_modeling_ims(time='2013-10-19T10:00:00', var='TD', plot=True,
                     gis_path=gis_path):
     # TODO: try 1d modeling first, like T=f(lat)
     from sklearn.gaussian_process import GaussianProcessRegressor
+    from sklearn.neighbors import KNeighborsRegressor
     import numpy as np
     # from aux_gps import scale_xr
     da = create_lat_lon_mesh()
@@ -28,8 +29,9 @@ def GP_modeling_ims(time='2013-10-19T10:00:00', var='TD', plot=True,
     r = np.linspace(min(da.lon.values), max(da.lon.values), da.shape[1])
     rr, cc = np.meshgrid(r, c)
     vals = ~np.isnan(da.values)
-    gp = GaussianProcessRegressor(alpha=0.01, n_restarts_optimizer=5,
-                                  normalize_y=True)
+    #gp = GaussianProcessRegressor(alpha=0.01, n_restarts_optimizer=5,
+    #                              normalize_y=True)
+    gp = KNeighborsRegressor(n_neighbors=2, weights='distance')
     X = np.column_stack([rr[vals], cc[vals]])
     # y = da_scaled.values[vals]
     y = da.values[vals]
@@ -38,7 +40,37 @@ def GP_modeling_ims(time='2013-10-19T10:00:00', var='TD', plot=True,
     interpolated = gp.predict(rr_cc_as_cols).reshape(da.values.shape)
     da_inter = da.copy(data=interpolated)
     if plot:
-        da_inter.plot(yincrease=False)
+        import salem
+        from salem import DataLevels, Map
+        import cartopy.crs as ccrs
+        # import cartopy.io.shapereader as shpreader
+        import matplotlib.pyplot as plt
+        # fname = gis_path / 'ne_10m_admin_0_sovereignty.shp'
+        # fname = gis_path / 'gadm36_ISR_0.shp'
+        # ax = plt.axes(projection=ccrs.PlateCarree())
+        f, ax = plt.subplots(figsize=(6, 10))
+        shdf = salem.read_shapefile(salem.get_demo_file('world_borders.shp'))
+        # shdf = salem.read_shapefile(gis_path / 'ISR_adm0.shp')
+        shdf = shdf.loc[shdf['CNTRY_NAME'] == 'Israel']  # remove other countries
+        dsr = da_inter.salem.roi(shape=shdf)
+        grid=dsr.salem.grid
+        sm = Map(grid)
+        # sm = dsr.salem.quick_map(ax=ax)
+        sm.set_data(dsr)
+        sm.set_nlevels(7)
+        sm.visualize(ax=ax, title='Israel IDW temperature from IMS',
+                     cbar_title='degC')
+        dl = DataLevels(geo_snap['TD'])
+        x, y = sm.grid.transform(geo_snap.lon.values, geo_snap.lat.values)
+        ax.scatter(x, y, color=dl.to_rgb(), s=50, edgecolors='k', linewidths=1)
+        # adm1_shapes = list(shpreader.Reader(fname).geometries())
+        # ax = plt.axes(projection=ccrs.PlateCarree())
+        # ax.coastlines(resolution='10m')
+        # ax.add_geometries(adm1_shapes, ccrs.PlateCarree(),
+        #                  edgecolor='black', facecolor='gray', alpha=0.5)
+        # da_inter.plot.pcolormesh('lon', 'lat', ax=ax)
+        #geo_snap.plot(ax=ax, column=var, cmap='viridis', edgecolor='black',
+        #              legend=False)
     return da_inter
 
 
