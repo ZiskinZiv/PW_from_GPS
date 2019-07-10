@@ -11,14 +11,14 @@ gis_path = work_yuval / 'gis'
 ims_10mins_path = ims_path / '10mins'
 
 
-def GP_modeling_ims(time='2013-10-19T10:00:00', var='TD', plot=True,
+def GP_modeling_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
                     gis_path=gis_path):
     # TODO: try 1d modeling first, like T=f(lat)
     from sklearn.gaussian_process import GaussianProcessRegressor
     from sklearn.neighbors import KNeighborsRegressor
     import numpy as np
     # from aux_gps import scale_xr
-    da = create_lat_lon_mesh()
+    da = create_lat_lon_mesh(points_per_degree=100)
     geo_snap = geo_pandas_time_snapshot(var=var, datetime=time, plot=False)
     for i, row in geo_snap.iterrows():
         lat = da.sel(lat=row['lat'], method='nearest').lat.values
@@ -29,9 +29,9 @@ def GP_modeling_ims(time='2013-10-19T10:00:00', var='TD', plot=True,
     r = np.linspace(min(da.lon.values), max(da.lon.values), da.shape[1])
     rr, cc = np.meshgrid(r, c)
     vals = ~np.isnan(da.values)
-    #gp = GaussianProcessRegressor(alpha=0.01, n_restarts_optimizer=5,
+    # gp = GaussianProcessRegressor(alpha=0.01, n_restarts_optimizer=5)
     #                              normalize_y=True)
-    gp = KNeighborsRegressor(n_neighbors=2, weights='distance')
+    gp = KNeighborsRegressor(n_neighbors=5, weights='distance')
     X = np.column_stack([rr[vals], cc[vals]])
     # y = da_scaled.values[vals]
     y = da.values[vals]
@@ -49,15 +49,16 @@ def GP_modeling_ims(time='2013-10-19T10:00:00', var='TD', plot=True,
         # fname = gis_path / 'gadm36_ISR_0.shp'
         # ax = plt.axes(projection=ccrs.PlateCarree())
         f, ax = plt.subplots(figsize=(6, 10))
-        shdf = salem.read_shapefile(salem.get_demo_file('world_borders.shp'))
-        # shdf = salem.read_shapefile(gis_path / 'ISR_adm0.shp')
-        shdf = shdf.loc[shdf['CNTRY_NAME'] == 'Israel']  # remove other countries
+        # shdf = salem.read_shapefile(salem.get_demo_file('world_borders.shp'))
+        shdf = salem.read_shapefile(gis_path / 'Israel_and_Yosh.shp')
+        # shdf = shdf.loc[shdf['CNTRY_NAME'] == 'Israel']  # remove other countries
+        shdf.crs = {'init': 'epsg:4326'}
         dsr = da_inter.salem.roi(shape=shdf)
-        grid=dsr.salem.grid
+        grid = dsr.salem.grid
         sm = Map(grid)
         # sm = dsr.salem.quick_map(ax=ax)
         sm.set_data(dsr)
-        sm.set_nlevels(7)
+        # sm.set_nlevels(7)
         sm.visualize(ax=ax, title='Israel IDW temperature from IMS',
                      cbar_title='degC')
         dl = DataLevels(geo_snap['TD'])
