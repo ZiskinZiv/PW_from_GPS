@@ -10,6 +10,7 @@ ims_path = work_yuval / 'IMS_T'
 gis_path = work_yuval / 'gis'
 ims_10mins_path = ims_path / '10mins'
 
+# TODO: follow up the RH download 10 mins
 
 def GP_modeling_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
                     gis_path=gis_path):
@@ -29,9 +30,9 @@ def GP_modeling_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
     r = np.linspace(min(da.lon.values), max(da.lon.values), da.shape[1])
     rr, cc = np.meshgrid(r, c)
     vals = ~np.isnan(da.values)
-    # gp = GaussianProcessRegressor(alpha=0.01, n_restarts_optimizer=5)
+    gp = GaussianProcessRegressor(alpha=0.01, n_restarts_optimizer=5)
     #                              normalize_y=True)
-    gp = KNeighborsRegressor(n_neighbors=5, weights='distance')
+    # gp = KNeighborsRegressor(n_neighbors=5, weights='distance')
     X = np.column_stack([rr[vals], cc[vals]])
     # y = da_scaled.values[vals]
     y = da.values[vals]
@@ -107,6 +108,57 @@ def read_save_ims_10mins(path=ims_10mins_path, var='TD'):
     return ds
 
 
+def analyse_10mins_ims_field(path=ims_10mins_path, var='TD',
+                             gis_path=gis_path, dem_path=work_yuval/ 'AW3D30'):
+    import xarray as xr
+    import collections
+    import numpy as np
+    # TODO: make 2d histogram of stations by altitude and time...
+    awd = xr.open_rasterio(dem_path / 'israel_dem.tif')
+    awd = awd.squeeze(drop=True)
+    filename = 'ims_' + var + '_10mins.nc'
+    ds = xr.open_dataset(path / filename)
+    meta = read_ims_metadata_from_files(path=gis_path,
+                                        filename='IMS_10mins_meta_data.xlsx')
+    meta.index = meta.ID.astype('int')
+    meta.drop('ID', axis=1, inplace=True)
+    meta.sort_index(inplace=True)
+    # there are some stations with the same altitude, i'm mapping them:
+    duplicate_alts = [item for item, count in collections.Counter(
+                        meta['alt']).items() if count > 1]
+    print(duplicate_alts)
+    # then replacing them with a 1-meter seperations:
+    for dup in duplicate_alts:
+        dup_size = len(meta.loc[meta['alt'] == dup, 'alt'])
+        start_value = meta.loc[meta['alt'] == dup, 'alt'].values[0]
+        replace_values = np.arange(start_value, start_value + dup_size)
+        print(
+                'duplicate {} has {} values, replacing with {}'.format(
+                        dup,
+                        dup_size,
+                        replace_values))
+        meta.loc[meta['alt'] == dup, 'alt'] = replace_values
+    for da in ds.data_vars.keys():
+        id_ = ds[da].attrs['station_id']
+        try:
+            lat = meta.loc[id_, 'lat']
+            lon = meta.loc[id_, 'lon']
+            alt = meta.loc[id_, 'alt']
+        except KeyError:
+            lat = ds[da].attrs['station_lat']
+            lon = ds[da].attrs['station_lon']
+            print('station {} keyerror.'.format(da))
+            alt = 'None'
+        try:
+            alt = awd.sel(x=float(lon), y=float(lat), method='nearest').values.item()
+        except ValueError:
+            print('station {} has not known lat or lon...'.format(ds[da].attrs['station_name']))
+        ds[da].attrs['station_lat'] = lat
+        ds[da].attrs['station_lon'] = lon
+        ds[da].attrs['station_alt'] = alt
+    return ds
+
+
 def geo_pandas_time_snapshot(path=ims_10mins_path, var='TD',
                              datetime='2013-10-19T10:00:00',
                              gis_path=gis_path, plot=True):
@@ -114,6 +166,8 @@ def geo_pandas_time_snapshot(path=ims_10mins_path, var='TD',
     import pandas as pd
     import geopandas as gpd
     import matplotlib.pyplot as plt
+    import numpy as np
+    import seaborn as sns
     # TODO: add simple df support
     # first, read ims_10mins data for choice var:
     filename = 'ims_' + var + '_10mins.nc'
@@ -146,16 +200,26 @@ def geo_pandas_time_snapshot(path=ims_10mins_path, var='TD',
     df.dropna(inplace=True)
     df = df.astype({'lat': 'float64', 'lon': 'float64'})
     # geopandas part:
-    isr = gpd.read_file(gis_path / 'israel_demog2012.shp')
+    isr = gpd.read_file(gis_path / 'Israel_and_Yosh.shp')
     isr.crs = {'init': 'epsg:4326'}
     geo_snap = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.lon,
                                                                 df.lat),
                                 crs=isr.crs)
+    lapse_rate = -1000 * np.polyfit(geo_snap['alt'],geo_snap[var_], 1)[0]
     if plot:
-        ax = isr.plot()
-        geo_snap.plot(ax=ax, column=var_, cmap='viridis', edgecolor='black',
+        f, ax = plt.subplots(1, 2, figsize=(12, 8))
+        isr.plot(ax=ax[0])
+        geo_snap.plot(ax=ax[0], column=var_, cmap='viridis', edgecolor='black',
                       legend=True)
-        plt.title(var_ + ' in ' + datetime)
+        sns.regplot(data=geo_snap, x='alt', y=var_, ax=ax[1])
+        ax[1].text(0.85, 0.85, 'lapse_rate = {:.2f} degC/km'.format(lapse_rate),
+                   verticalalignment='top',
+                   horizontalalignment='right',
+                   transform=ax[1].transAxes, color='blue',
+                   fontsize=12)
+        ax[1].set_xlabel('altitude [m]')
+        ax[1].set_ylabel(var_ + ' [degC]')
+        ax[0].set_title(var_ + ' in ' + datetime)
     return geo_snap
 
 
