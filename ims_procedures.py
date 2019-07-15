@@ -12,19 +12,22 @@ ims_10mins_path = ims_path / '10mins'
 
 # TODO: follow up the RH download 10 mins
 
+
 def GP_modeling_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
                     gis_path=gis_path):
     # TODO: try 1d modeling first, like T=f(lat)
     from sklearn.gaussian_process import GaussianProcessRegressor
     from sklearn.neighbors import KNeighborsRegressor
     import numpy as np
+    from scipy.spatial import Delaunay
+    from scipy.interpolate import griddata
     # from aux_gps import scale_xr
     da = create_lat_lon_mesh(points_per_degree=100)
     geo_snap = geo_pandas_time_snapshot(var=var, datetime=time, plot=False)
     for i, row in geo_snap.iterrows():
         lat = da.sel(lat=row['lat'], method='nearest').lat.values
         lon = da.sel(lon=row['lon'], method='nearest').lon.values
-        da.loc[{'lat': lat, 'lon': lon}] = row['TD']
+        da.loc[{'lat': lat, 'lon': lon}] = row[var]
     # da_scaled = scale_xr(da)
     c = np.linspace(min(da.lat.values), max(da.lat.values), da.shape[0])
     r = np.linspace(min(da.lon.values), max(da.lon.values), da.shape[1])
@@ -39,6 +42,7 @@ def GP_modeling_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
     gp.fit(X, y)
     rr_cc_as_cols = np.column_stack([rr.flatten(), cc.flatten()])
     interpolated = gp.predict(rr_cc_as_cols).reshape(da.values.shape)
+    # interpolated=griddata(X, y, (rr, cc), method='nearest')
     da_inter = da.copy(data=interpolated)
     if plot:
         import salem
@@ -62,7 +66,7 @@ def GP_modeling_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
         # sm.set_nlevels(7)
         sm.visualize(ax=ax, title='Israel IDW temperature from IMS',
                      cbar_title='degC')
-        dl = DataLevels(geo_snap['TD'])
+        dl = DataLevels(geo_snap[var])
         x, y = sm.grid.transform(geo_snap.lon.values, geo_snap.lat.values)
         ax.scatter(x, y, color=dl.to_rgb(), s=50, edgecolors='k', linewidths=1)
         # adm1_shapes = list(shpreader.Reader(fname).geometries())
@@ -91,7 +95,7 @@ def create_lat_lon_mesh(lats=[29.5, 33.5], lons=[34, 36],
 
 def read_save_ims_10mins(path=ims_10mins_path, var='TD'):
     import xarray as xr
-    search_str = '*' + var + '*.nc'
+    search_str = '*' + var + '_10mins.nc'
     da_list = []
     for file_and_path in path.glob(search_str):
         da = xr.open_dataarray(file_and_path)
@@ -109,7 +113,8 @@ def read_save_ims_10mins(path=ims_10mins_path, var='TD'):
 
 
 def analyse_10mins_ims_field(path=ims_10mins_path, var='TD',
-                             gis_path=gis_path, dem_path=work_yuval/ 'AW3D30'):
+                             gis_path=gis_path,
+                             dem_path=work_yuval / 'AW3D30'):
     import xarray as xr
     import collections
     import numpy as np
