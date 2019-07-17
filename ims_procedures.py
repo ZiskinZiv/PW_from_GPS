@@ -10,7 +10,6 @@ ims_path = work_yuval / 'IMS_T'
 gis_path = work_yuval / 'gis'
 ims_10mins_path = ims_path / '10mins'
 
-# TODO: follow up the RH download 10 mins
 
 
 def GP_modeling_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
@@ -33,9 +32,9 @@ def GP_modeling_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
     r = np.linspace(min(da.lon.values), max(da.lon.values), da.shape[1])
     rr, cc = np.meshgrid(r, c)
     vals = ~np.isnan(da.values)
-    gp = GaussianProcessRegressor(alpha=0.01, n_restarts_optimizer=5)
+    # gp = GaussianProcessRegressor(alpha=0.01, n_restarts_optimizer=5)
     #                              normalize_y=True)
-    # gp = KNeighborsRegressor(n_neighbors=5, weights='distance')
+    gp = KNeighborsRegressor(n_neighbors=5, weights='distance')
     X = np.column_stack([rr[vals], cc[vals]])
     # y = da_scaled.values[vals]
     y = da.values[vals]
@@ -113,8 +112,7 @@ def read_save_ims_10mins(path=ims_10mins_path, var='TD'):
 
 
 def analyse_10mins_ims_field(path=ims_10mins_path, var='TD',
-                             gis_path=gis_path,
-                             dem_path=work_yuval / 'AW3D30'):
+                             gis_path=gis_path, dem_path=work_yuval/ 'AW3D30'):
     import xarray as xr
     import collections
     import numpy as np
@@ -171,8 +169,6 @@ def geo_pandas_time_snapshot(path=ims_10mins_path, var='TD',
     import pandas as pd
     import geopandas as gpd
     import matplotlib.pyplot as plt
-    import numpy as np
-    import seaborn as sns
     # TODO: add simple df support
     # first, read ims_10mins data for choice var:
     filename = 'ims_' + var + '_10mins.nc'
@@ -205,26 +201,16 @@ def geo_pandas_time_snapshot(path=ims_10mins_path, var='TD',
     df.dropna(inplace=True)
     df = df.astype({'lat': 'float64', 'lon': 'float64'})
     # geopandas part:
-    isr = gpd.read_file(gis_path / 'Israel_and_Yosh.shp')
+    isr = gpd.read_file(gis_path / 'israel_demog2012.shp')
     isr.crs = {'init': 'epsg:4326'}
     geo_snap = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.lon,
                                                                 df.lat),
                                 crs=isr.crs)
-    lapse_rate = -1000 * np.polyfit(geo_snap['alt'],geo_snap[var_], 1)[0]
     if plot:
-        f, ax = plt.subplots(1, 2, figsize=(12, 8))
-        isr.plot(ax=ax[0])
-        geo_snap.plot(ax=ax[0], column=var_, cmap='viridis', edgecolor='black',
+        ax = isr.plot()
+        geo_snap.plot(ax=ax, column=var_, cmap='viridis', edgecolor='black',
                       legend=True)
-        sns.regplot(data=geo_snap, x='alt', y=var_, ax=ax[1])
-        ax[1].text(0.85, 0.85, 'lapse_rate = {:.2f} degC/km'.format(lapse_rate),
-                   verticalalignment='top',
-                   horizontalalignment='right',
-                   transform=ax[1].transAxes, color='blue',
-                   fontsize=12)
-        ax[1].set_xlabel('altitude [m]')
-        ax[1].set_ylabel(var_ + ' [degC]')
-        ax[0].set_title(var_ + ' in ' + datetime)
+        plt.title(var_ + ' in ' + datetime)
     return geo_snap
 
 
