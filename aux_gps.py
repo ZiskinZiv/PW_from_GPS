@@ -5,6 +5,28 @@ Created on Mon Jun 10 14:33:19 2019
 
 @author: ziskin
 """
+from PW_startup import *
+
+def coarse_dem(data, dem_path = work_yuval / 'AW3D30'):
+    """coarsen to data coords"""
+    # data is lower resolution than awd
+    # TODO: add save file option with resolution
+    import salem
+    awd = salem.open_xr_dataset(dem_path / 'israel_dem.tif')
+    awds = data.salem.lookup_transform(awd)
+    return awds
+
+
+def concat_shp(path, shp_file_list, saved_filename):
+    import geopandas as gpd
+    import pandas as pd
+    shapefiles = [path / x for x in shp_file_list]
+    gdf = pd.concat([gpd.read_file(shp)
+                     for shp in shapefiles]).pipe(gpd.GeoDataFrame)
+    gdf.to_file(path / saved_filename)
+    print('saved {} to {}'.format(saved_filename, path))
+    return
+
 
 def scale_xr(da, upper=1.0, lower=0.0, unscale=False):
     if not unscale:
