@@ -11,38 +11,63 @@ gis_path = work_yuval / 'gis'
 ims_10mins_path = ims_path / '10mins'
 
 
-
 def GP_modeling_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
-                    gis_path=gis_path):
+                    gis_path=gis_path, method='kriging',
+                    dem_path=work_yuval / 'AW3D30', lapse_rate=5., rms=True):
     # TODO: try 1d modeling first, like T=f(lat)
     from sklearn.gaussian_process import GaussianProcessRegressor
     from sklearn.neighbors import KNeighborsRegressor
     import numpy as np
     from scipy.spatial import Delaunay
     from scipy.interpolate import griddata
+    from sklearn.metrics import mean_squared_error
     # from aux_gps import scale_xr
-    da = create_lat_lon_mesh(points_per_degree=100)
+    da = create_lat_lon_mesh(points_per_degree=500)
     geo_snap = geo_pandas_time_snapshot(var=var, datetime=time, plot=False)
     for i, row in geo_snap.iterrows():
         lat = da.sel(lat=row['lat'], method='nearest').lat.values
         lon = da.sel(lon=row['lon'], method='nearest').lon.values
-        da.loc[{'lat': lat, 'lon': lon}] = row[var]
+        if lapse_rate is not None and var == 'TD':
+            da.loc[{'lat': lat, 'lon': lon}] = row[var] + \
+                lapse_rate * row['alt'] / 1000.0
+        elif lapse_rate is None:
+            da.loc[{'lat': lat, 'lon': lon}] = row[var]
     # da_scaled = scale_xr(da)
     c = np.linspace(min(da.lat.values), max(da.lat.values), da.shape[0])
     r = np.linspace(min(da.lon.values), max(da.lon.values), da.shape[1])
     rr, cc = np.meshgrid(r, c)
     vals = ~np.isnan(da.values)
-    # gp = GaussianProcessRegressor(alpha=0.01, n_restarts_optimizer=5)
-    #                              normalize_y=True)
-    gp = KNeighborsRegressor(n_neighbors=5, weights='distance')
     X = np.column_stack([rr[vals], cc[vals]])
     # y = da_scaled.values[vals]
     y = da.values[vals]
-    gp.fit(X, y)
     rr_cc_as_cols = np.column_stack([rr.flatten(), cc.flatten()])
+    if method == 'kriging':
+        gp = GaussianProcessRegressor(alpha=0.01, n_restarts_optimizer=5)
+    #                              normalize_y=True)
+    elif method == 'knn':
+        gp = KNeighborsRegressor(n_neighbors=5, weights='distance')
+    
+    gp.fit(X, y)
     interpolated = gp.predict(rr_cc_as_cols).reshape(da.values.shape)
     # interpolated=griddata(X, y, (rr, cc), method='nearest')
     da_inter = da.copy(data=interpolated)
+    if lapse_rate is not None and var == 'TD':
+        from aux_gps import coarse_dem
+        awd = coarse_dem(da_inter)
+        awd = awd['data'].values
+        da_inter -= lapse_rate * awd / 1000.0
+    if rms:
+        predicted = []
+        true_vals = []
+        for i, row in geo_snap.iterrows():
+            lat = da.sel(lat=row['lat'], method='nearest').lat.values
+            lon = da.sel(lon=row['lon'], method='nearest').lon.values
+            pred = da_inter.loc[{'lat': lat, 'lon': lon}].values.item()
+            true = row[var]
+            predicted.append(pred)
+            true_vals.append(true)
+        predicted = np.array(predicted)
+        true_vals = np.array(true_vals)
     if plot:
         import salem
         from salem import DataLevels, Map
@@ -59,15 +84,48 @@ def GP_modeling_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
         shdf.crs = {'init': 'epsg:4326'}
         dsr = da_inter.salem.roi(shape=shdf)
         grid = dsr.salem.grid
+        grid = da_inter.salem.grid
         sm = Map(grid)
+        # sm.set_shapefile(gis_path / 'Israel_and_Yosh.shp')
         # sm = dsr.salem.quick_map(ax=ax)
+#        sm2 = salem.Map(grid, factor=1)
+#        sm2.set_shapefile(gis_path/'gis_osm_water_a_free_1.shp',
+#                          edgecolor='k')
         sm.set_data(dsr)
         # sm.set_nlevels(7)
-        sm.visualize(ax=ax, title='Israel IDW temperature from IMS',
+        # sm.visualize(ax=ax, title='Israel {} interpolated temperature from IMS'.format(method),
+        #             cbar_title='degC')
+        sm.set_shapefile(gis_path/'gis_osm_water_a_free_1.shp',
+                         edgecolor='k') # , facecolor='aqua')
+        # sm.set_topography(awd.values, crs=awd.crs)
+        # sm.set_rgb(crs=shdf.crs, natural_earth='hr')  # ad
+        # lakes = salem.read_shapefile(gis_path/'gis_osm_water_a_free_1.shp')
+        sm.visualize(ax=ax, title='Israel {} interpolated temperature from IMS'.format(method),
                      cbar_title='degC')
         dl = DataLevels(geo_snap[var])
         x, y = sm.grid.transform(geo_snap.lon.values, geo_snap.lat.values)
         ax.scatter(x, y, color=dl.to_rgb(), s=50, edgecolors='k', linewidths=1)
+        suptitle = time.replace('T', ' ')
+        f.suptitle(suptitle, fontsize=14, fontweight='bold')
+        if rms:
+            import seaborn as sns
+            f, ax = plt.subplots(1, 2, figsize=(12, 6))
+            sns.scatterplot(x=true_vals, y=predicted, ax=ax[0], marker='.',
+                            s=100)
+            resid = predicted - true_vals
+            sns.distplot(resid, bins=5, color='c', label='residuals',
+                         ax=ax[1])
+            rmean = np.mean(resid)
+            rstd = np.std(resid)
+            rmedian = np.median(resid)
+            rmse = np.sqrt(mean_squared_error(true_vals, predicted))
+            plt.axvline(rmean, color='r', linestyle='dashed', linewidth=1)
+            _, max_ = plt.ylim()
+            plt.text(rmean + rmean / 10, max_ - max_ / 10,
+                     'Mean: {:.2f}, RMSE: {:.2f}'.format(rmean, rmse))
+            f.tight_layout()
+        # lakes.plot(ax=ax, color='b', edgecolor='k')
+        # lake_borders = gpd.overlay(countries, capitals, how='difference')
         # adm1_shapes = list(shpreader.Reader(fname).geometries())
         # ax = plt.axes(projection=ccrs.PlateCarree())
         # ax.coastlines(resolution='10m')
@@ -201,7 +259,7 @@ def geo_pandas_time_snapshot(path=ims_10mins_path, var='TD',
     df.dropna(inplace=True)
     df = df.astype({'lat': 'float64', 'lon': 'float64'})
     # geopandas part:
-    isr = gpd.read_file(gis_path / 'israel_demog2012.shp')
+    isr = gpd.read_file(gis_path / 'Israel_demog_yosh.shp')
     isr.crs = {'init': 'epsg:4326'}
     geo_snap = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.lon,
                                                                 df.lat),
