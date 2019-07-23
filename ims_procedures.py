@@ -13,50 +13,133 @@ ims_10mins_path = ims_path / '10mins'
 
 def GP_modeling_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
                     gis_path=gis_path, method='kriging',
-                    dem_path=work_yuval / 'AW3D30', lapse_rate=5., rms=True):
+                    dem_path=work_yuval / 'AW3D30', lapse_rate=5., cv=None,
+                    rms=None):
+    """main 2d_interpolation from stations to map"""
+    # cv usage is {'kfold': 5} or {'rkfold': [2, 3]}
     # TODO: try 1d modeling first, like T=f(lat)
     from sklearn.gaussian_process import GaussianProcessRegressor
     from sklearn.neighbors import KNeighborsRegressor
     import numpy as np
+    from sklearn.svm import SVR
     from scipy.spatial import Delaunay
     from scipy.interpolate import griddata
     from sklearn.metrics import mean_squared_error
+    from aux_gps import coarse_dem
+    import pyproj
+    lla = pyproj.Proj(proj='latlong', ellps='WGS84', datum='WGS84')
+    ecef = pyproj.Proj(proj='geocent', ellps='WGS84', datum='WGS84')
+
+    def parse_cv(cv):
+        from sklearn.model_selection import KFold
+        from sklearn.model_selection import RepeatedKFold
+        from sklearn.model_selection import LeaveOneOut
+        """input:cv number or string"""
+        # check for integer:
+        if 'kfold' in cv.keys():
+            n_splits = cv['kfold']
+            print('CV is KFold with n_splits={}'.format(n_splits))
+            return KFold(n_splits=n_splits)
+        if 'rkfold' in cv.keys():
+            n_splits = cv['rkfold'][0]
+            n_repeats = cv['rkfold'][1]
+            print('CV is ReapetedKFold with n_splits={},'.format(n_splits) +
+                  ' n_repeates={}'.format(n_repeats))
+            return RepeatedKFold(n_splits=n_splits, n_repeats=n_repeats,
+                                 random_state=42)
+        if 'loo' in cv.keys():
+            return LeaveOneOut()
     # from aux_gps import scale_xr
     da = create_lat_lon_mesh(points_per_degree=500)
     geo_snap = geo_pandas_time_snapshot(var=var, datetime=time, plot=False)
+    alts = []
     for i, row in geo_snap.iterrows():
         lat = da.sel(lat=row['lat'], method='nearest').lat.values
         lon = da.sel(lon=row['lon'], method='nearest').lon.values
+        alt = row['alt']
         if lapse_rate is not None and var == 'TD':
             da.loc[{'lat': lat, 'lon': lon}] = row[var] + \
-                lapse_rate * row['alt'] / 1000.0
+                lapse_rate * alt / 1000.0
         elif lapse_rate is None:
             da.loc[{'lat': lat, 'lon': lon}] = row[var]
+            alts.append(alt)
     # da_scaled = scale_xr(da)
     c = np.linspace(min(da.lat.values), max(da.lat.values), da.shape[0])
     r = np.linspace(min(da.lon.values), max(da.lon.values), da.shape[1])
     rr, cc = np.meshgrid(r, c)
     vals = ~np.isnan(da.values)
-    X = np.column_stack([rr[vals], cc[vals]])
+    if lapse_rate is None:
+        Xrr, Ycc, Z = pyproj.transform(
+                lla, ecef, rr[vals], cc[vals], np.array(alts), radians=False)
+        X = np.column_stack([Xrr, Ycc, Z])
+        awd = coarse_dem(da)
+        XX, YY, ZZ = pyproj.transform(lla, ecef, rr, cc, awd['data'].values,
+                                      radians=False)
+        rr_cc_as_cols = np.column_stack([XX.flatten(), YY.flatten(),
+                                         ZZ.flatten()])
+    else:
+        X = np.column_stack([rr[vals], cc[vals]])
+        rr_cc_as_cols = np.column_stack([rr.flatten(), cc.flatten()])
     # y = da_scaled.values[vals]
     y = da.values[vals]
-    rr_cc_as_cols = np.column_stack([rr.flatten(), cc.flatten()])
     if method == 'kriging':
-        gp = GaussianProcessRegressor(alpha=0.01, n_restarts_optimizer=5)
-    #                              normalize_y=True)
+        from sklearn.gaussian_process.kernels import RationalQuadratic
+        from sklearn.gaussian_process.kernels import RBF
+        from sklearn.gaussian_process.kernels import WhiteKernel
+        # kernel = RationalQuadratic(length_scale=100.0) \ 
+        # + WhiteKernel(noise_level=0.01, noise_level_bounds=(1e-10, 1e+1))
+        kernel = 1.0 * RBF(length_scale=0.25, length_scale_bounds=(1e-2, 1e3)) \
+            + WhiteKernel(noise_level=0.01, noise_level_bounds=(1e-10, 1e+1))
+#        kernel = None
+        gp = GaussianProcessRegressor(alpha=0.0, kernel=kernel,
+                                      n_restarts_optimizer=5,
+                                      random_state=42, normalize_y=True)
     elif method == 'knn':
         gp = KNeighborsRegressor(n_neighbors=5, weights='distance')
-    
+    elif method == 'svr':
+        gp = SVR(C=1.0, cache_size=200, coef0=0.0, degree=3, epsilon=0.1,
+                 gamma='auto_deprecated', kernel='rbf', max_iter=-1,
+                 shrinking=True, tol=0.001, verbose=False)
+    if cv is not None:
+        # from sklearn.model_selection import cross_validate
+        import xarray as xr
+        from sklearn import metrics
+        cv = parse_cv(cv)
+        ytests = []
+        ypreds = []
+        for train_idx, test_idx in cv.split(X):
+            X_train, X_test = X[train_idx], X[test_idx]  # requires arrays
+            y_train, y_test = y[train_idx], y[test_idx]
+            gp.fit(X=X_train, y=y_train)
+            y_pred = gp.predict(X_test)
+            # there is only one y-test and y-pred per iteration over the loo.split,
+            # so to get a proper graph, we append them to respective lists.
+            ytests += list(y_test)
+            ypreds += list(y_pred)
+        true_vals = np.array(ytests)
+        predicted = np.array(ypreds)
+        r2 = metrics.r2_score(ytests, ypreds)
+        ms_error = metrics.mean_squared_error(ytests, ypreds)
+        print("R^2: {:.5f}%, MSE: {:.5f}".format(r2*100, ms_error))
+#        cv_results = cross_validate(gp, X, y, cv=cv, scoring='mean_squared_error',
+#                                    return_train_score=True, n_jobs=-1)
+#        test = xr.DataArray(cv_results['test_score'], dims=['kfold'])
+#        train = xr.DataArray(cv_results['train_score'], dims=['kfold'])
+#        train.name = 'train'
+#        cds = test.to_dataset(name='test')
+#        cds['train'] = train
+#        cds['kfold'] = np.arange(len(cv_results['test_score'])) + 1
+#        cds['mean_train'] = cds.train.mean('kfold')
+#        cds['mean_test'] = cds.test.mean('kfold')
     gp.fit(X, y)
     interpolated = gp.predict(rr_cc_as_cols).reshape(da.values.shape)
     # interpolated=griddata(X, y, (rr, cc), method='nearest')
     da_inter = da.copy(data=interpolated)
     if lapse_rate is not None and var == 'TD':
-        from aux_gps import coarse_dem
         awd = coarse_dem(da_inter)
         awd = awd['data'].values
         da_inter -= lapse_rate * awd / 1000.0
-    if rms:
+    if rms is not None and cv is None:
         predicted = []
         true_vals = []
         for i, row in geo_snap.iterrows():
@@ -68,6 +151,8 @@ def GP_modeling_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
             true_vals.append(true)
         predicted = np.array(predicted)
         true_vals = np.array(true_vals)
+        ms_error = mean_squared_error(true_vals, predicted)
+        print("MSE: {:.5f}".format(ms_error))
     if plot:
         import salem
         from salem import DataLevels, Map
@@ -96,7 +181,7 @@ def GP_modeling_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
         # sm.visualize(ax=ax, title='Israel {} interpolated temperature from IMS'.format(method),
         #             cbar_title='degC')
         sm.set_shapefile(gis_path/'gis_osm_water_a_free_1.shp',
-                         edgecolor='k') # , facecolor='aqua')
+                         edgecolor='k')  # , facecolor='aqua')
         # sm.set_topography(awd.values, crs=awd.crs)
         # sm.set_rgb(crs=shdf.crs, natural_earth='hr')  # ad
         # lakes = salem.read_shapefile(gis_path/'gis_osm_water_a_free_1.shp')
@@ -107,7 +192,7 @@ def GP_modeling_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
         ax.scatter(x, y, color=dl.to_rgb(), s=50, edgecolors='k', linewidths=1)
         suptitle = time.replace('T', ' ')
         f.suptitle(suptitle, fontsize=14, fontweight='bold')
-        if rms:
+        if rms is not None:
             import seaborn as sns
             f, ax = plt.subplots(1, 2, figsize=(12, 6))
             sns.scatterplot(x=true_vals, y=predicted, ax=ax[0], marker='.',
