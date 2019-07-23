@@ -24,6 +24,39 @@ stations = pd.read_csv('stations.txt', header=0, delim_whitespace=True,
 # TODO: fix somehow the discontinuety daily problem in zwd gipsy runs
 
 
+def process_one_day_gispyx_output(path=work_yuval, plot=False):
+    import pandas as pd
+    import pyproj
+    df = pd.read_fwf(path / 'smoothFinal.tdp', header=None)
+    df_zwd = df[df.iloc[:, -1].str.contains('WetZ')]
+    X = df[df.iloc[:, -1].str.contains('Pos.X')].iloc[0, 2]
+    Y = df[df.iloc[:, -1].str.contains('Pos.Y')].iloc[0, 2]
+    Z = df[df.iloc[:, -1].str.contains('Pos.Z')].iloc[0, 2]
+#    X_error = df[df.iloc[:, -1].str.contains('Pos.X')].iloc[0, 3]
+#    Y_error = df[df.iloc[:, -1].str.contains('Pos.Y')].iloc[0, 3]
+#    Z_error = df[df.iloc[:, -1].str.contains('Pos.Z')].iloc[0, 3]
+    ecef = pyproj.Proj(proj='geocent', ellps='WGS84', datum='WGS84')
+    lla = pyproj.Proj(proj='latlong', ellps='WGS84', datum='WGS84')
+    lon, lat, alt = pyproj.transform(ecef, lla, X, Y, Z, radians=False)
+    df_zwd.columns = ['seconds', 'to_drop', 'zwd', 'error', 'meta']
+    dt = pd.to_datetime('2000-01-01T12:00:00')
+    time = dt + pd.to_timedelta(df_zwd.loc[:, 'seconds'], unit='sec')
+    df_zwd.set_index(time, inplace=True)
+    df_zwd.index.name = 'time'
+    df_zwd = df_zwd.drop(['seconds', 'to_drop', 'meta'], axis=1)
+    df_zwd = df_zwd.mul(100.0)  # zwd in cm
+    meta = {'lat': lat, 'lon': lon, 'alt': alt, 'zwd_mean_error_cm':
+            df_zwd['error'].mean()}
+    if plot:
+        ax = df_zwd['zwd'].plot(legend=True, figsize=(12, 7), color='k')
+        ax.fill_between(df_zwd.index, df_zwd['zwd'] - df_zwd['error'],
+                        df_zwd['zwd'] + df_zwd['error'], alpha=0.5)
+        ax.grid()
+        ax.set_title('Zenith Wet Delay')
+        ax.set_ylabel('[cm]')
+    return df_zwd, meta
+
+
 def proc_1minute(path):
     stations = pd.read_csv(path + 'Zstations', header=0,
                            delim_whitespace=True)
