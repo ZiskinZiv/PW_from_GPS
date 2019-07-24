@@ -498,6 +498,64 @@ def VaporPressure(tempc, phase="liquid", units='hPa'):
     else:
         raise NotImplementedError
 
+def dewpoint(e):
+    r"""Calculate the ambient dewpoint given the vapor pressure.
+
+    Parameters
+    ----------
+    e : `pint.Quantity`
+        Water vapor partial pressure
+
+    Returns
+    -------
+    `pint.Quantity`
+        Dew point temperature
+
+    See Also
+    --------
+    dewpoint_rh, saturation_vapor_pressure, vapor_pressure
+
+    Notes
+    -----
+    This function inverts the [Bolton1980]_ formula for saturation vapor
+    pressure to instead calculate the temperature. This yield the following
+    formula for dewpoint in degrees Celsius:
+
+    .. math:: T = \frac{243.5 log(e / 6.112)}{17.67 - log(e / 6.112)}
+
+    """
+    import numpy as np
+    # units are degC
+    sat_pressure_0c = 6.112  # in millibar
+    val = np.log(e / sat_pressure_0c)
+    return 243.5 * val / (17.67 - val)
+
+
+def dewpoint_rh(temperature, rh):
+    r"""Calculate the ambient dewpoint given air temperature and relative humidity.
+
+    Parameters
+    ----------
+    temperature : `pint.Quantity`
+        Air temperature
+    rh : `pint.Quantity`
+        Relative humidity expressed as a ratio in the range 0 < rh <= 1
+
+    Returns
+    -------
+    `pint.Quantity`
+        The dew point temperature
+
+    See Also
+    --------
+    dewpoint, saturation_vapor_pressure
+
+    """
+    import numpy as np
+    import warnings
+    if np.any(rh > 120):
+        warnings.warn('Relative humidity >120%, ensure proper units.')
+    return dewpoint(rh / 100.0 * VaporPressure(temperature))
 
 #def ea(T, rh):
 #    """water vapor pressure function using ARM function for sat."""
