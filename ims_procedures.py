@@ -11,25 +11,32 @@ gis_path = work_yuval / 'gis'
 ims_10mins_path = ims_path / '10mins'
 
 
-def GP_modeling_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
-                    gis_path=gis_path, method='kriging',
-                    dem_path=work_yuval / 'AW3D30', lapse_rate=5., cv=None,
-                    rms=None):
+def Interpolating_models_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
+                             gis_path=gis_path, method='kriging',
+                             dem_path=work_yuval / 'AW3D30', lapse_rate=5.,
+                             cv=None, rms=None):
     """main 2d_interpolation from stations to map"""
     # cv usage is {'kfold': 5} or {'rkfold': [2, 3]}
     # TODO: try 1d modeling first, like T=f(lat)
     from sklearn.gaussian_process import GaussianProcessRegressor
     from sklearn.neighbors import KNeighborsRegressor
+    from pykrige.uk import UniversalKriging
+    from pykrige.ok import OrdinaryKriging
+    from pykrige.ok3d import OrdinaryKriging3D
+    from pykrige.uk3d import UniversalKriging3D
     import numpy as np
     from sklearn.svm import SVR
     from scipy.spatial import Delaunay
     from scipy.interpolate import griddata
     from sklearn.metrics import mean_squared_error
     from aux_gps import coarse_dem
+    import seaborn as sns
+    import matplotlib.pyplot as plt
     import pyproj
+    from sklearn.utils.estimator_checks import check_estimator
     lla = pyproj.Proj(proj='latlong', ellps='WGS84', datum='WGS84')
     ecef = pyproj.Proj(proj='geocent', ellps='WGS84', datum='WGS84')
-
+    # TODO: implement loo.split to do a cv to all pykrige model hyperparameters
     def parse_cv(cv):
         from sklearn.model_selection import KFold
         from sklearn.model_selection import RepeatedKFold
@@ -52,6 +59,23 @@ def GP_modeling_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
     # from aux_gps import scale_xr
     da = create_lat_lon_mesh(points_per_degree=500)
     geo_snap = geo_pandas_time_snapshot(var=var, datetime=time, plot=False)
+    if var == 'TD':
+        [a, b] = np.polyfit(geo_snap['alt'].values, geo_snap['TD'].values, 1)
+        if lapse_rate == 'auto':
+            lapse_rate = np.abs(a) * 1000
+        fig, ax_lapse = plt.subplots(figsize=(10, 6))
+        sns.regplot(data=geo_snap, x='alt', y='TD', color='r',
+                    scatter_kws={'color': 'b'}, ax=ax_lapse)
+        suptitle = time.replace('T', ' ')
+        ax_lapse.set_xlabel('Altitude [m]')
+        ax_lapse.set_ylabel('Temperature [degC]')
+        ax_lapse.text(0.5, 0.95, 'Lapse_rate: {:.2f} degC/km'.format(lapse_rate),
+                      horizontalalignment='center', verticalalignment='center',
+                      transform=ax_lapse.transAxes, fontsize=12, color='k',
+                      fontweight='bold')
+        ax_lapse.grid()
+        ax_lapse.set_title(suptitle, fontsize=14, fontweight='bold')
+#     fig.suptitle(suptitle, fontsize=14, fontweight='bold')
     alts = []
     for i, row in geo_snap.iterrows():
         lat = da.sel(lat=row['lat'], method='nearest').lat.values
@@ -60,7 +84,8 @@ def GP_modeling_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
         if lapse_rate is not None and var == 'TD':
             da.loc[{'lat': lat, 'lon': lon}] = row[var] + \
                 lapse_rate * alt / 1000.0
-        elif lapse_rate is None:
+            alts.append(alt)
+        elif lapse_rate is None or var != 'TD':
             da.loc[{'lat': lat, 'lon': lon}] = row[var]
             alts.append(alt)
     # da_scaled = scale_xr(da)
@@ -82,25 +107,61 @@ def GP_modeling_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
         rr_cc_as_cols = np.column_stack([rr.flatten(), cc.flatten()])
     # y = da_scaled.values[vals]
     y = da.values[vals]
-    if method == 'kriging':
-        from sklearn.gaussian_process.kernels import RationalQuadratic
+    if method == 'gp-rbf':
         from sklearn.gaussian_process.kernels import RBF
         from sklearn.gaussian_process.kernels import WhiteKernel
-        # kernel = RationalQuadratic(length_scale=100.0) \ 
-        # + WhiteKernel(noise_level=0.01, noise_level_bounds=(1e-10, 1e+1))
         kernel = 1.0 * RBF(length_scale=0.25, length_scale_bounds=(1e-2, 1e3)) \
             + WhiteKernel(noise_level=0.01, noise_level_bounds=(1e-10, 1e+1))
 #        kernel = None
-        gp = GaussianProcessRegressor(alpha=0.0, kernel=kernel,
-                                      n_restarts_optimizer=5,
-                                      random_state=42, normalize_y=True)
+        model = GaussianProcessRegressor(alpha=0.0, kernel=kernel,
+                                         n_restarts_optimizer=5,
+                                         random_state=42, normalize_y=True)
+        model.fit(X, y)
+        interpolated = model.predict(rr_cc_as_cols).reshape(da.values.shape)
+    elif method == 'gp-qr':
+        from sklearn.gaussian_process.kernels import RationalQuadratic
+        from sklearn.gaussian_process.kernels import WhiteKernel
+        kernel = RationalQuadratic(length_scale=100.0) \
+            + WhiteKernel(noise_level=0.01, noise_level_bounds=(1e-10, 1e+1))
+        model = GaussianProcessRegressor(alpha=0.0, kernel=kernel,
+                                         n_restarts_optimizer=5,
+                                         random_state=42, normalize_y=True)
+        model.fit(X, y)
+        interpolated = model.predict(rr_cc_as_cols).reshape(da.values.shape)
     elif method == 'knn':
-        gp = KNeighborsRegressor(n_neighbors=5, weights='distance')
+        model = KNeighborsRegressor(n_neighbors=5, weights='distance')
+        model.fit(X, y)
+        interpolated = model.predict(rr_cc_as_cols).reshape(da.values.shape)
     elif method == 'svr':
-        gp = SVR(C=1.0, cache_size=200, coef0=0.0, degree=3, epsilon=0.1,
-                 gamma='auto_deprecated', kernel='rbf', max_iter=-1,
-                 shrinking=True, tol=0.001, verbose=False)
-    if cv is not None:
+        model = SVR(C=1.0, cache_size=200, coef0=0.0, degree=3, epsilon=0.1,
+                    gamma='auto_deprecated', kernel='rbf', max_iter=-1,
+                    shrinking=True, tol=0.001, verbose=False)
+        model.fit(X, y)
+        interpolated = model.predict(rr_cc_as_cols).reshape(da.values.shape)
+    elif method == 'okrig':
+        model = OrdinaryKriging(rr[vals], cc[vals], da.values[vals],
+                                variogram_model='linear', verbose=True,
+                                enable_plotting=False,
+                                coordinates_type='geographic')
+        interpolated, ss = model.execute('grid', r, c)
+    elif method == 'ukrig':
+        model = UniversalKriging(rr[vals], cc[vals], da.values[vals],
+                                 variogram_model='linear', verbose=True,
+                                 enable_plotting=False)
+        interpolated, ss = model.execute('grid', r, c)
+    elif method == 'okrig3d':
+        # don't bother - MemoryError...
+        model = OrdinaryKriging3D(rr[vals], cc[vals], np.array(alts),
+                                  da.values[vals], variogram_model='linear',
+                                  verbose=True)
+        awd = coarse_dem(da)
+        interpolated, ss = model.execute('grid', r, c, awd['data'].values)
+    try:
+        u = check_estimator(model)
+    except TypeError:
+        u = False
+        pass
+    if (cv is not None and u is None):
         # from sklearn.model_selection import cross_validate
         import xarray as xr
         from sklearn import metrics
@@ -110,8 +171,8 @@ def GP_modeling_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
         for train_idx, test_idx in cv.split(X):
             X_train, X_test = X[train_idx], X[test_idx]  # requires arrays
             y_train, y_test = y[train_idx], y[test_idx]
-            gp.fit(X=X_train, y=y_train)
-            y_pred = gp.predict(X_test)
+            model.fit(X=X_train, y=y_train)
+            y_pred = model.predict(X_test)
             # there is only one y-test and y-pred per iteration over the loo.split,
             # so to get a proper graph, we append them to respective lists.
             ytests += list(y_test)
@@ -131,15 +192,14 @@ def GP_modeling_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
 #        cds['kfold'] = np.arange(len(cv_results['test_score'])) + 1
 #        cds['mean_train'] = cds.train.mean('kfold')
 #        cds['mean_test'] = cds.test.mean('kfold')
-    gp.fit(X, y)
-    interpolated = gp.predict(rr_cc_as_cols).reshape(da.values.shape)
+
     # interpolated=griddata(X, y, (rr, cc), method='nearest')
     da_inter = da.copy(data=interpolated)
     if lapse_rate is not None and var == 'TD':
         awd = coarse_dem(da_inter)
         awd = awd['data'].values
         da_inter -= lapse_rate * awd / 1000.0
-    if rms is not None and cv is None:
+    if (rms is not None and cv is None) or (rms is not None and not u):
         predicted = []
         true_vals = []
         for i, row in geo_snap.iterrows():
@@ -185,11 +245,13 @@ def GP_modeling_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
         # sm.set_topography(awd.values, crs=awd.crs)
         # sm.set_rgb(crs=shdf.crs, natural_earth='hr')  # ad
         # lakes = salem.read_shapefile(gis_path/'gis_osm_water_a_free_1.shp')
+        sm.set_cmap(cm='rainbow')
         sm.visualize(ax=ax, title='Israel {} interpolated temperature from IMS'.format(method),
                      cbar_title='degC')
-        dl = DataLevels(geo_snap[var])
+        dl = DataLevels(geo_snap[var], levels=sm.levels)
+        dl.set_cmap(sm.cmap)
         x, y = sm.grid.transform(geo_snap.lon.values, geo_snap.lat.values)
-        ax.scatter(x, y, color=dl.to_rgb(), s=50, edgecolors='k', linewidths=1)
+        ax.scatter(x, y, color=dl.to_rgb(), s=20, edgecolors='k', linewidths=0.5)
         suptitle = time.replace('T', ' ')
         f.suptitle(suptitle, fontsize=14, fontweight='bold')
         if rms is not None:
