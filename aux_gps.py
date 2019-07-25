@@ -7,13 +7,113 @@ Created on Mon Jun 10 14:33:19 2019
 """
 from PW_startup import *
 
+
+def process_gridsearch_results(GridSearchCV):
+    import xarray as xr
+    import pandas as pd
+    import numpy as np
+    """takes GridSreachCV object with cv_results and xarray it into dataarray"""
+    params = GridSearchCV.param_grid
+    scoring = GridSearchCV.scoring
+    names = [x for x in params.keys()]
+    if len(params) > 1:
+        # unpack param_grid vals to list of lists:
+        pro = [[y for y in x] for x in params.values()]
+        ind = pd.MultiIndex.from_product((pro), names=names)
+        result_names = [x for x in GridSearchCV.cv_results_.keys() if 
+                        'time' not in x and 'param' not in x and
+                        'rank' not in x]
+        ds = xr.Dataset()
+        for da_name in result_names:
+            da = xr.DataArray(GridSearchCV.cv_results_[da_name])
+            ds[da_name] = da
+        ds = ds.assign(dim_0=ind).unstack('dim_0')
+    elif len(params) == 1:
+        result_names = [x for x in GridSearchCV.cv_results_.keys() if 
+                        'time' not in x and 'param' not in x and
+                        'rank' not in x]
+        ds = xr.Dataset()
+        for da_name in result_names:
+            da = xr.DataArray(GridSearchCV.cv_results_[da_name], dims={**params})
+            ds[da_name] = da
+        for k, v in params.items():
+            ds[k] = v
+    name = [x for x in ds.data_vars.keys() if 'split' in x and 'test' in x]
+    split_test = xr.concat(ds[name].data_vars.values(), dim='kfolds')
+    split_test.name = 'split_test'
+    kfolds_num = len(name)
+    name = [x for x in ds.data_vars.keys() if 'split' in x and 'train' in x]
+    split_train = xr.concat(ds[name].data_vars.values(), dim='kfolds')
+    split_train.name = 'split_train'
+    name = [x for x in ds.data_vars.keys() if 'mean_test' in x]
+    mean_test = xr.concat(ds[name].data_vars.values(), dim='scoring')
+    mean_test.name = 'mean_test'
+    name = [x for x in ds.data_vars.keys() if 'mean_train' in x]
+    mean_train = xr.concat(ds[name].data_vars.values(), dim='scoring')
+    mean_train.name = 'mean_train'
+    name = [x for x in ds.data_vars.keys() if 'std_test' in x]
+    std_test = xr.concat(ds[name].data_vars.values(), dim='scoring')
+    std_test.name = 'std_test'
+    name = [x for x in ds.data_vars.keys() if 'std_train' in x]
+    std_train = xr.concat(ds[name].data_vars.values(), dim='scoring')
+    std_train.name = 'std_train'
+    ds = ds.drop(ds.data_vars.keys())
+    ds['mean_test'] = mean_test
+    ds['mean_train'] = mean_train
+    ds['std_test'] = std_test
+    ds['std_train'] = std_train
+    ds['split_test'] = split_test
+    ds['split_train'] = split_train
+    mean_test_train = xr.concat(ds[['mean_train', 'mean_test']].data_vars.
+                                values(), dim='train_test')
+    std_test_train = xr.concat(ds[['std_train', 'std_test']].data_vars.
+                               values(), dim='train_test')
+    split_test_train = xr.concat(ds[['split_train', 'split_test']].data_vars.
+                                 values(), dim='train_test')
+    ds['train_test'] = ['train', 'test']
+    ds = ds.drop(ds.data_vars.keys())
+    ds['MEAN'] = mean_test_train
+    ds['STD'] = std_test_train
+    # CV = xr.Dataset(coords=GridSearchCV.param_grid)
+    ds = xr.concat(ds[['MEAN', 'STD']].data_vars.values(), dim='MEAN_STD')
+    ds['MEAN_STD'] = ['MEAN', 'STD']
+    ds.name = 'CV_mean_results'
+    ds.attrs['param_names'] = names
+    if isinstance(scoring, str):
+        ds.attrs['scoring'] = scoring
+        ds = ds.squeeze(drop=True)
+    else:
+        ds['scoring'] = scoring
+    ds = ds.to_dataset()
+    ds['CV_full_results'] = split_test_train
+    ds['kfolds'] = np.arange(kfolds_num)
+    return ds
+
+
 def coarse_dem(data, dem_path = work_yuval / 'AW3D30'):
     """coarsen to data coords"""
     # data is lower resolution than awd
-    # TODO: add save file option with resolution
     import salem
-    awd = salem.open_xr_dataset(dem_path / 'israel_dem.tif')
-    awds = data.salem.lookup_transform(awd)
+    import xarray as xr
+    # determine resulotion:
+    try:
+        lat_size = data.lat.size
+        lon_size = data.lon.size
+    except AttributeError:
+        print('data needs to have lat and lon coords..')
+        return
+    # check for file exist:
+    filename = 'israel_dem_' + str(lon_size) + '_' + str(lat_size) + '.nc'
+    my_file = dem_path / filename
+    if my_file.is_file():
+        awds = xr.open_dataarray(my_file)
+        print('{} is found and loaded...'.format(filename))
+    else:
+        awd = salem.open_xr_dataset(dem_path / 'israel_dem.tif')
+        awds = data.salem.lookup_transform(awd)
+        awds = awds['data']
+        awds.to_netcdf(dem_path / filename)
+        print('{} is saved to {}'.format(filename, dem_path))
     return awds
 
 
