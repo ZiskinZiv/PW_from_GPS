@@ -11,21 +11,33 @@ gis_path = work_yuval / 'gis'
 ims_10mins_path = ims_path / '10mins'
 
 
+def parse_cv_results(grid_search_cv):
+    from aux_gps import process_gridsearch_results
+    """parse cv_results from GridsearchCV object"""
+    # only supports neg-abs-mean-error with leaveoneout
+    from sklearn.model_selection import LeaveOneOut
+    if (isinstance(grid_search_cv.cv, LeaveOneOut)
+            and grid_search_cv.scoring == 'neg_mean_absolute_error'):
+
+        cds = process_gridsearch_results(grid_search_cv)
+        cds = - cds
+    return cds
+
+
 def Interpolating_models_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
                              gis_path=gis_path, method='kriging',
                              dem_path=work_yuval / 'AW3D30', lapse_rate=5.,
-                             cv=None, rms=None):
+                             cv=None, rms=None, gridsearch=False):
     """main 2d_interpolation from stations to map"""
     # cv usage is {'kfold': 5} or {'rkfold': [2, 3]}
     # TODO: try 1d modeling first, like T=f(lat)
     from sklearn.gaussian_process import GaussianProcessRegressor
     from sklearn.neighbors import KNeighborsRegressor
-    from pykrige.uk import UniversalKriging
-    from pykrige.ok import OrdinaryKriging
-    from pykrige.ok3d import OrdinaryKriging3D
-    from pykrige.uk3d import UniversalKriging3D
+    from pykrige.rk import Krige
     import numpy as np
     from sklearn.svm import SVR
+    from sklearn.linear_model import LinearRegression
+    from sklearn.ensemble import RandomForestRegressor
     from scipy.spatial import Delaunay
     from scipy.interpolate import griddata
     from sklearn.metrics import mean_squared_error
@@ -34,9 +46,10 @@ def Interpolating_models_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
     import matplotlib.pyplot as plt
     import pyproj
     from sklearn.utils.estimator_checks import check_estimator
+    from pykrige.compat import GridSearchCV
     lla = pyproj.Proj(proj='latlong', ellps='WGS84', datum='WGS84')
     ecef = pyproj.Proj(proj='geocent', ellps='WGS84', datum='WGS84')
-    # TODO: implement loo.split to do a cv to all pykrige model hyperparameters
+
     def parse_cv(cv):
         from sklearn.model_selection import KFold
         from sklearn.model_selection import RepeatedKFold
@@ -58,6 +71,8 @@ def Interpolating_models_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
             return LeaveOneOut()
     # from aux_gps import scale_xr
     da = create_lat_lon_mesh(points_per_degree=500)
+    awd = coarse_dem(da)
+    awd = awd.values
     geo_snap = geo_pandas_time_snapshot(var=var, datetime=time, plot=False)
     if var == 'TD':
         [a, b] = np.polyfit(geo_snap['alt'].values, geo_snap['TD'].values, 1)
@@ -97,8 +112,7 @@ def Interpolating_models_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
         Xrr, Ycc, Z = pyproj.transform(
                 lla, ecef, rr[vals], cc[vals], np.array(alts), radians=False)
         X = np.column_stack([Xrr, Ycc, Z])
-        awd = coarse_dem(da)
-        XX, YY, ZZ = pyproj.transform(lla, ecef, rr, cc, awd['data'].values,
+        XX, YY, ZZ = pyproj.transform(lla, ecef, rr, cc, awd.values,
                                       radians=False)
         rr_cc_as_cols = np.column_stack([XX.flatten(), YY.flatten(),
                                          ZZ.flatten()])
@@ -116,8 +130,7 @@ def Interpolating_models_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
         model = GaussianProcessRegressor(alpha=0.0, kernel=kernel,
                                          n_restarts_optimizer=5,
                                          random_state=42, normalize_y=True)
-        model.fit(X, y)
-        interpolated = model.predict(rr_cc_as_cols).reshape(da.values.shape)
+
     elif method == 'gp-qr':
         from sklearn.gaussian_process.kernels import RationalQuadratic
         from sklearn.gaussian_process.kernels import WhiteKernel
@@ -126,44 +139,41 @@ def Interpolating_models_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
         model = GaussianProcessRegressor(alpha=0.0, kernel=kernel,
                                          n_restarts_optimizer=5,
                                          random_state=42, normalize_y=True)
-        model.fit(X, y)
-        interpolated = model.predict(rr_cc_as_cols).reshape(da.values.shape)
     elif method == 'knn':
         model = KNeighborsRegressor(n_neighbors=5, weights='distance')
-        model.fit(X, y)
-        interpolated = model.predict(rr_cc_as_cols).reshape(da.values.shape)
     elif method == 'svr':
         model = SVR(C=1.0, cache_size=200, coef0=0.0, degree=3, epsilon=0.1,
                     gamma='auto_deprecated', kernel='rbf', max_iter=-1,
                     shrinking=True, tol=0.001, verbose=False)
-        model.fit(X, y)
-        interpolated = model.predict(rr_cc_as_cols).reshape(da.values.shape)
     elif method == 'okrig':
-        model = OrdinaryKriging(rr[vals], cc[vals], da.values[vals],
-                                variogram_model='linear', verbose=True,
-                                enable_plotting=False,
-                                coordinates_type='geographic')
-        interpolated, ss = model.execute('grid', r, c)
+        model = Krige(method='ordinary', variogram_model='spherical',
+                      verbose=True)
     elif method == 'ukrig':
-        model = UniversalKriging(rr[vals], cc[vals], da.values[vals],
-                                 variogram_model='linear', verbose=True,
-                                 enable_plotting=False)
-        interpolated, ss = model.execute('grid', r, c)
-    elif method == 'okrig3d':
-        # don't bother - MemoryError...
-        model = OrdinaryKriging3D(rr[vals], cc[vals], np.array(alts),
-                                  da.values[vals], variogram_model='linear',
-                                  verbose=True)
-        awd = coarse_dem(da)
-        interpolated, ss = model.execute('grid', r, c, awd['data'].values)
-    try:
-        u = check_estimator(model)
-    except TypeError:
-        u = False
-        pass
-    if (cv is not None and u is None):
+        model = Krige(method='universal', variogram_model='linear',
+                      verbose=True)
+#    elif method == 'okrig3d':
+#        # don't bother - MemoryError...
+#        model = OrdinaryKriging3D(rr[vals], cc[vals], np.array(alts),
+#                                  da.values[vals], variogram_model='linear',
+#                                  verbose=True)
+#        awd = coarse_dem(da)
+#        interpolated, ss = model.execute('grid', r, c, awd['data'].values)
+#    elif method == 'rkrig':
+#        # est = LinearRegression()
+#        est = RandomForestRegressor()
+#        model = RegressionKriging(regression_model=est, n_closest_points=5,
+#                                  verbose=True)
+#        p = np.array(alts).reshape(-1, 1)
+#        model.fit(p, X, y)
+#        P = awd.flatten().reshape(-1, 1)
+#        interpolated = model.predict(P, rr_cc_as_cols).reshape(da.values.shape)
+#    try:
+#        u = check_estimator(model)
+#    except TypeError:
+#        u = False
+#        pass
+    if cv is not None and not gridsearch:  # and u is None):
         # from sklearn.model_selection import cross_validate
-        import xarray as xr
         from sklearn import metrics
         cv = parse_cv(cv)
         ytests = []
@@ -171,7 +181,7 @@ def Interpolating_models_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
         for train_idx, test_idx in cv.split(X):
             X_train, X_test = X[train_idx], X[test_idx]  # requires arrays
             y_train, y_test = y[train_idx], y[test_idx]
-            model.fit(X=X_train, y=y_train)
+            model.fit(X_train, y_train)
             y_pred = model.predict(X_test)
             # there is only one y-test and y-pred per iteration over the loo.split,
             # so to get a proper graph, we append them to respective lists.
@@ -182,6 +192,50 @@ def Interpolating_models_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
         r2 = metrics.r2_score(ytests, ypreds)
         ms_error = metrics.mean_squared_error(ytests, ypreds)
         print("R^2: {:.5f}%, MSE: {:.5f}".format(r2*100, ms_error))
+    if gridsearch:
+        cv = parse_cv(cv)
+        param_dict = {"method": ["ordinary", "universal"],
+                      "variogram_model": ["linear", "power", "gaussian",
+                                          "spherical"],
+                      # "nlags": [4, 6, 8],
+                      # "weight": [True, False]
+                      }
+        estimator = GridSearchCV(Krige(), param_dict, verbose=True, cv=cv,
+                                 scoring='neg_mean_absolute_error',
+                                 return_train_score=True, n_jobs=1)
+        estimator.fit(X, y)
+        if hasattr(estimator, 'best_score_'):
+            print('best_score = {:.3f}'.format(estimator.best_score_))
+            print('best_params = ', estimator.best_params_)
+        
+        return estimator
+#    if (cv is not None and not u):
+#        from sklearn import metrics
+#        cv = parse_cv(cv)
+#        ytests = []
+#        ypreds = []
+#        for train_idx, test_idx in cv.split(X):
+#            X_train, X_test = X[train_idx], X[test_idx]  # requires arrays
+#            y_train, y_test = y[train_idx], y[test_idx]
+##            model = UniversalKriging(X_train[:, 0], X_train[:, 1], y_train,
+##                                     variogram_model='linear', verbose=False,
+##                                     enable_plotting=False)
+#            model.X_ORIG = X_train[:, 0]
+#            model.X_ADJUSTED = model.X_ORIG
+#            model.Y_ORIG = X_train[:, 1]
+#            model.Y_ADJUSTED = model.Y_ORIG
+#            model.Z = y_train
+#            y_pred, ss = model.execute('points', X_test[0, 0],
+#                                             X_test[0, 1])
+#            # there is only one y-test and y-pred per iteration over the loo.split,
+#            # so to get a proper graph, we append them to respective lists.
+#            ytests += list(y_test)
+#            ypreds += list(y_pred)
+#        true_vals = np.array(ytests)
+#        predicted = np.array(ypreds)
+#        r2 = metrics.r2_score(ytests, ypreds)
+#        ms_error = metrics.mean_squared_error(ytests, ypreds)
+#        print("R^2: {:.5f}%, MSE: {:.5f}".format(r2*100, ms_error))
 #        cv_results = cross_validate(gp, X, y, cv=cv, scoring='mean_squared_error',
 #                                    return_train_score=True, n_jobs=-1)
 #        test = xr.DataArray(cv_results['test_score'], dims=['kfold'])
@@ -194,12 +248,12 @@ def Interpolating_models_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
 #        cds['mean_test'] = cds.test.mean('kfold')
 
     # interpolated=griddata(X, y, (rr, cc), method='nearest')
+    model.fit(X, y)
+    interpolated = model.predict(rr_cc_as_cols).reshape(da.values.shape)
     da_inter = da.copy(data=interpolated)
     if lapse_rate is not None and var == 'TD':
-        awd = coarse_dem(da_inter)
-        awd = awd['data'].values
         da_inter -= lapse_rate * awd / 1000.0
-    if (rms is not None and cv is None) or (rms is not None and not u):
+    if (rms is not None and cv is None):  # or (rms is not None and not u):
         predicted = []
         true_vals = []
         for i, row in geo_snap.iterrows():
@@ -254,7 +308,7 @@ def Interpolating_models_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
         ax.scatter(x, y, color=dl.to_rgb(), s=20, edgecolors='k', linewidths=0.5)
         suptitle = time.replace('T', ' ')
         f.suptitle(suptitle, fontsize=14, fontweight='bold')
-        if rms is not None:
+        if (rms is not None or cv is not None) and (not gridsearch):
             import seaborn as sns
             f, ax = plt.subplots(1, 2, figsize=(12, 6))
             sns.scatterplot(x=true_vals, y=predicted, ax=ax[0], marker='.',
