@@ -5,7 +5,7 @@ Created on Mon Jun 10 14:33:19 2019
 
 @author: ziskin
 """
-from PW_startup import *
+from PW_paths import work_yuval
 
 
 def process_gridsearch_results(GridSearchCV):
