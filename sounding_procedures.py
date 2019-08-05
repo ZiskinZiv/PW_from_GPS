@@ -6,7 +6,7 @@ Created on Thu May 16 14:24:40 2019
 @author: ziskin
 """
 # from pathlib import Path
-from PW_startup import *
+from PW_paths import work_yuval
 sound_path = work_yuval / 'sounding'
 
 
