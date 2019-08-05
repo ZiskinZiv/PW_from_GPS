@@ -45,7 +45,6 @@ def download_all_10mins_ims(savepath, channel_name='TD'):
 if __name__ == '__main__':
     import argparse
     import sys
-    from PW_startup import *
     from ims_procedures import ims_api_get_meta
     from ims_procedures import download_ims_single_station
     from pathlib import Path
