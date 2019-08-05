@@ -8,7 +8,8 @@ Created on Mon Mar 25 15:50:20 2019
 
 import pandas as pd
 import numpy as np
-from PW_startup import *
+from PW_paths import work_yuval
+from PW_paths import work_path
 
 garner_path = work_yuval / 'garner'
 ims_path = work_yuval / 'IMS_T'
