@@ -5,7 +5,7 @@ Created on Mon Jun 10 17:22:51 2019
 
 @author: ziskin
 """
-from PW_startup import *
+from PW_paths import work_yuval
 ims_path = work_yuval / 'IMS_T'
 gis_path = work_yuval / 'gis'
 ims_10mins_path = ims_path / '10mins'
