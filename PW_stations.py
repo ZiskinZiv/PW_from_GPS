@@ -25,7 +25,7 @@ stations = pd.read_csv('stations.txt', header=0, delim_whitespace=True,
 # TODO: fix somehow the discontinuety daily problem in zwd gipsy runs
 
 
-def process_one_day_gispyx_output(path=work_yuval, plot=False):
+def process_one_day_gipsyx_output(path=work_yuval, plot=False):
     import pandas as pd
     import pyproj
     df = pd.read_fwf(path / 'smoothFinal.tdp', header=None)
