@@ -39,12 +39,11 @@ def run_gipsyx_for_station(rinexpath, savepath):
         print('processing {}'.format(filename))
         command = 'gd2e.py -rnxFile {} > {}.log 2>{}.err'.format(file_and_path.as_posix(), filename, filename)
         subprocess.run(command, shell=True)
-        filenames = [filename + '.err', filename + '.log', 'smoothFinal.tdp']
-        orig_filenames = [Path.cwd() / x for x in filenames]
+        orig_filenames = [filename + '.err', filename + '.log', 'smoothFinal.tdp']
+        orig_filenames = [Path.cwd() / x for x in orig_filenames]
         final_tdp = filename + '_smoothFinal.tdp'
-        filenames = [filename + '.err', filename + '.log', final_tdp]
-        print(filenames)
-        dest_filenames = [savepath / x for x in filenames]
+        dest_filenames = [filename + '.err', filename + '.log', final_tdp]
+        dest_filenames = [savepath / x for x in dest_filenames]
         for orig, dest in zip(orig_filenames, dest_filenames):
             orig.rename(dest)
     return
