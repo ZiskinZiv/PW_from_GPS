@@ -7,6 +7,21 @@ Created on Thu May 30 11:46:25 2019
 """
 
 
+def generate_download_shell_script(station_list,
+                                   script_file='rinex_download.sh'):
+    from pathlib import Path
+    lines = []
+    cwd = Path().cwd()
+    for station in station_list:
+        line = 'nohup python -u single_download.py --path ~/Work_Files/PW_yuval/rinex_from_garner/ --mode rinex --station {} &>nohup_{}_download.txt&'.format(station, station)
+        lines.append(line)
+    with open(cwd / script_file, 'w') as file:
+        for item in lines:
+            file.write("%s\n" % item)
+    print('generated download script file at {}'.format(cwd/script_file))
+    return
+    
+    
 def all_orbitals_download(save_dir, minimum_year=None, hr_only=None):
     import htmllistparse
     import requests
@@ -60,7 +75,7 @@ def all_orbitals_download(save_dir, minimum_year=None, hr_only=None):
                     for filename in found:
                         print('Downloading {} to {}.'.format(filename, savepath))
                         r = requests.get(command + year + filename)
-                        with open(savepath/filename, 'wb') as file:
+                        with open(savepath/filename, 'w') as file:
                             file.write(r.content)
     return
 
@@ -100,9 +115,15 @@ def single_station_rinex_garner_download(save_dir, minimum_year=None,
             found = [f for f in files if station in f]
             if found:
                 filename = found[0]
+                saved_filename = savepath / filename
+                if saved_filename.is_file():
+                    print(
+                        '{} already exists in {}, skipping...'.format(
+                            filename, savepath))
+                    continue
                 print('Downloading {} to {}.'.format(filename, savepath))
                 r = requests.get(command + year + day + filename)
-                with open(savepath/filename, 'wb') as file:
+                with open(saved_filename, 'wb') as file:
                     file.write(r.content)
     return
 
