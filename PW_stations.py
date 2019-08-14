@@ -16,7 +16,7 @@ ims_path = work_yuval / 'IMS_T'
 gis_path = work_yuval / 'gis'
 sound_path = work_yuval / 'sounding'
 PW_stations_path = work_yuval / '1minute'
-stations = pd.read_csv('stations.txt', header=0, delim_whitespace=True,
+stations = pd.read_csv('All_gps_stations.txt', header=0, delim_whitespace=True,
                        index_col='name')
 
 # TODO: noon, midnight accurate radiosonde data from tau
@@ -25,10 +25,75 @@ stations = pd.read_csv('stations.txt', header=0, delim_whitespace=True,
 # TODO: fix somehow the discontinuety daily problem in zwd gipsy runs
 
 
-def process_one_day_gipsyx_output(path=work_yuval, plot=False):
+def gipsyx_runs_error_analysis(path):
+    from collections import Counter
+
+    def further_filter(counter):
+        return c
+
+    def find_errors(content_list, name):
+        if len(content_list) <= 1:
+            return None
+        elif len(content_list) > 1:
+            keys = [x for x in content_list if 'KeyError' in x]
+            vals = [x for x in content_list if 'ValueError' in x]
+            excpt = [x for x in content_list if 'Exception' in x]
+            err = [x for x in content_list if 'Error' in x]
+            errors = keys + vals + excpt + err
+        if not errors:
+            print('found new error on {}'.format(name))
+        return errors
+    edict = {}
+    good = 0
+    bad = 0
+    for file in path.glob('*.err'):
+        filename = file.as_posix().split('/')[-1][0:-4]
+        if good == 0 and bad == 0:
+            print('running error analysis for station {}'.format(filename[0:4]))
+        with open(file) as f:
+            content = f.readlines()
+            # you may also want to remove whitespace characters like `\n` at
+            # the end of each line
+            content = [x.strip() for x in content]
+            errors = find_errors(content, filename)
+            if errors is not None:
+                edict[filename] = list(set(errors))
+                bad += 1
+            else:
+                good += 1
+    flat_list = [item for sublist in edict.values() for item in sublist]
+    counted_errors = Counter(flat_list)
+    print(
+        'total files: {}, good runs: {}, bad runs: {}'.format(
+            good +
+            bad,
+            good,
+            bad))
+    return counted_errors
+
+
+def read_one_station_gipsyx_results(path=work_yuval, plot=False):
+    df_list = []
+    for tdp_file in sorted(path.glob('*.tdp')):
+        print(tdp_file)
+        df, _ = process_one_day_gipsyx_output(tdp_file)
+        df_list.append(df)
+    df_all = pd.concat(df_list)
+    if plot:
+        ax = df_all['zwd'].plot(legend=True, figsize=(12, 7), color='k')
+        ax.fill_between(df_all.index, df_all['zwd'] - df_all['error'],
+                        df_all['zwd'] + df_all['error'], alpha=0.5)
+        ax.grid()
+        ax.set_title('Zenith Wet Delay')
+        ax.set_ylabel('[cm]')
+    return df_all
+
+
+def process_one_day_gipsyx_output(path_and_file=work_yuval / 'smoothFinal.tdp',
+                                  plot=False):
     import pandas as pd
     import pyproj
-    df = pd.read_fwf(path / 'smoothFinal.tdp', header=None)
+    df = pd.read_fwf(path_and_file, header=None)
     df_zwd = df[df.iloc[:, -1].str.contains('WetZ')]
     X = df[df.iloc[:, -1].str.contains('Pos.X')].iloc[0, 2]
     Y = df[df.iloc[:, -1].str.contains('Pos.Y')].iloc[0, 2]
