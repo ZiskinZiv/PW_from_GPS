@@ -8,6 +8,37 @@ Created on Mon Jun 10 14:33:19 2019
 from PW_paths import work_yuval
 
 
+def get_timedate_from_rinex(rinex_str='tela0010.05d'):
+    """return datetime from rinex2 format"""
+    import pandas as pd
+    import datetime
+    station = rinex_str[0:4]
+    days = int(rinex_str[4:7])
+    year = rinex_str[-3:-1]
+    Year = datetime.datetime.strptime(year,'%y').strftime('%Y')
+    dt = datetime.datetime(int(Year), 1, 1) + datetime.timedelta(days - 1)
+    return pd.to_datetime(dt)
+
+
+def configure_logger(name='general', filename=None):
+    import logging
+    import sys
+    stdout_handler = logging.StreamHandler(sys.stdout)
+    if filename is not None:
+        file_handler = logging.FileHandler(filename=filename, mode='a')
+        handlers = [file_handler, stdout_handler]
+    else:
+        handlers = [stdout_handler]
+
+    logging.basicConfig(
+            level=logging.INFO,
+            format='[%(asctime)s] {%(filename)s:%(lineno)d} %(levelname)s - %(message)s',
+            handlers=handlers
+            )
+    logger = logging.getLogger(name=name)
+    return logger
+
+
 def process_gridsearch_results(GridSearchCV):
     import xarray as xr
     import pandas as pd
