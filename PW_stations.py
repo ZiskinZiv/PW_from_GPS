@@ -25,6 +25,21 @@ stations = pd.read_csv('All_gps_stations.txt', header=0, delim_whitespace=True,
 # TODO: fix somehow the discontinuety daily problem in zwd gipsy runs
 
 
+def analyze_missing_rinex_files(path):
+    from aux_gps import get_timedate_from_rinex
+    import pandas as pd
+    dt_list = []
+    for file in path.glob('*.Z'):
+        filename = file.as_posix().split('/')[-1][:-2]
+        dt = get_timedate_from_rinex(filename)
+        dt_list.append(dt)
+    dt_list = sorted(dt_list)
+    true = pd.date_range(dt_list[0], dt_list[-1], freq='1D')
+    # df = pd.DataFrame(dt_list, columns=['downloaded'], index=true)
+    dif = true.difference(dt_list)
+    return dif
+
+
 def gipsyx_runs_error_analysis(path):
     from collections import Counter
 
