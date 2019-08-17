@@ -84,7 +84,9 @@ def gipsyx_runs_error_analysis(path):
             bad,
             good,
             bad))
-    return counted_errors
+    errors_sorted = sorted(counted_errors.items(), key=lambda x: x[1],
+                           reverse=True)
+    return errors_sorted
 
 
 def read_one_station_gipsyx_results(path=work_yuval, plot=False):
