@@ -26,12 +26,12 @@ stations = pd.read_csv('All_gps_stations.txt', header=0, delim_whitespace=True,
 
 
 def analyze_missing_rinex_files(path):
-    from aux_gps import get_timedate_from_rinex
+    from aux_gps import get_timedate_and_station_code_from_rinex
     import pandas as pd
     dt_list = []
     for file in path.glob('*.Z'):
         filename = file.as_posix().split('/')[-1][:-2]
-        dt = get_timedate_from_rinex(filename)
+        dt, _ = get_timedate_and_station_code_from_rinex(filename)
         dt_list.append(dt)
     dt_list = sorted(dt_list)
     true = pd.date_range(dt_list[0], dt_list[-1], freq='1D')
@@ -42,6 +42,7 @@ def analyze_missing_rinex_files(path):
 
 def gipsyx_runs_error_analysis(path):
     from collections import Counter
+    from aux_gps import get_timedate_and_station_code_from_rinex
 
     def further_filter(counter):
         return c
@@ -56,7 +57,8 @@ def gipsyx_runs_error_analysis(path):
             err = [x for x in content_list if 'Error' in x]
             errors = keys + vals + excpt + err
         if not errors:
-            print('found new error on {}'.format(name))
+            dt, _ = get_timedate_and_station_code_from_rinex(name)
+            print('found new error on {} ({})'.format(name,  dt.strftime('%Y-%m-%d')))
         return errors
     edict = {}
     good = 0
@@ -76,6 +78,10 @@ def gipsyx_runs_error_analysis(path):
                 bad += 1
             else:
                 good += 1
+    g = [get_timedate_and_station_code_from_rinex(x) for x in edict.keys()]
+    dts = [x[0] for x in g]
+    df = pd.DataFrame(data=edict.values(), index=dts)
+    df = df.sort_index()
     flat_list = [item for sublist in edict.values() for item in sublist]
     counted_errors = Counter(flat_list)
     print(
@@ -86,7 +92,7 @@ def gipsyx_runs_error_analysis(path):
             bad))
     errors_sorted = sorted(counted_errors.items(), key=lambda x: x[1],
                            reverse=True)
-    return errors_sorted
+    return errors_sorted, df
 
 
 def read_one_station_gipsyx_results(path=work_yuval, plot=False):
