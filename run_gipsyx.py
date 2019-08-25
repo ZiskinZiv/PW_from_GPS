@@ -69,12 +69,19 @@ def run_gipsyx_for_station(rinexpath, savepath, staDb=None):
             command = 'gd2e.py -rnxFile {} > {}.log 2>{}.err'.format(
                 file_and_path.as_posix(), filename, filename)
         else:
-            command0 = 'rnxEditGde.py -data {} -type rinex -out {} -staDb {} > {}.rnxEditlog 2>{}.rnxEditlog_err'.format(
+            command0 = 'rnxEditGde.py -data {} -type rinex -out {} -staDb {} > {}_rnxEdit.log 2>{}_rnxEdit.err'.format(
                 file_and_path.as_posix(), dr_path.as_posix(), staDb.as_posix(), filename, filename)
+            orig_rnxedit_paths = ['{}_rnxEdit.log'.format(station), '{}_rnxEdit.err'.format(station)]
+            orig_paths = [Path.cwd() / x for x in orig_rnxedit_paths]
+            dest_paths = [savepath / x for x in orig_rnxedit_paths]
             try:
                 subprocess.run(command0, shell=True, check=True)
+                for orig, dest in zip(orig_paths, dest_paths):
+                    shutil.move(orig.resolve(), dest.resolve())
             except:
                 logger.warning('rnxEditGde.py failed on {}, copying log files.'.format(filename))
+                for orig, dest in zip(orig_paths, dest_paths):
+                    shutil.move(orig.resolve(), dest.resolve())
                 continue
             command = 'gd2e.py -drEditedFile {} -recList {} -staDb {} > {}.log 2>{}.err'.format(
                 dr_path.as_posix(), station, staDb.as_posix(), filename, filename)
