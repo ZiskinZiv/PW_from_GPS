@@ -1,0 +1,264 @@
+Instructions for filling out IGS site logs
+Nov 2018
+
+See log form at ftp://igs.org/pub/station/general/blank.log
+
+General
+=======
+
+Please prepare site logs in plain ASCII.
+
+Line length is limited to 80 characters.
+
+When ready, submit site logs by sending as a plain text 
+email message to support@igs.org.  Site logs are usually  
+handled by the CB within about one business day.
+
+Date and time formats within the site log follow the basic format 
+"CCYY-MM-DDThh:mmZ" from  ISO 8061; see
+http://www.iso.ch/iso/en/prods-services/popstds/datesandtime.html
+As a summary, CC=2 digit century
+              YY=2 digit year
+              MM=2 digit month
+              DD=2 digit day of month
+              T=date/time separator
+              hh=2 digit hour
+              mm=2 digit minutes of hour
+              Z=UTC indicator
+              /=separator when begin & end times are given
+
+A date without a time is specified like "2003-07-30", not "2003-07-30Thh:mmZ"
+
+Latitude/Longitude formats are aligned to ISO 6709:
+  Lat:  +/-DDMMSS.SS
+  Long: +/-DDDMMSS.SS
+A + or - sign is required.  Leading zeroes must be used as appropriate
+to maintain the DDMMSS and DDDMMSS format.
+
+Valid latitude range is -90 degrees to +90 degrees.
+Valid longitude range is from -180 degrees to (infinitesmally less than) +180
+degrees.
+
+"etc" indicates you may enter any relevant answer, not just a choice 
+ofthe suggestions shown.
+
+"F7.4," "A4" and so on indicate the  FORTRAN-style format which the 
+response should have.
+     Example     12345.7 = F7.1
+                    ABCD = A4
+
+Blocks which have a "N.x" definition (namely sections 3-10) should 
+always have the complete historic set of information; when a change is 
+made, the previous information is left (for example in section 3.1) 
+and the new information is placed in a new block numbered 3.2.  Please 
+leave the .x  sections uncompleted to remind yourself of the format 
+when the next change occurs.  
+
+Please remove the response hints  such as "(F7.4 N/S)" as you fill out 
+the log (except in the .x sections and Date Removed fields for 
+currently installed equipment, which you will not alter).  If an
+answer in an optional field is unknown, try to learn the answer for 
+the next log update.  
+
+If you have any questions not answered here, please feel free to 
+contact the IGS Central Bureau:support@igs.org
+
+Special Instructions  by section
+================================
+
+0.   Form
+-----------
+
+If Update:
+Previous Site Log       : (ssss_CCYYMMDD.log)
+     If the site already has a log at the IGS Central Bureau, enter 
+     the filename currently found under 
+     ftp://igs.org/pub/station/log/     
+     ssss = 4 character site name
+
+If Update:
+Modified/Added Sections : (n.n,n.n,...)
+     Enter the sections which have changed from the previous version 
+     of the  log.  Example: 3.2, 4.2
+
+1.   Site Identification of the GNSS Monument
+---------------------------------------------
+
+IERS DOMES Number        : (A9)
+     This is strictly required.  See 
+     http://itrf.ensg.ign.fr/domes_request.php to obtain one.
+
+Monument Description     : (PILLAR/BRASS PLATE/STEEL MAST/FICTIVE/etc)
+     Enter one or more elements as necessary to describe the monument.
+
+Additional Information   : (multiple lines)
+     Suggestions: electrical isolation
+
+2. Site Location Information
+-----------------------------
+
+Approximate Position (ITRF)
+     This should be to a one meter precision.
+     The elevation may be given to more decimal places than F7.1.  7.1 is a
+        minimum for the SINEX format.
+     
+3.  GNSS Receiver Information
+--------------------------------------
+
+Receiver Type            : (A20, from rcvr_ant.tab; see instructions)
+     Please find your receiver in 
+     ftp://igs.org/pub/station/general/rcvr_ant.tab and use 
+     the official name, taking care to get capital letters, hyphens, 
+     etc. exactly correct.  If you do not find a listing for your 
+     receiver, please notify the IGS Central Bureau 
+     (support@igs.org).
+
+Satellite System         : (GPS+GLO+GAL+BDS+QZSS+SBAS)
+     Indicates what the receiver is currently tracking with the installed firmware.
+     Acronyms can be found in the rcvr_ant.tab standard.
+
+Serial Number            : (A20)
+     Keep the 5 significant characters of the serial number field in 
+     SINEX in mind: do not enter "S/N 12345" instead of "12345" since 
+     valuable information will be lost.
+
+Firmware Version         : (A11)
+     Keep the 11 significant characters of the field in SINEX in mind.
+
+ Elevation Cutoff Setting : (deg)
+     Please respond with the tracking cutoff as set in the receiver, 
+     regardless of terrain or obstructions in the area.
+
+Temperature Stabiliz.    : (none or tolerance in degrees C.)
+     This refers to the temperature of the room in which the receiver 
+     is housed.
+
+Date Removed             : (CCYY-MM-DDThh:mmZ)
+     In the block for the receiver currently in operation, leave this 
+     line as is to remind yourself of the format when the next receiver 
+     change is made.
+
+4.   GNSS Antenna Information
+---------------------------------------
+
+Antenna Type             : (A20 from rcvr_ant.tab; see instructions)
+     Please find your antenna in 
+     ftp://igs.org/pub/station/general/rcvr_ant.tab and 
+     use the official name, taking care to get capital letters, hyphens, 
+     etc. exactly correct.  If you do not find a listing for your 
+     antenna, please notify the IGS Central Bureau 
+     (support@igs.org).  Please do not use antenna names from a 
+     "Previously valid" section.  Choose the corresponding new antenna 
+     name instead.  The radome code from rcvr_ant.tab must be indicated
+     in columns 17-20 of the Antenna Type, use "NONE" if no radome is
+     installed.
+
+     The antenna+radome pair must have an entry in
+     ftp://igs.org/pub/station/general/igs08.atx with zenith-
+     and azimuth-dependent calibration values down to the horizon. If not,
+     notify the CB.  
+
+Serial Number            : (A20)
+     Keep the 5 significant characters of the serial number field in 
+     SINEX in mind: do not enter "S/N 12345" instead of "12345" since 
+     valuable information will be lost.
+
+Antenna Reference Point  : (BPA/BCR/XXX from "antenna.gra"; see instructions)
+     Locate your antenna in the file 
+     ftp://igs.org/pub/station/general/antenna.gra 
+     Indicate the three-letter abbreviation for the point which is 
+     indicated equivalent to ARP for your antenna.  Contact the Central 
+     Bureau (support@igs.org) if your antenna does not appear.
+
+Marker->ARP Up Ecc. (m)  : (F8.4) 
+     This is the antenna height measured to an accuracy of 1mm 
+     and defined as the vertical distance of the ARP from the marker 
+     described in section 1.
+
+Marker->ARP North Ecc(m) : (F8.4)
+Marker->ARP East Ecc(m)  : (F8.4)
+     These must be filled in if nonzero.
+
+Alignment from True N    : (deg; + is clockwise/east)
+     The positive direction is clockwise, so that due east
+     would be equivalent to a response of "+90"
+
+Antenna Radome Type      : (A4 from rcvr_ant.tab; see instructions)
+     Place a Radome code from
+     ftp://igs.org/pub/station/general/rcvr_ant.tab here.  
+     "NONE" indicates there is no external radome.  If an antenna has
+     a cover which is integral and not ordinarily removable by the 
+     user, it is considered part of the antenna and "NONE" is to 
+     be used for the radome code. The radome code used here has to be
+     the same as the one in the columns 17-20 of the Antenna Type
+
+Date Removed             : (CCYY-MM-DDThh:mmZ)
+     In the block for the antenna currently in operation, leave this 
+     line as is to remind yourself of the format when the next antenna 
+     change is made.
+
+5.   Surveyed Local Ties
+-------------------------------------------------------------
+Local ties to other markers on the site should be determined in ITRF
+coordinates to 1mm precision in all 3 dimensions.  Offsets are given
+in geocentric Cartesian coordinates (ITRF). 
+
+8.   Meteorological Instrumentation
+-------------------------------------------------------------
+       Height Diff to Ant     : (m)
+Positive numbers indicate meteorological instrument is ABOVE GPS antenna.
+
+12.  Responsible Agency (if different from 11.)
+-------------------------------------------------------------
+The primary contacts listed here should always be the first choice for 
+questions about operation of the site.  This person will receive 
+automated emails regarding site log or RINEX errors and should be 
+someone who can answer  questions about the configuration and data 
+delivery for this site.
+
+13.  More Information
+-------------------------------------------------------------
+     Primary Data Center      :
+     Secondary Data Center    :
+Please list the DC where the station's data ordinarily goes first as
+"Primary."  Use "Secondary" either for a second location where
+the station's data always goes, or would go in the case of a
+long-term failure with the Primary DC.
+
+Select primary and secondary data centers via centers.html and enter
+the abbreviation of the DC name.  A geographically-
+or functionally- related center is generally preferred.  The secondary DC
+is where data would be sent if the primary were unavailable for an extended
+period.  The switchover does not need to be automated, but data transfer
+procedures should be verified.
+
+     URL for More Information : 
+This will be linked on the igscb's page for this site.  It is
+not necessary to include "http://". 
+
+Photos are mandatory. Send all available photos of antenna, radome, 
+placement and all relevant photos to the CB. Contact the CB if you have photos
+which cannot be hosted on a site web page.
+
+
+     Additional Information:
+Anything you feel is important.  Some possibilities to consider are:
+- Elevation mask table indicating physical mask effects such as
+ AZ   ELEV    AZ   ELEV    AZ   ELEV    AZ   ELEV
+ 10     8     20    12     30    10     40     8
+ 50     5     60    12     70     8     80     8
+ 90     5    100     5    110     5    120     5
+130     5    140     5    150     8    160     8
+170     5    180     3    190     5    200     8
+210     8    220     8    230     5    240     5
+250     5    260     8    270    10    280    12
+290    12    300    12    310    12    320     8
+330     5    340     5    350     8    360     8
+(This could also be kept at your local www site and referred to
+by URL in the log).
+
+
+ 
+
+
+
