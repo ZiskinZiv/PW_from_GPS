@@ -45,7 +45,7 @@ def run_gipsyx_for_station(rinexpath, savepath, staDb=None):
     from subprocess import CalledProcessError
     import logging
     import shutil
-    from aux_gps import get_timedate_from_rinex
+    from aux_gps import get_timedate_and_station_code_from_rinex
     logger = logging.getLogger('gipsyx')
     # first check for GCORE path:
     if len(get_var('GCORE')) == 0:
@@ -54,8 +54,12 @@ def run_gipsyx_for_station(rinexpath, savepath, staDb=None):
         logger.info('working with {}'.format(staDb))
     for file_and_path in rinexpath.glob('*.Z'):
         filename = file_and_path.as_posix().split('/')[-1][0:-2]
-        dt = get_timedate_from_rinex(filename)
-        logger.info('processing {} (dt)'.format(filename, dt.strftime('%Y-%m-%d')))
+        dt, station = get_timedate_and_station_code_from_rinex(filename)
+        dr_path = Path.cwd() / '{}_data.dr.gz'.format(station) 
+        logger.info(
+            'processing {} ({})'.format(
+                filename,
+                dt.strftime('%Y-%m-%d')))
 #        orig_final = Path.cwd() / 'smoothFinal.tdp'
         final_tdp = filename + '_smoothFinal.tdp'
         if (savepath / final_tdp).is_file():
@@ -63,11 +67,17 @@ def run_gipsyx_for_station(rinexpath, savepath, staDb=None):
             continue
         if staDb is None:
             command = 'gd2e.py -rnxFile {} > {}.log 2>{}.err'.format(
-                    file_and_path.as_posix(), filename, filename)
+                file_and_path.as_posix(), filename, filename)
         else:
-            command = 'gd2e.py -rnxFile {} -staDb {} > {}.log 2>{}.err'.format(
-                    file_and_path.as_posix(), staDb.as_posix(), filename,
-                    filename)
+            command0 = 'rnxEditGde.py -data {} -type rinex -out {} -staDb {} > {}.rnxEditlog 2>{}.rnxEditlog_err'.format(
+                file_and_path.as_posix(), dr_path.as_posix(), staDb.as_posix(), filename, filename)
+            try:
+                subprocess.run(command0, shell=True, check=True)
+            except:
+                logger.warning('rnxEditGde.py failed on {}, copying log files.'.format(filename))
+                continue
+            command = 'gd2e.py -drEditedFile {} -recList {} -staDb {} > {}.log 2>{}.err'.format(
+                dr_path.as_posix(), station, staDb.as_posix(), filename, filename)
         orig_filenames = [
                 filename + '.err',
                 filename + '.log',
