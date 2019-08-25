@@ -8,16 +8,16 @@ Created on Mon Jun 10 14:33:19 2019
 from PW_paths import work_yuval
 
 
-def get_timedate_from_rinex(rinex_str='tela0010.05d'):
+def get_timedate_and_station_code_from_rinex(rinex_str='tela0010.05d'):
     """return datetime from rinex2 format"""
     import pandas as pd
     import datetime
     station = rinex_str[0:4]
     days = int(rinex_str[4:7])
     year = rinex_str[-3:-1]
-    Year = datetime.datetime.strptime(year,'%y').strftime('%Y')
+    Year = datetime.datetime.strptime(year, '%y').strftime('%Y')
     dt = datetime.datetime(int(Year), 1, 1) + datetime.timedelta(days - 1)
-    return pd.to_datetime(dt)
+    return pd.to_datetime(dt), station.upper()
 
 
 def configure_logger(name='general', filename=None):
