@@ -43,6 +43,7 @@ def run_gipsyx_for_station(rinexpath, savepath, staDb=None):
     from pathlib import Path
     import subprocess
     from subprocess import CalledProcessError
+    from subprocess import TimeoutExpired
     import logging
     import shutil
     from aux_gps import get_timedate_and_station_code_from_rinex
@@ -90,11 +91,15 @@ def run_gipsyx_for_station(rinexpath, savepath, staDb=None):
                 filename + '.log',
                 'smoothFinal.tdp']
         try:
-            subprocess.run(command, shell=True, check=True)
+            subprocess.run(command, shell=True, check=True, timeout=600)
             orig_filenames_paths = [Path.cwd() / x for x in orig_filenames]
             dest_filenames = [filename + '.err', filename + '.log', final_tdp]
         except CalledProcessError:
             logger.warning('gipsyx failed on {}, copying log files.'.format(filename))
+            orig_filenames_paths = [Path.cwd() / x for x in orig_filenames[0:2]]
+            dest_filenames = [filename + '.err', filename + '.log']
+        except TimeoutExpired:
+            logger.warning('gipsyx timed out on {}, copying log files.'.format(filename))
             orig_filenames_paths = [Path.cwd() / x for x in orig_filenames[0:2]]
             dest_filenames = [filename + '.err', filename + '.log']
         dest_filenames_paths = [savepath / x for x in dest_filenames]
