@@ -71,7 +71,7 @@ def run_gipsyx_for_station(rinexpath, savepath, staDb=None):
         else:
             command0 = 'rnxEditGde.py -data {} -type rinex -out {} -staDb {} > {}_rnxEdit.log 2>{}_rnxEdit.err'.format(
                 file_and_path.as_posix(), dr_path.as_posix(), staDb.as_posix(), filename, filename)
-            orig_rnxedit_paths = ['{}_rnxEdit.log'.format(filename), '{}_rnxEdit.err'.format(station)]
+            orig_rnxedit_paths = ['{}_rnxEdit.log'.format(filename), '{}_rnxEdit.err'.format(filename)]
             orig_paths = [Path.cwd() / x for x in orig_rnxedit_paths]
             dest_paths = [savepath / x for x in orig_rnxedit_paths]
             try:
