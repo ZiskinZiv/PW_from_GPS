@@ -41,6 +41,7 @@ def analyze_missing_rinex_files(path):
 
 
 def gipsyx_runs_error_analysis(path):
+    # TODO: fix rnxEdit errors
     from collections import Counter
     from aux_gps import get_timedate_and_station_code_from_rinex
 
@@ -64,7 +65,7 @@ def gipsyx_runs_error_analysis(path):
     good = 0
     bad = 0
     for file in path.glob('*.err'):
-        filename = file.as_posix().split('/')[-1][0:-4]
+        filename = file.as_posix().split('/')[-1][0:12]
         if good == 0 and bad == 0:
             print('running error analysis for station {}'.format(filename[0:4]))
         with open(file) as f:
