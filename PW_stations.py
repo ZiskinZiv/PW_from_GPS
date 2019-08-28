@@ -25,23 +25,51 @@ stations = pd.read_csv('All_gps_stations.txt', header=0, delim_whitespace=True,
 # TODO: fix somehow the discontinuety daily problem in zwd gipsy runs
 
 
-def analyze_missing_rinex_files(path):
+def analyze_missing_rinex_files(path, savepath=None):
     from aux_gps import get_timedate_and_station_code_from_rinex
+    from aux_gps import datetime_to_rinex_filename
     import pandas as pd
     dt_list = []
     for file in path.glob('*.Z'):
         filename = file.as_posix().split('/')[-1][:-2]
-        dt, _ = get_timedate_and_station_code_from_rinex(filename)
+        dt, station = get_timedate_and_station_code_from_rinex(filename)
         dt_list.append(dt)
     dt_list = sorted(dt_list)
     true = pd.date_range(dt_list[0], dt_list[-1], freq='1D')
     # df = pd.DataFrame(dt_list, columns=['downloaded'], index=true)
     dif = true.difference(dt_list)
-    return dif
+    dts = [datetime_to_rinex_filename(station, x) for x in dif]
+    df_missing = pd.DataFrame(data=dts, index=dif.strftime('%Y-%m-%d'),
+                              columns=['filenames'])
+    df_missing.index.name = 'dates'
+    if savepath is not None:
+        filename = station + '_missing_rinex_files.txt'
+        df_missing.to_csv(savepath / filename)
+        print('{} was saved to {}'.format(filename, savepath))
+    return df_missing
+
+
+def gipsyx_rnxedit_errors(df1, savepath=None):
+    """get the df output of gipsyx_runs_error_analysis and map out the reciever
+    error analysis using regex and print the output"""
+    df = df1.copy()
+    error_col = df.columns.values.item()
+    df['receiver'] = df[error_col].str.findall(r"'(.*?)'")
+    df['receiver'] = [x[0] if x is not None else None for x in df['receiver']]
+    text = [df.loc[i, error_col]
+            for i in df.index if df.loc[i, error_col] is not None][0]
+    station = error_col.split('_')[0]
+    if savepath is not None:
+        filename = station + '_rnxEdit_errors.txt'
+        with open(savepath / filename, 'a') as f:
+            f.write("%s\n" % text)
+            f.write("dataframe: \n")
+            df['receiver'].to_csv(f)
+            print('{} was saved to {}'.format(filename, savepath))
+    return df
 
 
 def gipsyx_runs_error_analysis(path):
-    # TODO: fix rnxEdit errors
     from collections import Counter
     from aux_gps import get_timedate_and_station_code_from_rinex
 
@@ -81,8 +109,11 @@ def gipsyx_runs_error_analysis(path):
                 good += 1
     g = [get_timedate_and_station_code_from_rinex(x) for x in edict.keys()]
     dts = [x[0] for x in g]
+    station = [x[1] for x in g][0]
     df = pd.DataFrame(data=edict.values(), index=dts)
     df = df.sort_index()
+    len_er = len(df.columns)
+    df.columns = [station + '_errors_' + str(i) for i in range(len_er)]
     flat_list = [item for sublist in edict.values() for item in sublist]
     counted_errors = Counter(flat_list)
     print(
