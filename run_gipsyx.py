@@ -77,8 +77,8 @@ def run_gipsyx_for_station(rinexpath, savepath, staDb=None):
             dest_paths = [savepath / x for x in orig_rnxedit_paths]
             try:
                 subprocess.run(command0, shell=True, check=True)
-                for orig, dest in zip(orig_paths, dest_paths):
-                    shutil.move(orig.resolve(), dest.resolve())
+#                for orig, dest in zip(orig_paths, dest_paths):
+#                    shutil.move(orig.resolve(), dest.resolve())
             except:
                 logger.warning('rnxEditGde.py failed on {}, copying log files.'.format(filename))
                 for orig, dest in zip(orig_paths, dest_paths):
