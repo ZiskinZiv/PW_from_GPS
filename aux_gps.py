@@ -8,6 +8,21 @@ Created on Mon Jun 10 14:33:19 2019
 from PW_paths import work_yuval
 
 
+def datetime_to_rinex_filename(station='tela', dt='2012-05-07'):
+    """return rinex filename from datetime string"""
+    import pandas as pd
+    day = pd.to_datetime(dt, format='%Y-%m-%d').dayofyear
+    year = pd.to_datetime(dt, format='%Y-%m-%d').year
+    if len(str(day)) == 1:
+        str_day = '00' + str(day) + '0'
+    elif len(str(day)) == 2:
+        str_day = '0' + str(day) + '0'
+    elif len(str(day)) == 3:
+        str_day = str(day) + '0'
+    filename = station.lower() + str_day + '.' + str(year)[2:4] + 'd'
+    return filename
+    
+
 def get_timedate_and_station_code_from_rinex(rinex_str='tela0010.05d'):
     """return datetime from rinex2 format"""
     import pandas as pd
