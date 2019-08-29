@@ -49,91 +49,184 @@ def analyze_missing_rinex_files(path, savepath=None):
     return df_missing
 
 
-def gipsyx_rnxedit_errors(df1, savepath=None):
-    """get the df output of gipsyx_runs_error_analysis and map out the reciever
-    error analysis using regex and print the output"""
-    df = df1.copy()
-    error_col = df.columns.values.item()
-    df['receiver'] = df[error_col].str.findall(r"'(.*?)'")
-    df['receiver'] = [x[0] if x is not None else None for x in df['receiver']]
-    text = [df.loc[i, error_col]
-            for i in df.index if df.loc[i, error_col] is not None][0]
-    station = error_col.split('_')[0]
-    if savepath is not None:
-        filename = station + '_rnxEdit_errors.txt'
-        with open(savepath / filename, 'a') as f:
-            f.write("%s\n" % text)
-            f.write("dataframe: \n")
-            df['receiver'].to_csv(f)
-            print('{} was saved to {}'.format(filename, savepath))
-    return df
+#def gipsyx_rnxedit_errors(df1, savepath=None):
+#    """get the df output of gipsyx_runs_error_analysis and map out the reciever
+#    error analysis using regex and print the output"""
+#    df = df1.copy()
+#    error_col = df.columns.values.item()
+#    df['receiver'] = df[error_col].str.findall(r"'(.*?)'")
+#    df['receiver'] = [x[0] if x is not None else None for x in df['receiver']]
+#    text = [df.loc[i, error_col]
+#            for i in df.index if df.loc[i, error_col] is not None][0]
+#    station = error_col.split('_')[0]
+#    if savepath is not None:
+#        filename = station + '_rnxEdit_errors.txt'
+#        with open(savepath / filename, 'a') as f:
+#            f.write("%s\n" % text)
+#            f.write("dataframe: \n")
+#            df['receiver'].to_csv(f)
+#            print('{} was saved to {}'.format(filename, savepath))
+#    return df
+
+
+#def gipsyx_runs_error_analysis(path):
+#    from collections import Counter
+#    from aux_gps import get_timedate_and_station_code_from_rinex
+#
+#    def further_filter(counter):
+#        return c
+#
+#    def find_errors(content_list, name):
+#        if len(content_list) <= 1:
+#            return None
+#        elif len(content_list) > 1:
+#            keys = [x for x in content_list if 'KeyError' in x]
+#            vals = [x for x in content_list if 'ValueError' in x]
+#            excpt = [x for x in content_list if 'Exception' in x]
+#            err = [x for x in content_list if 'Error' in x]
+#            errors = keys + vals + excpt + err
+#        if not errors:
+#            dt, _ = get_timedate_and_station_code_from_rinex(name)
+#            print('found new error on {} ({})'.format(name,  dt.strftime('%Y-%m-%d')))
+#        return errors
+#    edict = {}
+#    good = 0
+#    bad = 0
+#    for file in path.glob('*.err'):
+#        filename = file.as_posix().split('/')[-1][0:12]
+#        if good == 0 and bad == 0:
+#            print('running error analysis for station {}'.format(filename[0:4]))
+#        with open(file) as f:
+#            content = f.readlines()
+#            # you may also want to remove whitespace characters like `\n` at
+#            # the end of each line
+#            content = [x.strip() for x in content]
+#            errors = find_errors(content, filename)
+#            if errors is not None:
+#                edict[filename] = list(set(errors))
+#                bad += 1
+#            else:
+#                good += 1
+#    g = [get_timedate_and_station_code_from_rinex(x) for x in edict.keys()]
+#    dts = [x[0] for x in g]
+#    station = [x[1] for x in g][0]
+#    df = pd.DataFrame(data=edict.values(), index=dts)
+#    df = df.sort_index()
+#    len_er = len(df.columns)
+#    df.columns = [station + '_errors_' + str(i) for i in range(len_er)]
+#    flat_list = [item for sublist in edict.values() for item in sublist]
+#    counted_errors = Counter(flat_list)
+#    print(
+#        'total files: {}, good runs: {}, bad runs: {}'.format(
+#            good +
+#            bad,
+#            good,
+#            bad))
+#    errors_sorted = sorted(counted_errors.items(), key=lambda x: x[1],
+#                           reverse=True)
+#    return errors_sorted, df
 
 
 def gipsyx_runs_error_analysis(path):
     from collections import Counter
     from aux_gps import get_timedate_and_station_code_from_rinex
-
-    def further_filter(counter):
-        return c
-
+    import pandas as pd
+    
     def find_errors(content_list, name):
-        if len(content_list) <= 1:
-            return None
-        elif len(content_list) > 1:
-            keys = [x for x in content_list if 'KeyError' in x]
-            vals = [x for x in content_list if 'ValueError' in x]
-            excpt = [x for x in content_list if 'Exception' in x]
-            err = [x for x in content_list if 'Error' in x]
-            errors = keys + vals + excpt + err
+        keys = [x for x in content_list if 'KeyError' in x]
+        vals = [x for x in content_list if 'ValueError' in x]
+        excpt = [x for x in content_list if 'Exception' in x]
+        err = [x for x in content_list if 'Error' in x]
+        trouble = [x for x in content_list if 'Trouble' in x]
+        problem = [x for x in content_list if 'Problem' in x]
+        fatal = [x for x in content_list if 'FATAL' in x]
+        timed = [x for x in content_list if 'Timed' in x]
+        errors = keys + vals + excpt + err + trouble + problem + fatal + timed
         if not errors:
             dt, _ = get_timedate_and_station_code_from_rinex(name)
             print('found new error on {} ({})'.format(name,  dt.strftime('%Y-%m-%d')))
         return errors
-    edict = {}
-    good = 0
-    bad = 0
+
+    rfns = []
+    for file in path.glob('*.tdp'):
+        # first get all the rinex filenames that gipsyx ran successfuly:
+        rfn = file.as_posix().split('/')[-1][0:12]
+        rfns.append(rfn)
+    print('running error analysis for station {}'.format(rfn[0:4].upper()))
+    all_errors = []
+    errors = []
+    dates = []
     for file in path.glob('*.err'):
-        filename = file.as_posix().split('/')[-1][0:12]
-        if good == 0 and bad == 0:
-            print('running error analysis for station {}'.format(filename[0:4]))
-        with open(file) as f:
-            content = f.readlines()
-            # you may also want to remove whitespace characters like `\n` at
-            # the end of each line
-            content = [x.strip() for x in content]
-            errors = find_errors(content, filename)
-            if errors is not None:
-                edict[filename] = list(set(errors))
-                bad += 1
-            else:
-                good += 1
-    g = [get_timedate_and_station_code_from_rinex(x) for x in edict.keys()]
-    dts = [x[0] for x in g]
-    station = [x[1] for x in g][0]
-    df = pd.DataFrame(data=edict.values(), index=dts)
+        rfn = file.as_posix().split('/')[-1][0:12]
+        # now, filter the error files that were copyed but there is tdp file
+        # i.e., the gipsyx run was successful:
+        if rfn in rfns:
+            continue
+        else:
+            dt, _ = get_timedate_and_station_code_from_rinex(rfn)
+            dates.append(dt)
+            with open(file) as f:
+                content = f.readlines()
+                # you may also want to remove whitespace characters like `\n` at
+                # the end of each line
+                content = [x.strip() for x in content]
+                all_errors.append(content)
+                errors.append(find_errors(content, rfn))
+    er = [','.join(x) for x in all_errors]
+    df = pd.DataFrame(data=er, index=dates)
     df = df.sort_index()
-    len_er = len(df.columns)
-    df.columns = [station + '_errors_' + str(i) for i in range(len_er)]
-    flat_list = [item for sublist in edict.values() for item in sublist]
+    total = len(rfns) + len(df)
+    good = len(rfns)
+    bad = len(df)
+    print('total files: {}, successful runs: {}, errornous runs: {}'.format(
+            total, good, bad))
+    print('success percent: {0:.1f}%'.format(100.0 * good / total))
+    print('error percent: {0:.1f}%'.format(100.0 * bad / total))
+    # now count the similar errors and sort:
+    flat_list = [item for sublist in errors for item in sublist]
     counted_errors = Counter(flat_list)
-    print(
-        'total files: {}, good runs: {}, bad runs: {}'.format(
-            good +
-            bad,
-            good,
-            bad))
     errors_sorted = sorted(counted_errors.items(), key=lambda x: x[1],
                            reverse=True)
     return errors_sorted, df
 
 
-def read_one_station_gipsyx_results(path=work_yuval, plot=False):
+def read_one_station_gipsyx_results(path=work_yuval, savepath=None,
+                                    plot=False):
+    """read one station (all years) consisting of many tdp files"""
+    from scipy import stats
+    import numpy as np
     df_list = []
-    for tdp_file in sorted(path.glob('*.tdp')):
-        print(tdp_file)
-        df, _ = process_one_day_gipsyx_output(tdp_file)
+    errors = []
+    print('reading folder:{}'.format(path))
+    for tdp_file in path.glob('*.tdp'):
+        rfn = tdp_file.as_posix().split('/')[-1][0:12]
+        station = rfn[0:4].upper()
+        print(rfn)
+        try:
+            df, meta = process_one_day_gipsyx_output(tdp_file)
+        except TypeError:
+            print('problem reading {}, appending to errors...'.format(rfn))
+            errors.append(rfn)
+            continue
         df_list.append(df)
+    # concat and sort:
     df_all = pd.concat(df_list)
+    df_all = df_all.sort_index()
+    df_all.index.name = 'time'
+    # filter out negative values:
+    df_all = df_all[df_all > 0]
+    # filter outlies (zscore>3):
+    df_all = df_all[(np.abs(stats.zscore(df_all)) < 3).all(axis=1)]
+    # filter out constant values:
+    df_all['value_grp'] = df_all.zwd.diff(1)
+    df_all = df_all[np.abs(df_all['value_grp']) > 1e-7]
+    ds = df_all.to_xarray()
+    ds = ds.drop('value_grp')
+    ds.attrs['station'] = station
+    ds.attrs['lat'] = meta['lat']
+    ds.attrs['lon'] = meta['lon']
+    ds.attrs['alt'] = meta['alt']
+    ds.attrs['units'] = 'cm'
     if plot:
         ax = df_all['zwd'].plot(legend=True, figsize=(12, 7), color='k')
         ax.fill_between(df_all.index, df_all['zwd'] - df_all['error'],
@@ -141,7 +234,13 @@ def read_one_station_gipsyx_results(path=work_yuval, plot=False):
         ax.grid()
         ax.set_title('Zenith Wet Delay')
         ax.set_ylabel('[cm]')
-    return df_all
+    if savepath is not None:
+        ymin = ds.time.min().dt.year.item()
+        ymax = ds.time.max().dt.year.item()
+        filename = station + '_zwd_' + ymin + '-' + ymax + '.nc'
+        ds.to_netcdf(savepath / filename, 'w')
+        print('{} was saved to {}'.format(filename, savepath))
+    return ds, errors
 
 
 def process_one_day_gipsyx_output(path_and_file=work_yuval / 'smoothFinal.tdp',
