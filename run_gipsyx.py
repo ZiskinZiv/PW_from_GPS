@@ -2,12 +2,34 @@
 # -*- coding: utf-8 -*-
 """
 Created on Sun Aug 11 13:58:05 2019
-
+Methodology:
+    0) run code with --prep drdump on all rinex files
+    1) run code with either --prep edit24hr or --prep edit30hr on all
+    datarecords files
+    2) run code with --gd2e 30hr or --gd2e 24hr for either solve ppp on 24hr
+    folder or 30hr folder
 @author: ziskin
 """
 
 
-def read_organize_rinex(path):
+def move_files(path_orig, path_dest, files):
+    """move files (a list containing the file names) and move them from
+    path_orig to path_dest"""
+    import shutil
+    orig_filenames_paths = [path_orig / x for x in files]
+    dest_filenames_paths = [path_dest / x for x in files]
+    sizes = [x.stat().st_size for x in orig_filenames_paths]
+    # delete files if size =0:
+    for orig, dest, size in zip(
+            orig_filenames_paths, dest_filenames_paths, sizes):
+        if size == 0:
+            orig.resolve().unlink()
+        else:
+            shutil.move(orig.resolve(), dest.resolve())
+    return
+
+
+def read_organize_rinex(path, glob_str='*.Z'):
     """read and organize the rinex file names for 30 hour run"""
     from aux_gps import get_timedate_and_station_code_from_rinex
     import pandas as pd
@@ -17,15 +39,16 @@ def read_organize_rinex(path):
     dts = []
     rfns = []
     logger.info('reading and organizing rinex files in {}'.format(path))
-    for file_and_path in path.glob('*.Z'):
+    for file_and_path in path.glob(glob_str):
         filename = file_and_path.as_posix().split('/')[-1][0:12]
         dt, station = get_timedate_and_station_code_from_rinex(filename)
         dts.append(dt)
         rfns.append(filename)
-    full_time = pd.date_range(dts[0], dts[-1], freq='1D')
+
     df = pd.DataFrame(data=rfns, index=dts)
-    df = df.reindex(full_time)
     df = df.sort_index()
+    full_time = pd.date_range(df.index[0], df.index[-1], freq='1D')
+    df = df.reindex(full_time)
     df.columns = ['rinex']
     df.index.name = 'time'
     df['30hr'] = np.nan
@@ -83,51 +106,145 @@ def check_file_in_cwd(filename):
     return file_and_path
 
 
-def prepare_gipsyx_for_run_one_station(rinexpath, staDb, hours):
-    """rinex editing and merging command-line utility, two main modes:
-        1)24hr run(single rinex file)
-        2)30hr run(3 consecutive rinex files"""
+def prepare_gipsyx_for_run_one_station(rinexpath, staDb, prep, rewrite):
+    """rinex editing and merging command-line utility, 3 values for prep:
+        0) drdump: run dataRecordDump on all rinex files in rinexpath
+        1) edit24hr: run rnxEditGde.py with staDb on all datarecords files in
+            rinexpath / dr, savethem to rinexpath / 24hr
+        2) edit30hr: run drMerge.py on 3 consecutive datarecords files in
+            rinexpath / dr (rnxEditGde.py with staDb on lonely datarecords files)
+            and then rnxEditGde.py with staDb on merged datarecords files,
+            save them to rinexpath / 30hr
+        rewrite: overwrite all files - supported with all modes of prep"""
     import subprocess
     from subprocess import CalledProcessError
     import logging
-    import numpy as np
-    from aux_gps import get_timedate_and_station_code_from_rinex
+    import pandas as pd
+    from itertools import count
+    from pathlib import Path
+
+    def run_dataRecorDump_on_all_files(rinexpath, dr_path, rewrite):
+        try:
+            dr_path.mkdir()
+        except FileExistsError:
+            logger.info(
+                '{} already exists, using that folder.'.format(dr_path))
+        for file_and_path in rinexpath.glob('*.Z'):
+            filename = file_and_path.as_posix().split('/')[-1][0:12]
+            dr_file = dr_path / '{}.dr.gz'.format(filename)
+            if not rewrite:
+                if (dr_file).is_file():
+                    logger.warning(
+                        '{} already exists in {}, skipping...'.format(
+                            filename + '.dr.gz', dr_path))
+                    continue
+            logger.info('processing {}'.format(filename))
+            files_to_move = [filename + x for x in ['.log', '.err']]
+            command = 'dataRecordDump -rnx {} -drFileNmOut {} > {}.log 2>{}.err'.format(
+                file_and_path.as_posix(), dr_file.as_posix(), filename, filename)
+            try:
+                subprocess.run(command, shell=True, check=True)
+                next(succ)
+            except CalledProcessError:
+                logger.error('dataRecordDump failed on {}...'.format(filename))
+                next(failed)
+            move_files(Path().cwd(), dr_path, files_to_move)
+        return
+
+    def run_rnxEditGde(filename, dr_path, hr24, suffix=24, rewrite):
+        rfn = filename[0:12]
+        station = rfn[0:4].upper()
+        dr_edited_file = hr24 / '{}_edited{}hr.dr.gz'.format(rfn, suffix)
+        file_and_path = dr_path / filename
+        if not rewrite:
+            if (dr_edited_file).is_file():
+                logger.warning(
+                    '{} already exists in {}, skipping...'.format(
+                        filename + '_edited24hr.dr.gz', hr24))
+                return
+        logger.info('processing {} ({})'.format(filename,
+                                                date.strftime('%Y-%m-%d')))
+        files_to_move = [rfn + x for x in ['.log', '.err']]
+        command = 'rnxEditGde.py -type datarecord -recNm {} -data {} -out {} -staDb {} > {}.log 2>{}.err'.format(
+            station, file_and_path.as_posix(), dr_edited_file.as_posix(), staDb.as_posix(), rfn, rfn)
+        try:
+            subprocess.run(command, shell=True, check=True)
+            next(succ)
+        except CalledProcessError:
+            next(failed)
+            logger.error('rnxEditGde.py failed on {}...'.format(filename))
+        move_files(Path().cwd(), hr24, files_to_move)
+        return
+
+    def run_30hr_drMerge(rfns, dr_path, hr30, rewrite):
+        from aux_gps import get_timedate_and_station_code_from_rinex
+        dts = [get_timedate_and_station_code_from_rinex(x, True) for x in rfns]
+        return
     logger = logging.getLogger('gipsyx')
     # first check for GCORE path:
     if len(get_var('GCORE')) == 0:
         raise ValueError('Run ~/GipsyX-1.1/rc_GipsyX.sh first !')
     logger.info(
-        'starting rinex editing/merging utility for {} hours run.'.format(hours))
+        'starting preparation utility utility for gipsyX run.')
     logger.info('working with {}'.format(staDb))
+    if rewrite:
+        logger.warning('overwrite files mode initiated.')
     rinex_df = read_organize_rinex(rinexpath)
-    if hours == '24':
+    succ = count(1)
+    failed = count(1)
+    # rinex_df = rinex_df.fillna(999)
+    dr_path = rinexpath / 'dr'
+    if prep == 'drdump':
+        logger.info('running dataRecordDump for all files.')
+        run_dataRecorDump_on_all_files(rinexpath, dr_path, rewrite)
+    elif prep == 'edit24hr':
+        logger.info('running rnxEditGde.py with 24hr setting for all files.')
+        hr24 = rinexpath / '24hr'
+        try:
+            hr24.mkdir()
+        except FileExistsError:
+            logger.info('{} already exists, using that folder.'.format(hr24))
         for date, row in rinex_df.iterrows():
             rfn = row['rinex']
-            if rfn == np.nan:
+            if pd.isna(rfn):
                 continue
-            dt, station = get_timedate_and_station_code_from_rinex(rfn)
-            hr24 = rinexpath / '24hr'
-            try:
-                hr24.mkdir()
-            except FileExistsError:
-                print('{} already exists, rewriting files...'.format(hr24))
-            dr_path = hr24 / '{}.dr.gz'.format(rfn)
-            filename = rfn + '.Z'
-            file_and_path = rinexpath / filename
-            logger.info('processing {} ({})'.format(filename,
-                                                    dt.strftime('%Y-%m-%d')))
-            command = 'rnxEditGde.py -data {} -out {} -staDb {} > {}.log 2>{}.err'.format(
-                file_and_path.as_posix(), dr_path.as_posix(), staDb.as_posix(), rfn, rfn)
-            try:
-                subprocess.run(command, shell=True, check=True)
-            except CalledProcessError:
-                logger.error('rnxEditGde.py failed on {}...'.format(filename))
+            filename = rfn + '.dr.gz'
+            run_rnxEditGde(filename, dr_path, hr24, rewrite)
+    elif prep == 'edit30hr':
+        logger.info(
+            'running drMerge.py/rnxEditGde.py with 30hr setting for all files(when available).')
+        hr30 = rinexpath / '30hr'
+        try:
+            hr30.mkdir()
+        except FileExistsError:
+            logger.info('{} already exists, using that folder.'.format(hr30))
+        for i, date in enumerate(rinex_df.index):
+            rfn = rinex_df.loc[date, 'rinex']
+            if pd.isna(rfn):
+                continue
+            if rinex_df.loc[date, '30hr'] == 0:
+                logger.warning(
+                    '{} is lonely, doing 24hr prep only...'.format(rfn))
+                run_rnxEditGde(rfn, dr_path, hr30, rewrite)
+            elif rinex_df.loc[date, '30hr'] == 1:
+                yesterday = rinex_df.index[i - 1]
+                tommorow = rinex_df.index[i + 1]
+                rfns = [rinex_df.loc[yesterday, 'rinex'],
+                        rfn, rinex_df.loc[tommorow, 'rinex']]
+                merged_file = run_30hr_drMerge(rfns, dr_path, hr30, rewrite)
+                run_rnxEditGde(merged_file, Path().cwd(), hr30, 30, rewrite)
+                # delete merged file
+                print('1')
     logger.info('Done!')
-    # elif hours == 30:
+    total = next(failed) + next(succ) - 2
+    succses = next(succ) - 2
+    failure = next(failed) - 2
+    logger.info('Total files: {}, success: {}, failed: {}'.format(
+            total, succses, failure))
     return
 
 
-def run_gipsyx_for_station(rinexpath, savepath, staDb, hours):
+def run_gipsyx_for_station(rinexpath, savepath, staDb, rewrite):
     """main running wrapper for gipsyX. two main modes:
         1)rnxEdit mode of 24hr run(single file)
         2)rnxEdit mode of 30hr run(three consecutive files)"""
@@ -203,6 +320,8 @@ def run_gipsyx_for_station(rinexpath, savepath, staDb, hours):
 
 
 if __name__ == '__main__':
+    """--prep: prepare mode
+        choices: 1) drdump 2) edit24hr 3) edit30hr"""
     import argparse
     import sys
     from aux_gps import configure_logger
@@ -224,23 +343,28 @@ if __name__ == '__main__':
         '--staDb',
         help='add a station DB file for antennas in rinexpath',
         type=check_file_in_cwd)
-    optional.add_argument('--edit', help='call only rinex merge/edit utility',
-                          choices=['True', 'False'], default=False)
-    optional.add_argument('--hours', help='either 24 or 30 hours gipsyX run/rinex merge/edit',
-                          choices=['24', '30'], default='24')
+    optional.add_argument('--prep', help='call rinex rnxEditGde/drMerge or dataRecorDump',
+                          choices=['drdump', 'edit24hr', 'edit30hr'], default='drdump')
+    optional.add_argument(
+            '--rewrite',
+            dest='rewrite',
+            action='store_true',
+            help='overwrite files in prep/run mode')
+
     parser._action_groups.append(optional)  # added this line
+    parser.set_defaults(rewrite=False)
     args = parser.parse_args()
     if args.rinexpath is None:
         print('rinexpath is a required argument, run with -h...')
         sys.exit()
     if args.staDb is None:
         args.staDb = '$GOA_VAR/sta_info/sta_db_qlflinn'
-    if args.edit == 'True':
+    if args.prep is not None:
         prepare_gipsyx_for_run_one_station(args.rinexpath, args.staDb,
-                                           args.hours)
+                                           args.prep, args.rewrite)
     else:
         if args.savepath is None:
             print('savepath is a required argument, run with -h...')
             sys.exit()
         run_gipsyx_for_station(args.rinexpath, args.savepath, args.staDb,
-                               args.hours)
+                               args.rewrite)
