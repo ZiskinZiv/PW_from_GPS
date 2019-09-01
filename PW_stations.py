@@ -10,11 +10,13 @@ import pandas as pd
 import numpy as np
 from PW_paths import work_yuval
 from PW_paths import work_path
+from PW_paths import geo_path
 
 garner_path = work_yuval / 'garner'
 ims_path = work_yuval / 'IMS_T'
 gis_path = work_yuval / 'gis'
 sound_path = work_yuval / 'sounding'
+rinex_on_geo = geo_path / 'Work_Files/PW_yuval/rinex'
 PW_stations_path = work_yuval / '1minute'
 stations = pd.read_csv('All_gps_stations.txt', header=0, delim_whitespace=True,
                        index_col='name')
@@ -24,6 +26,12 @@ stations = pd.read_csv('All_gps_stations.txt', header=0, delim_whitespace=True,
 # TODO: play with ts-tm modeling, various machine learning algos.
 # TODO: fix somehow the discontinuety daily problem in zwd gipsy runs
 
+# algorithm for zwd stitching of 30hrs gipsyx runs:
+# 1) get the time intersection of each two overlapping signals
+# 2) find the time(intersection point) of the minimum of the absolute overlapping signals residuals
+# 3) stitch the signal so the earlier signal begins up until the IP and then the latest signal
+# 4) repeat that until end, avoid lonly points
+# 5) what if they don't intersect ? (>threshhold)
 
 def analyze_missing_rinex_files(path, savepath=None):
     from aux_gps import get_timedate_and_station_code_from_rinex
@@ -127,7 +135,7 @@ def analyze_missing_rinex_files(path, savepath=None):
 #    return errors_sorted, df
 
 
-def gipsyx_runs_error_analysis(path):
+def gipsyx_runs_error_analysis(path, glob_str='*.tdp'):
     from collections import Counter
     from aux_gps import get_timedate_and_station_code_from_rinex
     import pandas as pd
@@ -148,7 +156,7 @@ def gipsyx_runs_error_analysis(path):
         return errors
 
     rfns = []
-    for file in path.glob('*.tdp'):
+    for file in path.glob(glob_str):
         # first get all the rinex filenames that gipsyx ran successfuly:
         rfn = file.as_posix().split('/')[-1][0:12]
         rfns.append(rfn)
@@ -156,6 +164,7 @@ def gipsyx_runs_error_analysis(path):
     all_errors = []
     errors = []
     dates = []
+    rinex = []
     for file in path.glob('*.err'):
         rfn = file.as_posix().split('/')[-1][0:12]
         # now, filter the error files that were copyed but there is tdp file
@@ -165,6 +174,7 @@ def gipsyx_runs_error_analysis(path):
         else:
             dt, _ = get_timedate_and_station_code_from_rinex(rfn)
             dates.append(dt)
+            rinex.append(rfn)
             with open(file) as f:
                 content = f.readlines()
                 # you may also want to remove whitespace characters like `\n` at
@@ -173,7 +183,8 @@ def gipsyx_runs_error_analysis(path):
                 all_errors.append(content)
                 errors.append(find_errors(content, rfn))
     er = [','.join(x) for x in all_errors]
-    df = pd.DataFrame(data=er, index=dates)
+    df = pd.DataFrame(data=rinex, index=dates, columns=['rinex'])
+    df['error'] = er
     df = df.sort_index()
     total = len(rfns) + len(df)
     good = len(rfns)
@@ -195,8 +206,10 @@ def read_one_station_gipsyx_results(path=work_yuval, savepath=None,
     """read one station (all years) consisting of many tdp files"""
     from scipy import stats
     import numpy as np
+    import xarray as xr
     df_list = []
     errors = []
+    dts = []
     print('reading folder:{}'.format(path))
     for tdp_file in path.glob('*.tdp'):
         rfn = tdp_file.as_posix().split('/')[-1][0:12]
@@ -204,24 +217,37 @@ def read_one_station_gipsyx_results(path=work_yuval, savepath=None,
         print(rfn)
         try:
             df, meta = process_one_day_gipsyx_output(tdp_file)
+            dts.append(df.index[0])
         except TypeError:
             print('problem reading {}, appending to errors...'.format(rfn))
             errors.append(rfn)
             continue
         df_list.append(df)
-    # concat and sort:
-    df_all = pd.concat(df_list)
-    df_all = df_all.sort_index()
-    df_all.index.name = 'time'
-    # filter out negative values:
-    df_all = df_all[df_all > 0]
-    # filter outlies (zscore>3):
-    df_all = df_all[(np.abs(stats.zscore(df_all)) < 3).all(axis=1)]
-    # filter out constant values:
-    df_all['value_grp'] = df_all.zwd.diff(1)
-    df_all = df_all[np.abs(df_all['value_grp']) > 1e-7]
-    ds = df_all.to_xarray()
-    ds = ds.drop('value_grp')
+    # sort by first dates of each df:
+    df_dict = dict(zip(dts, df_list))
+    df_list = []
+    for key in sorted(df_dict):
+        df_list.append(df_dict[key])
+    dss = [df.to_xarray() for df in df_list]
+    dss_new = []
+    for i, ds in enumerate(dss):
+        dss_new.append(
+                ds.rename({'zwd': 'zwd_{}'.format(i),
+                           'error': 'error_{}'.format(i)}))
+    ds = xr.merge(dss_new)
+#    # concat and sort:
+#    df_all = pd.concat(df_list)
+#    df_all = df_all.sort_index()
+#    df_all.index.name = 'time'
+#    # filter out negative values:
+#    df_all = df_all[df_all > 0]
+#    # filter outlies (zscore>3):
+#    df_all = df_all[(np.abs(stats.zscore(df_all)) < 3).all(axis=1)]
+#    # filter out constant values:
+#    df_all['value_grp'] = df_all.zwd.diff(1)
+#    df_all = df_all[np.abs(df_all['value_grp']) > 1e-7]
+#    ds = df_all.to_xarray()
+#    ds = ds.drop('value_grp')
     ds.attrs['station'] = station
     ds.attrs['lat'] = meta['lat']
     ds.attrs['lon'] = meta['lon']
@@ -237,7 +263,7 @@ def read_one_station_gipsyx_results(path=work_yuval, savepath=None,
     if savepath is not None:
         ymin = ds.time.min().dt.year.item()
         ymax = ds.time.max().dt.year.item()
-        filename = station + '_zwd_' + ymin + '-' + ymax + '.nc'
+        filename = '{}_zwd_{}-{}.nc'.format(station, ymin, ymax)
         ds.to_netcdf(savepath / filename, 'w')
         print('{} was saved to {}'.format(filename, savepath))
     return ds, errors
