@@ -21,7 +21,7 @@ def datetime_to_rinex_filename(station='tela', dt='2012-05-07'):
         str_day = str(day) + '0'
     filename = station.lower() + str_day + '.' + str(year)[2:4] + 'd'
     return filename
-    
+
 
 def get_timedate_and_station_code_from_rinex(rinex_str='tela0010.05d',
                                              just_dt=False):
@@ -70,7 +70,7 @@ def process_gridsearch_results(GridSearchCV):
         # unpack param_grid vals to list of lists:
         pro = [[y for y in x] for x in params.values()]
         ind = pd.MultiIndex.from_product((pro), names=names)
-        result_names = [x for x in GridSearchCV.cv_results_.keys() if 
+        result_names = [x for x in GridSearchCV.cv_results_.keys() if
                         'time' not in x and 'param' not in x and
                         'rank' not in x]
         ds = xr.Dataset()
@@ -79,7 +79,7 @@ def process_gridsearch_results(GridSearchCV):
             ds[da_name] = da
         ds = ds.assign(dim_0=ind).unstack('dim_0')
     elif len(params) == 1:
-        result_names = [x for x in GridSearchCV.cv_results_.keys() if 
+        result_names = [x for x in GridSearchCV.cv_results_.keys() if
                         'time' not in x and 'param' not in x and
                         'rank' not in x]
         ds = xr.Dataset()
@@ -140,7 +140,7 @@ def process_gridsearch_results(GridSearchCV):
     return ds
 
 
-def coarse_dem(data, dem_path = work_yuval / 'AW3D30'):
+def coarse_dem(data, dem_path=work_yuval / 'AW3D30'):
     """coarsen to data coords"""
     # data is lower resolution than awd
     import salem
