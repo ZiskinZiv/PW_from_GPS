@@ -8,6 +8,19 @@ Created on Mon Jun 10 14:33:19 2019
 from PW_paths import work_yuval
 
 
+def find_cross_points(df, cols=None):
+    """find if col A is crossing col B in df and is higher (Up) or lower (Down)
+    than col B (after crossing). cols=None means that the first two cols of
+    df are used."""
+    import numpy as np
+    if cols is None:
+        cols = df.columns.values[0:2]
+    df['Diff'] = df[cols[0]] - df[cols[1]]
+    df['Cross'] = np.select([((df.Diff < 0) & (df.Diff.shift() > 0)), ((
+        df.Diff > 0) & (df.Diff.shift() < 0))], ['Up', 'Down'], None)
+    return df
+
+
 def datetime_to_rinex_filename(station='tela', dt='2012-05-07'):
     """return rinex filename from datetime string"""
     import pandas as pd
