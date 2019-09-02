@@ -27,11 +27,10 @@ stations = pd.read_csv('All_gps_stations.txt', header=0, delim_whitespace=True,
 # TODO: fix somehow the discontinuety daily problem in zwd gipsy runs
 
 # algorithm for zwd stitching of 30hrs gipsyx runs:
-# 1) get the time intersection of each two overlapping signals
-# 2) find the time(intersection point) of the minimum of the absolute overlapping signals residuals
-# 3) stitch the signal so the earlier signal begins up until the IP and then the latest signal
-# 4) repeat that until end, avoid lonly points
-# 5) what if they don't intersect ? (>threshhold)
+# just take the mean of the two overlapping signals
+# and then smooth is with savgol_filter using 3 hours more data in each
+# direction...
+
 
 def analyze_missing_rinex_files(path, savepath=None):
     from aux_gps import get_timedate_and_station_code_from_rinex
@@ -55,6 +54,80 @@ def analyze_missing_rinex_files(path, savepath=None):
         df_missing.to_csv(savepath / filename)
         print('{} was saved to {}'.format(filename, savepath))
     return df_missing
+
+
+def analyse_results_ds_one_station(ds, field='zwd', verbose=False, plot=False):
+    # TODO: add error propogation support err = sqrt(errA^2+errB^2)
+    # from aux_gps import find_cross_points
+    import matplotlib.pyplot as plt
+
+    def stitch_two_cols(df, cols=None):
+        """assume that df columns are : A, B, Diff, Cross, if cols=None
+        means take A, B to be the first two cols of df"""
+        from scipy.signal import savgol_filter
+        if cols is None:
+            cols = df.columns.values[0:2]
+        df['Mean'] = df[cols].mean(axis=1)
+        sav = savgol_filter(df.Mean.values, 25, 3)
+        df['savgol'] = sav
+        return df
+
+    def select_two_ds_from_gipsyx_results(ds, names=['zwd_0', 'zwd_1'],
+                                          hours_offset=None):
+        from aux_gps import dim_intersection
+        import xarray as xr
+        time = dim_intersection([ds[names[0]], ds[names[1]]], dim='time')
+        if not time:
+            return None
+        if hours_offset is not None:
+            # freq = pd.infer_freq(time)
+            start = time[0] - pd.DateOffset(hours=hours_offset)
+            end = time[-1] + pd.DateOffset(hours=hours_offset)
+            # time = pd.date_range(start, end, freq=freq)
+            first = ds[names[0]].sel(time=slice(start, end))
+            second = ds[names[1]].sel(time=slice(start, end))
+        else:
+            first = ds[names[0]].sel(time=time)
+            second = ds[names[1]].sel(time=time)
+        two = xr.Dataset()
+        two[first.name] = first
+        two[second.name] = second
+        df = two.to_dataframe()
+        return df
+    # first, select the field to work on:
+    ds = ds[[key for key in ds if field in key]]
+    df_list = []
+    for i, dss in enumerate(ds):
+        if i == len(ds) - 1:
+            break
+        first = ds['{}_{}'.format(field, i)]
+        second = ds['{}_{}'.format(field, i+1)]
+        if verbose:
+            print('proccesing {} and {}'.format(first.name, second.name))
+        df = select_two_ds_from_gipsyx_results(ds, [first.name, second.name],
+                                               3)
+        if df is not None:
+            df_list.append(stitch_two_cols(df, None))
+            # df_list.append(find_cross_points(df, None))
+        elif df is None:
+            if verbose:
+                print('skipping {} and {}...'.format(first.name, second.name))
+    da = pd.concat([x['savgol'] for x in df_list]).to_xarray()
+    if plot:
+        fig, ax = plt.subplots(figsize=(16, 5))
+        da.plot.line(marker='.', linewidth=0., ax=ax, color='k')
+        for i, zwd in enumerate(ds):
+            ds['{}_{}'.format(field, i)].plot(ax=ax)
+#    dfs = []
+#    for df in df_list:
+#        # check if there is an offset:
+#        A = df.columns.values[0]
+#        B = df.columns.values[1]
+#        if all([x is None for x in df.Cross]):
+#            offset = df.Diff.median()
+#            df['{}_new'.format(B)] = df[B] + offset
+#            dfs.append(df)
+    return da
 
 
 #def gipsyx_rnxedit_errors(df1, savepath=None):
@@ -202,27 +275,48 @@ def gipsyx_runs_error_analysis(path, glob_str='*.tdp'):
 
 
 def read_one_station_gipsyx_results(path=work_yuval, savepath=None,
-                                    plot=False):
+                                    times=None):
     """read one station (all years) consisting of many tdp files"""
+    # TODO: add analyse results of fragmented 30hr results
+    # TODO: add save stitched results and raw results support
+    # TODO: concat all to a single time-series, also errors
     from scipy import stats
     import numpy as np
     import xarray as xr
+    import pandas as pd
+    from aux_gps import get_timedate_and_station_code_from_rinex
+    if times is not None:
+        dt_range = pd.date_range(times[0], times[1], freq='1D')
+        print('getting tdp files from {} to {}'.format(times[0], times[1]))
     df_list = []
     errors = []
     dts = []
     print('reading folder:{}'.format(path))
     for tdp_file in path.glob('*.tdp'):
         rfn = tdp_file.as_posix().split('/')[-1][0:12]
-        station = rfn[0:4].upper()
-        print(rfn)
-        try:
-            df, meta = process_one_day_gipsyx_output(tdp_file)
-            dts.append(df.index[0])
-        except TypeError:
-            print('problem reading {}, appending to errors...'.format(rfn))
-            errors.append(rfn)
-            continue
-        df_list.append(df)
+        dt, station = get_timedate_and_station_code_from_rinex(rfn)
+        if times is not None:
+            if dt not in dt_range:
+                continue
+            else:
+                print(rfn)
+                try:
+                    df, meta = process_one_day_gipsyx_output(tdp_file)
+                    dts.append(df.index[0])
+                except TypeError:
+                    print('problem reading {}, appending to errors...'.format(rfn))
+                    errors.append(rfn)
+                    continue
+                df_list.append(df)
+        elif times is None:
+            try:
+                df, meta = process_one_day_gipsyx_output(tdp_file)
+                dts.append(df.index[0])
+            except TypeError:
+                print('problem reading {}, appending to errors...'.format(rfn))
+                errors.append(rfn)
+                continue
+            df_list.append(df)
     # sort by first dates of each df:
     df_dict = dict(zip(dts, df_list))
     df_list = []
@@ -253,13 +347,13 @@ def read_one_station_gipsyx_results(path=work_yuval, savepath=None,
     ds.attrs['lon'] = meta['lon']
     ds.attrs['alt'] = meta['alt']
     ds.attrs['units'] = 'cm'
-    if plot:
-        ax = df_all['zwd'].plot(legend=True, figsize=(12, 7), color='k')
-        ax.fill_between(df_all.index, df_all['zwd'] - df_all['error'],
-                        df_all['zwd'] + df_all['error'], alpha=0.5)
-        ax.grid()
-        ax.set_title('Zenith Wet Delay')
-        ax.set_ylabel('[cm]')
+#    if plot:
+#        ax = df_all['zwd'].plot(legend=True, figsize=(12, 7), color='k')
+#        ax.fill_between(df_all.index, df_all['zwd'] - df_all['error'],
+#                        df_all['zwd'] + df_all['error'], alpha=0.5)
+#        ax.grid()
+#        ax.set_title('Zenith Wet Delay')
+#        ax.set_ylabel('[cm]')
     if savepath is not None:
         ymin = ds.time.min().dt.year.item()
         ymax = ds.time.max().dt.year.item()
