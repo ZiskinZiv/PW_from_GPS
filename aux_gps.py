@@ -8,6 +8,22 @@ Created on Mon Jun 10 14:33:19 2019
 from PW_paths import work_yuval
 
 
+def path_glob(path, glob_str='*.Z', return_empty_list=False):
+    """returns all the files with full path(pathlib3 objs) if files exist in
+    path, if not, returns FilenotFoundErro"""
+    from pathlib import Path
+    if not isinstance(path, Path):
+        raise Exception('{} must be a pathlib object'.format(path))
+    files_with_path = [file for file in path.glob(glob_str) if file.is_file]
+    if not files_with_path and not return_empty_list:
+        raise Exception('{} search in {} found no files.'.format(glob_str,
+                        path))
+    elif not files_with_path and return_empty_list:
+        return files_with_path
+    else:
+        return files_with_path
+
+
 def find_cross_points(df, cols=None):
     """find if col A is crossing col B in df and is higher (Up) or lower (Down)
     than col B (after crossing). cols=None means that the first two cols of
@@ -212,6 +228,23 @@ def scale_xr(da, upper=1.0, lower=0.0, unscale=False):
 def print_saved_file(name, path):
     print(name + ' was saved to ' + str(path))
     return
+
+
+def dim_union(da_list, dim='time'):
+    import pandas as pd
+    setlist = [set(x[dim].values) for x in da_list]
+    empty_list = [x for x in setlist if not x]
+    if empty_list:
+        print('NaN dim drop detected, check da...')
+        return
+    u = list(set.union(*setlist))
+    # new_dim = list(set(a.dropna(dim)[dim].values).intersection(
+    #     set(b.dropna(dim)[dim].values)))
+    if dim == 'time':
+        new_dim = sorted(pd.to_datetime(u))
+    else:
+        new_dim = sorted(u)
+    return new_dim
 
 
 def dim_intersection(da_list, dim='time', dropna=True):
