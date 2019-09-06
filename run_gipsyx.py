@@ -46,6 +46,7 @@ def move_files(path_orig, path_dest, files, out_files=None, verbose=False):
 def read_organize_rinex(path, glob_str='*.Z'):
     """read and organize the rinex file names for 30 hour run"""
     from aux_gps import get_timedate_and_station_code_from_rinex
+    from aux_gps import path_glob
     import pandas as pd
     import numpy as np
     import logging
@@ -53,7 +54,8 @@ def read_organize_rinex(path, glob_str='*.Z'):
     dts = []
     rfns = []
     logger.info('reading and organizing rinex files in {}'.format(path))
-    for file_and_path in path.glob(glob_str):
+    files = path_glob(path, glob_str)
+    for file_and_path in files:
         filename = file_and_path.as_posix().split('/')[-1][0:12]
         dt, station = get_timedate_and_station_code_from_rinex(filename)
         dts.append(dt)
@@ -133,6 +135,7 @@ def prepare_gipsyx_for_run_one_station(rinexpath, staDb, prep, rewrite):
         rewrite: overwrite all files - supported with all modes of prep"""
     import subprocess
     from subprocess import CalledProcessError
+    from aux_gps import path_glob
     import logging
     import pandas as pd
     from itertools import count
@@ -148,7 +151,8 @@ def prepare_gipsyx_for_run_one_station(rinexpath, staDb, prep, rewrite):
         except FileExistsError:
             logger.info(
                 '{} already exists, using that folder.'.format(out_path))
-        for file_and_path in rinexpath.glob('*.Z'):
+        files = path_glob(rinexpath, '*.Z')
+        for file_and_path in files:
             filename = file_and_path.as_posix().split('/')[-1][0:12]
             dr_file = out_path / '{}.dr.gz'.format(filename)
             if not rewrite:
@@ -291,7 +295,7 @@ def prepare_gipsyx_for_run_one_station(rinexpath, staDb, prep, rewrite):
     return
 
 
-def run_gd2e_for_one_station(dr_path, staDb, rewrite):
+def run_gd2e_for_one_station(dr_path, staDb, tree, rewrite):
     """runs gd2e.py for all datarecodrs in one folder(dr_path) with staDb.
     rewrite: overwrite the results tdp in dr_path / results."""
     from pathlib import Path
@@ -301,13 +305,16 @@ def run_gd2e_for_one_station(dr_path, staDb, rewrite):
     from subprocess import TimeoutExpired
     import logging
     from aux_gps import get_timedate_and_station_code_from_rinex
+    from aux_gps import path_glob
     logger = logging.getLogger('gipsyx')
     logger.info(
         'starting gd2e.py main gipsyX run.')
-    logger.info('working with {}'.format(staDb))
+    logger.info('working with {} station database'.format(staDb))
     if rewrite:
         logger.warning('overwrite files mode initiated.')
     results_path = dr_path / 'results'
+    if tree.as_posix().strip():
+        logger.info('working with {} tree'.format(tree))
     try:
         results_path.mkdir()
     except FileExistsError:
@@ -315,7 +322,8 @@ def run_gd2e_for_one_station(dr_path, staDb, rewrite):
             '{} already exists, using that folder.'.format(results_path))
     succ = count(1)
     failed = count(1)
-    for file_and_path in dr_path.glob('*.dr.gz'):
+    files = path_glob(dr_path, '*.dr.gz')
+    for file_and_path in files:
         rfn = file_and_path.as_posix().split('/')[-1][0:12]
         dt, station = get_timedate_and_station_code_from_rinex(rfn)
         final_tdp = rfn + '_smoothFinal.tdp'
@@ -329,8 +337,10 @@ def run_gd2e_for_one_station(dr_path, staDb, rewrite):
                     '{} already exists in {}, skipping...'.format(
                         final_tdp, results_path))
                 continue
-        command = 'gd2e.py -drEditedFile {} -recList {} -staDb {} > {}.log 2>{}.err'.format(
-            file_and_path.as_posix(), station, staDb.as_posix(), rfn, rfn)
+        command = 'gd2e.py -drEditedFile {} -recList {} -staDb {} -treeS {} \
+        > {}.log 2>{}.err'.format(
+            file_and_path.as_posix(), station, staDb.as_posix(), tree, rfn,
+            rfn)
         files_to_move = [rfn + x for x in ['.log', '.err']]
         try:
             subprocess.run(command, shell=True, check=True, timeout=300)
@@ -386,6 +396,8 @@ if __name__ == '__main__':
         type=check_file_in_cwd)
     optional.add_argument('--prep', help='call rinex rnxEditGde/drMerge or dataRecorDump',
                           choices=['drdump', 'edit24hr', 'edit30hr'])
+    optional.add_argument('--tree', help='gipsyX tree directory.',
+                          type=check_path)
     optional.add_argument(
             '--rewrite',
             dest='rewrite',
@@ -404,4 +416,7 @@ if __name__ == '__main__':
         prepare_gipsyx_for_run_one_station(args.rinexpath, args.staDb,
                                            args.prep, args.rewrite)
     elif args.prep is None:
-        run_gd2e_for_one_station(args.rinexpath, args.staDb, args.rewrite)
+        if args.tree is None:
+            args.tree = ' '
+        run_gd2e_for_one_station(args.rinexpath, args.staDb, args.tree,
+                                 args.rewrite)
