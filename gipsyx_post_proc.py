@@ -449,6 +449,7 @@ def read_one_station_gipsyx_results(path=work_yuval, savepath=None,
 
 def process_one_day_gipsyx_output(path_and_file=work_yuval / 'smoothFinal.tdp',
                                   plot=False):
+    # TODO: add height proccessing also
     import pandas as pd
     import pyproj
     df = pd.read_fwf(path_and_file, header=None)
