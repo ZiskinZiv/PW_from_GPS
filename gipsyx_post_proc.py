@@ -25,6 +25,7 @@ stations = pd.read_csv('All_gps_stations.txt', header=0, delim_whitespace=True,
 def post_procces_gipsyx_yearly_files(path, savepath=None, plot=False):
     import xarray as xr
     from aux_gps import path_glob
+    from aux_gps import get_unique_index
     import matplotlib.pyplot as plt
     import numpy as np
     from scipy import stats
@@ -37,7 +38,8 @@ def post_procces_gipsyx_yearly_files(path, savepath=None, plot=False):
         print('proccessing {} station in year: {}'.format(station, year))
         da_fs = []
         meta = dss.attrs
-        for field in ['zwd', 'error']:
+        for field in ['zwd', 'error', 'lat', 'lon', 'alt', 'lat_error',
+                      'lon_error', 'alt_error']:
             da_field = analyse_results_ds_one_station(dss, field)
             da_year = replace_fields_in_ds(dss, da_field, field)
             da_fs.append(da_year)
@@ -49,6 +51,7 @@ def post_procces_gipsyx_yearly_files(path, savepath=None, plot=False):
     df = df[df > 0]
     ds = df.to_xarray()
     ds.attrs = meta
+    ds = get_unique_index(ds, 'time')
     if plot:
         fig, ax = plt.subplots(figsize=(12, 7))
         ds['zwd'].plot.line(marker='.', linewidth=0., color='b', ax=ax)
@@ -124,6 +127,10 @@ def analyse_results_ds_one_station(dss, field='zwd', verbose=False,
             df['stitched_signal'] = sav
         elif field == 'error':
             df['stitched_signal'] = np.sqrt(df[cols[0]]**2 + df[cols[1]]**2)
+        elif field == 'lat' or field == 'lon' or field == 'alt':
+            df['stitched_signal'] = df[cols[0]]
+        elif field == 'lat_error' or field == 'lon_error' or field == 'alt_error':
+            df['stitched_signal'] = df[cols[0]]
         return df
 
     def select_two_ds_from_gipsyx_results(ds, names=['zwd_0', 'zwd_1'],
@@ -168,7 +175,7 @@ def analyse_results_ds_one_station(dss, field='zwd', verbose=False,
             if verbose:
                 print('skipping {} and {}...'.format(first.name, second.name))
     da = pd.concat([x['stitched_signal'] for x in df_list]).to_xarray()
-    
+
     if plot:
         fig, ax = plt.subplots(figsize=(16, 5))
         da.plot.line(marker='.', linewidth=0., ax=ax, color='k')
@@ -409,7 +416,13 @@ def read_one_station_gipsyx_results(path=work_yuval, savepath=None,
     for i, ds in enumerate(dss):
         dss_new.append(
                 ds.rename({'zwd': 'zwd_{}'.format(i),
-                           'error': 'error_{}'.format(i)}))
+                           'error': 'error_{}'.format(i),
+                           'lat': 'lat_{}'.format(i),
+                           'lon': 'lon_{}'.format(i),
+                           'alt': 'alt_{}'.format(i),
+                           'lat_error': 'lat_error_{}'.format(i),
+                           'lon_error': 'lon_error_{}'.format(i),
+                           'alt_error': 'alt_error_{}'.format(i)}))
     ds = xr.merge(dss_new)
 #    # concat and sort:
 #    df_all = pd.concat(df_list)
@@ -449,28 +462,49 @@ def read_one_station_gipsyx_results(path=work_yuval, savepath=None,
 
 def process_one_day_gipsyx_output(path_and_file=work_yuval / 'smoothFinal.tdp',
                                   plot=False):
-    # TODO: add height proccessing also
     import pandas as pd
     import pyproj
     df = pd.read_fwf(path_and_file, header=None)
-    df_zwd = df[df.iloc[:, -1].str.contains('WetZ')]
-    X = df[df.iloc[:, -1].str.contains('Pos.X')].iloc[0, 2]
-    Y = df[df.iloc[:, -1].str.contains('Pos.Y')].iloc[0, 2]
-    Z = df[df.iloc[:, -1].str.contains('Pos.Z')].iloc[0, 2]
-#    X_error = df[df.iloc[:, -1].str.contains('Pos.X')].iloc[0, 3]
-#    Y_error = df[df.iloc[:, -1].str.contains('Pos.Y')].iloc[0, 3]
-#    Z_error = df[df.iloc[:, -1].str.contains('Pos.Z')].iloc[0, 3]
+    # df_zwd = df[df.iloc[:, -1].str.contains('WetZ')]
+    keys = ['WetZ', 'GradNorth', 'GradEast', 'Pos.X', 'Pos.Y', 'Pos.Z']
+    df_list = [df[df.iloc[:, -1].str.contains(x)] for x in keys]
+    assert len(set([len(x) for x in df_list])) == 1
+    seconds = df_list[0].iloc[:, 0]
+    dt = pd.to_datetime('2000-01-01T12:00:00')
+    time = dt + pd.to_timedelta(seconds, unit='sec')
+    ppp = pd.DataFrame(index=time)
+    ppp.index = 'time'
+    # time.set_index(time, inplace=True)
+    # df_zwd.index.name = 'time'
+    for i, df in enumerate(df_list):
+        df.columns = ['seconds', 'to_drop', keys[i], keys[i] + '_error',
+                      'meta']
+        df = df.drop(['seconds', 'to_drop', 'meta'], axis=1, inplace=True)
+        ppp[keys[i]] = df
+    # pos = ['Pos.X', 'Pos.Y', 'Pos.Z']
+    # position = [df[df.iloc[:, -1].str.contains(x)].iloc[:, 2].values for x in
+    #             pos]
+    #pos_error = [df[df.iloc[:, -1].str.contains(x)].iloc[:, 3].values for x in
+    #             pos]
     ecef = pyproj.Proj(proj='geocent', ellps='WGS84', datum='WGS84')
     lla = pyproj.Proj(proj='latlong', ellps='WGS84', datum='WGS84')
-    lon, lat, alt = pyproj.transform(ecef, lla, X, Y, Z, radians=False)
+    lon, lat, alt = pyproj.transform(ecef, lla, position[0], position[1],
+                                     position[2], radians=False)
+    lon_e, lat_e, alt_e = pyproj.transform(ecef, lla, pos_error[0],
+                                           pos_error[1], pos_error[2],
+                                           radians=False)
     df_zwd.columns = ['seconds', 'to_drop', 'zwd', 'error', 'meta']
-    dt = pd.to_datetime('2000-01-01T12:00:00')
-    time = dt + pd.to_timedelta(df_zwd.loc[:, 'seconds'], unit='sec')
-    df_zwd.set_index(time, inplace=True)
-    df_zwd.index.name = 'time'
+
+
     df_zwd = df_zwd.drop(['seconds', 'to_drop', 'meta'], axis=1)
     df_zwd = df_zwd.mul(100.0)  # zwd in cm
-    meta = {'lat': lat, 'lon': lon, 'alt': alt, 'zwd_mean_error_cm':
+    df_zwd['lat'] = lat
+    df_zwd['lon'] = lon
+    df_zwd['alt'] = alt
+    df_zwd['lat_error'] = lat_e
+    df_zwd['lon_error'] = lon_e
+    df_zwd['alt_error'] = alt_e
+    meta = {'lat': lat[0], 'lon': lon[0], 'alt': alt[0], 'zwd_mean_error_cm':
             df_zwd['error'].mean()}
     if plot:
         ax = df_zwd['zwd'].plot(legend=True, figsize=(12, 7), color='k')
