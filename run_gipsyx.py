@@ -374,6 +374,7 @@ if __name__ == '__main__':
     import argparse
     import sys
     from aux_gps import configure_logger
+    from pathlib import Path
     # first check for GCORE path:
     if len(get_var('GCORE')) == 0:
         raise ValueError('Run source ~/GipsyX-1.1/rc_GipsyX.sh first !')
@@ -417,6 +418,6 @@ if __name__ == '__main__':
                                            args.prep, args.rewrite)
     elif args.prep is None:
         if args.tree is None:
-            args.tree = ' '
+            args.tree = Path(' ')
         run_gd2e_for_one_station(args.rinexpath, args.staDb, args.tree,
                                  args.rewrite)
