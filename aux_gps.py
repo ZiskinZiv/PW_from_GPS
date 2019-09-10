@@ -8,6 +8,24 @@ Created on Mon Jun 10 14:33:19 2019
 from PW_paths import work_yuval
 
 
+def get_latlonalt_error_from_geocent_error(X, Y, Z, xe, ye, ze):
+    """returns the value and error in lat(decimal degree), lon(decimal degree)
+    and alt(meters) for X, Y, Z in geocent coords (in meters), all input is
+    lists or np.arrays"""
+    import pyproj
+    ecef = pyproj.Proj(proj='geocent', ellps='WGS84', datum='WGS84')
+    lla = pyproj.Proj(proj='latlong', ellps='WGS84', datum='WGS84')
+    lon, lat, alt = pyproj.transform(ecef, lla, X, Y, Z, radians=False)
+    lon_pe, lat_pe, alt_pe = pyproj.transform(ecef, lla, X + xe, Y + ye,
+                                              Z + ze, radians=False)
+    lon_me, lat_me, alt_me = pyproj.transform(ecef, lla, X - xe, Y - ye,
+                                              Z - ze, radians=False)
+    lon_e = lon_pe - lon_me
+    lat_e = lat_pe - lat_me
+    alt_e = alt_pe - alt_me
+    return lon, lat, alt, lon_e, lat_e, alt_e
+
+
 def path_glob(path, glob_str='*.Z', return_empty_list=False):
     """returns all the files with full path(pathlib3 objs) if files exist in
     path, if not, returns FilenotFoundErro"""
