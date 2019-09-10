@@ -38,8 +38,8 @@ def post_procces_gipsyx_yearly_files(path, savepath=None, plot=False):
         print('proccessing {} station in year: {}'.format(station, year))
         da_fs = []
         meta = dss.attrs
-        for field in ['zwd', 'error', 'lat', 'lon', 'alt', 'lat_error',
-                      'lon_error', 'alt_error']:
+        vars_list = list(set([x.split('-')[0] for x in dss.data_vars.keys()]))
+        for field in vars_list:
             da_field = analyse_results_ds_one_station(dss, field)
             da_year = replace_fields_in_ds(dss, da_field, field)
             da_fs.append(da_year)
@@ -48,42 +48,69 @@ def post_procces_gipsyx_yearly_files(path, savepath=None, plot=False):
     df = ds.to_dataframe()
     # filter outlies (zscore>3):
     df = df[(np.abs(stats.zscore(df)) < 3).all(axis=1)]
-    df = df[df > 0]
+    # df = df[df > 0]
     ds = df.to_xarray()
     ds.attrs = meta
+    desc = ['Zenith Wet Delay', 'North Gradient of Zenith Wet Delay',
+            'East Gradient of Zenith Wet Delay', 'Longitude', 'Latitude',
+            'Altitude']
+    desc_error = [x + ' Error' for x in desc]
+    units = ['[cm]', '[cm / m]', '[cm / m]', 'Degrees', 'Degrees', '[m]']
+    fields = ['WetZ', 'GradNorth', 'GradEast', 'lon', 'lat', 'alt']
+    fields_error = [x + '_error' for x in fields]
+    units_dict = dict(zip(fields, units))
+    desc_dict = dict(zip(fields, desc))
+    desc_er_dict = dict(zip(fields_error, desc_error))
+    units_er_dict = dict(zip(fields_error, units))
+    for field in fields:
+        ds[field].attrs['units'] = units_dict[field]
+        ds[field].attrs['description'] = desc_dict[field]
+    for er_field in fields_error:
+        ds[er_field].attrs['units'] = units_er_dict[er_field]
+        ds[er_field].attrs['description'] = desc_er_dict[er_field]
     ds = get_unique_index(ds, 'time')
     if plot:
-        fig, ax = plt.subplots(figsize=(12, 7))
-        ds['zwd'].plot.line(marker='.', linewidth=0., color='b', ax=ax)
-        ax.fill_between(ds.time.values, ds['zwd'] - ds['error'],
-                        ds['zwd'] + ds['error'], where=np.isfinite(ds['zwd']),
-                        alpha=0.5)
-        ax.grid()
-        ax.set_title('Zenith Wet Delay')
-        ax.set_ylabel('[cm]')
+        fig, axes = plt.subplots(6, 1, figsize=(12, 10), sharex=True)
+        desc = ['Zenith Wet Delay', 'North Gradient of Zenith Wet Delay',
+                'East Gradient of Zenith Wet Delay', 'Longitude', 'Latitude',
+                'Altitude']
+        units = ['[cm]', '[cm / m]', '[cm / m]', 'Degrees', 'Degrees', '[m]']
+        fields = ['WetZ', 'GradNorth', 'GradEast', 'lon', 'lat', 'alt']
+        for ax, field, name, unit in zip(axes.flatten(), fields, desc, units):
+            ds[field].plot.line(ax=ax, marker='.', linewidth=0., color='k')
+            ax.fill_between(ds.time.values,
+                            ds[field].values - ds[field + '_error'].values,
+                            ds[field].values + ds[field + '_error'].values,
+                            where=np.isfinite(ds['WetZ'].values),
+                            alpha=0.5)
+            ax.grid()
+            ax.set_title(name)
+            ax.set_ylabel(unit)
     if savepath is not None:
         comp = dict(zlib=True, complevel=9)  # best compression
         encoding = {var: comp for var in ds.data_vars}
         ymin = ds.time.min().dt.year.item()
         ymax = ds.time.max().dt.year.item()
-        filename = '{}_zwd_{}-{}.nc'.format(station, ymin, ymax)
+        filename = '{}_PPP_{}-{}.nc'.format(station, ymin, ymax)
         ds.to_netcdf(savepath / filename, 'w', encoding=encoding)
         print('{} was saved to {}'.format(filename, savepath))
     return ds
 
 
-def replace_fields_in_ds(dss, da_repl, field='zwd', verbose=False):
+def replace_fields_in_ds(dss, da_repl, field='WetZ', verbose=False):
     """replaces dss overlapping field(and then some) with the stiched signal
     fron da_repl. be carful with the choices for field"""
     from aux_gps import get_unique_index
     import xarray as xr
-    ds = dss[[key for key in dss if field in key]]
+    # choose the field from the bigger dss:
+    nums = sorted(list(set([int(x.split('-')[1]) for x in dss])))
+    ds = dss[['{}-{}'.format(field, i) for i in nums]]
     da_list = []
     for i, _ in enumerate(ds):
         if i == len(ds) - 1:
             break
-        first = ds['{}_{}'.format(field, i)]
-        second = ds['{}_{}'.format(field, i+1)]
+        first = ds['{}-{}'.format(field, i)]
+        second = ds['{}-{}'.format(field, i+1)]
         min_time = first.dropna('time').time.min()
         max_time = second.dropna('time').time.max()
         da = da_repl.sel(time=slice(min_time, max_time))
@@ -102,10 +129,10 @@ def replace_fields_in_ds(dss, da_repl, field='zwd', verbose=False):
     return da_final
 
 
-def analyse_results_ds_one_station(dss, field='zwd', verbose=False,
+def analyse_results_ds_one_station(dss, field='WetZ', verbose=False,
                                    plot=False):
-    """analyse and find an overlapping signal to fields 'zwd' or 'error' in
-    dss"""
+    """analyse and find an overlapping signal to fields 'WetZ' or 'WetZ_error'
+    in dss"""
     # algorithm for zwd stitching of 30hrs gipsyx runs:
     # just take the mean of the two overlapping signals
     # and then smooth is with savgol_filter using 3 hours more data in each
@@ -113,7 +140,8 @@ def analyse_results_ds_one_station(dss, field='zwd', verbose=False,
     import matplotlib.pyplot as plt
     import pandas as pd
 
-    def stitch_two_cols(df, window=25, order=3, cols=None, field='zwd'):
+    def stitch_two_cols(df, window=25, order=3, method='smooth_mean',
+                        cols=None):
         """Use smoothing with savgol filter on the mean of two overlapping
         signals. assume that df columns are : A, B, if cols=None
         means take A, B to be the first two cols of df"""
@@ -121,19 +149,17 @@ def analyse_results_ds_one_station(dss, field='zwd', verbose=False,
         import numpy as np
         if cols is None:
             cols = df.columns.values[0:2]
-        if field == 'zwd':
+        if method == 'smooth_mean':
             df['Mean'] = df[cols].mean(axis=1)
             sav = savgol_filter(df.Mean.values, window, order)
             df['stitched_signal'] = sav
-        elif field == 'error':
+        elif method == 'error':
             df['stitched_signal'] = np.sqrt(df[cols[0]]**2 + df[cols[1]]**2)
-        elif field == 'lat' or field == 'lon' or field == 'alt':
-            df['stitched_signal'] = df[cols[0]]
-        elif field == 'lat_error' or field == 'lon_error' or field == 'alt_error':
-            df['stitched_signal'] = df[cols[0]]
+        elif method == 'just_mean':
+            df['stitched_signal'] = df[cols].mean(axis=1)
         return df
 
-    def select_two_ds_from_gipsyx_results(ds, names=['zwd_0', 'zwd_1'],
+    def select_two_ds_from_gipsyx_results(ds, names=['WetZ_0', 'WetZ_1'],
                                           hours_offset=None):
         """selects two dataarrays from the raw gipsyx results dataset"""
         from aux_gps import dim_intersection
@@ -156,20 +182,33 @@ def analyse_results_ds_one_station(dss, field='zwd', verbose=False,
         two[second.name] = second
         df = two.to_dataframe()
         return df
-    # first, select the field to work on:
-    ds = dss[[key for key in dss if field in key]]
+    # first, group different vars for different stitching schemes:
+    to_smooth = ['GradEast', 'GradNorth', 'WetZ']
+    to_just_mean = ['X', 'Y', 'Z', 'lat', 'lon', 'alt']
+    to_error = [x + '_error' for x in to_smooth] + [x + '_error' for x in
+                                                    to_just_mean]
+    # second, select the field to work on:
+    nums = sorted(list(set([int(x.split('-')[1]) for x in dss])))
+    ds = dss[['{}-{}'.format(field, i) for i in nums]]
     df_list = []
     for i, _ in enumerate(ds):
         if i == len(ds) - 1:
             break
-        first = ds['{}_{}'.format(field, i)]
-        second = ds['{}_{}'.format(field, i+1)]
+        first = ds['{}-{}'.format(field, i)]
+        second = ds['{}-{}'.format(field, i+1)]
         if verbose:
             print('proccesing {} and {}'.format(first.name, second.name))
+        # 3 hours addition to each side:
         df = select_two_ds_from_gipsyx_results(ds, [first.name, second.name],
                                                3)
         if df is not None:
-            df_list.append(stitch_two_cols(df, cols=None))
+            if field in to_smooth:
+                stitched = stitch_two_cols(df, method='smooth_mean')
+            elif field in to_just_mean:
+                stitched = stitch_two_cols(df, method='just_mean')
+            elif field in to_error:
+                stitched = stitch_two_cols(df, method='error')
+            df_list.append(stitched)
             # df_list.append(find_cross_points(df, None))
         elif df is None:
             if verbose:
@@ -179,8 +218,8 @@ def analyse_results_ds_one_station(dss, field='zwd', verbose=False,
     if plot:
         fig, ax = plt.subplots(figsize=(16, 5))
         da.plot.line(marker='.', linewidth=0., ax=ax, color='k')
-        for i, zwd in enumerate(ds):
-            ds['{}_{}'.format(field, i)].plot(ax=ax)
+        for i, ppp in enumerate(ds):
+            ds['{}-{}'.format(field, i)].plot(ax=ax)
 #    dfs = []
 #    for df in df_list:
 #        # check if there is an offset:
@@ -353,7 +392,7 @@ def save_yearly_gipsyx_results(path=work_yuval, savepath=work_yuval):
     _, station = get_timedate_and_station_code_from_rinex(rfns[0])
     years = list(set([dt.year for dt in dts]))
     for year in sorted(years):
-        filename = '{}_zwd_raw_{}.nc'.format(station, year)
+        filename = '{}_ppp_raw_{}.nc'.format(station, year)
         if (savepath / filename).is_file():
             print('{} already in {}, skipping...'.format(filename, savepath))
             continue
@@ -364,10 +403,10 @@ def save_yearly_gipsyx_results(path=work_yuval, savepath=work_yuval):
 def read_one_station_gipsyx_results(path=work_yuval, savepath=None,
                                     year=None):
     """read one station (all years) consisting of many tdp files"""
-    from scipy import stats
-    import numpy as np
+#     from scipy import stats
+#     import numpy as np
     import xarray as xr
-    import pandas as pd
+#     import pandas as pd
     from aux_gps import get_timedate_and_station_code_from_rinex
     from aux_gps import path_glob
     if year is not None:
@@ -414,15 +453,10 @@ def read_one_station_gipsyx_results(path=work_yuval, savepath=None,
     dss = [df.to_xarray() for df in df_list]
     dss_new = []
     for i, ds in enumerate(dss):
-        dss_new.append(
-                ds.rename({'zwd': 'zwd_{}'.format(i),
-                           'error': 'error_{}'.format(i),
-                           'lat': 'lat_{}'.format(i),
-                           'lon': 'lon_{}'.format(i),
-                           'alt': 'alt_{}'.format(i),
-                           'lat_error': 'lat_error_{}'.format(i),
-                           'lon_error': 'lon_error_{}'.format(i),
-                           'alt_error': 'alt_error_{}'.format(i)}))
+        keys_to_rename = [x for x in ds.data_vars.keys()]
+        values_to_rename = [x + '-{}'.format(i) for x in keys_to_rename]
+        dict_to_rename = dict(zip(keys_to_rename, values_to_rename))
+        dss_new.append(ds.rename(dict_to_rename))
     ds = xr.merge(dss_new)
 #    # concat and sort:
 #    df_all = pd.concat(df_list)
@@ -438,10 +472,10 @@ def read_one_station_gipsyx_results(path=work_yuval, savepath=None,
 #    ds = df_all.to_xarray()
 #    ds = ds.drop('value_grp')
     ds.attrs['station'] = station
-    ds.attrs['lat'] = meta['lat']
-    ds.attrs['lon'] = meta['lon']
-    ds.attrs['alt'] = meta['alt']
-    ds.attrs['units'] = 'cm'
+#    ds.attrs['lat'] = meta['lat']
+#    ds.attrs['lon'] = meta['lon']
+#    ds.attrs['alt'] = meta['alt']
+#     ds.attrs['units'] = 'cm'
 #    if plot:
 #        ax = df_all['zwd'].plot(legend=True, figsize=(12, 7), color='k')
 #        ax.fill_between(df_all.index, df_all['zwd'] - df_all['error'],
@@ -454,7 +488,7 @@ def read_one_station_gipsyx_results(path=work_yuval, savepath=None,
         encoding = {var: comp for var in ds.data_vars}
         # ymin = ds.time.min().dt.year.item()
         # ymax = ds.time.max().dt.year.item()
-        filename = '{}_zwd_raw_{}.nc'.format(station, year)
+        filename = '{}_ppp_raw_{}.nc'.format(station, year)
         ds.to_netcdf(savepath / filename, 'w', encoding=encoding)
         print('{} was saved to {}'.format(filename, savepath))
     return ds, errors
@@ -463,54 +497,62 @@ def read_one_station_gipsyx_results(path=work_yuval, savepath=None,
 def process_one_day_gipsyx_output(path_and_file=work_yuval / 'smoothFinal.tdp',
                                   plot=False):
     import pandas as pd
-    import pyproj
-    df = pd.read_fwf(path_and_file, header=None)
-    # df_zwd = df[df.iloc[:, -1].str.contains('WetZ')]
+    # import pyproj
+    import matplotlib.pyplot as plt
+    from aux_gps import get_latlonalt_error_from_geocent_error
+    df_raw = pd.read_fwf(path_and_file, header=None)
+    # get all the vars from smoothFinal.tdp file and put it in a df_list:
     keys = ['WetZ', 'GradNorth', 'GradEast', 'Pos.X', 'Pos.Y', 'Pos.Z']
-    df_list = [df[df.iloc[:, -1].str.contains(x)] for x in keys]
+    df_list = [df_raw[df_raw.iloc[:, -1].str.contains(x)] for x in keys]
+    # make sure that all keys in df have the same length:
     assert len(set([len(x) for x in df_list])) == 1
+    # translate the seconds col to datetime:
     seconds = df_list[0].iloc[:, 0]
     dt = pd.to_datetime('2000-01-01T12:00:00')
     time = dt + pd.to_timedelta(seconds, unit='sec')
+    # build a new df that contains all the vars(from keys):
     ppp = pd.DataFrame(index=time)
-    ppp.index = 'time'
+    ppp.index.name = 'time'
     # time.set_index(time, inplace=True)
     # df_zwd.index.name = 'time'
     for i, df in enumerate(df_list):
         df.columns = ['seconds', 'to_drop', keys[i], keys[i] + '_error',
                       'meta']
-        df = df.drop(['seconds', 'to_drop', 'meta'], axis=1, inplace=True)
-        ppp[keys[i]] = df
-    # pos = ['Pos.X', 'Pos.Y', 'Pos.Z']
-    # position = [df[df.iloc[:, -1].str.contains(x)].iloc[:, 2].values for x in
-    #             pos]
-    #pos_error = [df[df.iloc[:, -1].str.contains(x)].iloc[:, 3].values for x in
-    #             pos]
-    ecef = pyproj.Proj(proj='geocent', ellps='WGS84', datum='WGS84')
-    lla = pyproj.Proj(proj='latlong', ellps='WGS84', datum='WGS84')
-    lon, lat, alt = pyproj.transform(ecef, lla, position[0], position[1],
-                                     position[2], radians=False)
-    lon_e, lat_e, alt_e = pyproj.transform(ecef, lla, pos_error[0],
-                                           pos_error[1], pos_error[2],
-                                           radians=False)
-    df_zwd.columns = ['seconds', 'to_drop', 'zwd', 'error', 'meta']
-
-
-    df_zwd = df_zwd.drop(['seconds', 'to_drop', 'meta'], axis=1)
-    df_zwd = df_zwd.mul(100.0)  # zwd in cm
-    df_zwd['lat'] = lat
-    df_zwd['lon'] = lon
-    df_zwd['alt'] = alt
-    df_zwd['lat_error'] = lat_e
-    df_zwd['lon_error'] = lon_e
-    df_zwd['alt_error'] = alt_e
-    meta = {'lat': lat[0], 'lon': lon[0], 'alt': alt[0], 'zwd_mean_error_cm':
-            df_zwd['error'].mean()}
+        ppp[keys[i]] = df[keys[i]].values
+        ppp[keys[i] + '_error'] = df[keys[i] + '_error'].values
+    # rename all the Pos. to nothing:
+    ppp.columns = ppp.columns.str.replace('Pos.', '')
+    lon, lat, alt, lon_error, lat_error, alt_error = get_latlonalt_error_from_geocent_error(
+        ppp.X.values, ppp.Y.values, ppp.Z.values, ppp.X_error.values, ppp.Y_error.values, ppp.Z_error.values,)
+    vals = [lon, lat, alt]
+    vals_error = [lon_error, lat_error, alt_error]
+    for i, key in enumerate(['lon', 'lat', 'alt']):
+        ppp[key] = vals[i]
+        ppp[key + '_error'] = vals_error[i]
+    # get initial lat, lon, alt for meta data purpose:
+#    ecef = pyproj.Proj(proj='geocent', ellps='WGS84', datum='WGS84')
+#    lla = pyproj.Proj(proj='latlong', ellps='WGS84', datum='WGS84')
+#    lon, lat, alt = pyproj.transform(ecef, lla, ppp.X[0], ppp.Y[0],
+#                                     ppp.Z[0], radians=False)
+    desc = ['Zenith Wet Delay', 'North Gradient of Zenith Wet Delay',
+            'East Gradient of Zenith Wet Delay', 'Longitude', 'Latitude',
+            'Altitude']
+    units = ['[cm]', '[cm / m]', '[cm / m]', 'Degrees', 'Degrees', '[m]']
+    fields = ['WetZ', 'GradNorth', 'GradEast', 'lon', 'lat', 'alt']
+    units_dict = dict(zip(fields, units))
+    desc_dict = dict(zip(fields, desc))
+    meta = {'units': units_dict, 'desc': desc_dict}
+    # convert tropospheric products to cm, rest stay in meters:
+    trop_cols = ppp.columns.values[0:6]
+    ppp[trop_cols] = ppp[trop_cols].mul(100.0)
     if plot:
-        ax = df_zwd['zwd'].plot(legend=True, figsize=(12, 7), color='k')
-        ax.fill_between(df_zwd.index, df_zwd['zwd'] - df_zwd['error'],
-                        df_zwd['zwd'] + df_zwd['error'], alpha=0.5)
-        ax.grid()
-        ax.set_title('Zenith Wet Delay')
-        ax.set_ylabel('[cm]')
-    return df_zwd, meta
+        fig, axes = plt.subplots(3, 2, figsize=(12, 10), sharex=True)
+
+        for ax, field, name, unit in zip(axes.flatten(), fields, desc, units):
+            ppp[field].plot(ax=ax, legend=True, color='k')
+            ax.fill_between(ppp.index, ppp[field] - ppp[field + '_error'],
+                            ppp[field] + ppp[field + '_error'], alpha=0.5)
+            ax.grid()
+            ax.set_title(name)
+            ax.set_ylabel(unit)
+    return ppp, meta
