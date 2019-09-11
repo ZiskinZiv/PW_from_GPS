@@ -20,9 +20,9 @@ def get_latlonalt_error_from_geocent_error(X, Y, Z, xe, ye, ze):
                                               Z + ze, radians=False)
     lon_me, lat_me, alt_me = pyproj.transform(ecef, lla, X - xe, Y - ye,
                                               Z - ze, radians=False)
-    lon_e = lon_pe - lon_me
-    lat_e = lat_pe - lat_me
-    alt_e = alt_pe - alt_me
+    lon_e = (lon_pe - lon_me) / 2.0
+    lat_e = (lat_pe - lat_me) / 2.0
+    alt_e = (alt_pe - alt_me) / 2.0
     return lon, lat, alt, lon_e, lat_e, alt_e
 
 
