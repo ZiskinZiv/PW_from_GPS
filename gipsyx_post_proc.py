@@ -95,6 +95,7 @@ def read_gipsyx_all_yearly_files(load_save_path, plot=False):
         station = file.as_posix().split('/')[-1].split('_')[0]
         if 'ppp_post' not in filename:
             continue
+        print('concatanating {}'.format(filename))
         dss = xr.open_dataset(file)
         ds_list.append(dss)
     ds = xr.concat(ds_list, 'time')
