@@ -22,6 +22,69 @@ stations = pd.read_csv('All_gps_stations.txt', header=0, delim_whitespace=True,
                        index_col='name')
 
 
+def plot_gipsy_field(ds, fields='WetZ'):
+    import matplotlib.pyplot as plt
+    import numpy as np
+    if isinstance(fields, list) and len(fields) == 1:
+        fields = fields[0]
+    if fields is None:
+        all_fields = sorted(list(set([x.split('_')[0] for x in ds.data_vars])))
+        desc = [ds[x].attrs['description'] for x in ds[all_fields]]
+        units = [ds[x].attrs['units'] for x in ds[all_fields]]
+        fig, axes = plt.subplots(
+            len(all_fields), 1, figsize=(
+                20, 15), sharex=True)
+        df = ds.to_dataframe()
+        for i, (ax, field, name, unit) in enumerate(
+                zip(axes.flatten(), all_fields, desc, units)):
+            df[field].plot(
+                ax=ax,
+                style='.',
+                linewidth=0.,
+                color="C{}".format(i))
+            ax.fill_between(df.index,
+                            df[field].values - df[field + '_error'].values,
+                            df[field].values + df[field + '_error'].values,
+                            where=np.isfinite(df['WetZ'].values),
+                            alpha=0.5)
+            ax.grid()
+            ax.set_title(name)
+            ax.set_ylabel(unit)
+        fig.tight_layout()
+    elif fields is not None and isinstance(fields, str):
+        fig, ax = plt.subplots(figsize=(16, 5))
+        ds[fields].plot.line(marker='.', linewidth=0., ax=ax, color='b')
+        ax.fill_between(ds.time.values,
+                        ds[fields].values - ds[fields + '_error'].values,
+                        ds[fields].values + ds[fields + '_error'].values,
+                        where=np.isfinite(ds[fields]),
+                        alpha=0.5)
+        ax.grid()
+        fig.tight_layout()
+    elif fields is not None and isinstance(fields, list):
+        fig, axes = plt.subplots(len(fields), 1, figsize=(20, 15), sharex=True)
+        desc = [ds[x].attrs['description'] for x in ds[fields]]
+        units = [ds[x].attrs['units'] for x in ds[fields]]
+        df = ds.to_dataframe()
+        for i, (ax, field, name, unit) in enumerate(
+                zip(axes.flatten(), fields, desc, units)):
+            df[field].plot(
+                ax=ax,
+                style='.',
+                linewidth=0.,
+                color="C{}".format(i))
+            ax.fill_between(df.index,
+                            df[field].values - df[field + '_error'].values,
+                            df[field].values + df[field + '_error'].values,
+                            where=np.isfinite(df['WetZ'].values),
+                            alpha=0.5)
+            ax.grid()
+            ax.set_title(name)
+            ax.set_ylabel(unit)
+        fig.tight_layout()
+    return
+
+
 def read_gipsyx_all_yearly_files(load_save_path, plot=False):
     from aux_gps import path_glob
     import xarray as xr
@@ -30,12 +93,13 @@ def read_gipsyx_all_yearly_files(load_save_path, plot=False):
     for file in files:
         filename = file.as_posix().split('/')[-1]
         station = file.as_posix().split('/')[-1].split('_')[0]
-        year = file.as_posix().split('/')[-1].split('_')[-1].split('.')[0]
         if 'ppp_post' not in filename:
             continue
         dss = xr.open_dataset(file)
         ds_list.append(dss)
     ds = xr.concat(ds_list, 'time')
+    for name, var in dss.data_vars.items():
+        ds[name].attrs = var.attrs
     comp = dict(zlib=True, complevel=9)  # best compression
     encoding = {var: comp for var in ds.data_vars}
     ymin = ds.time.min().dt.year.item()
@@ -70,6 +134,7 @@ def post_procces_gipsyx_yearly_file(path_file, savepath=None, plot=False):
     from aux_gps import get_unique_index
     import matplotlib.pyplot as plt
     import numpy as np
+    import pandas as pd
 #    from scipy import stats
 #    import pandas as pd
 #    import seaborn as sns
@@ -85,7 +150,13 @@ def post_procces_gipsyx_yearly_file(path_file, savepath=None, plot=False):
         da_year = replace_fields_in_ds(dss, da_field, field, verbose=0)
         da_fs.append(da_year)
     ds = xr.merge(da_fs)
-    # df = ds.to_dataframe()
+    df = get_unique_index(ds, 'time').to_dataframe()
+    st = df.index.min()
+    ed = df.index.max()
+    new_time = pd.date_range(st, ed, freq='5min')
+    df = df.reindex(new_time)
+    df.index.name = 'time'
+    ds = df.to_xarray()
     # filter outlies (zscore>3):
     # df = df[(np.abs(stats.zscore(df)) < 3).all(axis=1)]
     # df = df[df > 0]
@@ -93,10 +164,13 @@ def post_procces_gipsyx_yearly_file(path_file, savepath=None, plot=False):
     ds.attrs = meta
     desc = ['Zenith Wet Delay', 'North Gradient of Zenith Wet Delay',
             'East Gradient of Zenith Wet Delay', 'Longitude', 'Latitude',
-            'Altitude']
+            'Altitude', 'WGS84(geocentric) X coordinate',
+            'WGS84(geocentric) Y coordinate', 'WGS84(geocentric) Z coordinate']
     desc_error = [x + ' Error' for x in desc]
-    units = ['[cm]', '[cm / m]', '[cm / m]', 'Degrees', 'Degrees', '[m]']
-    fields = ['WetZ', 'GradNorth', 'GradEast', 'lon', 'lat', 'alt']
+    units = ['cm', 'cm/m', 'cm/m', 'Degrees', 'Degrees', 'm',
+             'm', 'm', 'm']
+    fields = ['WetZ', 'GradNorth', 'GradEast', 'lon', 'lat', 'alt', 'X', 'Y',
+              'Z']
     fields_error = [x + '_error' for x in fields]
     units_dict = dict(zip(fields, units))
     desc_dict = dict(zip(fields, desc))
