@@ -8,6 +8,45 @@ Created on Mon Jun 10 14:33:19 2019
 from PW_paths import work_yuval
 
 
+def keep_relative_error(ds, ds_error, dim='time', tol=25.0):
+    """return the data in a dataarray only if abs(relative error) is
+    below tol (in percent)"""
+    import xarray as xr
+
+    def keep_rel_error_da(da, da_error, dim, tol):
+        import numpy as np
+        error = np.abs(100.0 * da_error / da)
+        data = da.where(error < tol).dropna(dim)
+        error = da_error.sel({dim:data[dim]})
+        return data, error
+    if isinstance(ds, xr.DataArray):
+        data, error = keep_rel_error_da(ds, ds_error, dim, tol)
+    else:
+        raise NotImplementedError('Dataset not implemented yet...')
+    return data, error
+
+
+def keep_iqr(ds, dim='time', qlow=0.25, qhigh=0.75):
+    """return the data in a dataset or dataarray only in the
+    Interquartile Range (low, high)"""
+    import xarray as xr
+
+    def keep_iqr_da(da, dim, qlow, qhigh):
+        quan = da.quantile([qlow, qhigh], dim).values
+        low = quan[0]
+        high = quan[1]
+        iqr = ds.where(da < high).where(da > low).dropna(dim)
+        return iqr
+    if isinstance(ds, xr.DataArray):
+        iqr = keep_iqr_da(ds, dim, qlow, qhigh)
+    elif isinstance(ds, xr.Dataset):
+        iqr_list = []
+        for da in ds.data_vars:
+            iqr_list.append(keep_iqr_da(ds[da], dim, qlow, qhigh))
+        iqr = xr.merge(iqr_list)
+    return iqr
+
+
 def get_latlonalt_error_from_geocent_error(X, Y, Z, xe, ye, ze):
     """returns the value and error in lat(decimal degree), lon(decimal degree)
     and alt(meters) for X, Y, Z in geocent coords (in meters), all input is
@@ -265,7 +304,7 @@ def dim_union(da_list, dim='time'):
     return new_dim
 
 
-def dim_intersection(da_list, dim='time', dropna=True):
+def dim_intersection(da_list, dim='time', dropna=True, verbose=None):
     import pandas as pd
     if dropna:
         setlist = [set(x.dropna(dim)[dim].values) for x in da_list]
@@ -273,8 +312,9 @@ def dim_intersection(da_list, dim='time', dropna=True):
         setlist = [set(x[dim].values) for x in da_list]
     empty_list = [x for x in setlist if not x]
     if empty_list:
-        print('NaN dim drop detected, check da...')
-        return
+        if verbose == 0:
+            print('NaN dim drop detected, check da...')
+        return None
     u = list(set.intersection(*setlist))
     # new_dim = list(set(a.dropna(dim)[dim].values).intersection(
     #     set(b.dropna(dim)[dim].values)))
