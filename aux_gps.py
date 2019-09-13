@@ -8,42 +8,64 @@ Created on Mon Jun 10 14:33:19 2019
 from PW_paths import work_yuval
 
 
-def keep_relative_error(ds, ds_error, dim='time', tol=25.0):
-    """return the data in a dataarray only if abs(relative error) is
-    below tol (in percent)"""
+def add_attr_to_xr(da, key, value, append=False):
+    """add attr to da, if append=True, appends it"""
     import xarray as xr
-
-    def keep_rel_error_da(da, da_error, dim, tol):
-        import numpy as np
-        error = np.abs(100.0 * da_error / da)
-        data = da.where(error < tol).dropna(dim)
-        error = da_error.sel({dim:data[dim]})
-        return data, error
-    if isinstance(ds, xr.DataArray):
-        data, error = keep_rel_error_da(ds, ds_error, dim, tol)
+    if isinstance(da, xr.Dataset):
+        raise TypeError('only xr.DataArray allowd!')
+    if key in da.attrs and not append:
+        raise ValueError('{} already exists in {}, use append=True'.format(key, da.name))
+    elif key in da.attrs and append:
+        da.attrs[key] += value
     else:
-        raise NotImplementedError('Dataset not implemented yet...')
-    return data, error
+        da.attrs[key] = value
+    return da
 
 
-def keep_iqr(ds, dim='time', qlow=0.25, qhigh=0.75):
+def filter_nan_errors(ds, error_str='_error', dim='time', meta='action'):
+    """return the data in a dataarray only if its error is not NaN,
+    assumes that ds is a xr.dataset and includes fields and their error
+   like this: field, field+error_str"""
+    import xarray as xr
+    import numpy as np
+    from aux_gps import add_attr_to_xr
+    if isinstance(ds, xr.DataArray):
+        raise TypeError('only xr.Dataset allowd!')
+    fields = [x for x in ds.data_vars if error_str not in x]
+    for field in fields:
+        ds[field] = ds[field].where(np.isfinite(ds[field+error_str])).dropna(dim)
+        if meta in ds[field].attrs:
+            append = True
+        add_attr_to_xr(ds[field], meta, ', filtered values with NaN errors', append)
+    return ds
+
+
+def keep_iqr(ds, dim='time', qlow=0.25, qhigh=0.75, k=1.5):
     """return the data in a dataset or dataarray only in the
     Interquartile Range (low, high)"""
     import xarray as xr
 
-    def keep_iqr_da(da, dim, qlow, qhigh):
+    def keep_iqr_da(da, dim, qlow, qhigh, meta='action'):
+        from aux_gps import add_attr_to_xr
         quan = da.quantile([qlow, qhigh], dim).values
         low = quan[0]
         high = quan[1]
-        iqr = ds.where(da < high).where(da > low).dropna(dim)
-        return iqr
+        iqr = high - low
+        lower = low - (iqr * k)
+        higher = high + (iqr * k)
+        da = da.where((da < higher) & (da > lower)).dropna(dim)
+        if meta in da.attrs:
+            append = True
+        add_attr_to_xr(da, meta, ', kept IQR ({}, {}, {})'.format(qlow, qhigh, k), append)
+        return da
     if isinstance(ds, xr.DataArray):
         iqr = keep_iqr_da(ds, dim, qlow, qhigh)
     elif isinstance(ds, xr.Dataset):
-        iqr_list = []
-        for da in ds.data_vars:
-            iqr_list.append(keep_iqr_da(ds[da], dim, qlow, qhigh))
-        iqr = xr.merge(iqr_list)
+        da_list = []
+        for name in ds.data_vars:
+            da = keep_iqr_da(ds[name], dim, qlow, qhigh)
+            da_list.append(da)
+        iqr = xr.merge(da_list)
     return iqr
 
 
