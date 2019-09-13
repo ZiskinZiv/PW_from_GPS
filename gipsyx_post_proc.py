@@ -22,7 +22,6 @@ stations = pd.read_csv('All_gps_stations.txt', header=0, delim_whitespace=True,
                        index_col='name')
 
 # TODO: add action_taken attr on metadata for each timeseries (stitching, cleaning etc)
-# TODO: clean signals with big errors or zscore...
 # TODO: add nans for full time-series with 5 mins freq
 # TODO: convert to lon,lat,alt in the final cleaned time-series
 # TODO: check various gipsyx run parameters(e.g., postsmooth, elmin)
@@ -64,6 +63,14 @@ def plot_gipsy_field(ds, fields='WetZ'):
             ax.set_ylabel(unit)
         fig.tight_layout()
     elif fields is not None and isinstance(fields, str):
+        try:
+            desc = [ds[x].attrs['description'] for x in ds[fields]]
+        except KeyError:
+            desc = [None] * len(fields)
+        try:
+            units = [ds[x].attrs['units'] for x in ds[fields]]
+        except KeyError:
+            units = [None] * len(fields)
         fig, ax = plt.subplots(figsize=(16, 5))
         ds[fields].plot.line(marker='.', linewidth=0., ax=ax, color='b')
         ax.fill_between(ds.time.values,
@@ -74,9 +81,15 @@ def plot_gipsy_field(ds, fields='WetZ'):
         ax.grid()
         fig.tight_layout()
     elif fields is not None and isinstance(fields, list):
+        try:
+            desc = [ds[x].attrs['description'] for x in ds[fields]]
+        except KeyError:
+            desc = [None] * len(fields)
+        try:
+            units = [ds[x].attrs['units'] for x in ds[fields]]
+        except KeyError:
+            units = [None] * len(fields)
         fig, axes = plt.subplots(len(fields), 1, figsize=(20, 15), sharex=True)
-        desc = [ds[x].attrs['description'] for x in ds[fields]]
-        units = [ds[x].attrs['units'] for x in ds[fields]]
         df = ds.to_dataframe()
         for i, (ax, field, name, unit) in enumerate(
                 zip(axes.flatten(), fields, desc, units)):
@@ -97,22 +110,6 @@ def plot_gipsy_field(ds, fields='WetZ'):
     return
 
 
-def clean_yearly_ds(ds, rel_error=25, quan=[0.01, 0.99]):
-    from aux_gps import keep_iqr
-    from aux_gps import keep_relative_error
-    import xarray as xr
-    fields = [x for x in ds.data_vars if 'error' not in x]
-    ds_list = []
-    for field in fields:
-        da, da_error = keep_relative_error(ds[field], ds[field + '_error'],
-                                           'time', rel_error)
-        ds_list.append(da)
-        ds_list.append(da_error)
-    ds = xr.merge(ds_list)
-    ds = keep_iqr(ds, 'time', quan[0], quan[1])
-    return ds
-
-
 def read_gipsyx_all_yearly_files(load_path, savepath=None, plot=False):
     """read, stitch and clean all yearly post proccessed ppp gipsyx solutions
     and concat them to a multiple fields time-series dataset"""
@@ -121,6 +118,8 @@ def read_gipsyx_all_yearly_files(load_path, savepath=None, plot=False):
     from aux_gps import get_unique_index
     from aux_gps import dim_intersection
     import pandas as pd
+    from aux_gps import filter_nan_errors
+    from aux_gps import keep_iqr
 
     def stitch_yearly_files(ds_list):
         """input is multiple field yearly dataset list and output is the same
@@ -169,7 +168,7 @@ def read_gipsyx_all_yearly_files(load_path, savepath=None, plot=False):
             second_time = dim_intersection([ds_list[i+1], st_ds])
             vals_rpl = st_ds.sel(time=second_time)
             for field in ds_list[i+1].data_vars:
-                ds_list[i+1][field].loc[{'time': second_time}] = vals_rpl[field]    
+                ds_list[i+1][field].loc[{'time': second_time}] = vals_rpl[field]
         return ds_list
     files = sorted(path_glob(load_path, '*.nc'))
     ds_list = []
@@ -183,10 +182,22 @@ def read_gipsyx_all_yearly_files(load_path, savepath=None, plot=False):
         ds_list.append(dss)
     # now loop over ds_list and stitch yearly discontinuities:
     ds_list = stitch_yearly_files(ds_list)
+    print('concating all years...')
     ds = xr.concat(ds_list, 'time')
+    print('fixing meta-data...')
+    for da in ds.data_vars:
+        old_keys = [x for x in ds[da].attrs.keys()]
+        vals = [x for x in ds[da].attrs.values()]
+        new_keys = [x.split('>')[-1] for x in old_keys]
+        ds[da].attrs = dict(zip(new_keys, vals))
+    print('dropping duplicates time stamps...')
     ds = get_unique_index(ds)
-    for name, var in dss.data_vars.items():
-        ds[name].attrs = var.attrs
+    # clean with IQR all fields:
+    print('removing outliers with IQR=1.5...')
+    ds = keep_iqr(ds, dim='time', qlow=0.25, qhigh=0.75, k=1.5)
+    # filter the fields based on their errors not being NaNs:
+    print('filtering out fields if their errors are NaN...')
+    ds = filter_nan_errors(ds, error_str='_error', dim='time')
     if plot:
         plot_gipsy_field(ds, None)
     if savepath is not None:
@@ -197,6 +208,7 @@ def read_gipsyx_all_yearly_files(load_path, savepath=None, plot=False):
         new_filename = '{}_PPP_{}-{}.nc'.format(station, ymin, ymax)
         ds.to_netcdf(savepath / new_filename, 'w', encoding=encoding)
         print('{} was saved to {}'.format(new_filename, savepath))
+    print('Done!')
     return ds
 
 
@@ -231,7 +243,7 @@ def post_procces_gipsyx_yearly_file(path_file, savepath=None, plot=False):
     station = path_file.as_posix().split('/')[-1].split('_')[0]
     year = path_file.as_posix().split('/')[-1].split('_')[-1].split('.')[0]
     print('proccessing {} station in year: {}'.format(station, year))
-    dss = xr.load_dataset(path_file)
+    dss = xr.open_dataset(path_file)
     da_fs = []
     # attrs_list = []
     vars_list = list(set([x.split('-')[0] for x in dss.data_vars.keys()]))
