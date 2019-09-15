@@ -8,8 +8,17 @@ Created on Mon Jun 10 14:33:19 2019
 from PW_paths import work_yuval
 
 
+def xr_reindex_with_date_range(ds, time_dim='time', freq='5min'):
+    import pandas as pd
+    start = pd.to_datetime(ds[time_dim].min().item())
+    end = pd.to_datetime(ds[time_dim].max().item())
+    new_time = pd.date_range(start, end, freq=freq)
+    ds = ds.reindex({time_dim: new_time})
+    return ds
+
+
 def add_attr_to_xr(da, key, value, append=False):
-    """add attr to da, if append=True, appends it"""
+    """add attr to da, if append=True, appends it, if key exists"""
     import xarray as xr
     if isinstance(da, xr.Dataset):
         raise TypeError('only xr.DataArray allowd!')
@@ -67,6 +76,27 @@ def keep_iqr(ds, dim='time', qlow=0.25, qhigh=0.75, k=1.5):
             da_list.append(da)
         iqr = xr.merge(da_list)
     return iqr
+
+
+def transform_ds_to_lat_lon_alt(ds, coords_name=['X', 'Y', 'Z'],
+                                error_str='_error', time_dim='time'):
+    """appends to the data vars of ds(xr.dataset) the lat, lon, alt fields
+    and their error where the geocent fields are X, Y, Z"""
+    import xarray as xr
+    from aux_gps import get_latlonalt_error_from_geocent_error
+    geo_fields = [ds[x].values for x in coords_name]
+    geo_errors = [ds[x + error_str].values for x in coords_name]
+    latlong = get_latlonalt_error_from_geocent_error(*geo_fields, *geo_errors)
+    new_fields = ['lon', 'lat', 'alt', 'lon_error', 'lat_error', 'alt_error']
+    new_names = ['Longitude', 'Latitude', 'Altitude']
+    new_units = ['Degrees', 'Degrees', 'm']
+    for name, data in zip(new_fields, latlong):
+        ds[name] = xr.DataArray(data, dims=[time_dim])
+    for name, unit, full_name in zip(new_fields[0:3], new_units[0:3],
+                                     new_names[0:3]):
+        ds[name].attrs['full_name'] = full_name
+        ds[name].attrs['units'] = unit
+    return ds
 
 
 def get_latlonalt_error_from_geocent_error(X, Y, Z, xe, ye, ze):
