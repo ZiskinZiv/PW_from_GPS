@@ -53,6 +53,7 @@ def plot_gipsy_field(ds, fields='WetZ', with_error=False):
                 ax.set_ylabel('[' + ds[field].attrs['units'] + ']')
             except IndexError:
                 pass
+            ax.set_facecolor('red')
             ax.grid()
         fg.fig.subplots_adjust(left=0.1)
     return fg
