@@ -172,7 +172,8 @@ def filter_stations(path, group_name='israeli', save=False):
 #        return intr
 
 
-def produce_geo_gps_stations(path, file='stations.txt', plot=True):
+def produce_geo_gps_stations(path=gis_path, file='All_gps_stations.txt',
+                             plot=True):
     import geopandas as gpd
     import xarray as xr
     stations_df = pd.read_csv(file, index_col='name',
