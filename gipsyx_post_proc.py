@@ -6,108 +6,56 @@ Created on Thu Sep  5 11:24:01 2019
 @author: shlomi
 """
 
-import pandas as pd
-from PW_paths import work_yuval
-from PW_paths import work_path
-from PW_paths import geo_path
-from PW_paths import cwd
-
-garner_path = work_yuval / 'garner'
-ims_path = work_yuval / 'IMS_T'
-gis_path = work_yuval / 'gis'
-sound_path = work_yuval / 'sounding'
-rinex_on_geo = geo_path / 'Work_Files/PW_yuval/rinex'
-PW_stations_path = work_yuval / '1minute'
-stations = pd.read_csv('All_gps_stations.txt', header=0, delim_whitespace=True,
-                       index_col='name')
 
 # TODO: add action_taken attr on metadata for each timeseries (stitching, cleaning etc)
-# TODO: add nans for full time-series with 5 mins freq
-# TODO: convert to lon,lat,alt in the final cleaned time-series
+# TODO: should i filter with IQR the lat lon alt fields after calculation?
 # TODO: check various gipsyx run parameters(e.g., postsmooth, elmin)
 
+def check_path(path):
+    import os
+    from pathlib import Path
+    path = str(path)
+    if not os.path.exists(path):
+        raise argparse.ArgumentTypeError(path + ' does not exist...')
+    return Path(path)
 
-def plot_gipsy_field(ds, fields='WetZ'):
-    import matplotlib.pyplot as plt
+
+def plot_gipsy_field(ds, fields='WetZ', with_error=False):
     import numpy as np
-    if isinstance(fields, list) and len(fields) == 1:
-        fields = fields[0]
+    import matplotlib.pyplot as plt
+    if isinstance(fields, str):
+        fields = [fields]
     if fields is None:
         all_fields = sorted(list(set([x.split('_')[0] for x in ds.data_vars])))
-        try:
-            desc = [ds[x].attrs['description'] for x in ds[all_fields]]
-        except KeyError:
-            desc = [None] * len(all_fields)
-        try:
-            units = [ds[x].attrs['units'] for x in ds[all_fields]]
-        except KeyError:
-            units = [None] * len(all_fields)
-        fig, axes = plt.subplots(
-            len(all_fields), 1, figsize=(
-                20, 15), sharex=True)
-        df = ds.to_dataframe()
-        for i, (ax, field, name, unit) in enumerate(
-                zip(axes.flatten(), all_fields, desc, units)):
-            df[field].plot(
-                ax=ax,
-                style='.',
-                linewidth=0.,
-                color="C{}".format(i))
-            ax.fill_between(df.index,
-                            df[field].values - df[field + '_error'].values,
-                            df[field].values + df[field + '_error'].values,
-                            where=np.isfinite(df['WetZ'].values),
-                            alpha=0.5)
-            ax.grid()
-            ax.set_title(name)
-            ax.set_ylabel(unit)
-        fig.tight_layout()
-    elif fields is not None and isinstance(fields, str):
-        try:
-            desc = [ds[x].attrs['description'] for x in ds[fields]]
-        except KeyError:
-            desc = [None] * len(fields)
-        try:
-            units = [ds[x].attrs['units'] for x in ds[fields]]
-        except KeyError:
-            units = [None] * len(fields)
-        fig, ax = plt.subplots(figsize=(16, 5))
-        ds[fields].plot.line(marker='.', linewidth=0., ax=ax, color='b')
-        ax.fill_between(ds.time.values,
-                        ds[fields].values - ds[fields + '_error'].values,
-                        ds[fields].values + ds[fields + '_error'].values,
-                        where=np.isfinite(ds[fields]),
-                        alpha=0.5)
-        ax.grid()
-        fig.tight_layout()
     elif fields is not None and isinstance(fields, list):
-        try:
-            desc = [ds[x].attrs['description'] for x in ds[fields]]
-        except KeyError:
-            desc = [None] * len(fields)
-        try:
-            units = [ds[x].attrs['units'] for x in ds[fields]]
-        except KeyError:
-            units = [None] * len(fields)
-        fig, axes = plt.subplots(len(fields), 1, figsize=(20, 15), sharex=True)
-        df = ds.to_dataframe()
-        for i, (ax, field, name, unit) in enumerate(
-                zip(axes.flatten(), fields, desc, units)):
-            df[field].plot(
-                ax=ax,
-                style='.',
-                linewidth=0.,
-                color="C{}".format(i))
-            ax.fill_between(df.index,
-                            df[field].values - df[field + '_error'].values,
-                            df[field].values + df[field + '_error'].values,
-                            where=np.isfinite(df['WetZ'].values),
-                            alpha=0.5)
+        all_fields = sorted(fields)
+    if len(all_fields) == 1:
+        da = ds[all_fields[0]]
+        error = da.name + '_error'
+        ax = da.plot(figsize=(20, 4), color='b')[0].axes
+        ax.fill_between(da.time.values, da.values - ds[error].values,
+                                da.values + ds[error].values,
+                                where=np.isfinite(da.values),
+                                alpha=0.5)
+        ax.grid()
+        plt.tight_layout()
+        return ax
+    else:
+        da = ds[all_fields].to_array('var')
+        fg = da.plot(row='var', sharex=True, sharey=False, figsize=(20, 15), hue='var')
+        for i, (ax, field) in enumerate(zip(fg.axes.flatten(), all_fields)):
+            if with_error:
+                ax.fill_between(da.time.values, da.sel(var=field).values - ds[field+'_error'].values,
+                                da.sel(var=field).values + ds[field+'_error'].values,
+                                where=np.isfinite(da.sel(var=field).values),
+                                alpha=0.5)
+            try:
+                ax.set_ylabel('[' + ds[field].attrs['units'] + ']')
+            except IndexError:
+                pass
             ax.grid()
-            ax.set_title(name)
-            ax.set_ylabel(unit)
-        fig.tight_layout()
-    return
+        fg.fig.subplots_adjust(left=0.1)
+    return fg
 
 
 def read_gipsyx_all_yearly_files(load_path, savepath=None, plot=False):
@@ -120,6 +68,9 @@ def read_gipsyx_all_yearly_files(load_path, savepath=None, plot=False):
     import pandas as pd
     from aux_gps import filter_nan_errors
     from aux_gps import keep_iqr
+    from aux_gps import xr_reindex_with_date_range
+    from aux_gps import transform_ds_to_lat_lon_alt
+    import logging
 
     def stitch_yearly_files(ds_list):
         """input is multiple field yearly dataset list and output is the same
@@ -135,10 +86,10 @@ def read_gipsyx_all_yearly_files(load_path, savepath=None, plot=False):
             second_ds = ds_list[i+1].sel(time=slice(str(first_year),
                                                     '{}-01-01T06:00'.format(second_year)))
             if dim_intersection([first_ds, second_ds], 'time') is None:
-                print('skipping stitching years {} and {}...'.format(first_year, second_year))
+                logger.warning('skipping stitching years {} and {}...'.format(first_year, second_year))
                 continue
             else:
-                print('stitching years {} and {}'.format(first_year, second_year))
+                logger.info('stitching years {} and {}'.format(first_year, second_year))
             time = xr.concat([first_ds.time, second_ds.time], 'time')
             time = pd.to_datetime(get_unique_index(time).values)
             st_list = []
@@ -170,6 +121,7 @@ def read_gipsyx_all_yearly_files(load_path, savepath=None, plot=False):
             for field in ds_list[i+1].data_vars:
                 ds_list[i+1][field].loc[{'time': second_time}] = vals_rpl[field]
         return ds_list
+    logger = logging.getLogger('gipsyx_post_proccesser')
     files = sorted(path_glob(load_path, '*.nc'))
     ds_list = []
     for file in files:
@@ -177,27 +129,33 @@ def read_gipsyx_all_yearly_files(load_path, savepath=None, plot=False):
         station = file.as_posix().split('/')[-1].split('_')[0]
         if 'ppp_post' not in filename:
             continue
-        print('reading {}'.format(filename))
+        logger.info('reading {}'.format(filename))
         dss = xr.open_dataset(file)
         ds_list.append(dss)
     # now loop over ds_list and stitch yearly discontinuities:
     ds_list = stitch_yearly_files(ds_list)
-    print('concating all years...')
+    logger.info('concating all years...')
     ds = xr.concat(ds_list, 'time')
-    print('fixing meta-data...')
+    logger.info('fixing meta-data...')
     for da in ds.data_vars:
         old_keys = [x for x in ds[da].attrs.keys()]
         vals = [x for x in ds[da].attrs.values()]
         new_keys = [x.split('>')[-1] for x in old_keys]
         ds[da].attrs = dict(zip(new_keys, vals))
-    print('dropping duplicates time stamps...')
+        if 'desc' in ds[da].attrs.keys():
+            ds[da].attrs['full_name'] = ds[da].attrs.pop('desc')
+    logger.info('dropping duplicates time stamps...')
     ds = get_unique_index(ds)
     # clean with IQR all fields:
-    print('removing outliers with IQR=1.5...')
+    logger.info('removing outliers with IQR=1.5...')
     ds = keep_iqr(ds, dim='time', qlow=0.25, qhigh=0.75, k=1.5)
     # filter the fields based on their errors not being NaNs:
-    print('filtering out fields if their errors are NaN...')
+    logger.info('filtering out fields if their errors are NaN...')
     ds = filter_nan_errors(ds, error_str='_error', dim='time')
+    logger.info('transforming X, Y, Z coords to lat, lon and alt...')
+    ds = transform_ds_to_lat_lon_alt(ds, ['X', 'Y', 'Z'], '_error', 'time')
+    logger.info('reindexing fields with 5 mins frequency(i.e., inserting NaNs)')
+    ds = xr_reindex_with_date_range(ds, 'time', '5min')
     if plot:
         plot_gipsy_field(ds, None)
     if savepath is not None:
@@ -207,13 +165,15 @@ def read_gipsyx_all_yearly_files(load_path, savepath=None, plot=False):
         ymax = ds.time.max().dt.year.item()
         new_filename = '{}_PPP_{}-{}.nc'.format(station, ymin, ymax)
         ds.to_netcdf(savepath / new_filename, 'w', encoding=encoding)
-        print('{} was saved to {}'.format(new_filename, savepath))
-    print('Done!')
+        logger.info('{} was saved to {}'.format(new_filename, savepath))
+    logger.info('Done!')
     return ds
 
 
 def post_procces_gipsyx_all_years(load_save_path, plot=False):
     from aux_gps import path_glob
+    import logging
+    logger = logging.getLogger('gipsyx_post_proccesser')
     files = sorted(path_glob(load_save_path, '*.nc'))
     for file in files:
         filename = file.as_posix().split('/')[-1]
@@ -223,8 +183,8 @@ def post_procces_gipsyx_all_years(load_save_path, plot=False):
             continue
         new_filename = '{}_ppp_post_{}.nc'.format(station, year)
         if (load_save_path / new_filename).is_file():
-            print('{} already exists in {}, skipping...'.format(new_filename,
-                                                                load_save_path))
+            logger.warning('{} already exists in {}, skipping...'.format(new_filename,
+                                                                         load_save_path))
             continue
         _ = post_procces_gipsyx_yearly_file(file, savepath=load_save_path,
                                             plot=False)
@@ -236,13 +196,15 @@ def post_procces_gipsyx_yearly_file(path_file, savepath=None, plot=False):
     # from aux_gps import get_unique_index
     import matplotlib.pyplot as plt
     import numpy as np
+    import logging
     # import pandas as pd
 #    from scipy import stats
 #    import pandas as pd
 #    import seaborn as sns
+    logger = logging.getLogger('gipsyx_post_proccesser')
     station = path_file.as_posix().split('/')[-1].split('_')[0]
     year = path_file.as_posix().split('/')[-1].split('_')[-1].split('.')[0]
-    print('proccessing {} station in year: {}'.format(station, year))
+    logger.info('proccessing {} station in year: {}'.format(station, year))
     dss = xr.open_dataset(path_file)
     da_fs = []
     # attrs_list = []
@@ -304,7 +266,7 @@ def post_procces_gipsyx_yearly_file(path_file, savepath=None, plot=False):
         encoding = {var: comp for var in ds.data_vars}
         new_filename = '{}_ppp_post_{}.nc'.format(station, year)
         ds.to_netcdf(savepath / new_filename, 'w', encoding=encoding)
-        print('{} was saved to {}'.format(new_filename, savepath))
+        logger.info('{} was saved to {}'.format(new_filename, savepath))
     return ds
 
 
@@ -313,6 +275,8 @@ def replace_fields_in_ds(dss, da_repl, field='WetZ', verbose=None):
     fron da_repl. be carful with the choices for field"""
     from aux_gps import get_unique_index
     import xarray as xr
+    import logging
+    logger = logging.getLogger('gipsyx_post_proccesser')
     if verbose == 0:
         print('replacing {} field.'.format(field))
     # choose the field from the bigger dss:
@@ -328,7 +292,7 @@ def replace_fields_in_ds(dss, da_repl, field='WetZ', verbose=None):
         max_time = second.dropna('time').time.max()
         da = da_repl.sel(time=slice(min_time, max_time))
         if verbose == 1:
-            print('proccesing {} and {}'.format(first.name, second.name))
+            logger.info('proccesing {} and {}'.format(first.name, second.name))
         # utime = dim_union([first, second], 'time')
         first_time = set(first.dropna('time').time.values).difference(set(da.time.values))
         second_time = set(second.dropna('time').time.values).difference(set(da.time.values))
@@ -374,6 +338,7 @@ def analyse_results_ds_one_station(dss, field='WetZ', verbose=None,
     # direction...
     import matplotlib.pyplot as plt
     import pandas as pd
+    import logging
 
     def select_two_ds_from_gipsyx_results(ds, names=['WetZ_0', 'WetZ_1'],
                                           hours_offset=None):
@@ -398,8 +363,9 @@ def analyse_results_ds_one_station(dss, field='WetZ', verbose=None,
         two[second.name] = second
         df = two.to_dataframe()
         return df
+    logger = logging.getLogger('gipsyx_post_proccesser')
     if verbose == 0:
-        print('analysing {} field.'.format(field))
+        logger.info('analysing {} field.'.format(field))
     # first, group different vars for different stitching schemes:
     to_smooth = ['GradEast', 'GradNorth', 'WetZ']
     to_simple_mean = ['X', 'Y', 'Z']
@@ -438,7 +404,7 @@ def analyse_results_ds_one_station(dss, field='WetZ', verbose=None,
             # df_list.append(find_cross_points(df, None))
         elif df is None:
             if verbose:
-                print('skipping {} and {}...'.format(first.name, second.name))
+                logger.warning('skipping {} and {}...'.format(first.name, second.name))
     da = pd.concat([x['stitched_signal'] for x in df_list]).to_xarray()
     attrs_list = [(x, y)
                   for x, y in dss.attrs.items() if field == x.split('>')[0]]
@@ -546,6 +512,7 @@ def gipsyx_runs_error_analysis(path, glob_str='*.tdp'):
     from aux_gps import get_timedate_and_station_code_from_rinex
     from aux_gps import path_glob
     import pandas as pd
+    import logging
 
     def find_errors(content_list, name):
         keys = [x for x in content_list if 'KeyError' in x]
@@ -559,9 +526,10 @@ def gipsyx_runs_error_analysis(path, glob_str='*.tdp'):
         errors = keys + vals + excpt + err + trouble + problem + fatal + timed
         if not errors:
             dt, _ = get_timedate_and_station_code_from_rinex(name)
-            print('found new error on {} ({})'.format(name,  dt.strftime('%Y-%m-%d')))
+            logger.warning('found new error on {} ({})'.format(name,  dt.strftime('%Y-%m-%d')))
         return errors
 
+    logger = logging.getLogger('gipsyx_post_proccesser')
     rfns = []
     files = path_glob(path, glob_str, True)
     for file in files:
@@ -569,7 +537,7 @@ def gipsyx_runs_error_analysis(path, glob_str='*.tdp'):
         rfn = file.as_posix().split('/')[-1][0:12]
         rfns.append(rfn)
     if files:
-        print('running error analysis for station {}'.format(rfn[0:4].upper()))
+        logger.info('running error analysis for station {}'.format(rfn[0:4].upper()))
     all_errors = []
     errors = []
     dates = []
@@ -599,10 +567,10 @@ def gipsyx_runs_error_analysis(path, glob_str='*.tdp'):
     total = len(rfns) + len(df)
     good = len(rfns)
     bad = len(df)
-    print('total files: {}, successful runs: {}, errornous runs: {}'.format(
+    logger.info('total files: {}, successful runs: {}, errornous runs: {}'.format(
             total, good, bad))
-    print('success percent: {0:.1f}%'.format(100.0 * good / total))
-    print('error percent: {0:.1f}%'.format(100.0 * bad / total))
+    logger.info('success percent: {0:.1f}%'.format(100.0 * good / total))
+    logger.info('error percent: {0:.1f}%'.format(100.0 * bad / total))
     # now count the similar errors and sort:
     flat_list = [item for sublist in errors for item in sublist]
     counted_errors = Counter(flat_list)
@@ -611,11 +579,13 @@ def gipsyx_runs_error_analysis(path, glob_str='*.tdp'):
     return errors_sorted, df
 
 
-def save_yearly_gipsyx_results(path=work_yuval, savepath=work_yuval):
+def save_yearly_gipsyx_results(path, savepath):
     """call read one station for each year and save the results, then
     concat and save to a bigger raw file, can add postproccess function"""
     from aux_gps import path_glob
     from aux_gps import get_timedate_and_station_code_from_rinex
+    import logging
+    logger = logging.getLogger('gipsyx_post_proccesser')
     files = path_glob(path, '*.tdp')
     rfns = [x.as_posix().split('/')[-1][0:12] for x in files]
     dts = [get_timedate_and_station_code_from_rinex(rfn, just_dt=True) for
@@ -625,31 +595,27 @@ def save_yearly_gipsyx_results(path=work_yuval, savepath=work_yuval):
     for year in sorted(years):
         filename = '{}_ppp_raw_{}.nc'.format(station, year)
         if (savepath / filename).is_file():
-            print('{} already in {}, skipping...'.format(filename, savepath))
+            logger.warning('{} already in {}, skipping...'.format(filename, savepath))
             continue
         ds, _ = read_one_station_gipsyx_results(path, savepath, year)
     return
 
 
-def read_one_station_gipsyx_results(path=work_yuval, savepath=None,
+def read_one_station_gipsyx_results(path, savepath=None,
                                     year=None):
     """read one station (all years) consisting of many tdp files"""
-#     from scipy import stats
-#     import numpy as np
     import xarray as xr
-#     import pandas as pd
     from aux_gps import get_timedate_and_station_code_from_rinex
     from aux_gps import path_glob
+    import logging
+    logger = logging.getLogger('gipsyx_post_proccesser')
     if year is not None:
         year = int(year)
-        print('getting tdp files from year {}'.format(year))
-#    if times is not None:
-#        dt_range = pd.date_range(times[0], times[1], freq='1D')
-#        print('getting tdp files from {} to {}'.format(times[0], times[1]))
+        logger.info('getting tdp files from year {}'.format(year))
     df_list = []
     errors = []
     dts = []
-    print('reading folder:{}'.format(path))
+    logger.info('reading folder:{}'.format(path))
     files = path_glob(path, '*.tdp')
     for tdp_file in files:
         rfn = tdp_file.as_posix().split('/')[-1][0:12]
@@ -663,7 +629,7 @@ def read_one_station_gipsyx_results(path=work_yuval, savepath=None,
                     df, meta = process_one_day_gipsyx_output(tdp_file)
                     dts.append(df.index[0])
                 except TypeError:
-                    print('problem reading {}, appending to errors...'.format(rfn))
+                    logger.error('problem reading {}, appending to errors...'.format(rfn))
                     errors.append(rfn)
                     continue
                 df_list.append(df)
@@ -672,7 +638,7 @@ def read_one_station_gipsyx_results(path=work_yuval, savepath=None,
                 df, meta = process_one_day_gipsyx_output(tdp_file)
                 dts.append(df.index[0])
             except TypeError:
-                print('problem reading {}, appending to errors...'.format(rfn))
+                logger.error('problem reading {}, appending to errors...'.format(rfn))
                 errors.append(rfn)
                 continue
             df_list.append(df)
@@ -689,48 +655,22 @@ def read_one_station_gipsyx_results(path=work_yuval, savepath=None,
         dict_to_rename = dict(zip(keys_to_rename, values_to_rename))
         dss_new.append(ds.rename(dict_to_rename))
     ds = xr.merge(dss_new)
-#    # concat and sort:
-#    df_all = pd.concat(df_list)
-#    df_all = df_all.sort_index()
-#    df_all.index.name = 'time'
-#    # filter out negative values:
-#    df_all = df_all[df_all > 0]
-#    # filter outlies (zscore>3):
-#    df_all = df_all[(np.abs(stats.zscore(df_all)) < 3).all(axis=1)]
-#    # filter out constant values:
-#    df_all['value_grp'] = df_all.zwd.diff(1)
-#    df_all = df_all[np.abs(df_all['value_grp']) > 1e-7]
-#    ds = df_all.to_xarray()
-#    ds = ds.drop('value_grp')
     ds.attrs['station'] = station
     for key, val in meta['units'].items():
         ds.attrs[key + '>units'] = val
     for key, val in meta['desc'].items():
         ds.attrs[key + '>desc'] = val
-#    ds.attrs['lat'] = meta['lat']
-#    ds.attrs['lon'] = meta['lon']
-#    ds.attrs['alt'] = meta['alt']
-#     ds.attrs['units'] = 'cm'
-#    if plot:
-#        ax = df_all['zwd'].plot(legend=True, figsize=(12, 7), color='k')
-#        ax.fill_between(df_all.index, df_all['zwd'] - df_all['error'],
-#                        df_all['zwd'] + df_all['error'], alpha=0.5)
-#        ax.grid()
-#        ax.set_title('Zenith Wet Delay')
-#        ax.set_ylabel('[cm]')
     if savepath is not None:
         comp = dict(zlib=True, complevel=9)  # best compression
         encoding = {var: comp for var in ds.data_vars}
-        # ymin = ds.time.min().dt.year.item()
-        # ymax = ds.time.max().dt.year.item()
         filename = '{}_ppp_raw_{}.nc'.format(station, year)
         ds.to_netcdf(savepath / filename, 'w', encoding=encoding)
-        print('{} was saved to {}'.format(filename, savepath))
+        logger.info('{} was saved to {}'.format(filename, savepath))
     return ds, errors
 
 
-def process_one_day_gipsyx_output(path_and_file=work_yuval / 'smoothFinal.tdp',
-                                  plot=False):
+def process_one_day_gipsyx_output(path_and_file, plot=False):
+    # path_and_file = work_yuval / 'smoothFinal.tdp'
     import pandas as pd
     # import pyproj
     import matplotlib.pyplot as plt
@@ -748,8 +688,6 @@ def process_one_day_gipsyx_output(path_and_file=work_yuval / 'smoothFinal.tdp',
     # build a new df that contains all the vars(from keys):
     ppp = pd.DataFrame(index=time)
     ppp.index.name = 'time'
-    # time.set_index(time, inplace=True)
-    # df_zwd.index.name = 'time'
     for i, df in enumerate(df_list):
         df.columns = ['seconds', 'to_drop', keys[i], keys[i] + '_error',
                       'meta']
@@ -757,18 +695,6 @@ def process_one_day_gipsyx_output(path_and_file=work_yuval / 'smoothFinal.tdp',
         ppp[keys[i] + '_error'] = df[keys[i] + '_error'].values
     # rename all the Pos. to nothing:
     ppp.columns = ppp.columns.str.replace('Pos.', '')
-#    lon, lat, alt, lon_error, lat_error, alt_error = get_latlonalt_error_from_geocent_error(
-#        ppp.X.values, ppp.Y.values, ppp.Z.values, ppp.X_error.values, ppp.Y_error.values, ppp.Z_error.values,)
-#    vals = [lon, lat, alt]
-#    vals_error = [lon_error, lat_error, alt_error]
-#    for i, key in enumerate(['lon', 'lat', 'alt']):
-#        ppp[key] = vals[i]
-#        ppp[key + '_error'] = vals_error[i]
-    # get initial lat, lon, alt for meta data purpose:
-#    ecef = pyproj.Proj(proj='geocent', ellps='WGS84', datum='WGS84')
-#    lla = pyproj.Proj(proj='latlong', ellps='WGS84', datum='WGS84')
-#    lon, lat, alt = pyproj.transform(ecef, lla, ppp.X[0], ppp.Y[0],
-#                                     ppp.Z[0], radians=False)
     desc = ['Zenith Wet Delay', 'North Gradient of Zenith Wet Delay',
             'East Gradient of Zenith Wet Delay',
             'WGS84(geocentric) X coordinate',
@@ -792,3 +718,52 @@ def process_one_day_gipsyx_output(path_and_file=work_yuval / 'smoothFinal.tdp',
             ax.set_title(name)
             ax.set_ylabel(unit)
     return ppp, meta
+
+
+if __name__ == '__main__':
+    """tdppath is where the gipsyx results are (tdp files).
+    e.g., /rinex/tela/30hr/results. savepath is where the raw/final post
+    proccessed results will be saved."""
+    import argparse
+    import sys
+    from PW_paths import work_yuval
+    from PW_paths import work_path
+    from PW_paths import geo_path
+    from PW_paths import cwd
+    from aux_gps import configure_logger
+    garner_path = work_yuval / 'garner'
+    ims_path = work_yuval / 'IMS_T'
+    gis_path = work_yuval / 'gis'
+    sound_path = work_yuval / 'sounding'
+    rinex_on_geo = geo_path / 'Work_Files/PW_yuval/rinex'
+    logger = configure_logger('gipsyx_post_proccesser')
+    parser = argparse.ArgumentParser(
+        description='a command line tool for post proccessing PPP gipsyX results.')
+    optional = parser._action_groups.pop()
+    required = parser.add_argument_group('required arguments')
+    required.add_argument(
+        '--savepath',
+        help="a full path to save the raw and final output files, e.g., /home/ziskin/Work_Files/PW_yuval/gipsyx_resolved/TELA",
+        type=check_path)
+    required.add_argument(
+        '--tdppath',
+        help="a full path to the tdp files path of the station, /home/ziskin/Work_Files/PW_yuval/rinex/tela/30hr/results",
+        type=check_path)
+#    optional.add_argument(
+#            '--rewrite',
+#            dest='rewrite',
+#            action='store_true',
+#            help='overwrite files in prep/run mode')
+
+    parser._action_groups.append(optional)  # added this line
+#    parser.set_defaults(rewrite=False)
+    args = parser.parse_args()
+    if args.tdppath is None:
+        print('tdppath is a required argument, run with -h...')
+        sys.exit()
+    station = args.tdppath.as_posix().split('/')[-3].upper()
+    logger.info('Starting post proccessing {} station'.format(station))
+    save_yearly_gipsyx_results(args.tdppath, args.savepath)
+    post_procces_gipsyx_all_years(args.savepath, False)
+    read_gipsyx_all_yearly_files(args.savepath, args.savepath, False)
+    logger.info('Done post proccessing station {}.'.format(station))
