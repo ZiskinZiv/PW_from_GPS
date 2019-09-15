@@ -380,7 +380,7 @@ if __name__ == '__main__':
         raise ValueError('Run source ~/GipsyX-1.1/rc_GipsyX.sh first !')
     logger = configure_logger(name='gipsyx')
     parser = argparse.ArgumentParser(
-        description='a command line tool for downloading all 10mins stations from the IMS with specific variable')
+        description='a command line tool for preparing and running rinex files with gipsyX softwere.')
     optional = parser._action_groups.pop()
     required = parser.add_argument_group('required arguments')
 #    required.add_argument(
