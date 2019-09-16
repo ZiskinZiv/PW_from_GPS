@@ -20,11 +20,20 @@ def check_path(path):
     return Path(path)
 
 
+def check_abs_int(num):
+    try:
+        num = abs(int(num))
+    except ValueError:
+        print('{} needs to be a natural number (>0 and int)'.format(num))
+    return num
+
+
 def plot_gipsy_field(ds, fields='WetZ', with_error=False):
     import numpy as np
     import matplotlib.pyplot as plt
     if isinstance(fields, str):
         fields = [fields]
+    station = ds['WetZ'].attrs['station']
     if fields is None:
         all_fields = sorted(list(set([x.split('_')[0] for x in ds.data_vars])))
     elif fields is not None and isinstance(fields, list):
@@ -34,18 +43,22 @@ def plot_gipsy_field(ds, fields='WetZ', with_error=False):
         error = da.name + '_error'
         ax = da.plot(figsize=(20, 4), color='b')[0].axes
         ax.fill_between(da.time.values, da.values - ds[error].values,
-                                da.values + ds[error].values,
-                                where=np.isfinite(da.values),
-                                alpha=0.5)
+                        da.values + ds[error].values,
+                        where=np.isfinite(da.values),
+                        alpha=0.5)
         ax.grid()
+        ax.set_title('GPS station: {}'.format(station))
         plt.tight_layout()
+        plt.subplots_adjust(top=0.93)
         return ax
     else:
         da = ds[all_fields].to_array('var')
-        fg = da.plot(row='var', sharex=True, sharey=False, figsize=(20, 15), hue='var')
+        fg = da.plot(row='var', sharex=True, sharey=False, figsize=(20, 15),
+                     hue='var',color='k')
         for i, (ax, field) in enumerate(zip(fg.axes.flatten(), all_fields)):
             if with_error:
-                ax.fill_between(da.time.values, da.sel(var=field).values - ds[field+'_error'].values,
+                ax.fill_between(da.time.values,
+                                da.sel(var=field).values - ds[field+'_error'].values,
                                 da.sel(var=field).values + ds[field+'_error'].values,
                                 where=np.isfinite(da.sel(var=field).values),
                                 alpha=0.5)
@@ -53,13 +66,15 @@ def plot_gipsy_field(ds, fields='WetZ', with_error=False):
                 ax.set_ylabel('[' + ds[field].attrs['units'] + ']')
             except IndexError:
                 pass
-            ax.set_facecolor('red')
+            ax.lines[0].set_color('C{}'.format(i))
             ax.grid()
-        fg.fig.subplots_adjust(left=0.1)
+        fg.fig.suptitle('GPS station: {}'.format(station))
+        fg.fig.subplots_adjust(left=0.1, top=0.93)
     return fg
 
 
-def read_gipsyx_all_yearly_files(load_path, savepath=None, plot=False):
+def read_gipsyx_all_yearly_files(load_path, savepath=None, iqr_k=3.0,
+                                 plot=False):
     """read, stitch and clean all yearly post proccessed ppp gipsyx solutions
     and concat them to a multiple fields time-series dataset"""
     from aux_gps import path_glob
@@ -148,8 +163,8 @@ def read_gipsyx_all_yearly_files(load_path, savepath=None, plot=False):
     logger.info('dropping duplicates time stamps...')
     ds = get_unique_index(ds)
     # clean with IQR all fields:
-    logger.info('removing outliers with IQR=1.5...')
-    ds = keep_iqr(ds, dim='time', qlow=0.25, qhigh=0.75, k=1.5)
+    logger.info('removing outliers with IQR of {}...'.format(iqr_k))
+    ds = keep_iqr(ds, dim='time', qlow=0.25, qhigh=0.75, k=iqr_k)
     # filter the fields based on their errors not being NaNs:
     logger.info('filtering out fields if their errors are NaN...')
     ds = filter_nan_errors(ds, error_str='_error', dim='time')
@@ -750,6 +765,9 @@ if __name__ == '__main__':
         '--tdppath',
         help="a full path to the tdp files path of the station, /home/ziskin/Work_Files/PW_yuval/rinex/tela/30hr/results",
         type=check_path)
+    optional.add_argument('--iqr_k', help='InterQuartile Range multiplier parameter(e.g., 1.5), Defualt=3.0',
+                          type=check_abs_int)
+
 #    optional.add_argument(
 #            '--rewrite',
 #            dest='rewrite',
@@ -766,5 +784,9 @@ if __name__ == '__main__':
     logger.info('Starting post proccessing {} station'.format(station))
     save_yearly_gipsyx_results(args.tdppath, args.savepath)
     post_procces_gipsyx_all_years(args.savepath, False)
-    read_gipsyx_all_yearly_files(args.savepath, args.savepath, False)
+    if args.iqr_k is None:
+        iqr_k = 3.0
+    else:
+        iqr_k = args.iqr_k
+    read_gipsyx_all_yearly_files(args.savepath, args.savepath, iqr_k, False)
     logger.info('Done post proccessing station {}.'.format(station))
