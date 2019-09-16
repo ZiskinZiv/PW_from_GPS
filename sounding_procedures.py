@@ -9,6 +9,21 @@ Created on Thu May 16 14:24:40 2019
 from PW_paths import work_yuval
 sound_path = work_yuval / 'sounding'
 
+# TODO: complete functions:
+
+
+def move_bet_dagan_physical_to_main_path(bet_dagan_path):
+    """rename bet_dagan physical radiosonde filenames and move them to main
+    path i.e., bet_dagan_path """
+    return
+
+
+def read_one_physical_radiosonde_report(path):
+    """read one(12 or 00) physical bet dagan radiosonde reports and return a df
+    containing time series, PW for the whole sounding and time span of the
+    sounding"""
+    return
+
 
 def classify_clouds_from_sounding(sound_path=sound_path):
     import xarray as xr
