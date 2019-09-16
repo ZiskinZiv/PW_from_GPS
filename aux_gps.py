@@ -8,6 +8,22 @@ Created on Mon Jun 10 14:33:19 2019
 from PW_paths import work_yuval
 
 
+def dt_to_np64(time_coord, unit='m', convert_back=False):
+    """accepts time_coord and a required time unit and returns a dataarray
+    of time_coord and unix POSIX continous float index"""
+    import numpy as np
+    import xarray as xr
+    unix_epoch = np.datetime64(0, unit)
+    one_time_unit = np.timedelta64(1, unit)
+    time_unit_since_epoch = (time_coord.values - unix_epoch) / one_time_unit
+    units = {'Y': 'years', 'M': 'months', 'W': 'weeks', 'D': 'days',
+             'h': 'hours', 'm': 'minutes', 's': 'seconds'}
+    new_time = xr.DataArray(time_unit_since_epoch, coords=[time_coord],
+                            dims=[time_coord.name])
+    new_time.attrs['units'] = units[unit] + ' since 1970-01-01 00:00:00'
+    return new_time
+
+
 def xr_reindex_with_date_range(ds, time_dim='time', freq='5min'):
     import pandas as pd
     start = pd.to_datetime(ds[time_dim].min().item())
