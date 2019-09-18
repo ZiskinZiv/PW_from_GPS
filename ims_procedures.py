@@ -9,6 +9,12 @@ from PW_paths import work_yuval
 ims_path = work_yuval / 'IMS_T'
 gis_path = work_yuval / 'gis'
 ims_10mins_path = ims_path / '10mins'
+# fill missing data:
+#some_missing = ds.tmin.sel(time=ds['time.day'] > 15).reindex_like(ds)
+#
+#In [20]: filled = some_missing.groupby('time.month').fillna(climatology.tmin)
+#
+#In [21]: both = xr.Dataset({'some_missing': some_missing, 'filled': filled})
 
 
 def parse_cv_results(grid_search_cv):
