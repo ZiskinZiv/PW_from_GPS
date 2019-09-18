@@ -8,6 +8,34 @@ Created on Mon Jun 10 14:33:19 2019
 from PW_paths import work_yuval
 
 
+def time_series_stack(time_da, time_dim='time', grp='hour', plot=True):
+    import xarray as xr
+    grp_obj = time_da.groupby(time_dim + '.' + grp)
+    s_list = []
+    for grp_name, grp_inds in grp_obj.groups.items():
+        da = time_da.isel({time_dim: grp_inds})
+        # da = da.rename({time_dim: grp + '_' + str(grp_name)})
+        # da.name += '_' + grp + '_' + str(grp_name)
+        s_list.append(da)
+    grps = [x for x in grp_obj.groups.keys()]
+    stacked_da = xr.concat(s_list, dim=grp)
+    stacked_da[grp] = grps
+    if 'year' in grp:
+        resample_span = '1Y'
+    elif grp == 'month':
+        resample_span = '1Y'
+    elif grp == 'day':
+        resample_span = '1MS'
+    elif grp == 'hour':
+        resample_span = '1D'
+    elif grp == 'minute':
+        resample_span = '1H'
+    stacked_da = stacked_da.resample({time_dim: resample_span}).mean(time_dim)
+    if plot:
+        stacked_da.T.plot.pcolormesh(figsize=(6, 8))
+    return stacked_da
+
+
 def dt_to_np64(time_coord, unit='m', convert_back=False):
     """accepts time_coord and a required time unit and returns a dataarray
     of time_coord and unix POSIX continous float index"""
