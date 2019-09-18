@@ -14,15 +14,97 @@ sound_path = work_yuval / 'sounding'
 
 def move_bet_dagan_physical_to_main_path(bet_dagan_path):
     """rename bet_dagan physical radiosonde filenames and move them to main
-    path i.e., bet_dagan_path """
-    return
+    path i.e., bet_dagan_path! warning-DO ONCE """
+    from aux_gps import path_glob
+    import shutil
+    year_dirs = sorted([x for x in path_glob(bet_dagan_path, '*/') if x.is_dir()])
+    for year_dir in year_dirs:
+        month_dirs = sorted([x for x in path_glob(year_dir, '*/') if x.is_dir()])
+        for month_dir in month_dirs:
+            day_dirs = sorted([x for x in path_glob(month_dir, '*/') if x.is_dir()])
+            for day_dir in day_dirs:
+                hour_dirs = sorted([x for x in path_glob(day_dir, '*/') if x.is_dir()])
+                for hour_dir in hour_dirs:
+                    file = [x for x in path_glob(hour_dir, '*/') if x.is_file()]
+                    splitted = file[0].as_posix().split('/')
+                    name = splitted[-1]
+                    hour = splitted[-2]
+                    day = splitted[-3]
+                    month = splitted[-4]
+                    year = splitted[-5]
+                    filename = '{}_{}{}{}{}'.format(name, year, month, day, hour)
+                    orig = file[0]
+                    dest = bet_dagan_path / filename
+                    shutil.move(orig.resolve(), dest.resolve())
+                    print('moving {} to {}'.format(filename, bet_dagan_path))
+    return year_dirs
 
 
-def read_one_physical_radiosonde_report(path):
+def read_one_physical_radiosonde_report(path_file):
     """read one(12 or 00) physical bet dagan radiosonde reports and return a df
     containing time series, PW for the whole sounding and time span of the
     sounding"""
-    return
+    import pandas as pd
+    import numpy as np
+    # TODO: recheck units, add to df and to units_dict
+    df = pd.read_csv(
+         path_file,
+         header=None,
+         encoding="windows-1252",
+         delim_whitespace=True,
+         skip_blank_lines=True,
+         na_values=['/////'])
+    # drop last two cols:
+    df.drop(df.iloc[:, -2:len(df)], inplace=True, axis=1)
+    # extract datetime:
+    date = df[df.loc[:, 0].str.contains("PHYSICAL")].loc[0, 3]
+    time = df[df.loc[:, 0].str.contains("PHYSICAL")].loc[0, 4]
+    dt = pd.to_datetime(date + 'T' + time, dayfirst=True)
+    # extract station number:
+    station_num = int(df[df.loc[:, 0].str.contains("STATION")].iloc[0, 3])
+    # extract cloud code:
+    cloud_code = int(df[df.loc[:, 0].str.contains("CLOUD")].iloc[0, 3])
+    # change col names to:
+    df.columns = ['Time', 'Temp', 'RH', 'Press', 'H-Sur', 'H-Msl', 'EL',
+                  'AZ', 'W.D', 'W.S']
+    units = dict(zip(df.columns.to_list(),
+                     ['sec', 'deg_C', '%', 'mb', 'm', 'm', 'deg', 'deg', 'deg',
+                      'knots']))
+    meta = {'cloud_code': cloud_code, 'station_num': station_num, 'units':
+            units}
+    # iterate over the cols and change all to numeric(or timedelta) values:
+    for col in df.columns:
+        if col == 'Time':
+            df[col] = pd.to_timedelta(df[col], errors='coerce')
+        else:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+    # filter all entries that the first col is not null:
+    df = df[~df.loc[:, 'Time'].isnull()]
+    # finally, take care of the datetime index:
+    df.Time = dt + df.Time
+    df = df.set_index('Time')
+    # calculate total precipitaple water:
+    # df = df[df['Temp']>-40]
+    prespa = df['Press'].values * 100.0
+    tempc = df['Temp'].values
+    tempk = df['Temp'].values + 273.15
+    hghtm = df['H-Msl'].values
+    rh = df['RH'].values
+    df['Dewpt'] = dewpoint_rh(df['Temp'], df['RH'])
+    dewptc = dewpoint_rh(tempc, rh)
+    vprespa = VaporPressure(dewptc, method='Buck')
+    df['Mixratio'] = MixRatio(vprespa, df['Press'])
+    mixrkg = MixRatio(vprespa, df['Press'])
+    # Calculate density of air (accounting for moisture)
+    rho = DensHumid(tempk, prespa, vprespa)
+    # print('rho: {}, mix: {}, h: {}'.format(rho.shape,mixrkg.shape, hghtm.shape))
+    # Trapezoidal rule to approximate TPW (units kg/m^2==mm)
+    try:
+        tpw = np.trapz(mixrkg/1000.0 * rho, hghtm)
+    except ValueError:
+        return np.nan
+    print('datetime: {}, TPW: {:.2f} '.format(df.index[0], tpw))
+    return df, meta
 
 
 def classify_clouds_from_sounding(sound_path=sound_path):
@@ -453,10 +535,10 @@ def MixRatio(e, p):
     e (Pa) Water vapor pressure
     p (Pa) Ambient pressure
     RETURNS
-    qv (kg kg^-1) Water vapor mixing ratio`
+    qv (g kg^-1) Water vapor mixing ratio`
     """
     Epsilon = 0.622  # Epsilon=Rs_da/Rs_v; The ratio of the gas constants
-    return Epsilon * e / (p - e)
+    return 1000 * Epsilon * e / (p - e)
 
 
 def DensHumid(tempk, pres, e):
@@ -479,7 +561,7 @@ def DensHumid(tempk, pres, e):
     return rho_da + rho_wv
 
 
-def VaporPressure(tempc, phase="liquid", units='hPa'):
+def VaporPressure(tempc, phase="liquid", units='hPa', method=None):
     import numpy as np
     """Water vapor pressure over liquid water or ice.
     INPUTS:
@@ -500,8 +582,12 @@ def VaporPressure(tempc, phase="liquid", units='hPa'):
         unit = 1.0
     elif units == 'Pa':
         unit = 100.0
-    over_liquid = 6.112 * np.exp(17.67 * tempc / (tempc + 243.12)) * unit
-    over_ice = 6.112 * np.exp(22.46 * tempc / (tempc + 272.62)) * unit
+    if method is None:
+        over_liquid = 6.112 * np.exp(17.67 * tempc / (tempc + 243.12)) * unit
+        over_ice = 6.112 * np.exp(22.46 * tempc / (tempc + 272.62)) * unit
+    elif method == 'Buck':
+        over_liquid = 6.1121 * np.exp((18.678 - tempc / 234.5) * (tempc / (257.4 + tempc))) * unit
+        over_ice = 6.1125 * np.exp((23.036 - tempc / 333.7) * (tempc / (279.82 + tempc))) * unit
     # return where(tempc<0,over_ice,over_liquid)
 
     if phase == "liquid":
