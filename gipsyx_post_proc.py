@@ -33,7 +33,10 @@ def plot_gipsy_field(ds, fields='WetZ', with_error=False):
     import matplotlib.pyplot as plt
     if isinstance(fields, str):
         fields = [fields]
-    station = ds['WetZ'].attrs['station']
+    try:
+        station = ds['WetZ'].attrs['station']
+    except KeyError:
+        station = 'No Name'
     if fields is None:
         all_fields = sorted(list(set([x.split('_')[0] for x in ds.data_vars])))
     elif fields is not None and isinstance(fields, list):
@@ -42,10 +45,11 @@ def plot_gipsy_field(ds, fields='WetZ', with_error=False):
         da = ds[all_fields[0]]
         error = da.name + '_error'
         ax = da.plot(figsize=(20, 4), color='b')[0].axes
-        ax.fill_between(da.time.values, da.values - ds[error].values,
-                        da.values + ds[error].values,
-                        where=np.isfinite(da.values),
-                        alpha=0.5)
+        if with_error:
+            ax.fill_between(da.time.values, da.values - ds[error].values,
+                            da.values + ds[error].values,
+                            where=np.isfinite(da.values),
+                            alpha=0.5)
         ax.grid()
         ax.set_title('GPS station: {}'.format(station))
         plt.tight_layout()
