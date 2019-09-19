@@ -40,10 +40,118 @@ def move_bet_dagan_physical_to_main_path(bet_dagan_path):
     return year_dirs
 
 
-def read_one_physical_radiosonde_report(path_file):
+def read_all_physical_radiosonde(path, savepath=None, verbose=True, plot=True):
+    from aux_gps import path_glob
+    import xarray as xr
+    ds_list = []
+    ds_extra_list = []
+#    sound_list = []
+#    tpw_list = []
+#    cloud_list = []
+#    dt_range_list = []
+#    tm_list = []
+    for path_file in sorted(path_glob(path, '*/')):
+        if path_file.is_file():
+            ds = read_one_physical_radiosonde_report(path_file)
+            if ds is None:
+                print('{} is corrupted...'.format(path_file.as_posix().split('/')[-1]))
+                continue
+            date = ds['sound_time'].dt.strftime('%Y-%m-%d %H:%M').values
+            if verbose:
+                print('reading {} physical radiosonde report'.format(date))
+            ds_with_time_dim = [x for x in ds.data_vars if 'time' in ds[x].dims]
+            ds_list.append(ds[ds_with_time_dim])
+            ds_extra = [x for x in ds.data_vars if 'time' not in ds[x].dims]
+            ds_extra_list.append(ds[ds_extra])
+#            sound_list.append(ds['sound_time'])
+#            tpw_list.append(ds['tpw'])
+#            cloud_list.append(ds['cloud_code'])
+#            dt_range_list.append(ds['dt_range'])
+#            tm_list.append(ds['tm'])
+#            ds_list.append(ds.drop(['tpw', 'cloud_code', 'sound_time',
+#                                    'dt_range', 'tm']))
+    dss = xr.concat(ds_list, 'time')
+    dss_extra = xr.concat(ds_extra_list, 'sound_time')
+#    cloud = xr.concat(cloud_list, 'sound_time')
+#    tm = xr.concat(tm_list, 'sound_time')
+#    dt_range = xr.DataArray(dt_range_list, dims=['bnd', 'sound_time'])
+    dss = dss.merge(dss_extra)
+#    dss['tpw'] = tpw
+#    dss['tm'] = tm
+#    dss['cloud_code'] = cloud
+#    dss['sound_time'] = sound_list
+#    dss['dt_range'] = dt_range
+    if savepath is not None:
+        yr_min = dss.time.min().dt.year.item()
+        yr_max = dss.time.max().dt.year.item()
+        filename = 'bet_dagan_phys_sounding_{}-{}.nc'.format(yr_min, yr_max)
+        print('saving {} to {}'.format(filename, savepath))
+        comp = dict(zlib=True, complevel=9)  # best compression
+        encoding = {var: comp for var in dss}
+        dss.to_netcdf(savepath / filename, 'w', encoding=encoding)
+    print('Done!')
+    return dss
+
+
+def read_one_physical_radiosonde_report(path_file, verbose=False):
     """read one(12 or 00) physical bet dagan radiosonde reports and return a df
     containing time series, PW for the whole sounding and time span of the
     sounding"""
+    def df_to_ds(df, df_extra, meta):
+        import xarray as xr
+        if not df.between_time('22:00', '02:00').empty:
+            sound_time = pd.to_datetime(
+                df.index[0].strftime('%Y-%m-%d')).replace(hour=0, minute=0)
+        elif not df.between_time('10:00', '14:00').empty:
+            sound_time = pd.to_datetime(
+                df.index[0].strftime('%Y-%m-%d')).replace(hour=12, minute=0)
+        elif (df.between_time('22:00', '02:00').empty and
+              df.between_time('10:00', '14:00').empty):
+            raise ValueError(
+                '{} time is not midnight nor noon'.format(
+                    df.index[0]))
+        ds = df.to_xarray()
+        for name in ds.data_vars:
+            ds[name].attrs['units'] = meta['units'][name]
+        ds.attrs['station_number'] = meta['station']
+        for col in df_extra.columns:
+            ds[col] = df_extra[col]
+            ds[col].attrs['units'] = meta['units_extra'][col]
+            ds[col] = ds[col].squeeze(drop=True)
+        ds['dt_range'] = xr.DataArray(
+            [ds.time.min().values, ds.time.max().values], dims='bnd')
+        ds['bnd'] = ['Min', 'Max']
+        ds['sound_time'] = sound_time
+        return ds
+
+    def calculate_tpw(df, z_cutoff=None):
+        if z_cutoff is not None:
+            df = df[df['H-Msl'] <= z_cutoff]
+        specific_humidity = (df['Mixratio'] / 1000.0) / \
+            (1 + 0.001 * df['Mixratio'] / 1000.0)
+        try:
+            tpw = np.trapz(specific_humidity * df['Rho'].values,
+                           df['H-Msl'])
+        except ValueError:
+            return np.nan
+        return tpw
+
+    def calculate_tm(df, z_cutoff=None):
+        if z_cutoff is not None:
+            df = df[df['H-Msl'] <= z_cutoff]
+        try:
+            numerator = np.trapz(
+                df['Press'] /
+                (df['Temp'] +
+                 273.15),
+                df['H-Msl'])
+            denominator = np.trapz(
+                df['Press'] / (df['Temp'] + 273.15)**2.0, df['H-Msl'])
+            tm = numerator / denominator
+        except ValueError:
+            return np.nan
+        return tm
+
     import pandas as pd
     import numpy as np
     # TODO: recheck units, add to df and to units_dict
@@ -54,6 +162,8 @@ def read_one_physical_radiosonde_report(path_file):
          delim_whitespace=True,
          skip_blank_lines=True,
          na_values=['/////'])
+    if not df[df.iloc[:, 0].str.contains('PILOT')].empty:
+        return None
     # drop last two cols:
     df.drop(df.iloc[:, -2:len(df)], inplace=True, axis=1)
     # extract datetime:
@@ -63,15 +173,13 @@ def read_one_physical_radiosonde_report(path_file):
     # extract station number:
     station_num = int(df[df.loc[:, 0].str.contains("STATION")].iloc[0, 3])
     # extract cloud code:
-    cloud_code = int(df[df.loc[:, 0].str.contains("CLOUD")].iloc[0, 3])
+    cloud_code = df[df.loc[:, 0].str.contains("CLOUD")].iloc[0, 3]
     # change col names to:
     df.columns = ['Time', 'Temp', 'RH', 'Press', 'H-Sur', 'H-Msl', 'EL',
                   'AZ', 'W.D', 'W.S']
     units = dict(zip(df.columns.to_list(),
                      ['sec', 'deg_C', '%', 'mb', 'm', 'm', 'deg', 'deg', 'deg',
                       'knots']))
-    meta = {'cloud_code': cloud_code, 'station_num': station_num, 'units':
-            units}
     # iterate over the cols and change all to numeric(or timedelta) values:
     for col in df.columns:
         if col == 'Time':
@@ -83,28 +191,31 @@ def read_one_physical_radiosonde_report(path_file):
     # finally, take care of the datetime index:
     df.Time = dt + df.Time
     df = df.set_index('Time')
-    # calculate total precipitaple water:
-    # df = df[df['Temp']>-40]
-    prespa = df['Press'].values * 100.0
-    tempc = df['Temp'].values
-    tempk = df['Temp'].values + 273.15
-    hghtm = df['H-Msl'].values
-    rh = df['RH'].values
+    df.index.name = 'time'
+    # calculate total precipitaple water(tpw):
+    # add cols to df that help calculate tpw:
     df['Dewpt'] = dewpoint_rh(df['Temp'], df['RH'])
-    dewptc = dewpoint_rh(tempc, rh)
-    vprespa = VaporPressure(dewptc, method='Buck')
-    df['Mixratio'] = MixRatio(vprespa, df['Press'])
-    mixrkg = MixRatio(vprespa, df['Press'])
+    df['WVpress'] = VaporPressure(df['Dewpt'], units='hPa', method='Buck')
+    df['Mixratio'] = MixRatio(df['WVpress'], df['Press'])  # both in hPa
     # Calculate density of air (accounting for moisture)
-    rho = DensHumid(tempk, prespa, vprespa)
+    df['Rho'] = DensHumid(df['Temp'], df['Press'], df['WVpress'])
     # print('rho: {}, mix: {}, h: {}'.format(rho.shape,mixrkg.shape, hghtm.shape))
     # Trapezoidal rule to approximate TPW (units kg/m^2==mm)
-    try:
-        tpw = np.trapz(mixrkg/1000.0 * rho, hghtm)
-    except ValueError:
-        return np.nan
-    print('datetime: {}, TPW: {:.2f} '.format(df.index[0], tpw))
-    return df, meta
+    tpw = calculate_tpw(df)
+    # calculate the mean atmospheric temperature and get surface temp in K:
+    tm = calculate_tm(df)
+    ts = df['Temp'][0] + 273.15
+    units.update(Dewpt='deg_C', WVpress='hPa', Mixratio='gr/kg', Rho='kg/m^3')
+    extra = np.array([ts, tm, tpw, cloud_code]).reshape(1, -1)
+    df_extra = pd.DataFrame(data=extra, columns=['Ts', 'Tm', 'Tpw', 'Cloud_code'])
+    for col in ['Ts', 'Tm', 'Tpw']:
+        df_extra[col] = pd.to_numeric(df_extra[col])
+    units_extra = {'Ts': 'K', 'Tm': 'K', 'Tpw': 'kg/m^2', 'Cloud_code': ''}
+    meta = {'units': units, 'units_extra': units_extra, 'station': station_num}
+    if verbose:
+        print('datetime: {}, TPW: {:.2f} '.format(df.index[0], tpw))
+    ds = df_to_ds(df, df_extra, meta)
+    return ds
 
 
 def classify_clouds_from_sounding(sound_path=sound_path):
@@ -537,27 +648,32 @@ def MixRatio(e, p):
     RETURNS
     qv (g kg^-1) Water vapor mixing ratio`
     """
-    Epsilon = 0.622  # Epsilon=Rs_da/Rs_v; The ratio of the gas constants
+    MW_dry_air = 28.9647  # gr/mol
+    MW_water = 18.015  # gr/mol
+    Epsilon = MW_water / MW_dry_air  # Epsilon=Rs_da/Rs_v;
+    # The ratio of the gas constants
     return 1000 * Epsilon * e / (p - e)
 
 
-def DensHumid(tempk, pres, e):
+def DensHumid(tempc, pres, e):
     """Density of moist air.
     This is a bit more explicit and less confusing than the method below.
     INPUTS:
-    tempk: Temperature (K)
-    pres: static pressure (Pa)
-    mixr: mixing ratio (kg/kg)
+    tempc: Temperature (C)
+    pres: static pressure (hPa)
+    e: water vapor partial pressure (hPa)
     OUTPUTS:
     rho_air (kg/m^3)
     SOURCE: http://en.wikipedia.org/wiki/Density_of_air
     """
-    Rs_v = 461.51  # Specific gas const for water vapour, J kg^{-1} K^{-1}
+    tempk = tempc + 273.15
+    prespa = pres * 100.0
+    epa = e * 100.0
+    Rs_v = 461.52  # Specific gas const for water vapour, J kg^{-1} K^{-1}
     Rs_da = 287.05  # Specific gas const for dry air, J kg^{-1} K^{-1}
-    pres_da = pres - e
+    pres_da = prespa - epa
     rho_da = pres_da / (Rs_da * tempk)
-    rho_wv = e/(Rs_v * tempk)
-
+    rho_wv = epa/(Rs_v * tempk)
     return rho_da + rho_wv
 
 
@@ -570,7 +686,7 @@ def VaporPressure(tempc, phase="liquid", units='hPa', method=None):
     return saturation vapour pressure as follows:
     Tc>=0: es = es_liquid
     Tc <0: es = es_ice
-    RETURNS: e_sat  (Pa)
+    RETURNS: e_sat  (Pa) or (hPa) units parameter choice
     SOURCE: http://cires.colorado.edu/~voemel/vp.html (#2:
     CIMO guide (WMO 2008), modified to return values in Pa)
     This formulation is chosen because of its appealing simplicity,
@@ -586,8 +702,10 @@ def VaporPressure(tempc, phase="liquid", units='hPa', method=None):
         over_liquid = 6.112 * np.exp(17.67 * tempc / (tempc + 243.12)) * unit
         over_ice = 6.112 * np.exp(22.46 * tempc / (tempc + 272.62)) * unit
     elif method == 'Buck':
-        over_liquid = 6.1121 * np.exp((18.678 - tempc / 234.5) * (tempc / (257.4 + tempc))) * unit
-        over_ice = 6.1125 * np.exp((23.036 - tempc / 333.7) * (tempc / (279.82 + tempc))) * unit
+        over_liquid = 6.1121 * \
+            np.exp((18.678 - tempc / 234.5) * (tempc / (257.4 + tempc))) * unit
+        over_ice = 6.1125 * \
+            np.exp((23.036 - tempc / 333.7) * (tempc / (279.82 + tempc))) * unit
     # return where(tempc<0,over_ice,over_liquid)
 
     if phase == "liquid":
@@ -599,23 +717,19 @@ def VaporPressure(tempc, phase="liquid", units='hPa', method=None):
     else:
         raise NotImplementedError
 
+
 def dewpoint(e):
-    r"""Calculate the ambient dewpoint given the vapor pressure.
+    """Calculate the ambient dewpoint given the vapor pressure.
 
     Parameters
     ----------
-    e : `pint.Quantity`
-        Water vapor partial pressure
-
+    e : Water vapor partial pressure in mb (hPa)
     Returns
     -------
-    `pint.Quantity`
-        Dew point temperature
-
+    Dew point temperature in deg_C
     See Also
     --------
     dewpoint_rh, saturation_vapor_pressure, vapor_pressure
-
     Notes
     -----
     This function inverts the [Bolton1980]_ formula for saturation vapor
@@ -633,30 +747,27 @@ def dewpoint(e):
 
 
 def dewpoint_rh(temperature, rh):
-    r"""Calculate the ambient dewpoint given air temperature and relative humidity.
-
+    """Calculate the ambient dewpoint given air temperature and relative
+    humidity.
     Parameters
     ----------
-    temperature : `pint.Quantity`
+    temperature : in deg_C
         Air temperature
-    rh : `pint.Quantity`
-        Relative humidity expressed as a ratio in the range 0 < rh <= 1
-
+    rh : in %
+        Relative Humidity
     Returns
     -------
-    `pint.Quantity`
-        The dew point temperature
-
+       The dew point temperature
     See Also
     --------
     dewpoint, saturation_vapor_pressure
-
     """
     import numpy as np
     import warnings
     if np.any(rh > 120):
         warnings.warn('Relative humidity >120%, ensure proper units.')
-    return dewpoint(rh / 100.0 * VaporPressure(temperature))
+    return dewpoint(rh / 100.0 * VaporPressure(temperature, units='hPa',
+                    method='Buck'))
 
 #def ea(T, rh):
 #    """water vapor pressure function using ARM function for sat."""
