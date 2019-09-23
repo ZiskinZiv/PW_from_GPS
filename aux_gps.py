@@ -8,23 +8,31 @@ Created on Mon Jun 10 14:33:19 2019
 from PW_paths import work_yuval
 
 
-def plot_tmseries_xarray(ds, fields=None, time_dim='time',
-                         error_suffix='_error', errorbar_alpha=0.5):
+def plot_tmseries_xarray(ds, fields=None, error_suffix='_error',
+                         errorbar_alpha=0.5):
     """plot time-series plot w/o errorbars of a xarray dataset"""
     import numpy as np
     import matplotlib.pyplot as plt
+    import xarray as xr
+    if isinstance(ds, xr.DataArray):
+        ds = ds.to_dataset()
+    if len(ds.dims) > 1:
+        raise ValueError('Number of dimensions in Dataset exceeds 1!')
+    time_dim = list(set(ds.dims))[0]
     if isinstance(fields, str):
         fields = [fields]
-    if fields is None and error_suffix is not None:
+    error_fields = [x for x in ds.data_vars if error_suffix in x]
+    if fields is None and error_fields:
         all_fields = [x for x in ds.data_vars if error_suffix not in x]
-    elif fields is None and error_suffix is None:
+    elif fields is None and not error_fields:
         all_fields = [x for x in ds.data_vars]
     elif fields is not None and isinstance(fields, list):
         all_fields = sorted(fields)
     if len(all_fields) == 1:
         da = ds[all_fields[0]]
         ax = da.plot(figsize=(20, 4), color='b')[0].axes
-        if error_suffix is not None:
+        if error_fields:
+            print('adding errorbars fillbetween...')
             error = da.name + error_suffix
             ax.fill_between(da[time_dim].values, da.values - ds[error].values,
                             da.values + ds[error].values,
@@ -40,7 +48,8 @@ def plot_tmseries_xarray(ds, fields=None, time_dim='time',
         fg = da.plot(row='var', sharex=True, sharey=False, figsize=(20, 15),
                      hue='var', color='k')
         for i, (ax, field) in enumerate(zip(fg.axes.flatten(), all_fields)):
-            if error_suffix is not None:
+            if error_fields:
+                print('adding errorbars fillbetween...')
                 ax.fill_between(da[time_dim].values,
                                 da.sel(var=field).values - ds[field+error_suffix].values,
                                 da.sel(var=field).values + ds[field+error_suffix].values,
