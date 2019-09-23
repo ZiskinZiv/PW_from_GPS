@@ -16,6 +16,9 @@ garner_path = work_yuval / 'garner'
 ims_path = work_yuval / 'IMS_T'
 gis_path = work_yuval / 'gis'
 sound_path = work_yuval / 'sounding'
+phys_soundings = sound_path / 'bet_dagan_phys_sounding_2007-2019.nc'
+tela_zwd = work_yuval / 'gipsyx_results/tela/TELA_PPP_1996-2019.nc'
+tela_ims = ims_path / '10mins/TEL-AVIV-COAST_178_TD_10mins.nc'
 rinex_on_geo = geo_path / 'Work_Files/PW_yuval/rinex'
 PW_stations_path = work_yuval / '1minute'
 stations = pd.read_csv('All_gps_stations.txt', header=0, delim_whitespace=True,
@@ -91,6 +94,26 @@ def proc_1minute(path):
     return
 
 
+def compare_physical_bet_dagan_soundings_to_tela_station(
+        phys_sound_file, tela_zwd_file, tel_aviv_IMS_file,
+        savepath=None, plot=True):
+    """compare the IPW of the physical soundings of bet dagan station to
+    the TELA gps station - using IMS temperature Tel-aviv station"""
+    from aux_gps import get_unique_index
+    from aux_gps import keep_iqr
+    import xarray as xr
+    # first load physical bet_dagan Tpw, Ts and Tm:
+    phys = xr.open_dataset(phys_sound_file)
+    p_list = [get_unique_index(phys[x], 'sound_time')
+              for x in ['Ts', 'Tm', 'Tpw']]
+    phys_ds = xr.merge(p_list)
+    phys_ds = keep_iqr(phys_ds, 'sound_time', k=2.0)
+    # load the zenith wet daley for TELA station:
+    tela_zwd = xr.open_dataset(tela_zwd_file)
+    tela_zwd = tela_zwd[['WetZ', 'WetZ_error']]
+    return tela_zwd
+
+
 #def get_geo_data_from_gps_stations(gps_names):
 #    import requests
 #    from bs4 import BeautifulSoup as bs
@@ -107,7 +130,8 @@ def proc_1minute(path):
 # 
 ## Convert JSON to dict and print
 #print(response.json())
-    
+
+
 def read_stations_to_dataset(path, group_name='israeli', save=False,
                              names=None):
     import xarray as xr
@@ -554,27 +578,41 @@ def check_Tm_func(Tmul_num=10, Ts_num=6, Toff_num=15):
     return da
 
 
-def kappa_ml(T, model=None, k2=22.1, k3=3.776e5):
+def kappa_ml(T, model=None, k2=22.1, k3=3.776e5, dk3=0.004e5, dk2=2.2):
     """T in celsious, anton says k2=22.1 is better, """
+    import numpy as np
     # original k2=17.0 bevis 1992 etal.
     # [k2] = K / mbar, [k3] = K^2 / mbar
     # 100 Pa = 1 mbar
+    dT = 0.5  # deg_C
     if model is None:
         Tm = (273.15 + T) * 0.72 + 70.0  # K Bevis 1992 model
+        dTm = 0.72 * dT
     else:
+        print('Using sklearn model of: {}'.format(model))
+        if hasattr(model, 'coef_'):
+            print(
+                'with coef: {} and intercept: {}'.format(
+                    model.coef_[0],
+                    model.intercept_))
         # Tm = T.copy(deep=False)
         Tnp = T.dropna('time').values.reshape(-1, 1)
         # T = T.values.reshape(-1, 1)
         Tm = T.dropna('time').copy(deep=False,
                                    data=model.predict((273.15 + Tnp)))
         Tm = Tm.reindex(time=T['time'])
+        dTm = model.coef_[0] * dT
         # Tm = model.predict((273.15 + T))
     Rv = 461.52  # [Rv] = J / (kg * K) = (Pa * m^3) / (kg * K)
     # (1e-2 mbar * m^3) / (kg * K)
     k = 1e-6 * (k3 / Tm + k2) * Rv
     k = 1.0 / k  # [k] = 100 * kg / m^3 =  kg/ (m^2 * cm)
+    # dk = (1e6 / Rv ) * (k3 / Tm + k2)**-2 * (dk3 / Tm + dTm * k3 / Tm**2.0 + dk2)
+    # dk = k * np.sqrt(dk3Tm**2.0 + dk2**2.0)
+    dk = k * (k3 / Tm + k2)**-1 * np.sqrt((dk3 / Tm) **
+                                          2.0 + (dTm * k3 / Tm**2.0)**2.0 + dk2**2.0)
     # 1 kg/m^2 IPW = 1 mm PW
-    return k
+    return k, dk
 
 
 def kappa(T, Tmul=0.72, T_offset=70.2, k2=22.1, k3=3.776e5):
