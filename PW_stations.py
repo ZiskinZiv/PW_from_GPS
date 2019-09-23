@@ -30,6 +30,51 @@ stations = pd.read_csv('All_gps_stations.txt', header=0, delim_whitespace=True,
 # TODO: fix somehow the discontinuety daily problem in zwd gipsy runs
 
 
+def read_log_files(path, savepath=None, fltr='updated_by_shlomi',
+                   suff='*.log'):
+    import pandas as pd
+    from aux_gps import path_glob
+    from tabulate import tabulate
+
+    def to_fwf(df, fname, showindex=False):
+        from tabulate import simple_separated_format
+        tsv = simple_separated_format("   ")
+        # tsv = 'plain'
+        content = tabulate(
+            df.values.tolist(), list(
+                df.columns), tablefmt=tsv, showindex=showindex, floatfmt='f')
+        open(fname, "w").write(content)
+
+    files = sorted(path_glob(path, glob_str=suff))
+    record = {}
+    for file in files:
+        filename = file.as_posix().split('/')[-1]
+        if fltr not in filename:
+            continue
+        station = filename.split('_')[0]
+        print('reading station {} log file'.format(station))
+        with open(file) as f:
+            content = f.readlines()
+        content = [x.strip() for x in content]
+        posnames = ['X', 'Y', 'Z']
+        pos_list = []
+        for pos in posnames:
+            text = [
+                x for x in content if '{} coordinate (m)'.format(pos) in x][0]
+            xyz = float(text.split(':')[-1])
+            pos_list.append(xyz)
+        record[station] = pos_list
+    df = pd.DataFrame.from_dict(record, orient='index')
+    df.columns = posnames
+    if savepath is not None:
+        savefilename = 'stations_approx_loc.txt'
+        show_index = [x + '                   ' for x in df.index.tolist()]
+        to_fwf(df, savepath / savefilename, show_index)
+        # df.to_csv(savepath / savefilename, sep=' ')
+        print('{} was saved to {}.'.format(savefilename, savepath))
+    return df
+
+
 def analyze_missing_rinex_files(path, savepath=None):
     from aux_gps import get_timedate_and_station_code_from_rinex
     from aux_gps import datetime_to_rinex_filename
@@ -101,17 +146,53 @@ def compare_physical_bet_dagan_soundings_to_tela_station(
     the TELA gps station - using IMS temperature Tel-aviv station"""
     from aux_gps import get_unique_index
     from aux_gps import keep_iqr
+    from aux_gps import dim_intersection
     import xarray as xr
-    # first load physical bet_dagan Tpw, Ts and Tm:
+    import numpy as np
+    # first load physical bet_dagan Tpw, Ts, Tm and dt_range:
     phys = xr.open_dataset(phys_sound_file)
+    # clean and merge:
     p_list = [get_unique_index(phys[x], 'sound_time')
-              for x in ['Ts', 'Tm', 'Tpw']]
+              for x in ['Ts', 'Tm', 'Tpw', 'dt_range']]
     phys_ds = xr.merge(p_list)
     phys_ds = keep_iqr(phys_ds, 'sound_time', k=2.0)
     # load the zenith wet daley for TELA station:
     tela_zwd = xr.open_dataset(tela_zwd_file)
     tela_zwd = tela_zwd[['WetZ', 'WetZ_error']]
-    return tela_zwd
+    # load the 10 mins temperature data from IMS:
+    tela_T = xr.open_dataset(tel_aviv_IMS_file)
+    # compute the kappa function and multiply by ZWD to get PW(+error):
+    k, dk = kappa_ml(tela_T.to_array(name='TELA_T').squeeze(drop=True))
+    kappa = k.to_dataset(name='tela_kappa')
+    kappa['tela_kappa_error'] = dk
+    PW = (
+        kappa['tela_kappa'] *
+        tela_zwd['WetZ']).to_dataset(
+        name='TELA_PW').squeeze(
+            drop=True)
+    PW['TELA_PW_error'] = np.sqrt(
+        tela_zwd['WetZ_error']**2.0 +
+        kappa['tela_kappa_error']**2.0)
+    # loop over dt_range and average the results on PW:
+    pw_list = []
+    pw_error_list = []
+    for i in range(len(phys_ds['dt_range'].sound_time)):
+        min_time = phys_ds['dt_range'].isel(sound_time=i).sel(bnd='Min').values
+        max_time = phys_ds['dt_range'].isel(sound_time=i).sel(bnd='Max').values
+        pw = PW['TELA_PW'].sel(time=slice(min_time, max_time)).mean('time')
+        pw_error = PW['TELA_PW_error'].sel(time=slice(min_time, max_time)).mean('time')
+        pw_list.append(pw)
+        pw_error_list.append(pw_error)
+    pw_tela = xr.DataArray(pw_list, dims='sound_time')
+    pw_tela.name = 'TELA_PW'
+    pw_tela_error = xr.DataArray(pw_error_list, dims='sound_time')
+    pw_tela_error.name = 'TELA_PW_error'
+    pw_tela['sound_time'] = phys_ds['sound_time']
+    pw_tela_error['sound_time'] = phys_ds['sound_time']
+    new_time = dim_intersection([pw_tela, phys_ds['Tpw'], 'sound_time'])
+    pw_tela = pw_tela.sel(sound_time=new_time)
+    tpw_bet_dagan = phys_ds.Tpw.sel(sound_time=new_time)
+    return pw_tela, tpw_bet_dagan
 
 
 #def get_geo_data_from_gps_stations(gps_names):
