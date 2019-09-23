@@ -8,6 +8,55 @@ Created on Mon Jun 10 14:33:19 2019
 from PW_paths import work_yuval
 
 
+def plot_tmseries_xarray(ds, fields=None, time_dim='time',
+                         error_suffix='_error', errorbar_alpha=0.5):
+    """plot time-series plot w/o errorbars of a xarray dataset"""
+    import numpy as np
+    import matplotlib.pyplot as plt
+    if isinstance(fields, str):
+        fields = [fields]
+    if fields is None and error_suffix is not None:
+        all_fields = [x for x in ds.data_vars if error_suffix not in x]
+    elif fields is None and error_suffix is None:
+        all_fields = [x for x in ds.data_vars]
+    elif fields is not None and isinstance(fields, list):
+        all_fields = sorted(fields)
+    if len(all_fields) == 1:
+        da = ds[all_fields[0]]
+        ax = da.plot(figsize=(20, 4), color='b')[0].axes
+        if error_suffix is not None:
+            error = da.name + error_suffix
+            ax.fill_between(da[time_dim].values, da.values - ds[error].values,
+                            da.values + ds[error].values,
+                            where=np.isfinite(da.values),
+                            alpha=errorbar_alpha)
+        ax.grid()
+        ax.set_title(da.name)
+        plt.tight_layout()
+        plt.subplots_adjust(top=0.93)
+        return ax
+    else:
+        da = ds[all_fields].to_array('var')
+        fg = da.plot(row='var', sharex=True, sharey=False, figsize=(20, 15),
+                     hue='var', color='k')
+        for i, (ax, field) in enumerate(zip(fg.axes.flatten(), all_fields)):
+            if error_suffix is not None:
+                ax.fill_between(da[time_dim].values,
+                                da.sel(var=field).values - ds[field+error_suffix].values,
+                                da.sel(var=field).values + ds[field+error_suffix].values,
+                                where=np.isfinite(da.sel(var=field).values),
+                                alpha=errorbar_alpha)
+            try:
+                ax.set_ylabel('[' + ds[field].attrs['units'] + ']')
+            except IndexError:
+                pass
+            ax.lines[0].set_color('C{}'.format(i))
+            ax.grid()
+        # fg.fig.suptitle()
+        fg.fig.subplots_adjust(left=0.1, top=0.93)
+    return fg
+
+
 def time_series_stack(time_da, time_dim='time', grp='hour', plot=True):
     import xarray as xr
     grp_obj = time_da.groupby(time_dim + '.' + grp)
@@ -86,10 +135,15 @@ def filter_nan_errors(ds, error_str='_error', dim='time', meta='action'):
         raise TypeError('only xr.Dataset allowd!')
     fields = [x for x in ds.data_vars if error_str not in x]
     for field in fields:
-        ds[field] = ds[field].where(np.isfinite(ds[field+error_str])).dropna(dim)
+        ds[field] = ds[field].where(np.isfinite(
+            ds[field + error_str])).dropna(dim)
         if meta in ds[field].attrs:
             append = True
-        add_attr_to_xr(ds[field], meta, ', filtered values with NaN errors', append)
+        add_attr_to_xr(
+            ds[field],
+            meta,
+            ', filtered values with NaN errors',
+            append)
     return ds
 
 
@@ -100,7 +154,17 @@ def keep_iqr(ds, dim='time', qlow=0.25, qhigh=0.75, k=1.5):
 
     def keep_iqr_da(da, dim, qlow, qhigh, meta='action'):
         from aux_gps import add_attr_to_xr
-        quan = da.quantile([qlow, qhigh], dim).values
+        try:
+            quan = da.quantile([qlow, qhigh], dim).values
+        except TypeError:
+            # support for datetime64 dtypes:
+            if da.dtype == '<M8[ns]':
+                quan = da.astype(int).quantile(
+                        [qlow, qhigh], dim).astype('datetime64[ns]').values
+            # support for timedelta64 dtypes:
+            elif da.dtype == '<m8[ns]':
+                quan = da.astype(int).quantile(
+                        [qlow, qhigh], dim).astype('timedelta64[ns]').values
         low = quan[0]
         high = quan[1]
         iqr = high - low
@@ -109,17 +173,21 @@ def keep_iqr(ds, dim='time', qlow=0.25, qhigh=0.75, k=1.5):
         da = da.where((da < higher) & (da > lower)).dropna(dim)
         if meta in da.attrs:
             append = True
-        add_attr_to_xr(da, meta, ', kept IQR ({}, {}, {})'.format(qlow, qhigh, k), append)
+        else:
+            append = False
+        add_attr_to_xr(
+            da, meta, ', kept IQR ({}, {}, {})'.format(
+                qlow, qhigh, k), append)
         return da
     if isinstance(ds, xr.DataArray):
-        iqr = keep_iqr_da(ds, dim, qlow, qhigh)
+        filtered_da = keep_iqr_da(ds, dim, qlow, qhigh)
     elif isinstance(ds, xr.Dataset):
         da_list = []
         for name in ds.data_vars:
             da = keep_iqr_da(ds[name], dim, qlow, qhigh)
             da_list.append(da)
-        iqr = xr.merge(da_list)
-    return iqr
+        filtered_da = xr.merge(da_list)
+    return filtered_da
 
 
 def transform_ds_to_lat_lon_alt(ds, coords_name=['X', 'Y', 'Z'],
