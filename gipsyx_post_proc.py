@@ -7,8 +7,6 @@ Created on Thu Sep  5 11:24:01 2019
 """
 
 
-# TODO: add action_taken attr on metadata for each timeseries (stitching, cleaning etc)
-# TODO: should i filter with IQR the lat lon alt fields after calculation?
 # TODO: check various gipsyx run parameters(e.g., postsmooth, elmin)
 
 def check_path(path):
