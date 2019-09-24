@@ -16,9 +16,8 @@ def plot_tmseries_xarray(ds, fields=None, error_suffix='_error',
     import xarray as xr
     if isinstance(ds, xr.DataArray):
         ds = ds.to_dataset()
-    if len(ds.dims) > 1:
-        raise ValueError('Number of dimensions in Dataset exceeds 1!')
-    time_dim = list(set(ds.dims))[0]
+#    if len(ds.dims) > 1:
+#        raise ValueError('Number of dimensions in Dataset exceeds 1!')
     if isinstance(fields, str):
         fields = [fields]
     error_fields = [x for x in ds.data_vars if error_suffix in x]
@@ -28,6 +27,7 @@ def plot_tmseries_xarray(ds, fields=None, error_suffix='_error',
         all_fields = [x for x in ds.data_vars]
     elif fields is not None and isinstance(fields, list):
         all_fields = sorted(fields)
+    time_dim = list(set(ds[all_fields].dims))[0]
     if len(all_fields) == 1:
         da = ds[all_fields[0]]
         ax = da.plot(figsize=(20, 4), color='b')[0].axes
@@ -57,7 +57,7 @@ def plot_tmseries_xarray(ds, fields=None, error_suffix='_error',
                                 alpha=errorbar_alpha)
             try:
                 ax.set_ylabel('[' + ds[field].attrs['units'] + ']')
-            except IndexError:
+            except KeyError:
                 pass
             ax.lines[0].set_color('C{}'.format(i))
             ax.grid()
