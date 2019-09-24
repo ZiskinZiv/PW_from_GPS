@@ -24,10 +24,26 @@ PW_stations_path = work_yuval / '1minute'
 stations = pd.read_csv('All_gps_stations.txt', header=0, delim_whitespace=True,
                        index_col='name')
 
-# TODO: noon, midnight accurate radiosonde data from tau
 # TODO: finish clouds formulation in ts-tm modeling
-# TODO: play with ts-tm modeling, various machine learning algos.
-# TODO: fix somehow the discontinuety daily problem in zwd gipsy runs
+# TODO: finish playing with ts-tm modeling, various machine learning algos.
+# TODO: redo the hour, season and cloud selection in formulate_plot
+
+
+def get_ts_tm_from_physical(phys=phys_soundings, plot=True):
+    import xarray as xr
+    from aux_gps import get_unique_index
+    from aux_gps import keep_iqr
+    from aux_gps import plot_tmseries_xarray
+    pds = xr.open_dataset(phys)
+    pds = pds[['Tm', 'Ts']]
+    pds = pds.rename({'Ts': 'ts', 'Tm': 'tm'})
+    pds = pds.rename({'sound_time': 'time'})
+    pds = get_unique_index(pds)
+    pds = keep_iqr(pds, k=2.0)
+    pds = pds.dropna('time')
+    if plot:
+        plot_tmseries_xarray(pds)
+    return pds
 
 
 def read_log_files(path, savepath=None, fltr='updated_by_shlomi',
@@ -139,9 +155,47 @@ def proc_1minute(path):
     return
 
 
+def parameter_study_ts_tm_TELA_bet_dagan(tel_aviv_IMS_file, path=work_yuval,
+                                         coef=[-3, 3, 100],
+                                         inter=[-300, 300, 1000], plot=True):
+    import xarray as xr
+    import numpy as np
+    from aux_gps import dim_intersection
+    from sklearn.metrics import mean_squared_error
+    filename = 'TELA_zwd_aligned_with_physical_bet_dagan.nc'
+    zwd_and_tpw = xr.open_dataset(path / filename)
+    wetz = zwd_and_tpw['TELA_WetZ']
+    tpw = zwd_and_tpw['Tpw']
+    # load the 10 mins temperature data from IMS:
+    tela_T = xr.open_dataset(tel_aviv_IMS_file)
+    coef_space = np.linspace(*coef)
+    intercept_space = np.linspace(*inter)
+    rmse_np = np.empty((len(coef_space), len(intercept_space)))
+    mean_error_np = np.empty((len(coef_space), len(intercept_space)))
+    for i, coef in enumerate(coef_space):
+        for j, intercept in enumerate(intercept_space):
+            model = {'coef': coef, 'intercept': intercept}
+            k, _ = kappa_ml(tela_T.to_array(name='TELA_T').squeeze(drop=True),
+                            model=model)
+            pw = k * wetz
+            new_time = dim_intersection([pw, tpw])
+            pw = pw.sel(time=new_time)
+            tpw = tpw.sel(time=new_time)
+            rmse_np[i, j] = np.sqrt(mean_squared_error(tpw, pw))
+            mean_error_np[i, j] = (tpw - pw).mean('time')
+    rmse_da = xr.DataArray(rmse_np, dims=['coef', 'intercept'])
+    rmse_da.name = 'RMSE'
+    mean_error_da = xr.DataArray(mean_error_np, dims=['coef', 'intercept'])
+    mean_error_da.name = 'MEAN'
+    rds = xr.merge([mean_error_da, rmse_da])
+    rds['coef'] = coef_space
+    rds['intercept'] = intercept_space
+    return rds
+
+
 def compare_physical_bet_dagan_soundings_to_tela_station(
         phys_sound_file, tela_zwd_file, tel_aviv_IMS_file,
-        savepath=None, plot=True):
+        savepath=work_yuval, model=None, plot=True):
     """compare the IPW of the physical soundings of bet dagan station to
     the TELA gps station - using IMS temperature Tel-aviv station"""
     from aux_gps import get_unique_index
@@ -149,50 +203,69 @@ def compare_physical_bet_dagan_soundings_to_tela_station(
     from aux_gps import dim_intersection
     import xarray as xr
     import numpy as np
-    # first load physical bet_dagan Tpw, Ts, Tm and dt_range:
-    phys = xr.open_dataset(phys_sound_file)
-    # clean and merge:
-    p_list = [get_unique_index(phys[x], 'sound_time')
-              for x in ['Ts', 'Tm', 'Tpw', 'dt_range']]
-    phys_ds = xr.merge(p_list)
-    phys_ds = keep_iqr(phys_ds, 'sound_time', k=2.0)
-    # load the zenith wet daley for TELA station:
-    tela_zwd = xr.open_dataset(tela_zwd_file)
-    tela_zwd = tela_zwd[['WetZ', 'WetZ_error']]
-    # load the 10 mins temperature data from IMS:
-    tela_T = xr.open_dataset(tel_aviv_IMS_file)
-    # compute the kappa function and multiply by ZWD to get PW(+error):
-    k, dk = kappa_ml(tela_T.to_array(name='TELA_T').squeeze(drop=True))
-    kappa = k.to_dataset(name='tela_kappa')
-    kappa['tela_kappa_error'] = dk
-    PW = (
-        kappa['tela_kappa'] *
-        tela_zwd['WetZ']).to_dataset(
-        name='TELA_PW').squeeze(
-            drop=True)
-    PW['TELA_PW_error'] = np.sqrt(
-        tela_zwd['WetZ_error']**2.0 +
-        kappa['tela_kappa_error']**2.0)
-    # loop over dt_range and average the results on PW:
-    pw_list = []
-    pw_error_list = []
-    for i in range(len(phys_ds['dt_range'].sound_time)):
-        min_time = phys_ds['dt_range'].isel(sound_time=i).sel(bnd='Min').values
-        max_time = phys_ds['dt_range'].isel(sound_time=i).sel(bnd='Max').values
-        pw = PW['TELA_PW'].sel(time=slice(min_time, max_time)).mean('time')
-        pw_error = PW['TELA_PW_error'].sel(time=slice(min_time, max_time)).mean('time')
-        pw_list.append(pw)
-        pw_error_list.append(pw_error)
-    pw_tela = xr.DataArray(pw_list, dims='sound_time')
-    pw_tela.name = 'TELA_PW'
-    pw_tela_error = xr.DataArray(pw_error_list, dims='sound_time')
-    pw_tela_error.name = 'TELA_PW_error'
-    pw_tela['sound_time'] = phys_ds['sound_time']
-    pw_tela_error['sound_time'] = phys_ds['sound_time']
-    new_time = dim_intersection([pw_tela, phys_ds['Tpw'], 'sound_time'])
-    pw_tela = pw_tela.sel(sound_time=new_time)
-    tpw_bet_dagan = phys_ds.Tpw.sel(sound_time=new_time)
-    return pw_tela, tpw_bet_dagan
+    filename = 'TELA_zwd_aligned_with_physical_bet_dagan.nc'
+    if not (savepath / filename).is_file():
+        print('saving {} to {}'.format(filename, savepath))
+        # first load physical bet_dagan Tpw, Ts, Tm and dt_range:
+        phys = xr.open_dataset(phys_sound_file)
+        # clean and merge:
+        p_list = [get_unique_index(phys[x], 'sound_time')
+                  for x in ['Ts', 'Tm', 'Tpw', 'dt_range']]
+        phys_ds = xr.merge(p_list)
+        phys_ds = keep_iqr(phys_ds, 'sound_time', k=2.0)
+        phys_ds = phys_ds.rename({'Ts': 'ts', 'Tm': 'tm'})
+        # load the zenith wet daley for TELA station:
+        tela_zwd = xr.open_dataset(tela_zwd_file)
+        tela_zwd = tela_zwd[['WetZ', 'WetZ_error']]
+        # loop over dt_range and average the results on PW:
+        wz_list = []
+        wz_error_list = []
+        for i in range(len(phys_ds['dt_range'].sound_time)):
+            min_time = phys_ds['dt_range'].isel(sound_time=i).sel(bnd='Min').values
+            max_time = phys_ds['dt_range'].isel(sound_time=i).sel(bnd='Max').values
+            wetz = tela_zwd['WetZ'].sel(time=slice(min_time, max_time)).mean('time')
+            wetz_error = tela_zwd['WetZ_error'].sel(time=slice(min_time, max_time)).mean('time')
+            wz_list.append(wetz)
+            wz_error_list.append(wetz_error)
+        wetz_tela = xr.DataArray(wz_list, dims='sound_time')
+        wetz_tela.name = 'TELA_WetZ'
+        wetz_tela_error = xr.DataArray(wz_error_list, dims='sound_time')
+        wetz_tela_error.name = 'TELA_WetZ_error'
+        wetz_tela['sound_time'] = phys_ds['sound_time']
+        wetz_tela_error['sound_time'] = phys_ds['sound_time']
+        new_time = dim_intersection([wetz_tela, phys_ds['Tpw']], 'sound_time')
+        wetz_tela = wetz_tela.sel(sound_time=new_time)
+        tpw_bet_dagan = phys_ds.Tpw.sel(sound_time=new_time)
+        zwd_and_tpw = xr.merge([wetz_tela, wetz_tela_error, tpw_bet_dagan])
+        zwd_and_tpw = zwd_and_tpw.rename({'sound_time': 'time'})
+        comp = dict(zlib=True, complevel=9)  # best compression
+        encoding = {var: comp for var in zwd_and_tpw.data_vars}
+        zwd_and_tpw.to_netcdf(savepath / filename, 'w', encoding=encoding)
+        print('Done!')
+    else:
+        print('found file!')
+        zwd_and_tpw = xr.open_dataset(savepath / filename)
+        wetz = zwd_and_tpw['TELA_WetZ']
+        wetz_error = zwd_and_tpw['TELA_WetZ_error']
+        # load the 10 mins temperature data from IMS:
+        tela_T = xr.open_dataset(tel_aviv_IMS_file)
+        # tela_T = tela_T.resample(time='5min').ffill()
+        # compute the kappa function and multiply by ZWD to get PW(+error):
+        k, dk = kappa_ml(tela_T.to_array(name='TELA_T').squeeze(drop=True),
+                         model=model)
+        kappa = k.to_dataset(name='tela_kappa')
+        kappa['tela_kappa_error'] = dk
+        PW = (
+            kappa['tela_kappa'] *
+            wetz).to_dataset(
+            name='TELA_PW').squeeze(
+                drop=True)
+        PW['TELA_PW_error'] = np.sqrt(
+            wetz_error**2.0 +
+            kappa['tela_kappa_error']**2.0)
+        PW['TPW_bet_dagan'] = zwd_and_tpw['Tpw']
+        PW = PW.dropna('time')
+    return PW
 
 
 #def get_geo_data_from_gps_stations(gps_names):
@@ -659,7 +732,8 @@ def check_Tm_func(Tmul_num=10, Ts_num=6, Toff_num=15):
     return da
 
 
-def kappa_ml(T, model=None, k2=22.1, k3=3.776e5, dk3=0.004e5, dk2=2.2):
+def kappa_ml(T, model=None, k2=22.1, k3=3.776e5, dk3=0.004e5, dk2=2.2,
+             verbose=False):
     """T in celsious, anton says k2=22.1 is better, """
     import numpy as np
     # original k2=17.0 bevis 1992 etal.
@@ -667,15 +741,23 @@ def kappa_ml(T, model=None, k2=22.1, k3=3.776e5, dk3=0.004e5, dk2=2.2):
     # 100 Pa = 1 mbar
     dT = 0.5  # deg_C
     if model is None:
+        if verbose:
+            print('Bevis 1992-1994 model selected.')
         Tm = (273.15 + T) * 0.72 + 70.0  # K Bevis 1992 model
         dTm = 0.72 * dT
+    elif isinstance(model, dict):
+        if verbose:
+            print('using linear model of Tm = {} * Ts + {}'.format(model['coef'], model['intercept']))
+        Tm = (273.15 + T) * model['coef'] + model['intercept']
+        dTm = model['coef'] * dT
     else:
-        print('Using sklearn model of: {}'.format(model))
-        if hasattr(model, 'coef_'):
-            print(
-                'with coef: {} and intercept: {}'.format(
-                    model.coef_[0],
-                    model.intercept_))
+        if verbose:
+            print('Using sklearn model of: {}'.format(model))
+            if hasattr(model, 'coef_'):
+                print(
+                        'with coef: {} and intercept: {}'.format(
+                                model.coef_[0],
+                                model.intercept_))
         # Tm = T.copy(deep=False)
         Tnp = T.dropna('time').values.reshape(-1, 1)
         # T = T.values.reshape(-1, 1)
@@ -884,6 +966,117 @@ def from_opt_to_comparison(result=None, times=None, bounds=None, x0=None,
     return pw, result
 
 
+def compare_to_sounding2(pw_from_gps, pw_from_sounding, station='TELA',
+                         times=None, season=None, hour=None, title=None):
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    from sklearn.metrics import mean_squared_error
+    sns.set_style('darkgrid')
+    pw = pw_from_gps.to_dataset(name=station).reset_coords(drop=True)
+    pw['sound'] = pw_from_sounding
+    pw['resid'] = pw['sound'] - pw[station]
+    time_dim = list(set(pw.dims))[0]
+    pw = pw.rename({time_dim: 'time'})
+    if times is not None:
+        pw = pw.sel(time=slice(times[0], times[1]))
+    if season is not None:
+        pw = pw.sel(time=pw['time.season'] == season)
+    if hour is not None:
+        pw = pw.sel(time=pw['time.hour'] == hour)
+    if title is None:
+        sup = sup = 'ipw is created using Bevis Tm formulation'
+    if title is not None:
+        if title == 'hour':
+            sup = 'ipw is created using hourly Tm segmentation and formulation'
+        elif title == 'season':
+            sup = 'ipw is created using seasonly Tm segmentation and formulation'
+        elif title == 'whole':
+            sup = 'ipw is created using whole Tm formulation'
+        elif title == 'hour_season':
+            sup = 'ipw is created using seasonly and hourly Tm segmentation and formulation'
+    fig, ax = plt.subplots(1, 2, figsize=(20, 4),
+                           gridspec_kw={'width_ratios': [3, 1]})
+    fig.suptitle(sup)
+    pw[[station, 'sound']].to_dataframe().plot(ax=ax[0], style='.')
+    sns.distplot(
+        pw['resid'].values,
+        bins=100,
+        color='c',
+        label='residuals',
+        ax=ax[1])
+    # pw['resid'].plot.hist(bins=100, color='c', edgecolor='k', alpha=0.65,
+    #                      ax=ax[1])
+    rmean = pw['resid'].mean().values
+    rstd = pw['resid'].std().values
+    rmedian = pw['resid'].median().values
+    rmse = np.sqrt(mean_squared_error(pw['sound'], pw[station]))
+    plt.axvline(rmean, color='r', linestyle='dashed', linewidth=1)
+    # plt.axvline(rmedian, color='b', linestyle='dashed', linewidth=1)
+    _, max_ = plt.ylim()
+    plt.text(rmean + rmean / 10, max_ - max_ / 10,
+             'Mean: {:.2f}, RMSE: {:.2f}'.format(rmean, rmse))
+    fig.tight_layout()
+    if season is None:
+        pw['season'] = pw['time.season']
+        pw['hour'] = pw['time.hour'].astype(str)
+        pw['hour'] = pw.hour.where(pw.hour != '12', 'noon')
+        pw['hour'] = pw.hour.where(pw.hour != '0', 'midnight')
+        df = pw.to_dataframe()
+    #    g = sns.relplot(
+    #        data=df,
+    #        x='sound',
+    #        y='TELA',
+    #        col='season',
+    #        hue='hour',
+    #        kind='scatter',
+    #        style='season')
+    #    if times is not None:
+    #        plt.subplots_adjust(top=0.85)
+    #        g.fig.suptitle('Time: ' + times[0] + ' to ' + times[1], y=0.98)
+        h_order = ['noon', 'midnight']
+        s_order = ['DJF', 'JJA', 'SON', 'MAM']
+        g = sns.lmplot(
+            data=df,
+            x='sound',
+            y='TELA',
+            col='season',
+            hue='season',
+            row='hour',
+            row_order=h_order,
+            col_order=s_order)
+        g.set(ylim=(0, 50), xlim=(0, 50))
+        if times is not None:
+            plt.subplots_adjust(top=0.9)
+            g.fig.suptitle('Time: ' + times[0] + ' to ' + times[1], y=0.98)
+        g = sns.FacetGrid(data=df, col='season', hue='season', row='hour',
+                          row_order=h_order, col_order=s_order)
+        g.fig.set_size_inches(15, 8)
+        g = (g.map(sns.distplot, "resid"))
+        rmeans = []
+        rmses = []
+        for hour in h_order:
+            for season in s_order:
+                sliced_pw = pw.sel(
+                    time=pw['time.season'] == season).where(
+                    pw.hour != hour).dropna('time')
+                rmses.append(
+                    np.sqrt(
+                        mean_squared_error(
+                            sliced_pw['sound'],
+                            sliced_pw[station])))
+                rmeans.append(sliced_pw['resid'].mean().values)
+        for i, ax in enumerate(g.axes.flat):
+            ax.axvline(rmeans[i], color='k', linestyle='dashed', linewidth=1)
+            _, max_ = ax.get_ylim()
+            ax.text(rmeans[i] + rmeans[i] / 10, max_ - max_ / 10,
+                    'Mean: {:.2f}, RMSE: {:.2f}'.format(rmeans[i], rmses[i]))
+        # g.set(xlim=(-5, 5))
+        if times is not None:
+            plt.subplots_adjust(top=0.9)
+            g.fig.suptitle('Time: ' + times[0] + ' to ' + times[1], y=0.98)
+    return pw
+
+
 def compare_to_sounding(sound_path=sound_path, gps=garner_path, station='TELA',
                         times=None, season=None, hour=None, title=None):
     """ipw comparison to bet-dagan sounding, gps can be the ipw dataset"""
@@ -1022,13 +1215,25 @@ def compare_to_sounding(sound_path=sound_path, gps=garner_path, station='TELA',
 
 
 def ml_models_T_from_sounding(sound_path=sound_path, categories=None,
-                              models=['LR', 'TSEN']):
+                              models=['LR', 'TSEN'], physical_file=None):
     """calls formulate_plot to analyse and model the ts-tm connection from
     radiosonde(bet-dagan). options for categories:season, hour, clouds
     you can choose some ,all or none categories"""
     import xarray as xr
-    ds = xr.open_dataset(sound_path / 'bet_dagan_sounding_pw_Ts_Tk_with_clouds.nc')
-    ds = ds.reset_coords(drop=True)
+    from aux_gps import get_unique_index
+    from aux_gps import keep_iqr
+    if physical_file is not None:
+        print('Overwriting ds input...')
+        pds = xr.open_dataset(physical_file)
+        pds = pds[['Tm', 'Ts']]
+        pds = pds.rename({'Ts': 'ts', 'Tm': 'tm'})
+        pds = pds.rename({'sound_time': 'time'})
+        pds = get_unique_index(pds)
+        pds = keep_iqr(pds, k=2.0)
+        ds = pds.dropna('time')
+    else:
+        ds = xr.open_dataset(sound_path / 'bet_dagan_sounding_pw_Ts_Tk_with_clouds.nc')
+        ds = ds.reset_coords(drop=True)
     s_order = ['DJF', 'JJA', 'SON', 'MAM']
     h_order = ['noon', 'midnight']
     cld_order = [0, 1]
@@ -1109,6 +1314,7 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
     import matplotlib.pyplot as plt
     import seaborn as sns
     from sklearn.metrics import mean_squared_error
+    time_dim = list(set(ds.dims))[0]
     sns.set_style('darkgrid')
     colors = ['red', 'green', 'magenta', 'cyan', 'orange', 'teal',
               'gray', 'purple']
@@ -1138,16 +1344,19 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
         # sns.regplot(ds.ts.values, ds.tm.values, ax=axes[0])
         df = ds.ts.dropna('time').to_dataframe()
         df['tm'] = ds.tm.dropna('time')
-        df['clouds'] = ds.any_cld.dropna('time')
-        g = sns.scatterplot(
-            data=df,
-            x='ts',
-            y='tm',
-            hue='clouds',
-            marker='.',
-            s=100,
-            ax=axes[0])
-        g.legend(loc='best')
+        try:
+            df['clouds'] = ds.any_cld.dropna('time')
+            g = sns.scatterplot(
+                data=df,
+                x='ts',
+                y='tm',
+                hue='clouds',
+                marker='.',
+                s=100,
+                ax=axes[0])
+            g.legend(loc='best')
+        except AttributeError:
+            pass
         # axes[0].scatter(x=ds.ts.values, y=ds.tm.values, marker='.', s=10)
 #        linex = np.array([ds.ts.min().item(), ds.ts.max().item()])
 #        liney = a * linex + b
@@ -1188,8 +1397,10 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
         size = len(keys)
         if size == 1:
             key = keys[0]
+#            other_keys = [
+#                *set(['any_cld', 'hour', 'season']).difference([key])]
             other_keys = [
-                *set(['any_cld', 'hour', 'season']).difference([key])]
+                *set(['time.hour', 'time.season']).difference([key])]
             vals = dim_dict[key]
 #            result = np.empty((len(vals), 2))
 #            residuals = []
@@ -1197,6 +1408,7 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
             trained = []
             fig, axes = plt.subplots(1, len(vals), sharey=True, sharex=True,
                                      figsize=(15, 8))
+            key = '{}.{}'.format(time_dim, key)
             for i, val in enumerate(vals):
                 ts = ds.ts.where(ds[key] == val).dropna('time')
                 tm = ds.tm.where(ds[key] == val).dropna('time')
@@ -1257,7 +1469,8 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
             da['name'] = model_names
             da[key] = vals
         elif size == 2:
-            other_keys = [*set(['any_cld', 'hour', 'season']).difference(keys)]
+#            other_keys = [*set(['any_cld', 'hour', 'season']).difference(keys)]
+            other_keys = [*set(['hour', 'season']).difference(keys)]
             vals = [dim_dict[key] for key in dim_dict.keys()]
 #            result = np.empty((len(vals[0]), len(vals[1]), 2))
 #            residuals = []
