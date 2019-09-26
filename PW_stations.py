@@ -156,40 +156,81 @@ def proc_1minute(path):
 
 
 def parameter_study_ts_tm_TELA_bet_dagan(tel_aviv_IMS_file, path=work_yuval,
-                                         coef=[-3, 3, 100],
-                                         inter=[-300, 300, 1000], plot=True):
+                                         coef=[-3, 3], inter=[-300, 300],
+                                         span=10, breakdown=True, plot=True):
     import xarray as xr
     import numpy as np
     from aux_gps import dim_intersection
-    from sklearn.metrics import mean_squared_error
+    import matplotlib.pyplot as plt
     filename = 'TELA_zwd_aligned_with_physical_bet_dagan.nc'
     zwd_and_tpw = xr.open_dataset(path / filename)
     wetz = zwd_and_tpw['TELA_WetZ']
     tpw = zwd_and_tpw['Tpw']
     # load the 10 mins temperature data from IMS:
     tela_T = xr.open_dataset(tel_aviv_IMS_file)
-    coef_space = np.linspace(*coef)
-    intercept_space = np.linspace(*inter)
-    rmse_np = np.empty((len(coef_space), len(intercept_space)))
-    mean_error_np = np.empty((len(coef_space), len(intercept_space)))
-    for i, coef in enumerate(coef_space):
-        for j, intercept in enumerate(intercept_space):
-            model = {'coef': coef, 'intercept': intercept}
-            k, _ = kappa_ml(tela_T.to_array(name='TELA_T').squeeze(drop=True),
-                            model=model)
-            pw = k * wetz
-            new_time = dim_intersection([pw, tpw])
-            pw = pw.sel(time=new_time)
-            tpw = tpw.sel(time=new_time)
-            rmse_np[i, j] = np.sqrt(mean_squared_error(tpw, pw))
-            mean_error_np[i, j] = (tpw - pw).mean('time')
-    rmse_da = xr.DataArray(rmse_np, dims=['coef', 'intercept'])
-    rmse_da.name = 'RMSE'
-    mean_error_da = xr.DataArray(mean_error_np, dims=['coef', 'intercept'])
-    mean_error_da.name = 'MEAN'
-    rds = xr.merge([mean_error_da, rmse_da])
-    rds['coef'] = coef_space
-    rds['intercept'] = intercept_space
+    coef_space = np.linspace(*coef, span)
+    intercept_space = np.linspace(*inter, span)
+    model = np.stack([coef_space, intercept_space], axis=0)
+    if breakdown:
+        seasons = ['DJF', 'MAM', 'JJA', 'SON']
+        hours = [0, 12]
+        rds_list = []
+        for season in seasons:
+            for hour in hours:
+                print('calculating kappa of season {} and hour {}'.format(season, hour))
+                T = tela_T.to_array(name='TELA_T').squeeze(drop=True)
+                T = T.where(T['time.season'] == season).dropna('time')
+                T = T.where(T['time.hour'] == hour).dropna('time')
+                k, _ = kappa_ml(T, model=model, no_error=True)
+                print('building results...')
+                pw = k * wetz
+                new_time = dim_intersection([pw, tpw])
+                pw = pw.sel(time=new_time)
+                tpw_sel = tpw.sel(time=new_time)
+                rmse = (tpw_sel - pw)**2.0
+                rmse = np.sqrt(rmse.mean('time'))
+                mean_error = (tpw_sel - pw).mean('time')
+                rmse.name = 'RMSE'.format(season, hour)
+                mean_error.name = 'MEAN'.format(season, hour)
+                merged = xr.merge([mean_error, rmse])
+                merged = merged.expand_dims(['season', 'hour'])
+                merged['season'] = [season]
+                merged['hour'] = [hour]
+                rds_list.append(merged.stack(prop=['season', 'hour']))
+        rds = xr.concat(rds_list, 'prop').unstack('prop')
+        print('Done!')
+    else:
+        print('calculating kappa of for all data!')
+        T = tela_T.to_array(name='TELA_T').squeeze(drop=True)
+        k, _ = kappa_ml(T, model=model, no_error=True)
+        print('building results...')
+        pw = k * wetz
+        new_time = dim_intersection([pw, tpw])
+        pw = pw.sel(time=new_time)
+        tpw_sel = tpw.sel(time=new_time)
+        rmse = (tpw_sel - pw)**2.0
+        rmse = np.sqrt(rmse.mean('time'))
+        mean_error = (tpw_sel - pw).mean('time')
+        rmse.name = 'RMSE_all'
+        mean_error.name = 'MEAN_all'
+        rds = xr.merge([mean_error, rmse])
+        print('Done!')
+    if plot:
+        if not breakdown:
+            fig, ax = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
+            rds.MEAN.plot.pcolormesh(ax=ax[0])
+            rds.RMSE.plot.pcolormesh(ax=ax[1])
+        else:
+            fg_mean = rds.MEAN.plot.pcolormesh(row='hour', col='season',
+                                               figsize=(20, 10), cmap='seismic')
+            [ax.grid() for ax in fg_mean.fig.axes]
+            # fg_mean.fig.tight_layout()
+            # fg_mean.fig.subplots_adjust(right=0.9)
+            fg_rmse = rds.RMSE.plot.pcolormesh(row='hour', col='season',
+                                               figsize=(20, 10))
+            [ax.grid() for ax in fg_rmse.fig.axes]
+            # fg_mean.fig.tight_layout()
+            # fg_rmse.fig.subplots_adjust(right=0.9)
     return rds
 
 
@@ -733,9 +774,10 @@ def check_Tm_func(Tmul_num=10, Ts_num=6, Toff_num=15):
 
 
 def kappa_ml(T, model=None, k2=22.1, k3=3.776e5, dk3=0.004e5, dk2=2.2,
-             verbose=False):
+             verbose=False, no_error=False):
     """T in celsious, anton says k2=22.1 is better, """
     import numpy as np
+    import xarray as xr
     # original k2=17.0 bevis 1992 etal.
     # [k2] = K / mbar, [k3] = K^2 / mbar
     # 100 Pa = 1 mbar
@@ -747,9 +789,22 @@ def kappa_ml(T, model=None, k2=22.1, k3=3.776e5, dk3=0.004e5, dk2=2.2,
         dTm = 0.72 * dT
     elif isinstance(model, dict):
         if verbose:
-            print('using linear model of Tm = {} * Ts + {}'.format(model['coef'], model['intercept']))
+            print(
+                'using linear model of Tm = {} * Ts + {}'.format(model['coef'], model['intercept']))
         Tm = (273.15 + T) * model['coef'] + model['intercept']
         dTm = model['coef'] * dT
+    elif isinstance(model, np.ndarray) and model.ndim == 2:
+        print('using model arg as 2d np array with dims: [coef, intercept]')
+        coef = model[0, :]
+        intercept = model[1, :]
+        tm = np.empty((T.values.shape[0], coef.shape[0], intercept.shape[0]))
+        for i in range(coef.shape[0]):
+            for j in range(intercept.shape[0]):
+                tm[:, i, j] = (273.15 + T.values) * coef[i] + intercept[j]
+        Tm = xr.DataArray(tm, dims=['time', 'coef', 'intercept'])
+        Tm['time'] = T.time
+        Tm['coef'] = coef
+        Tm['intercept'] = intercept
     else:
         if verbose:
             print('Using sklearn model of: {}'.format(model))
@@ -772,10 +827,13 @@ def kappa_ml(T, model=None, k2=22.1, k3=3.776e5, dk3=0.004e5, dk2=2.2,
     k = 1.0 / k  # [k] = 100 * kg / m^3 =  kg/ (m^2 * cm)
     # dk = (1e6 / Rv ) * (k3 / Tm + k2)**-2 * (dk3 / Tm + dTm * k3 / Tm**2.0 + dk2)
     # dk = k * np.sqrt(dk3Tm**2.0 + dk2**2.0)
-    dk = k * (k3 / Tm + k2)**-1 * np.sqrt((dk3 / Tm) **
-                                          2.0 + (dTm * k3 / Tm**2.0)**2.0 + dk2**2.0)
-    # 1 kg/m^2 IPW = 1 mm PW
-    return k, dk
+    if no_error:
+        return k, _
+    else:
+        dk = k * (k3 / Tm + k2)**-1 * np.sqrt((dk3 / Tm) **
+                                              2.0 + (dTm * k3 / Tm**2.0)**2.0 + dk2**2.0)
+        # 1 kg/m^2 IPW = 1 mm PW
+        return k, dk
 
 
 def kappa(T, Tmul=0.72, T_offset=70.2, k2=22.1, k3=3.776e5):
