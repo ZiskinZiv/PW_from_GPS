@@ -283,6 +283,7 @@ def compare_physical_bet_dagan_soundings_to_tela_station(
         encoding = {var: comp for var in zwd_and_tpw.data_vars}
         zwd_and_tpw.to_netcdf(savepath / filename, 'w', encoding=encoding)
         print('Done!')
+        return
     else:
         print('found file!')
         zwd_and_tpw = xr.open_dataset(savepath / filename)
@@ -532,35 +533,38 @@ def produce_geo_df(gis_path=gis_path):
     return geo_df
 
 
-def produce_single_station_IPW(zwd, Tds, mda=None, model_name='LR', k2=22.1,
-                               k3=3.776e5):
+def produce_single_station_IPW(zwd, Tds, mda=None, model_name='LR'):
     """input is zwd from gipsy or garner, Tds is the temperature of the
     station, mda is the Ts-Tm relationsship ml models dataarray, model is
     the ml model chosen."""
     import xarray as xr
-    zwd.load()
-    Tds.load()
-    hours = dict(zip([12, 0], ['noon', 'midnight']))
+    # hours = dict(zip([12, 0], ['noon', 'midnight']))
+    try:
+        zwd.name = 'WetZ'
+    except AttributeError:
+        print('zwd has no name attribute ?')
+        zwd.name = 'WetZ'
     if mda is None:
         # Bevis 1992 relationship:
-        kappa_ds = kappa_ml(Tds, model=None, k2=k2, k3=k3)
+        kappa_ds, _ = kappa_ml(Tds, model=None)
         ipw = kappa_ds * zwd
-        try:
-            ipw.name = zwd.name
-        except AttributeError:
-            print('zwd has no name attribute ?')
-        try:
-            ipw = ipw.rename({'zwd': 'ipw'})
-        except ValueError:
-            print('zwd name not found, ok?')
-        ipw.attrs['name'] = 'IPW'
-        ipw.attrs['long_name'] = 'Integrated Precipitable Water'
+        ipw.name = 'PW'
+        ipw.attrs['long_name'] = 'Precipitable Water'
         ipw.attrs['units'] = 'kg / m^2'
         ipw.attrs['description'] = 'whole data Tm formulation using Bevis etal. 1992'
         print('Done!')
         return ipw
-    if 'season' in mda.dims:
-        seasons = mda.season.values.tolist()
+    time_dim = mda.attrs['time_dim']
+    hours = None
+    seasons = None
+    if 'season' in [x.split('.')[-1] for x in list(mda.dims)]:
+        val = mda['{}.season'.format(time_dim)].values.tolist()
+        key = '{}.season'.format(time_dim)
+        seasons = {key: val}
+    if 'hour' in [x.split('.')[-1] for x in list(mda.dims)]:
+        val = mda['{}.hour'.format(time_dim)].values.tolist()
+        key = '{}.hour'.format(time_dim)
+        hours = {key: val}
     if 'any_cld' in mda.dims:
         any_clds = mda.any_cld.values.tolist()
     if len(mda.dims) == 1 and 'name' in mda.dims:
@@ -568,47 +572,44 @@ def produce_single_station_IPW(zwd, Tds, mda=None, model_name='LR', k2=22.1,
 #        Tmul = mda.sel(parameter='slope').values.item()
 #        Toff = mda.sel(parameter='intercept').values.item()
         m = mda.sel(name=model_name).values.item()
-        kappa_ds = kappa_ml(Tds, model=m, k2=k2, k3=k3)
+        kappa_ds, _ = kappa_ml(Tds, model=m)
         ipw = kappa_ds * zwd
-        try:
-            ipw.name = zwd.name
-        except AttributeError:
-            print('zwd has no name attribute ?')
-        try:
-            ipw = ipw.rename({'zwd': 'ipw'})
-        except ValueError:
-            print('zwd name not found, ok?')
-        ipw.attrs['name'] = 'IPW'
-        ipw.attrs['long_name'] = 'Integrated Precipitable Water'
+        ipw.name = 'PW'
+        ipw.attrs['long_name'] = 'Precipitable Water'
         ipw.attrs['units'] = 'kg / m^2'
-        ipw.attrs['description'] = 'whole data Tm formulation using {} model'.format(model_name)
+        ipw.attrs['description'] = 'whole data Tm formulation using {} model'.format(
+            model_name)
         print('Done!')
         return ipw
-    elif len(mda.dims) == 2 and set(mda.dims) == set(['hour', 'name']):
-        print('Found hour Ts-Tm relationship slice.')
+    elif len(mda.dims) == 2 and hours is not None:
+        print('Found hourly Ts-Tm relationship slice.')
         kappa_list = []
-        for hr_num in hours.keys():
-            print('working on hour {}'.format(hours[hr_num]))
-            sliced = Tds.where(Tds['time.hour'] == hr_num).dropna('time')
-            m = mda.sel(name=model_name, hour=hours[hr_num]).values.item()
-            kappa_part = kappa_ml(sliced, model=m)
+        h_key = [x for x in hours.keys()][0]
+        for hr_num in [x for x in hours.values()][0]:
+            print('working on hour {}'.format(hr_num))
+            sliced = Tds.where(Tds[h_key] == hr_num).dropna(time_dim)
+            m = mda.sel({'name': model_name, h_key: hr_num}).values.item()
+            kappa_part, _ = kappa_ml(sliced, model=m)
             kappa_list.append(kappa_part)
-        des_attrs= 'hourly data Tm formulation using {} model'.format(model_name)
-    elif len(mda.dims) == 2 and set(mda.dims) == set(['season', 'name']):
+        des_attrs = 'hourly data Tm formulation using {} model'.format(
+            model_name)
+    elif len(mda.dims) == 2 and seasons is not None:
         print('Found season Ts-Tm relationship slice.')
         kappa_list = []
-        for season in seasons:
+        s_key = [x for x in seasons.keys()][0]
+        for season in [x for x in seasons.values()][0]:
             print('working on season {}'.format(season))
-            sliced = Tds.where(Tds['time.season'] == season).dropna('time')
-            m = mda.sel(name=model_name, season=season).values.item()
-            kappa_part = kappa_ml(sliced, model=m)
+            sliced = Tds.where(Tds[s_key] == season).dropna('time')
+            m = mda.sel({'name': model_name, s_key: season}).values.item()
+            kappa_part, _ = kappa_ml(sliced, model=m)
             kappa_list.append(kappa_part)
-        des_attrs= 'seasonly data Tm formulation using {} model'.format(model_name)
+        des_attrs = 'seasonly data Tm formulation using {} model'.format(
+            model_name)
     elif len(mda.dims) == 2 and set(mda.dims) == set(['any_cld', 'name']):
         print('Found clouds Ts-Tm relationship slice.')
     elif (len(mda.dims) == 3 and set(mda.dims) ==
           set(['any_cld', 'season', 'name'])):
-        print('Found clouds and season Ts-Tm relationship slice.')
+        print('Found clouds and seasonly Ts-Tm relationship slice.')
     elif (len(mda.dims) == 3 and set(mda.dims) ==
           set(['any_cld', 'hour', 'name'])):
         print('Found clouds and hour Ts-Tm relationship slice.')
@@ -619,13 +620,13 @@ def produce_single_station_IPW(zwd, Tds, mda=None, model_name='LR', k2=22.1,
         for hr_num in hours.keys():
             for any_cld in any_clds:
                 print('working on any_cld {}, hour {}'.format(
-                        any_cld, hours[hr_num]))
+                    any_cld, hours[hr_num]))
 #                Tmul = models.sel(any_cld=any_cld, hour=hours[hr_num],
 #                                   parameter='slope')
 #                Toff = models.sel(any_cld=any_cld, hour=hours[hr_num],
 #                                   parameter='intercept')
                 sliced = Tds.where(Tds['time.season'] == season).dropna(
-                        'time').where(Tds['time.hour'] == hr_num).dropna('time')
+                    'time').where(Tds['time.hour'] == hr_num).dropna('time')
                 m = mda.sel(any_cld=any_cld, hour=hours[hr_num],
                             name=model_name)
                 kappa_part = kappa_ml(sliced, model=m)
@@ -634,39 +635,32 @@ def produce_single_station_IPW(zwd, Tds, mda=None, model_name='LR', k2=22.1,
                               kappa_keys]
                 mda_list.append(kappa_keys)
                 mda_vals.append([Tmul.values.item(), Toff.values.item(),
-                                     k2, k3])
+                                 k2, k3])
                 kappa_list.append(kappa_part)
-    elif (len(mda.dims) == 3 and set(mda.dims) ==
-          set(['hour', 'season', 'name'])):
-        print('Found hour and season Ts-Tm relationship slice.')
+    elif (len(mda.dims) == 3 and seasons is not None and hours is not None):
+        print('Found hourly and seasonly Ts-Tm relationship slice.')
         kappa_list = []
-        for hr_num in hours.keys():
-            for season in seasons:
+        h_key = [x for x in hours.keys()][0]
+        s_key = [x for x in seasons.keys()][0]
+        for hr_num in [x for x in hours.values()][0]:
+            for season in [x for x in seasons.values()][0]:
                 print('working on season {}, hour {}'.format(
-                        season, hours[hr_num]))
-                sliced = Tds.where(Tds['time.season'] == season).dropna(
-                        'time').where(Tds['time.hour'] == hr_num).dropna('time')
-                m = mda.sel(name=model_name, hour=hours[hr_num],
-                            season=season).values.item()
-                kappa_part = kappa_ml(sliced, model=m)
+                    season, hr_num))
+                sliced = Tds.where(Tds[s_key] == season).dropna(
+                    time_dim).where(Tds[h_key] == hr_num).dropna(time_dim)
+                m = mda.sel({'name': model_name, s_key: season,
+                             h_key: hr_num}).values.item()
+                kappa_part, _ = kappa_ml(sliced, model=m)
                 kappa_list.append(kappa_part)
-        des_attrs= 'hourly and seasonly data Tm formulation using {} model'.format(model_name)
-    kappa_ds = xr.concat(kappa_list, 'time')
+        des_attrs = 'hourly and seasonly data Tm formulation using {} model'.format(model_name)
+    kappa_ds = xr.concat(kappa_list, time_dim)
     ipw = kappa_ds * zwd
-    try:
-        ipw.name = zwd.name
-    except AttributeError:
-        print('zwd has no name attribute ?')
-    try:
-        ipw = ipw.rename({'zwd': 'ipw'})
-    except ValueError:
-        print('zwd name not found, ok?')
+    ipw.name = 'PW'
 #    kappa_dict = dict(zip([item for sublist in mda_list for item in sublist],
 #                          [item for sublist in mda_vals for item in sublist]))
 #    for k, v in kappa_dict.items():
 #        ipw.attrs[k] = v
-    ipw.attrs['name'] = 'IPW'
-    ipw.attrs['long_name'] = 'Integrated Precipitable Water'
+    ipw.attrs['long_name'] = 'Precipitable Water'
     ipw.attrs['units'] = 'kg / m^2'
     ipw.attrs['description'] = des_attrs
     print('Done!')
@@ -1029,9 +1023,12 @@ def compare_to_sounding2(pw_from_gps, pw_from_sounding, station='TELA',
     import matplotlib.pyplot as plt
     import seaborn as sns
     from sklearn.metrics import mean_squared_error
+    time_dim_gps = list(set(pw_from_gps.dims))[0]
+    time_dim_sound = list(set(pw_from_sounding.dims))[0]
     sns.set_style('darkgrid')
     pw = pw_from_gps.to_dataset(name=station).reset_coords(drop=True)
-    pw['sound'] = pw_from_sounding
+    pw['sound'] = pw_from_sounding.dropna(time_dim_sound)
+    pw = pw.dropna(time_dim_gps)
     pw['resid'] = pw['sound'] - pw[station]
     time_dim = list(set(pw.dims))[0]
     pw = pw.rename({time_dim: 'time'})
@@ -1290,38 +1287,34 @@ def ml_models_T_from_sounding(sound_path=sound_path, categories=None,
         pds = keep_iqr(pds, k=2.0)
         ds = pds.dropna('time')
     else:
-        ds = xr.open_dataset(sound_path / 'bet_dagan_sounding_pw_Ts_Tk_with_clouds.nc')
+        ds = xr.open_dataset(sound_path /
+                             'bet_dagan_sounding_pw_Ts_Tk_with_clouds.nc')
         ds = ds.reset_coords(drop=True)
+    # define the possible categories and feed their dictionary:
+    possible_cats = ['season', 'hour']
+    pos_cats_dict = {}
     s_order = ['DJF', 'JJA', 'SON', 'MAM']
-    h_order = ['noon', 'midnight']
+    h_order = [12, 0]
     cld_order = [0, 1]
+    time_dim = list(set(ds.dims))[0]
+    if 'season' in possible_cats:
+        pos_cats_dict['{}.season'.format(time_dim)] = s_order
+    if 'hour' in possible_cats:
+        pos_cats_dict['{}.hour'.format(time_dim)] = h_order
     if categories is None:
         results = formulate_plot(ds, model_names=models)
     if categories is not None:
         if not isinstance(categories, list):
             categories = [categories]
-        if set(categories + ['season', 'hour', 'clouds']) != set(['season',
-                                                                  'hour',
-                                                                  'clouds']):
-            raise ValueError('choices for categories are: season, hour, clouds')
-        if len(categories) == 1:
-            if 'season' in categories:
-                dd = {'season': s_order}
-            elif 'hour' in categories:
-                dd = {'hour': h_order}
-            elif 'clouds' in categories:
-                dd = {'any_cld': cld_order}
-        elif len(categories) == 2:
-            if 'season' in categories and 'hour' in categories:
-                dd = {'hour': h_order, 'season': s_order}
-            elif 'season' in categories and 'clouds' in categories:
-                dd = {'any_cld': cld_order, 'season': s_order}
-            elif 'clouds' in categories and 'hour' in categories:
-                dd = {'hour': h_order, 'any_cld': cld_order}
-        elif len(categories) == 3:
-            if 'season' in categories and 'hour' in categories and 'clouds' in categories:
-                dd = {'hour': h_order, 'any_cld': cld_order, 'season': s_order}
-        results = formulate_plot(ds, dim_dict=dd, model_names=models)
+        if set(categories + possible_cats) != set(possible_cats):
+            raise ValueError(
+                'choices for categories are: ' +
+                ', '.join(possible_cats))
+        categories = [x.replace(x, time_dim + '.' + x) if x ==
+                      'season' or x == 'hour' else x for x in categories]
+        results = formulate_plot(ds, pos_cats_dict=pos_cats_dict,
+                                 chosen_cats=categories, model_names=models)
+    results.attrs['time_dim'] = time_dim
     return results
 
 
@@ -1363,9 +1356,10 @@ def ml_models_T_from_sounding(sound_path=sound_path, categories=None,
 
 
 def formulate_plot(ds, model_names=['LR', 'TSEN'],
-                   dim_dict=None):
-    """accepts dim_dict with keys : hour, season , any_cld and appropriate
-    values, returns trained sklearn models with the same slices.
+                   pos_cats_dict=None, chosen_cats=None):
+    """accepts pos_cat (dict) with keys : hour, season ,and appropriate
+    values, and chosen keys and returns trained sklearn models with
+    the same slices.
     this function is called by 'ml_models_T_from_sounding' above."""
     import xarray as xr
     import numpy as np
@@ -1373,6 +1367,7 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
     import seaborn as sns
     from sklearn.metrics import mean_squared_error
     time_dim = list(set(ds.dims))[0]
+    print('time dim is: {}'.format(time_dim))
     sns.set_style('darkgrid')
     colors = ['red', 'green', 'magenta', 'cyan', 'orange', 'teal',
               'gray', 'purple']
@@ -1385,7 +1380,8 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
                 len(colors)))
     ml = ML_Switcher()
     models = [ml.pick_model(x) for x in model_names]
-    if dim_dict is None:
+    if chosen_cats is None:
+        print('no categories selected, using full data.')
         fig, axes = plt.subplots(1, 2, figsize=(10, 7))
         fig.suptitle(
             'Water vapor weighted mean atmospheric temperature vs. bet dagan sounding station surface temperature')
@@ -1404,17 +1400,20 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
         df['tm'] = ds.tm.dropna('time')
         try:
             df['clouds'] = ds.any_cld.dropna('time')
-            g = sns.scatterplot(
-                data=df,
-                x='ts',
-                y='tm',
-                hue='clouds',
-                marker='.',
-                s=100,
-                ax=axes[0])
-            g.legend(loc='best')
+            hue = 'clouds'
         except AttributeError:
+            hue = None
             pass
+        g = sns.scatterplot(
+            data=df,
+            x='ts',
+            y='tm',
+            hue=hue,
+            marker='.',
+            s=100,
+            ax=axes[0])
+        g.legend(loc='best')
+
         # axes[0].scatter(x=ds.ts.values, y=ds.tm.values, marker='.', s=10)
 #        linex = np.array([ds.ts.min().item(), ds.ts.max().item()])
 #        liney = a * linex + b
@@ -1450,30 +1449,29 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
         da.name = 'all_data_trained_models'
         # results = xr.DataArray(result, dims=['parameter'])
         # results['parameter'] = ['slope', 'intercept']
-    elif dim_dict is not None:
-        keys = [x for x in dim_dict.keys()]
-        size = len(keys)
+    elif chosen_cats is not None:
+        size = len(chosen_cats)
         if size == 1:
-            key = keys[0]
+            key = chosen_cats[0]
+            vals = pos_cats_dict[key]
+            print('{} category selected.'.format(key))
+#            other_keys = [
+#                *set([x for x in pos_cats_dict.keys()]).difference([key])]
 #            other_keys = [
 #                *set(['any_cld', 'hour', 'season']).difference([key])]
-            other_keys = [
-                *set(['time.hour', 'time.season']).difference([key])]
-            vals = dim_dict[key]
 #            result = np.empty((len(vals), 2))
 #            residuals = []
 #            rmses = []
             trained = []
             fig, axes = plt.subplots(1, len(vals), sharey=True, sharex=True,
                                      figsize=(15, 8))
-            key = '{}.{}'.format(time_dim, key)
             for i, val in enumerate(vals):
-                ts = ds.ts.where(ds[key] == val).dropna('time')
-                tm = ds.tm.where(ds[key] == val).dropna('time')
-                other_val0 = ds[other_keys[0]].where(
-                    ds[key] == val).dropna('time')
-                other_val1 = ds[other_keys[1]].where(
-                    ds[key] == val).dropna('time')
+                ts = ds.ts.where(ds[key] == val).dropna(time_dim)
+                tm = ds.tm.where(ds[key] == val).dropna(time_dim)
+#                other_val0 = ds[other_keys[0]].where(
+#                    ds[key] == val).dropna(time_dim)
+#                other_val1 = ds[other_keys[1]].where(
+#                    ds[key] == val).dropna(time_dim)
                 X = ts.values.reshape(-1, 1)
                 y = tm.values
                 models = [ml.pick_model(x) for x in model_names]
@@ -1495,11 +1493,13 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
                              fontsize=12)
                 df = ts.to_dataframe()
                 df['tm'] = tm
-                df[other_keys[0]] = other_val0
-                df[other_keys[1]] = other_val1
+#                df[other_keys[0]] = other_val0
+#                df[other_keys[1]] = other_val1
+#                g = sns.scatterplot(data=df, x='ts', y='tm', marker='.', s=100,
+#                                    ax=axes[i], hue=other_keys[0],
+#                                    style=other_keys[1])
                 g = sns.scatterplot(data=df, x='ts', y='tm', marker='.', s=100,
-                                    ax=axes[i], hue=other_keys[0],
-                                    style=other_keys[1])
+                                    ax=axes[i])
                 g.legend(loc='upper right')
                 # axes[i, j].scatter(x=x.values, y=y.values, marker='.', s=10)
                 axes[i].set_title('{}:{}'.format(key, val))
@@ -1528,8 +1528,9 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
             da[key] = vals
         elif size == 2:
 #            other_keys = [*set(['any_cld', 'hour', 'season']).difference(keys)]
-            other_keys = [*set(['hour', 'season']).difference(keys)]
-            vals = [dim_dict[key] for key in dim_dict.keys()]
+#            other_keys = [*set(['hour', 'season']).difference(keys)]
+            vals = [pos_cats_dict[key] for key in chosen_cats]
+            keys = chosen_cats
 #            result = np.empty((len(vals[0]), len(vals[1]), 2))
 #            residuals = []
 #            rmses = []
@@ -1540,11 +1541,11 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
                 trained0 = []
                 for j, val1 in enumerate(vals[1]):
                     ts = ds.ts.where(ds[keys[0]] == val0).dropna(
-                        'time').where(ds[keys[1]] == val1).dropna('time')
+                        time_dim).where(ds[keys[1]] == val1).dropna(time_dim)
                     tm = ds.tm.where(ds[keys[0]] == val0).dropna(
-                        'time').where(ds[keys[1]] == val1).dropna('time')
-                    other_val = ds[other_keys[0]].where(ds[keys[0]] == val0).dropna(
-                        'time').where(ds[keys[1]] == val1).dropna('time')
+                        time_dim).where(ds[keys[1]] == val1).dropna(time_dim)
+#                    other_val = ds[other_keys[0]].where(ds[keys[0]] == val0).dropna(
+#                        'time').where(ds[keys[1]] == val1).dropna('time')
                     X = ts.values.reshape(-1, 1)
                     y = tm.values
                     models = [ml.pick_model(x) for x in model_names]
@@ -1566,10 +1567,12 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
                                     color='blue', fontsize=12)
                     df = ts.to_dataframe()
                     df['tm'] = tm
-                    df[other_keys[0]] = other_val
+                    # df[other_keys[0]] = other_val
+#                    g = sns.scatterplot(data=df, x='ts', y='tm', marker='.',
+#                                        s=100, ax=axes[i, j],
+#                                        hue=other_keys[0])
                     g = sns.scatterplot(data=df, x='ts', y='tm', marker='.',
-                                        s=100, ax=axes[i, j],
-                                        hue=other_keys[0])
+                                        s=100, ax=axes[i, j])
                     g.legend(loc='upper right')
                     # axes[i, j].scatter(x=x.values, y=y.values, marker='.', s=10)
                     # axes[i, j].set_title('{}:{}'.format(key, val))
