@@ -1022,13 +1022,16 @@ def compare_to_sounding2(pw_from_gps, pw_from_sounding, station='TELA',
                          times=None, season=None, hour=None, title=None):
     import matplotlib.pyplot as plt
     import seaborn as sns
+    from aux_gps import get_unique_index
     from sklearn.metrics import mean_squared_error
     time_dim_gps = list(set(pw_from_gps.dims))[0]
     time_dim_sound = list(set(pw_from_sounding.dims))[0]
     sns.set_style('darkgrid')
     pw = pw_from_gps.to_dataset(name=station).reset_coords(drop=True)
-    pw['sound'] = pw_from_sounding.dropna(time_dim_sound)
     pw = pw.dropna(time_dim_gps)
+    pw = get_unique_index(pw, time_dim_gps)
+    pw_sound = pw_from_sounding.dropna(time_dim_sound)
+    pw['sound'] = get_unique_index(pw_sound, time_dim_sound)
     pw['resid'] = pw['sound'] - pw[station]
     time_dim = list(set(pw.dims))[0]
     pw = pw.rename({time_dim: 'time'})
