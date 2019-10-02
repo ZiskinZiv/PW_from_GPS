@@ -772,6 +772,8 @@ def kappa_ml(T, model=None, k2=22.1, k3=3.776e5, dk3=0.004e5, dk2=2.2,
     """T in celsious, anton says k2=22.1 is better, """
     import numpy as np
     import xarray as xr
+    # maybe implemment Tm= linear_fit(Ts_clim, Tm_clim) + linear_fit(Ts_anom, Tm_anom)
+#    from sklearn.utils.estimator_checks import check_estimator
     # original k2=17.0 bevis 1992 etal.
     # [k2] = K / mbar, [k3] = K^2 / mbar
     # 100 Pa = 1 mbar
