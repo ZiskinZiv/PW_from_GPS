@@ -209,7 +209,8 @@ def post_procces_gipsyx_all_years(load_save_path, plot=False):
     return
 
 
-def post_procces_gipsyx_yearly_file(path_file, savepath=None, plot=False):
+def post_procces_gipsyx_yearly_file(path_file, savepath=None, plot=False,
+                                    verbose=0):
     import xarray as xr
     # from aux_gps import get_unique_index
     import matplotlib.pyplot as plt
@@ -228,8 +229,12 @@ def post_procces_gipsyx_yearly_file(path_file, savepath=None, plot=False):
     # attrs_list = []
     vars_list = list(set([x.split('-')[0] for x in dss.data_vars.keys()]))
     for field in vars_list:
-        da_field = analyse_results_ds_one_station(dss, field, verbose=0)
-        da_year = replace_fields_in_ds(dss, da_field, field, verbose=0)
+        try:
+            da_field = analyse_results_ds_one_station(dss, field, verbose=verbose)
+        except ValueError as e:
+            logger.warning('ValueError: {}, meaning only single 24hr day files in all {}'.format(e, year))
+            return None
+        da_year = replace_fields_in_ds(dss, da_field, field, verbose=verbose)
         da_fs.append(da_year)
         # attrs_list += [(x, y) for x, y in da_year.attrs.items()]
     # attrs = list(set(attrs_list))
@@ -308,7 +313,12 @@ def replace_fields_in_ds(dss, da_repl, field='WetZ', verbose=None):
         second = ds['{}-{}'.format(field, i+1)]
         min_time = first.dropna('time').time.min()
         max_time = second.dropna('time').time.max()
-        da = da_repl.sel(time=slice(min_time, max_time))
+        try:
+            da = da_repl.sel(time=slice(min_time, max_time))
+        except KeyError:
+            if verbose == 1:
+                logger.warning('item {}, {} - {} is lonely'.format(field, i, i+1))
+            continue
         if verbose == 1:
             logger.info('proccesing {} and {}'.format(first.name, second.name))
         # utime = dim_union([first, second], 'time')
