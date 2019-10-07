@@ -90,7 +90,7 @@ def read_all_physical_radiosonde(path, savepath=None, cutoff=None,
 #    dt_range_list = []
 #    tm_list = []
     if cutoff is not None:
-        print('applying Z-cutoff at {} meters for PW and Tm calculations.'.format(cutoff))
+        print('applying Z-cutoff at {} meters for PW and Tm calculations.'.format(int(cutoff)))
     for path_file in sorted(path_glob(path, '*/')):
         if path_file.is_file():
             ds = read_one_physical_radiosonde_report(path_file, cutoff=cutoff)
