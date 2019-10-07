@@ -9,7 +9,45 @@ Created on Thu May 16 14:24:40 2019
 from PW_paths import work_yuval
 sound_path = work_yuval / 'sounding'
 
-# TODO: complete functions:
+# TODO: TAKE alook at how to calculate the pw from radiosondes, maybe apply
+# cutoff at some level...
+
+
+def evaluate_sin_to_tmsearies(da, time_dim='time', plot=True, amp=6.0,
+                              period=365.0, phase=30.0, offset=253.0,
+                              just_eval=False):
+    import pandas as pd
+    import xarray as xr
+    import numpy as np
+    from scipy.optimize import curve_fit
+
+    def func(time, amp, period, phase, offset):
+        f = amp * np.sin(2 * np.pi * (time / period + 1.0 / phase)) + offset
+        return f
+    time = da[time_dim].dropna(time_dim).values
+    time = pd.to_datetime(time)
+    jul = time.to_julian_date()
+    jul -= round(jul[0])
+    if not just_eval:
+        ydata = da.values
+        popt, pcov = curve_fit(func, jul, ydata, p0=[amp, period, phase,
+                                                     offset])
+        amp = popt[0]
+        period = popt[1]
+        phase = popt[2]
+        offset = popt[3]
+        perr = np.sqrt(np.diag(pcov))
+        print('amp: {:.2f} +- {:.2f}'.format(amp, perr[0]))
+        print('period: {:.2f} +- {:.2f}'.format(period, perr[1]))
+        print('phase: {:.2f} +- {:.2f}'.format(phase, perr[2]))
+        print('offset: {:.2f} +- {:.2f}'.format(offset, perr[3]))
+    new = func(jul, amp, period, phase, offset)
+    new_da = xr.DataArray(new, dims=[time_dim])
+    new_da[time_dim] = time
+    if plot:
+        da.plot.line(marker='.', linewidth=0.)
+        new_da.plot.line(marker='.', linewidth=0.)
+    return new_da
 
 
 def move_bet_dagan_physical_to_main_path(bet_dagan_path):
@@ -40,7 +78,8 @@ def move_bet_dagan_physical_to_main_path(bet_dagan_path):
     return year_dirs
 
 
-def read_all_physical_radiosonde(path, savepath=None, verbose=True, plot=True):
+def read_all_physical_radiosonde(path, savepath=None, cutoff=None,
+                                 verbose=True, plot=True):
     from aux_gps import path_glob
     import xarray as xr
     ds_list = []
@@ -50,9 +89,11 @@ def read_all_physical_radiosonde(path, savepath=None, verbose=True, plot=True):
 #    cloud_list = []
 #    dt_range_list = []
 #    tm_list = []
+    if cutoff is not None:
+        print('applying Z-cutoff at {} meters for PW and Tm calculations.'.format(cutoff))
     for path_file in sorted(path_glob(path, '*/')):
         if path_file.is_file():
-            ds = read_one_physical_radiosonde_report(path_file)
+            ds = read_one_physical_radiosonde_report(path_file, cutoff=cutoff)
             if ds is None:
                 print('{} is corrupted...'.format(path_file.as_posix().split('/')[-1]))
                 continue
@@ -84,7 +125,10 @@ def read_all_physical_radiosonde(path, savepath=None, verbose=True, plot=True):
     if savepath is not None:
         yr_min = dss.time.min().dt.year.item()
         yr_max = dss.time.max().dt.year.item()
-        filename = 'bet_dagan_phys_sounding_{}-{}.nc'.format(yr_min, yr_max)
+        if cutoff is not None:
+            filename = 'bet_dagan_phys_sounding_{}-{}_cutoff_{}.nc'.format(yr_min, yr_max,cutoff)
+        else:
+            filename = 'bet_dagan_phys_sounding_{}-{}.nc'.format(yr_min, yr_max)
         print('saving {} to {}'.format(filename, savepath))
         comp = dict(zlib=True, complevel=9)  # best compression
         encoding = {var: comp for var in dss}
@@ -93,7 +137,7 @@ def read_all_physical_radiosonde(path, savepath=None, verbose=True, plot=True):
     return dss
 
 
-def read_one_physical_radiosonde_report(path_file, verbose=False):
+def read_one_physical_radiosonde_report(path_file, cutoff=None, verbose=False):
     """read one(12 or 00) physical bet dagan radiosonde reports and return a df
     containing time series, PW for the whole sounding and time span of the
     sounding"""
@@ -201,9 +245,9 @@ def read_one_physical_radiosonde_report(path_file, verbose=False):
     df['Rho'] = DensHumid(df['Temp'], df['Press'], df['WVpress'])
     # print('rho: {}, mix: {}, h: {}'.format(rho.shape,mixrkg.shape, hghtm.shape))
     # Trapezoidal rule to approximate TPW (units kg/m^2==mm)
-    tpw = calculate_tpw(df)
+    tpw = calculate_tpw(df, z_cutoff=cutoff)
     # calculate the mean atmospheric temperature and get surface temp in K:
-    tm = calculate_tm(df)
+    tm = calculate_tm(df, z_cutoff=cutoff)
     ts = df['Temp'][0] + 273.15
     units.update(Dewpt='deg_C', WVpress='hPa', Mixratio='gr/kg', Rho='kg/m^3')
     extra = np.array([ts, tm, tpw, cloud_code]).reshape(1, -1)
