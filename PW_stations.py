@@ -18,6 +18,7 @@ gis_path = work_yuval / 'gis'
 sound_path = work_yuval / 'sounding'
 phys_soundings = sound_path / 'bet_dagan_phys_sounding_2007-2019.nc'
 tela_zwd = work_yuval / 'gipsyx_results/tela/TELA_PPP_1996-2019.nc'
+tela_zwd_aligned = work_yuval / 'TELA_zwd_aligned_with_physical_bet_dagan.nc'
 tela_ims = ims_path / '10mins/TEL-AVIV-COAST_178_TD_10mins.nc'
 rinex_on_geo = geo_path / 'Work_Files/PW_yuval/rinex'
 PW_stations_path = work_yuval / '1minute'
@@ -27,6 +28,62 @@ stations = pd.read_csv('All_gps_stations.txt', header=0, delim_whitespace=True,
 # TODO: finish clouds formulation in ts-tm modeling
 # TODO: finish playing with ts-tm modeling, various machine learning algos.
 # TODO: redo the hour, season and cloud selection in formulate_plot
+
+
+def get_zwd_from_sounding_and_compare_to_gps(phys_sound_file=phys_soundings,
+                                             tela_zwd_file=tela_zwd_aligned,
+                                             tm=None, plot=True):
+    import xarray as xr
+    import matplotlib.pyplot as plt
+    zwd_and_tpw = xr.open_dataset(tela_zwd_file)
+    tpw = zwd_and_tpw['Tpw']
+    pds = get_ts_tm_from_physical(phys_sound_file, plot=False)
+    if tm is None:
+        k = kappa(pds['tm'], Tm_input=True)
+    else:
+        k = kappa(tm, Tm_input=True)
+    zwd_sound = tpw / k
+    zwd_and_tpw['WetZ_from_bet_dagan'] = zwd_sound
+    bet = zwd_and_tpw['WetZ_from_bet_dagan']
+    tela = zwd_and_tpw['TELA_WetZ']
+    if plot:
+        bet.plot.line(marker='.', linewidth=0.)
+        tela.plot.line(marker='.', linewidth=0.)
+        plt.title('TELA station ZWD and Bet-Dagan ZWD using TELA temperatures')
+        plt.figure()
+        (bet - tela).plot.line(marker='.', linewidth=0.)
+        plt.title('TELA-BET_DAGAN ZWD Residuals')
+        plt.figure()
+        (bet - tela).plot.hist(bins=100)
+    return zwd_and_tpw
+
+
+def fit_ts_tm_produce_ipw_and_compare_TELA(phys_sound_file=phys_soundings,
+                                           tela_zwd_file=tela_zwd_aligned,
+                                           tel_aviv_IMS_file=tela_ims,
+                                           sound_path=sound_path,
+                                           categories=None, model='LR',
+                                           **compare_kwargs):
+    """categories can be :'bevis', None, 'season' and/or 'hour'. None means
+    whole dataset ts-tm.
+    models can be 'LR' or 'TSEN'. compare_kwargs is for
+    compare_to_sounding2 i.e., times, season, hour, title"""
+    import xarray as xr
+    if categories == 'bevis':
+        results = None
+    else:
+        results = ml_models_T_from_sounding(sound_path, categories, model,
+                                            physical_file=phys_sound_file)
+    zwd_and_tpw = xr.open_dataset(tela_zwd_file)
+    wetz = zwd_and_tpw['TELA_WetZ']
+    tpw = zwd_and_tpw['Tpw']
+    wetz_error = zwd_and_tpw['TELA_WetZ_error']
+    # load the 10 mins temperature data from IMS:
+    tela_T = xr.open_dataset(tel_aviv_IMS_file)
+    T = tela_T.to_array(name='t').squeeze(drop=True)
+    pw_gps = produce_single_station_IPW(wetz, T, mda=results, model_name=model)
+    compare_to_sounding2(pw_gps, tpw, station='TELA', **compare_kwargs)
+    return pw_gps
 
 
 def get_ts_tm_from_physical(phys=phys_soundings, plot=True):
@@ -294,7 +351,7 @@ def compare_physical_bet_dagan_soundings_to_tela_station(
         # tela_T = tela_T.resample(time='5min').ffill()
         # compute the kappa function and multiply by ZWD to get PW(+error):
         k, dk = kappa_ml(tela_T.to_array(name='TELA_T').squeeze(drop=True),
-                         model=model)
+                         model=model, verbose=True)
         kappa = k.to_dataset(name='tela_kappa')
         kappa['tela_kappa_error'] = dk
         PW = (
@@ -546,6 +603,7 @@ def produce_single_station_IPW(zwd, Tds, mda=None, model_name='LR'):
         zwd.name = 'WetZ'
     if mda is None:
         # Bevis 1992 relationship:
+        print('Using Bevis 1992-1994 Ts-Tm relationship.')
         kappa_ds, _ = kappa_ml(Tds, model=None)
         ipw = kappa_ds * zwd
         ipw.name = 'PW'
@@ -832,12 +890,15 @@ def kappa_ml(T, model=None, k2=22.1, k3=3.776e5, dk3=0.004e5, dk2=2.2,
         return k, dk
 
 
-def kappa(T, Tmul=0.72, T_offset=70.2, k2=22.1, k3=3.776e5):
-    """T in celsious, anton says k2=22.1 is better"""
+def kappa(T, Tmul=0.72, T_offset=70.2, k2=22.1, k3=3.776e5, Tm_input=False):
+    """T in celsious, or in K when Tm_input is True"""
     # original k2=17.0 bevis 1992 etal.
     # [k2] = K / mbar, [k3] = K^2 / mbar
     # 100 Pa = 1 mbar
-    Tm = (273.15 + T) * Tmul + T_offset  # K
+    if not Tm_input:
+        Tm = (273.15 + T) * Tmul + T_offset  # K
+    else:
+        Tm = T
     Rv = 461.52  # [Rv] = J / (kg * K) = (Pa * m^3) / (kg * K)
     # (1e-2 mbar * m^3) / (kg * K)
     k = 1e-6 * (k3 / Tm + k2) * Rv
@@ -1036,7 +1097,8 @@ def compare_to_sounding2(pw_from_gps, pw_from_sounding, station='TELA',
     pw['sound'] = get_unique_index(pw_sound, time_dim_sound)
     pw['resid'] = pw['sound'] - pw[station]
     time_dim = list(set(pw.dims))[0]
-    pw = pw.rename({time_dim: 'time'})
+    if time_dim != 'time':
+        pw = pw.rename({time_dim: 'time'})
     if times is not None:
         pw = pw.sel(time=slice(times[0], times[1]))
     if season is not None:
@@ -1282,6 +1344,8 @@ def ml_models_T_from_sounding(sound_path=sound_path, categories=None,
     import xarray as xr
     from aux_gps import get_unique_index
     from aux_gps import keep_iqr
+    if isinstance(models, str):
+        models = [models]
     if physical_file is not None:
         print('Overwriting ds input...')
         pds = xr.open_dataset(physical_file)
