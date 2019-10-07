@@ -103,6 +103,82 @@ def get_ts_tm_from_physical(phys=phys_soundings, plot=True):
     return pds
 
 
+def align_physical_bet_dagan_soundings_pw_to_tela_station_zwd(
+        phys_sound_file, tela_zwd_file, tel_aviv_IMS_file,
+        savepath=work_yuval, model=None, plot=True):
+    """compare the IPW of the physical soundings of bet dagan station to
+    the TELA gps station - using IMS temperature Tel-aviv station"""
+    from aux_gps import get_unique_index
+    from aux_gps import keep_iqr
+    from aux_gps import dim_intersection
+    import xarray as xr
+    import numpy as np
+    filename = 'TELA_zwd_aligned_with_physical_bet_dagan.nc'
+    if not (savepath / filename).is_file():
+        print('saving {} to {}'.format(filename, savepath))
+        # first load physical bet_dagan Tpw, Ts, Tm and dt_range:
+        phys = xr.open_dataset(phys_sound_file)
+        # clean and merge:
+        p_list = [get_unique_index(phys[x], 'sound_time')
+                  for x in ['Ts', 'Tm', 'Tpw', 'dt_range']]
+        phys_ds = xr.merge(p_list)
+        phys_ds = keep_iqr(phys_ds, 'sound_time', k=2.0)
+        phys_ds = phys_ds.rename({'Ts': 'ts', 'Tm': 'tm'})
+        # load the zenith wet daley for TELA station:
+        tela_zwd = xr.open_dataset(tela_zwd_file)
+        tela_zwd = tela_zwd[['WetZ', 'WetZ_error']]
+        # loop over dt_range and average the results on PW:
+        wz_list = []
+        wz_error_list = []
+        for i in range(len(phys_ds['dt_range'].sound_time)):
+            min_time = phys_ds['dt_range'].isel(sound_time=i).sel(bnd='Min').values
+            max_time = phys_ds['dt_range'].isel(sound_time=i).sel(bnd='Max').values
+            wetz = tela_zwd['WetZ'].sel(time=slice(min_time, max_time)).mean('time')
+            wetz_error = tela_zwd['WetZ_error'].sel(time=slice(min_time, max_time)).mean('time')
+            wz_list.append(wetz)
+            wz_error_list.append(wetz_error)
+        wetz_tela = xr.DataArray(wz_list, dims='sound_time')
+        wetz_tela.name = 'TELA_WetZ'
+        wetz_tela_error = xr.DataArray(wz_error_list, dims='sound_time')
+        wetz_tela_error.name = 'TELA_WetZ_error'
+        wetz_tela['sound_time'] = phys_ds['sound_time']
+        wetz_tela_error['sound_time'] = phys_ds['sound_time']
+        new_time = dim_intersection([wetz_tela, phys_ds['Tpw']], 'sound_time')
+        wetz_tela = wetz_tela.sel(sound_time=new_time)
+        tpw_bet_dagan = phys_ds.Tpw.sel(sound_time=new_time)
+        zwd_and_tpw = xr.merge([wetz_tela, wetz_tela_error, tpw_bet_dagan])
+        zwd_and_tpw = zwd_and_tpw.rename({'sound_time': 'time'})
+        comp = dict(zlib=True, complevel=9)  # best compression
+        encoding = {var: comp for var in zwd_and_tpw.data_vars}
+        zwd_and_tpw.to_netcdf(savepath / filename, 'w', encoding=encoding)
+        print('Done!')
+        return
+    else:
+        print('found file!')
+        zwd_and_tpw = xr.open_dataset(savepath / filename)
+        wetz = zwd_and_tpw['TELA_WetZ']
+        wetz_error = zwd_and_tpw['TELA_WetZ_error']
+        # load the 10 mins temperature data from IMS:
+        tela_T = xr.open_dataset(tel_aviv_IMS_file)
+        # tela_T = tela_T.resample(time='5min').ffill()
+        # compute the kappa function and multiply by ZWD to get PW(+error):
+        k, dk = kappa_ml(tela_T.to_array(name='TELA_T').squeeze(drop=True),
+                         model=model, verbose=True)
+        kappa = k.to_dataset(name='tela_kappa')
+        kappa['tela_kappa_error'] = dk
+        PW = (
+            kappa['tela_kappa'] *
+            wetz).to_dataset(
+            name='TELA_PW').squeeze(
+                drop=True)
+        PW['TELA_PW_error'] = np.sqrt(
+            wetz_error**2.0 +
+            kappa['tela_kappa_error']**2.0)
+        PW['TPW_bet_dagan'] = zwd_and_tpw['Tpw']
+        PW = PW.dropna('time')
+    return PW
+
+
 def read_log_files(path, savepath=None, fltr='updated_by_shlomi',
                    suff='*.log'):
     import pandas as pd
@@ -289,82 +365,6 @@ def parameter_study_ts_tm_TELA_bet_dagan(tel_aviv_IMS_file, path=work_yuval,
             # fg_mean.fig.tight_layout()
             # fg_rmse.fig.subplots_adjust(right=0.9)
     return rds
-
-
-def compare_physical_bet_dagan_soundings_to_tela_station(
-        phys_sound_file, tela_zwd_file, tel_aviv_IMS_file,
-        savepath=work_yuval, model=None, plot=True):
-    """compare the IPW of the physical soundings of bet dagan station to
-    the TELA gps station - using IMS temperature Tel-aviv station"""
-    from aux_gps import get_unique_index
-    from aux_gps import keep_iqr
-    from aux_gps import dim_intersection
-    import xarray as xr
-    import numpy as np
-    filename = 'TELA_zwd_aligned_with_physical_bet_dagan.nc'
-    if not (savepath / filename).is_file():
-        print('saving {} to {}'.format(filename, savepath))
-        # first load physical bet_dagan Tpw, Ts, Tm and dt_range:
-        phys = xr.open_dataset(phys_sound_file)
-        # clean and merge:
-        p_list = [get_unique_index(phys[x], 'sound_time')
-                  for x in ['Ts', 'Tm', 'Tpw', 'dt_range']]
-        phys_ds = xr.merge(p_list)
-        phys_ds = keep_iqr(phys_ds, 'sound_time', k=2.0)
-        phys_ds = phys_ds.rename({'Ts': 'ts', 'Tm': 'tm'})
-        # load the zenith wet daley for TELA station:
-        tela_zwd = xr.open_dataset(tela_zwd_file)
-        tela_zwd = tela_zwd[['WetZ', 'WetZ_error']]
-        # loop over dt_range and average the results on PW:
-        wz_list = []
-        wz_error_list = []
-        for i in range(len(phys_ds['dt_range'].sound_time)):
-            min_time = phys_ds['dt_range'].isel(sound_time=i).sel(bnd='Min').values
-            max_time = phys_ds['dt_range'].isel(sound_time=i).sel(bnd='Max').values
-            wetz = tela_zwd['WetZ'].sel(time=slice(min_time, max_time)).mean('time')
-            wetz_error = tela_zwd['WetZ_error'].sel(time=slice(min_time, max_time)).mean('time')
-            wz_list.append(wetz)
-            wz_error_list.append(wetz_error)
-        wetz_tela = xr.DataArray(wz_list, dims='sound_time')
-        wetz_tela.name = 'TELA_WetZ'
-        wetz_tela_error = xr.DataArray(wz_error_list, dims='sound_time')
-        wetz_tela_error.name = 'TELA_WetZ_error'
-        wetz_tela['sound_time'] = phys_ds['sound_time']
-        wetz_tela_error['sound_time'] = phys_ds['sound_time']
-        new_time = dim_intersection([wetz_tela, phys_ds['Tpw']], 'sound_time')
-        wetz_tela = wetz_tela.sel(sound_time=new_time)
-        tpw_bet_dagan = phys_ds.Tpw.sel(sound_time=new_time)
-        zwd_and_tpw = xr.merge([wetz_tela, wetz_tela_error, tpw_bet_dagan])
-        zwd_and_tpw = zwd_and_tpw.rename({'sound_time': 'time'})
-        comp = dict(zlib=True, complevel=9)  # best compression
-        encoding = {var: comp for var in zwd_and_tpw.data_vars}
-        zwd_and_tpw.to_netcdf(savepath / filename, 'w', encoding=encoding)
-        print('Done!')
-        return
-    else:
-        print('found file!')
-        zwd_and_tpw = xr.open_dataset(savepath / filename)
-        wetz = zwd_and_tpw['TELA_WetZ']
-        wetz_error = zwd_and_tpw['TELA_WetZ_error']
-        # load the 10 mins temperature data from IMS:
-        tela_T = xr.open_dataset(tel_aviv_IMS_file)
-        # tela_T = tela_T.resample(time='5min').ffill()
-        # compute the kappa function and multiply by ZWD to get PW(+error):
-        k, dk = kappa_ml(tela_T.to_array(name='TELA_T').squeeze(drop=True),
-                         model=model, verbose=True)
-        kappa = k.to_dataset(name='tela_kappa')
-        kappa['tela_kappa_error'] = dk
-        PW = (
-            kappa['tela_kappa'] *
-            wetz).to_dataset(
-            name='TELA_PW').squeeze(
-                drop=True)
-        PW['TELA_PW_error'] = np.sqrt(
-            wetz_error**2.0 +
-            kappa['tela_kappa_error']**2.0)
-        PW['TPW_bet_dagan'] = zwd_and_tpw['Tpw']
-        PW = PW.dropna('time')
-    return PW
 
 
 #def get_geo_data_from_gps_stations(gps_names):
