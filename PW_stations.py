@@ -17,9 +17,12 @@ ims_path = work_yuval / 'IMS_T'
 gis_path = work_yuval / 'gis'
 sound_path = work_yuval / 'sounding'
 phys_soundings = sound_path / 'bet_dagan_phys_sounding_2007-2019.nc'
-tela_zwd = work_yuval / 'gipsyx_results/tela/TELA_PPP_1996-2019.nc'
+tela_zwd = work_yuval / 'gipsyx_results/tela_newocean/TELA_PPP_1996-2019.nc'
+alon_zwd = work_yuval / 'gipsyx_results/alon_newocean/ALON_PPP_2005-2019.nc'
 tela_zwd_aligned = work_yuval / 'TELA_zwd_aligned_with_physical_bet_dagan.nc'
+alon_zwd_aligned = work_yuval / 'ALON_zwd_aligned_with_physical_bet_dagan.nc'
 tela_ims = ims_path / '10mins/TEL-AVIV-COAST_178_TD_10mins.nc'
+alon_ims = ims_path / '10mins/ASHQELON-PORT_208_TD_10mins.nc'
 rinex_on_geo = geo_path / 'Work_Files/PW_yuval/rinex'
 PW_stations_path = work_yuval / '1minute'
 stations = pd.read_csv('All_gps_stations.txt', header=0, delim_whitespace=True,
@@ -31,11 +34,12 @@ stations = pd.read_csv('All_gps_stations.txt', header=0, delim_whitespace=True,
 
 
 def get_zwd_from_sounding_and_compare_to_gps(phys_sound_file=phys_soundings,
-                                             tela_zwd_file=tela_zwd_aligned,
+                                             zwd_file=tela_zwd_aligned,
                                              tm=None, plot=True):
     import xarray as xr
     import matplotlib.pyplot as plt
-    zwd_and_tpw = xr.open_dataset(tela_zwd_file)
+    station = zwd_file.as_posix().split('/')[-1].split('_')[0]
+    zwd_and_tpw = xr.open_dataset(zwd_file)
     tpw = zwd_and_tpw['Tpw']
     pds = get_ts_tm_from_physical(phys_sound_file, plot=False)
     if tm is None:
@@ -44,25 +48,26 @@ def get_zwd_from_sounding_and_compare_to_gps(phys_sound_file=phys_soundings,
         k = kappa(tm, Tm_input=True)
     zwd_sound = tpw / k
     zwd_and_tpw['WetZ_from_bet_dagan'] = zwd_sound
-    bet = zwd_and_tpw['WetZ_from_bet_dagan']
-    tela = zwd_and_tpw['TELA_WetZ']
+    radio = zwd_and_tpw['WetZ_from_bet_dagan']
+    gps = zwd_and_tpw['{}_WetZ'.format(station)]
     if plot:
-        bet.plot.line(marker='.', linewidth=0.)
-        tela.plot.line(marker='.', linewidth=0.)
-        plt.title('TELA station ZWD and Bet-Dagan ZWD using TELA temperatures')
+        radio.plot.line(marker='.', linewidth=0.)
+        gps.plot.line(marker='.', linewidth=0.)
+        plt.title('{} station ZWD and Bet-Dagan ZWD using {} temperatures'.format(station, station))
         plt.figure()
-        (bet - tela).plot.line(marker='.', linewidth=0.)
-        plt.title('TELA-BET_DAGAN ZWD Residuals')
+        (radio - gps).plot.line(marker='.', linewidth=0.)
+        plt.title('{}-BET_DAGAN ZWD Residuals'.format(station))
         plt.figure()
-        (bet - tela).plot.hist(bins=100)
+        (radio - gps).plot.hist(bins=100)
     return zwd_and_tpw
 
 
 def fit_ts_tm_produce_ipw_and_compare_TELA(phys_sound_file=phys_soundings,
-                                           tela_zwd_file=tela_zwd_aligned,
-                                           tel_aviv_IMS_file=tela_ims,
+                                           zwd_file=tela_zwd_aligned,
+                                           IMS_file=tela_ims,
                                            sound_path=sound_path,
                                            categories=None, model='LR',
+                                           times=['2005', '2019'],
                                            **compare_kwargs):
     """categories can be :'bevis', None, 'season' and/or 'hour'. None means
     whole dataset ts-tm.
@@ -73,16 +78,20 @@ def fit_ts_tm_produce_ipw_and_compare_TELA(phys_sound_file=phys_soundings,
         results = None
     else:
         results = ml_models_T_from_sounding(sound_path, categories, model,
-                                            physical_file=phys_sound_file)
-    zwd_and_tpw = xr.open_dataset(tela_zwd_file)
-    wetz = zwd_and_tpw['TELA_WetZ']
+                                            physical_file=phys_sound_file,
+                                            times=times)
+    zwd_and_tpw = xr.open_dataset(zwd_file)
+    if times is not None:
+        zwd_and_tpw = zwd_and_tpw.sel(time=slice(*times))
+    station = zwd_file.as_posix().split('/')[-1].split('_')[0]
+    wetz = zwd_and_tpw['{}_WetZ'.format(station)]
     tpw = zwd_and_tpw['Tpw']
-    wetz_error = zwd_and_tpw['TELA_WetZ_error']
+    wetz_error = zwd_and_tpw['{}_WetZ_error'.format(station)]
     # load the 10 mins temperature data from IMS:
-    tela_T = xr.open_dataset(tel_aviv_IMS_file)
-    T = tela_T.to_array(name='t').squeeze(drop=True)
+    T = xr.open_dataset(IMS_file)
+    T = T.to_array(name='t').squeeze(drop=True)
     pw_gps = produce_single_station_IPW(wetz, T, mda=results, model_name=model)
-    compare_to_sounding2(pw_gps, tpw, station='TELA', **compare_kwargs)
+    compare_to_sounding2(pw_gps, tpw, station=station, **compare_kwargs)
     return pw_gps
 
 
@@ -103,8 +112,8 @@ def get_ts_tm_from_physical(phys=phys_soundings, plot=True):
     return pds
 
 
-def align_physical_bet_dagan_soundings_pw_to_tela_station_zwd(
-        phys_sound_file, tela_zwd_file, tel_aviv_IMS_file,
+def align_physical_bet_dagan_soundings_pw_to_gps_station_zwd(
+        phys_sound_file, zwd_file, IMS_file,
         savepath=work_yuval, model=None, plot=True):
     """compare the IPW of the physical soundings of bet dagan station to
     the TELA gps station - using IMS temperature Tel-aviv station"""
@@ -113,7 +122,8 @@ def align_physical_bet_dagan_soundings_pw_to_tela_station_zwd(
     from aux_gps import dim_intersection
     import xarray as xr
     import numpy as np
-    filename = 'TELA_zwd_aligned_with_physical_bet_dagan.nc'
+    station = zwd_file.as_posix().split('/')[-1].split('_')[0]
+    filename = '{}_zwd_aligned_with_physical_bet_dagan.nc'.format(station)
     if not (savepath / filename).is_file():
         print('saving {} to {}'.format(filename, savepath))
         # first load physical bet_dagan Tpw, Ts, Tm and dt_range:
@@ -124,29 +134,35 @@ def align_physical_bet_dagan_soundings_pw_to_tela_station_zwd(
         phys_ds = xr.merge(p_list)
         phys_ds = keep_iqr(phys_ds, 'sound_time', k=2.0)
         phys_ds = phys_ds.rename({'Ts': 'ts', 'Tm': 'tm'})
-        # load the zenith wet daley for TELA station:
-        tela_zwd = xr.open_dataset(tela_zwd_file)
-        tela_zwd = tela_zwd[['WetZ', 'WetZ_error']]
+        # load the zenith wet daley for GPS (e.g.,TELA) station:
+        zwd = xr.open_dataset(zwd_file)
+        zwd = zwd[['WetZ', 'WetZ_error']]
         # loop over dt_range and average the results on PW:
         wz_list = []
+        wz_std = []
         wz_error_list = []
         for i in range(len(phys_ds['dt_range'].sound_time)):
             min_time = phys_ds['dt_range'].isel(sound_time=i).sel(bnd='Min').values
             max_time = phys_ds['dt_range'].isel(sound_time=i).sel(bnd='Max').values
-            wetz = tela_zwd['WetZ'].sel(time=slice(min_time, max_time)).mean('time')
-            wetz_error = tela_zwd['WetZ_error'].sel(time=slice(min_time, max_time)).mean('time')
+            wetz = zwd['WetZ'].sel(time=slice(min_time, max_time)).mean('time')
+            wetz_std = zwd['WetZ'].sel(time=slice(min_time, max_time)).std('time')
+            wetz_error = zwd['WetZ_error'].sel(time=slice(min_time, max_time)).mean('time')
+            wz_std.append(wetz_std)
             wz_list.append(wetz)
             wz_error_list.append(wetz_error)
-        wetz_tela = xr.DataArray(wz_list, dims='sound_time')
-        wetz_tela.name = 'TELA_WetZ'
-        wetz_tela_error = xr.DataArray(wz_error_list, dims='sound_time')
-        wetz_tela_error.name = 'TELA_WetZ_error'
-        wetz_tela['sound_time'] = phys_ds['sound_time']
-        wetz_tela_error['sound_time'] = phys_ds['sound_time']
-        new_time = dim_intersection([wetz_tela, phys_ds['Tpw']], 'sound_time')
-        wetz_tela = wetz_tela.sel(sound_time=new_time)
+        wetz_gps = xr.DataArray(wz_list, dims='sound_time')
+        wetz_gps.name = '{}_WetZ'.format(station)
+        wetz_gps_error = xr.DataArray(wz_error_list, dims='sound_time')
+        wetz_gps_error.name = 'TELA_WetZ_error'
+        wetz_gps_std = xr.DataArray(wz_list, dims='sound_time')
+        wetz_gps_std.name = 'TELA_WetZ_std'
+        wetz_gps['sound_time'] = phys_ds['sound_time']
+        wetz_gps_error['sound_time'] = phys_ds['sound_time']
+        new_time = dim_intersection([wetz_gps, phys_ds['Tpw']], 'sound_time')
+        wetz_gps = wetz_gps.sel(sound_time=new_time)
         tpw_bet_dagan = phys_ds.Tpw.sel(sound_time=new_time)
-        zwd_and_tpw = xr.merge([wetz_tela, wetz_tela_error, tpw_bet_dagan])
+        zwd_and_tpw = xr.merge([wetz_gps, wetz_gps_error, wetz_gps_std,
+                                tpw_bet_dagan])
         zwd_and_tpw = zwd_and_tpw.rename({'sound_time': 'time'})
         comp = dict(zlib=True, complevel=9)  # best compression
         encoding = {var: comp for var in zwd_and_tpw.data_vars}
@@ -156,24 +172,24 @@ def align_physical_bet_dagan_soundings_pw_to_tela_station_zwd(
     else:
         print('found file!')
         zwd_and_tpw = xr.open_dataset(savepath / filename)
-        wetz = zwd_and_tpw['TELA_WetZ']
-        wetz_error = zwd_and_tpw['TELA_WetZ_error']
+        wetz = zwd_and_tpw['{}_WetZ'.format(station)]
+        wetz_error = zwd_and_tpw['{}_WetZ_error'.format(station)]
         # load the 10 mins temperature data from IMS:
-        tela_T = xr.open_dataset(tel_aviv_IMS_file)
+        tela_T = xr.open_dataset(IMS_file)
         # tela_T = tela_T.resample(time='5min').ffill()
         # compute the kappa function and multiply by ZWD to get PW(+error):
-        k, dk = kappa_ml(tela_T.to_array(name='TELA_T').squeeze(drop=True),
+        k, dk = kappa_ml(tela_T.to_array(name='Ts').squeeze(drop=True),
                          model=model, verbose=True)
-        kappa = k.to_dataset(name='tela_kappa')
-        kappa['tela_kappa_error'] = dk
+        kappa = k.to_dataset(name='{}_kappa'.format(station))
+        kappa['{}_kappa_error'.format(station)] = dk
         PW = (
-            kappa['tela_kappa'] *
+            kappa['{}_kappa'.format(station)] *
             wetz).to_dataset(
-            name='TELA_PW').squeeze(
+            name='{}_PW'.format(station)).squeeze(
                 drop=True)
-        PW['TELA_PW_error'] = np.sqrt(
+        PW['{}_PW_error'.format(station)] = np.sqrt(
             wetz_error**2.0 +
-            kappa['tela_kappa_error']**2.0)
+            kappa['{}_kappa_error'.format(station)]**2.0)
         PW['TPW_bet_dagan'] = zwd_and_tpw['Tpw']
         PW = PW.dropna('time')
     return PW
@@ -1337,7 +1353,8 @@ def compare_to_sounding(sound_path=sound_path, gps=garner_path, station='TELA',
 
 
 def ml_models_T_from_sounding(sound_path=sound_path, categories=None,
-                              models=['LR', 'TSEN'], physical_file=None):
+                              models=['LR', 'TSEN'], physical_file=None,
+                              times=['2005', '2019']):
     """calls formulate_plot to analyse and model the ts-tm connection from
     radiosonde(bet-dagan). options for categories:season, hour, clouds
     you can choose some ,all or none categories"""
@@ -1359,6 +1376,8 @@ def ml_models_T_from_sounding(sound_path=sound_path, categories=None,
         ds = xr.open_dataset(sound_path /
                              'bet_dagan_sounding_pw_Ts_Tk_with_clouds.nc')
         ds = ds.reset_coords(drop=True)
+    if times is not None:
+        ds = ds.sel(time=slice(*times))
     # define the possible categories and feed their dictionary:
     possible_cats = ['season', 'hour']
     pos_cats_dict = {}
