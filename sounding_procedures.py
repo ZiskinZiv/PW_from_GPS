@@ -78,8 +78,8 @@ def move_bet_dagan_physical_to_main_path(bet_dagan_path):
     return year_dirs
 
 
-def read_all_physical_radiosonde(path, savepath=None, cutoff=None,
-                                 verbose=True, plot=True):
+def read_all_physical_radiosonde(path, savepath=None, lower_cutoff=None,
+                                 upper_cutoff=None, verbose=True, plot=True):
     from aux_gps import path_glob
     import xarray as xr
     ds_list = []
@@ -89,11 +89,15 @@ def read_all_physical_radiosonde(path, savepath=None, cutoff=None,
 #    cloud_list = []
 #    dt_range_list = []
 #    tm_list = []
-    if cutoff is not None:
-        print('applying Z-cutoff at {} meters for PW and Tm calculations.'.format(int(cutoff)))
+    if lower_cutoff is not None:
+        print('applying lower cutoff at {} meters for PW and Tm calculations.'.format(int(lower_cutoff)))
+    if upper_cutoff is not None:
+        print('applying upper cutoff at {} meters for PW and Tm calculations.'.format(int(upper_cutoff)))
     for path_file in sorted(path_glob(path, '*/')):
         if path_file.is_file():
-            ds = read_one_physical_radiosonde_report(path_file, cutoff=cutoff)
+            ds = read_one_physical_radiosonde_report(path_file,
+                                                     lower_cutoff=lower_cutoff,
+                                                     upper_cutoff=upper_cutoff)
             if ds is None:
                 print('{} is corrupted...'.format(path_file.as_posix().split('/')[-1]))
                 continue
@@ -122,13 +126,16 @@ def read_all_physical_radiosonde(path, savepath=None, cutoff=None,
 #    dss['cloud_code'] = cloud
 #    dss['sound_time'] = sound_list
 #    dss['dt_range'] = dt_range
+    if lower_cutoff is not None:
+        dss['Tpw'].attrs['lower_cutoff'] = lower_cutoff
+        dss['Tm'].attrs['lower_cutoff'] = lower_cutoff
+    if upper_cutoff is not None:
+        dss['Tpw'].attrs['upper_cutoff'] = upper_cutoff
+        dss['Tm'].attrs['upper_cutoff'] = upper_cutoff
     if savepath is not None:
         yr_min = dss.time.min().dt.year.item()
         yr_max = dss.time.max().dt.year.item()
-        if cutoff is not None:
-            filename = 'bet_dagan_phys_sounding_{}-{}_cutoff_{}.nc'.format(yr_min, yr_max,cutoff)
-        else:
-            filename = 'bet_dagan_phys_sounding_{}-{}.nc'.format(yr_min, yr_max)
+        filename = 'bet_dagan_phys_sounding_{}-{}.nc'.format(yr_min, yr_max)
         print('saving {} to {}'.format(filename, savepath))
         comp = dict(zlib=True, complevel=9)  # best compression
         encoding = {var: comp for var in dss}
@@ -137,7 +144,8 @@ def read_all_physical_radiosonde(path, savepath=None, cutoff=None,
     return dss
 
 
-def read_one_physical_radiosonde_report(path_file, cutoff=None, verbose=False):
+def read_one_physical_radiosonde_report(path_file, lower_cutoff=None,
+                                        upper_cutoff=None, verbose=False):
     """read one(12 or 00) physical bet dagan radiosonde reports and return a df
     containing time series, PW for the whole sounding and time span of the
     sounding"""
@@ -168,9 +176,11 @@ def read_one_physical_radiosonde_report(path_file, cutoff=None, verbose=False):
         ds['sound_time'] = sound_time
         return ds
 
-    def calculate_tpw(df, z_cutoff=None):
-        if z_cutoff is not None:
-            df = df[df['H-Msl'] <= z_cutoff]
+    def calculate_tpw(df, upper=None, lower=None):
+        if upper is not None:
+            df = df[df['H-Msl'] <= upper]
+        if lower is not None:
+            df = df[df['H-Msl'] >= lower]
         specific_humidity = (df['Mixratio'] / 1000.0) / \
             (1 + 0.001 * df['Mixratio'] / 1000.0)
         try:
@@ -180,9 +190,11 @@ def read_one_physical_radiosonde_report(path_file, cutoff=None, verbose=False):
             return np.nan
         return tpw
 
-    def calculate_tm(df, z_cutoff=None):
-        if z_cutoff is not None:
-            df = df[df['H-Msl'] <= z_cutoff]
+    def calculate_tm(df, upper=None, lower=None):
+        if upper is not None:
+            df = df[df['H-Msl'] <= upper]
+        if lower is not None:
+            df = df[df['H-Msl'] >= lower]
         try:
             numerator = np.trapz(
                 df['Press'] /
@@ -245,9 +257,9 @@ def read_one_physical_radiosonde_report(path_file, cutoff=None, verbose=False):
     df['Rho'] = DensHumid(df['Temp'], df['Press'], df['WVpress'])
     # print('rho: {}, mix: {}, h: {}'.format(rho.shape,mixrkg.shape, hghtm.shape))
     # Trapezoidal rule to approximate TPW (units kg/m^2==mm)
-    tpw = calculate_tpw(df, z_cutoff=cutoff)
+    tpw = calculate_tpw(df, lower=lower_cutoff, upper=upper_cutoff)
     # calculate the mean atmospheric temperature and get surface temp in K:
-    tm = calculate_tm(df, z_cutoff=cutoff)
+    tm = calculate_tm(df, lower=lower_cutoff, upper=upper_cutoff)
     ts = df['Temp'][0] + 273.15
     units.update(Dewpt='deg_C', WVpress='hPa', Mixratio='gr/kg', Rho='kg/m^3')
     extra = np.array([ts, tm, tpw, cloud_code]).reshape(1, -1)
