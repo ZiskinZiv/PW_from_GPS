@@ -9,8 +9,7 @@ Created on Thu May 16 14:24:40 2019
 from PW_paths import work_yuval
 sound_path = work_yuval / 'sounding'
 
-# TODO: TAKE alook at how to calculate the pw from radiosondes, maybe apply
-# cutoff at some level...
+# write a command line tool to download data from Wyoming upper air soundings
 
 
 def evaluate_sin_to_tmsearies(da, time_dim='time', plot=True, amp=6.0,
@@ -525,8 +524,9 @@ def process_sounding_json(savepath=sound_path):
     return pw, da, bad_line
 
 
-def get_sounding_data(savepath, start_date='2003-01-01',
-                      end_date='2004-12-31'):
+def get_sounding_data_from_uwyo(savepath, st_num='40179',
+                                start_date='2003-01-01',
+                                end_date='2004-12-31'):
     """Download sounding data from bet_dagan station at two times:00 and 12"""
     import requests
     from bs4 import BeautifulSoup as bs
@@ -553,7 +553,7 @@ def get_sounding_data(savepath, start_date='2003-01-01',
                 hour = str(date.hour)
             url = ('http://weather.uwyo.edu/cgi-bin/sounding?region=mideast&'
                    'TYPE=TEXT%3ALIST&YEAR=' + year + '&MONTH=' + month +
-                   '&FROM=' + day + hour + '&TO=0100&STNM=40179')
+                   '&FROM=' + day + hour + '&TO=0100&STNM=' + st_num)
             r = requests.get(url)
             soup = bs(r.text, "lxml")
             allLines = soup.text.split('\n')
@@ -564,7 +564,7 @@ def get_sounding_data(savepath, start_date='2003-01-01',
     #        dict_list.append(dict(zip(keys, values)))
             lines_list.append(allLines)
         print('Saving list of dicts to: {}'.format(savepath))
-        filename = 'bet_dagan_soundings_' + str(year) + '.json'
+        filename = 'station_{}_soundings_{}.json'.format(st_num, year)
         with open(savepath / filename, 'w') as fout:
             json.dump(lines_list, fout)
         print('Done!')
