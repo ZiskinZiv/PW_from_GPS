@@ -5,6 +5,7 @@ Created on Thu May 30 11:46:25 2019
 
 @author: ziskin
 """
+# TODO: improve command line tool, maybe use wget, for sure logger.
 
 
 def generate_download_shell_script(station_list,
