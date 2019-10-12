@@ -162,6 +162,7 @@ def prepare_gipsyx_for_run_one_station(rinexpath, staDb, prep, rewrite):
                     logger.warning(
                         '{} already exists in {}, skipping...'.format(
                             filename + '.dr.gz', out_path))
+                    cnt['succ'] += 1
                     continue
             logger.info('processing {} ({}/{})'.format(
                 filename, cnt['succ'] + cnt['failed'], tot))
@@ -195,11 +196,12 @@ def prepare_gipsyx_for_run_one_station(rinexpath, staDb, prep, rewrite):
                 logger.warning(
                     '{} already exists in {}, skipping...'.format(
                         filename, out_path))
+                    cnt['succ'] += 1
                 return
         logger.info(
             'processing {} ({}, {}/{})'.format(
                 filename,
-                date.strftime('%Y-%m-%d')), cnt['succ'] + cnt['failed'], tot)
+                date.strftime('%Y-%m-%d'), cnt['succ'] + cnt['failed'], tot))
         files_to_move = [rfn + x for x in ['.log', '.err']]
         command = 'rnxEditGde.py -type datarecord -recNm {} -data {} -out {} -staDb {} > {}.log 2>{}.err'.format(
             station, file_and_path.as_posix(), dr_edited_file.as_posix(),
@@ -360,12 +362,13 @@ def run_gd2e_for_one_station(dr_path, staDb, tree, rewrite):
         logger.info(
             'processing {} ({}, {}/{})'.format(
                 rfn,
-                dt.strftime('%Y-%m-%d')), cnt['succ'] + cnt['failed'], tot)
+                dt.strftime('%Y-%m-%d'), cnt['succ'] + cnt['failed'], tot))
         if not rewrite:
             if (results_path / final_tdp).is_file():
                 logger.warning(
                     '{} already exists in {}, skipping...'.format(
                         final_tdp, results_path))
+                cnt['succ'] += 1
                 continue
         command = 'gd2e.py -drEditedFile {} -recList {} -staDb {} -treeS {} \
         > {}.log 2>{}.err'.format(
