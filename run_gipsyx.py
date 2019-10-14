@@ -135,9 +135,12 @@ def prepare_gipsyx_for_run_one_station(rinexpath, staDb, prep, rewrite):
         rewrite: overwrite all files - supported with all modes of prep"""
     import subprocess
     from subprocess import CalledProcessError
+    from subprocess import TimeoutExpired
     from aux_gps import path_glob
     import logging
     import pandas as pd
+    global cnt
+    global tot
     # from itertools import count
     from pathlib import Path
 
@@ -146,8 +149,6 @@ def prepare_gipsyx_for_run_one_station(rinexpath, staDb, prep, rewrite):
         rinex files exist), saves the datarecord files to out_path. rewrite
         is a flag that overwrites the files in out_path even if they already
         exist there."""
-        global cnt
-        global tot
         try:
             out_path.mkdir()
         except FileExistsError:
@@ -185,8 +186,6 @@ def prepare_gipsyx_for_run_one_station(rinexpath, staDb, prep, rewrite):
         edited file (with suffix) to out_path. it first checks wether filename
         exists in out_path and if it is, it skipps this filename. rewrite flag
         overwrites the filename regardless."""
-        global tot
-        global cnt
         rfn = filename[0:12]
         station = rfn[0:4].upper()
         dr_edited_file = out_path / '{}_edited{}hr.dr.gz'.format(rfn, suffix)
@@ -196,7 +195,7 @@ def prepare_gipsyx_for_run_one_station(rinexpath, staDb, prep, rewrite):
                 logger.warning(
                     '{} already exists in {}, skipping...'.format(
                         filename, out_path))
-                    cnt['succ'] += 1
+                cnt['succ'] += 1
                 return
         logger.info(
             'processing {} ({}, {}/{})'.format(
@@ -225,6 +224,7 @@ def prepare_gipsyx_for_run_one_station(rinexpath, staDb, prep, rewrite):
             start = dts[0].strftime('%Y-%m-%d') + ' 21:00:00'
             end = dts[2].strftime('%Y-%m-%d') + ' 03:00:00'
         dr_merged_file = Path().cwd() / '{}_merged.dr.gz'.format(rfns[1])
+        logger.info('merging {}, {} and {} to {}'.format(*rfns,rfns[1] + '_merged.dr.gz'))
         f_and_paths = [in_path / x for x in filenames]
         files_to_move = [rfn + x for x in ['_drmerge.log', '_drmerge.err']]
         command = 'drMerge.py -inFiles {} {} {} -outFile {} -start {} -end {} > {}.log 2>{}.err'.format(
@@ -232,9 +232,16 @@ def prepare_gipsyx_for_run_one_station(rinexpath, staDb, prep, rewrite):
                 f_and_paths[2].as_posix(), dr_merged_file.as_posix(),
                 start, end, rfn + '_drmerge', rfn + '_drmerge')
         try:
-            subprocess.run(command, shell=True, check=True)
+            subprocess.run(command, shell=True, check=True, timeout=60)
         except CalledProcessError:
             logger.error('drMerge.py failed on {}...'.format(filenames))
+        except TimeoutExpired:
+            logger.error('drMerge.py timed out on {}, copying log files.'.format(filenames))
+            # next(failed)
+            cnt['failed'] += 1
+            with open(Path().cwd() / files_to_move[1], 'a') as f:
+                f.write('drMerge.py run has Timed out !')
+            return None
         move_files(Path().cwd(), Path().cwd(), files_to_move)
         return rfns[1] + '_merged.dr.gz'
     logger = logging.getLogger('gipsyx')
@@ -296,6 +303,14 @@ def prepare_gipsyx_for_run_one_station(rinexpath, staDb, prep, rewrite):
                 run_rnxEditGde(filename, dr_path, hr30, rewrite)
             # check for 3 consecutive datarecords files:
             elif rinex_df.loc[date, '30hr'] == 1:
+                merged_filename = '{}_edited30hr.dr.gz'.format(rfn)
+                if not rewrite:
+                    if (hr30 / merged_filename).is_file():
+                        logger.warning(
+                                '{} already merged and edited in {}, skipping...'.format(
+                                        merged_filename, hr30))
+                        cnt['succ'] += 1
+                        continue
                 yesterday = rinex_df.index[i - 1]
                 tommorow = rinex_df.index[i + 1]
                 rfns = [rinex_df.loc[yesterday, 'rinex'],
@@ -304,6 +319,8 @@ def prepare_gipsyx_for_run_one_station(rinexpath, staDb, prep, rewrite):
                 # merge them from yesterday 21:00 to tommorow 03:00
                 # i.e., 30 hr:
                 merged_file = run_drMerge(filenames, dr_path, duration='30hr')
+                if merged_file is None:
+                    continue
                 # rnxEditGde the merged datarecord with staDb and move
                 # to 30hr folder:
                 run_rnxEditGde(merged_file, Path().cwd(), hr30, rewrite, 30)
