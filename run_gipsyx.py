@@ -260,7 +260,12 @@ def prepare_gipsyx_for_run_one_station(rinexpath, staDb, prep, rewrite):
         logger.info('running dataRecordDump for all files.')
         est_time_per_single_run = 1.0  # seconds
         tot = len(path_glob(rinexpath, '*.Z'))
-        dtt = pd.to_timedelta(est_time_per_single_run, unit='s') * tot
+        logger.info('found {} rinex Z files in {} to run.'.format(tot, rinexpath))
+        tot_final = len(path_glob(dr_path, '*.dr.gz', True))
+        logger.info('found {} data records dr.gz files in {}'.format(tot_final,
+                    dr_path))
+        tot_to_run = tot - tot_final
+        dtt = pd.to_timedelta(est_time_per_single_run, unit='s') * tot_to_run
         logger.info('estimated time to completion of run: {}'.format(dtt))
         logger.info('check again in {}'.format(pd.Timestamp.now() + dtt))
         run_dataRecorDump_on_all_files(rinexpath, dr_path, rewrite)
@@ -280,12 +285,17 @@ def prepare_gipsyx_for_run_one_station(rinexpath, staDb, prep, rewrite):
     elif prep == 'edit30hr':
         logger.info(
             'running drMerge.py/rnxEditGde.py with 30hr setting for all files(when available).')
+        hr30 = rinexpath / '30hr'
         est_time_per_single_run = 4.0  # seconds
         tot = len(path_glob(dr_path, '*.dr.gz'))
-        dtt = pd.to_timedelta(est_time_per_single_run, unit='s') * tot
+        logger.info('found {} data records dr.gz files in {} to run.'.format(tot, dr_path))
+        tot_final = len(path_glob(hr30, '*.dr.gz', True))
+        logger.info('found {} edited and merged dr.gz files in {}'.format(tot_final,
+                    hr30))
+        tot_to_run = tot - tot_final
+        dtt = pd.to_timedelta(est_time_per_single_run, unit='s') * tot_to_run
         logger.info('estimated time to completion of run: {}'.format(dtt))
         logger.info('check again in {}'.format(pd.Timestamp.now() + dtt))
-        hr30 = rinexpath / '30hr'
         try:
             hr30.mkdir()
         except FileExistsError:
@@ -368,8 +378,13 @@ def run_gd2e_for_one_station(dr_path, staDb, tree, rewrite):
     cnt = {'succ': 0, 'failed': 0}
     files = path_glob(dr_path, '*.dr.gz')
     tot = len(files)
+    logger.info('found {} dr.gz files in {} to run.'.format(tot, dr_path))
+    tot_final = len(path_glob(results_path, '*_smoothFinal.tdp', True))
+    logger.info('found {} _smoothFinal.tdp files in {}'.format(tot_final,
+                results_path))
+    tot_to_run = tot - tot_final
     est_time_per_single_run = 22.0  # seconds
-    dtt = pd.to_timedelta(est_time_per_single_run, unit='s') * tot
+    dtt = pd.to_timedelta(est_time_per_single_run, unit='s') * tot_to_run
     logger.info('estimated time to completion of run: {}'.format(dtt))
     logger.info('check again in {}'.format(pd.Timestamp.now() + dtt))
     for file_and_path in files:
