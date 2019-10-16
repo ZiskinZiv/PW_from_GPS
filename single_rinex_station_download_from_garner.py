@@ -21,23 +21,25 @@ def generate_download_shell_script(station_list,
             file.write("%s\n" % item)
     print('generated download script file at {}'.format(cwd/script_file))
     return
-    
-    
+
+
 def all_orbitals_download(save_dir, minimum_year=None, hr_only=None):
     import htmllistparse
     import requests
     import os
-    print('Creating {}/{}'.format(save_dir, 'gipsy_orbitals'))
+    import logging
+    logger = logging.getLogger('rinex_garner')
+    logger.info('Creating {}/{}'.format(save_dir, 'gipsy_orbitals'))
     savepath = save_dir / 'gipsy_orbitals'
     if not os.path.exists(savepath):
         try:
             os.makedirs(savepath)
         except OSError:
-            print("Creation of the directory %s failed" % savepath)
+            logger.error("Creation of the directory %s failed" % savepath)
         else:
-            print("Successfully created the directory %s" % savepath)
+            logger.info("Successfully created the directory %s" % savepath)
     else:
-        print('Folder {} already exists.'.format(savepath))
+        logger.warning('Folder {} already exists.'.format(savepath))
     command = 'https://sideshow.jpl.nasa.gov/pub/JPL_GPS_Products/Final/'
     cwd, listing = htmllistparse.fetch_listing(command, timeout=30)
     dirs = [f.name for f in listing if '/' in f.name]
@@ -45,9 +47,9 @@ def all_orbitals_download(save_dir, minimum_year=None, hr_only=None):
         years = [int(x.split('/')[0]) for x in dirs]
         years = [x for x in years if x >= minimum_year]
         dirs = [str(x) + '/' for x in years]
-        print('starting search from year {}'.format(minimum_year))
+        logger.info('starting search from year {}'.format(minimum_year))
     for year in dirs:
-        print(year)
+        logger.info(year)
         cwd, listing = htmllistparse.fetch_listing(command + year, timeout=30)
         files = [f.name for f in listing if f.size is not None]
 #        2017-01-28.eo.gz
@@ -64,7 +66,7 @@ def all_orbitals_download(save_dir, minimum_year=None, hr_only=None):
                 found = [f for f in files if suff in f.split('.')[1] and '_' not in f]
                 if found:
                     for filename in found:
-                        print('Downloading {} to {}.'.format(filename, savepath))
+                        logger.info('Downloading {} to {}.'.format(filename, savepath))
                         r = requests.get(command + year + filename)
                         with open(savepath/filename, 'wb') as file:
                             file.write(r.content)
@@ -74,7 +76,7 @@ def all_orbitals_download(save_dir, minimum_year=None, hr_only=None):
                 found = [f for f in pre_found if f.split('.')[0].split('_')[1] == 'hr']
                 if found:
                     for filename in found:
-                        print('Downloading {} to {}.'.format(filename, savepath))
+                        logger.info('Downloading {} to {}.'.format(filename, savepath))
                         r = requests.get(command + year + filename)
                         with open(savepath/filename, 'w') as file:
                             file.write(r.content)
@@ -86,17 +88,19 @@ def single_station_rinex_garner_download(save_dir, minimum_year=None,
     import htmllistparse
     import requests
     import os
-    print('Creating {}/{}'.format(save_dir, station))
+    import logging
+    logger = logging.getLogger('rinex_garner')
+    logger.info('Creating {}/{}'.format(save_dir, station))
     savepath = save_dir / station
     if not os.path.exists(savepath):
         try:
             os.makedirs(savepath)
         except OSError:
-            print("Creation of the directory %s failed" % savepath)
+            logger.error("Creation of the directory %s failed" % savepath)
         else:
-            print("Successfully created the directory %s" % savepath)
+            logger.info("Successfully created the directory %s" % savepath)
     else:
-        print('Folder {} already exists.'.format(savepath))
+        logger.warning('Folder {} already exists.'.format(savepath))
     command = 'http://anonymous:shlomiziskin%40gmail.com@garner.ucsd.edu/pub/rinex/'
     cwd, listing = htmllistparse.fetch_listing(command, timeout=30)
     dirs = [f.name for f in listing if '/' in f.name]
@@ -104,9 +108,9 @@ def single_station_rinex_garner_download(save_dir, minimum_year=None,
         years = [int(x.split('/')[0]) for x in dirs]
         years = [x for x in years if x >= minimum_year]
         dirs = [str(x) + '/' for x in years]
-        print('starting search from year {}'.format(minimum_year))
+        logger.info('starting search from year {}'.format(minimum_year))
     for year in dirs:
-        print(year)
+        logger.info(year)
         cwd, listing = htmllistparse.fetch_listing(command + year, timeout=30)
         days = [f.name for f in listing if '/' in f.name]
         for day in days:
@@ -118,11 +122,11 @@ def single_station_rinex_garner_download(save_dir, minimum_year=None,
                 filename = found[0]
                 saved_filename = savepath / filename
                 if saved_filename.is_file():
-                    print(
+                    logger.warning(
                         '{} already exists in {}, skipping...'.format(
                             filename, savepath))
                     continue
-                print('Downloading {} to {}.'.format(filename, savepath))
+                logger.info('Downloading {} to {}.'.format(filename, savepath))
                 r = requests.get(command + year + day + filename)
                 with open(saved_filename, 'wb') as file:
                     file.write(r.content)
@@ -179,6 +183,8 @@ if __name__ == '__main__':
     import argparse
     import sys
     from pathlib import Path
+    from aux_gps import configure_logger
+    logger = configure_logger(name='rinex_garner')
     check_python_version(min_major=3, min_minor=6)
     parser = argparse.ArgumentParser(description='a command line tool for ' +
                                      'downloading a single station rinex files' +
