@@ -18,11 +18,14 @@ gis_path = work_yuval / 'gis'
 sound_path = work_yuval / 'sounding'
 phys_soundings = sound_path / 'bet_dagan_phys_sounding_2007-2019.nc'
 tela_zwd = work_yuval / 'gipsyx_results/tela_newocean/TELA_PPP_1996-2019.nc'
+jslm_zwd = work_yuval / 'gipsyx_results/jslm_newocean/JSLM_PPP_2001-2019.nc'
 alon_zwd = work_yuval / 'gipsyx_results/alon_newocean/ALON_PPP_2005-2019.nc'
 tela_zwd_aligned = work_yuval / 'TELA_zwd_aligned_with_physical_bet_dagan.nc'
 alon_zwd_aligned = work_yuval / 'ALON_zwd_aligned_with_physical_bet_dagan.nc'
+jslm_zwd_aligned = work_yuval / 'JSLM_zwd_aligned_with_physical_bet_dagan.nc'
 tela_ims = ims_path / '10mins/TEL-AVIV-COAST_178_TD_10mins.nc'
 alon_ims = ims_path / '10mins/ASHQELON-PORT_208_TD_10mins.nc'
+jslm_ims = ims_path / '10mins/JERUSALEM-CENTRE_23_TD_10mins.nc'
 rinex_on_geo = geo_path / 'Work_Files/PW_yuval/rinex'
 PW_stations_path = work_yuval / '1minute'
 stations = pd.read_csv('All_gps_stations.txt', header=0, delim_whitespace=True,
@@ -197,6 +200,7 @@ def align_physical_bet_dagan_soundings_pw_to_gps_station_zwd(
 
 def read_log_files(path, savepath=None, fltr='updated_by_shlomi',
                    suff='*.log'):
+    """read gnss log files for putting them into ocean tides model"""
     import pandas as pd
     from aux_gps import path_glob
     from tabulate import tabulate
