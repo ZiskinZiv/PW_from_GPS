@@ -613,19 +613,34 @@ def save_yearly_gipsyx_results(path, savepath):
     from aux_gps import path_glob
     from aux_gps import get_timedate_and_station_code_from_rinex
     import logging
+    import pandas as pd
+    global cnt
+    global tot
     logger = logging.getLogger('gipsyx_post_proccesser')
     files = path_glob(path, '*.tdp')
+    tot = len(files)
+    est_time_per_single_run = 0.3  # seconds
+    logger.info('found {} _smoothFinal tdp files in {} to process.'.format(tot, path))
+    dtt = pd.to_timedelta(est_time_per_single_run, unit='s') * tot
+    extra_dtt = pd.to_timedelta(0.4, unit='s') * tot
+    dtt += extra_dtt
+    logger.info('estimated time to completion of run: {}'.format(dtt))
+    logger.info('check again in {}'.format(pd.Timestamp.now() + dtt))
     rfns = [x.as_posix().split('/')[-1][0:12] for x in files]
     dts = [get_timedate_and_station_code_from_rinex(rfn, just_dt=True) for
            rfn in rfns]
     _, station = get_timedate_and_station_code_from_rinex(rfns[0])
     years = list(set([dt.year for dt in dts]))
+    cnt = {'succ': 0, 'failed': 0}
     for year in sorted(years):
         filename = '{}_ppp_raw_{}.nc'.format(station, year)
         if (savepath / filename).is_file():
             logger.warning('{} already in {}, skipping...'.format(filename, savepath))
             continue
         ds, _ = read_one_station_gipsyx_results(path, savepath, year)
+    total = cnt['failed'] + cnt['succ']
+    logger.info('Total files: {}, success: {}, failed: {}'.format(
+            total, cnt['succ'], cnt['failed']))
     return
 
 
@@ -643,7 +658,7 @@ def read_one_station_gipsyx_results(path, savepath=None,
     df_list = []
     errors = []
     dts = []
-    logger.info('reading folder:{}'.format(path))
+    # logger.info('reading folder:{}'.format(path))
     files = path_glob(path, '*.tdp')
     for tdp_file in files:
         rfn = tdp_file.as_posix().split('/')[-1][0:12]
@@ -652,22 +667,29 @@ def read_one_station_gipsyx_results(path, savepath=None,
             if dt.year != year:
                 continue
             else:
-                print(rfn)
+                logger.info(
+                        'processing {} ({}, {}/{})'.format(
+                                rfn,
+                                dt.strftime('%Y-%m-%d'), cnt['succ'] + cnt['failed'], tot))
                 try:
                     df, meta = process_one_day_gipsyx_output(tdp_file)
                     dts.append(df.index[0])
+                    cnt['succ'] += 1
                 except TypeError:
                     logger.error('problem reading {}, appending to errors...'.format(rfn))
                     errors.append(rfn)
+                    cnt['failed'] += 1
                     continue
                 df_list.append(df)
         elif year is None:
             try:
                 df, meta = process_one_day_gipsyx_output(tdp_file)
                 dts.append(df.index[0])
+                cnt['succ'] += 1
             except TypeError:
                 logger.error('problem reading {}, appending to errors...'.format(rfn))
                 errors.append(rfn)
+                cnt['failed'] += 1
                 continue
             df_list.append(df)
     # sort by first dates of each df:
