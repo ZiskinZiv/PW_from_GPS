@@ -90,18 +90,6 @@ def read_organize_rinex(path, glob_str='*.Z'):
     return df
 
 
-def get_var(varname):
-    """get a linux shell var (without the $)"""
-    import subprocess
-    CMD = 'echo $%s' % varname
-    p = subprocess.Popen(
-        CMD,
-        stdout=subprocess.PIPE,
-        shell=True,
-        executable='/bin/bash')
-    return p.stdout.readlines()[0].strip().decode("utf-8")
-
-
 def check_path(path):
     import os
     from pathlib import Path
@@ -178,6 +166,12 @@ def prepare_gipsyx_for_run_one_station(rinexpath, staDb, prep, rewrite):
                 logger.error('dataRecordDump failed on {}...'.format(filename))
 #                next(failed)
                 cnt['failed'] += 1
+            except TimeoutExpired:
+                logger.error('dataRecordDump timed out on {}, copying log files.'.format(rfn))
+                # next(failed)
+                cnt['failed'] += 1
+                with open(Path().cwd() / files_to_move[1], 'a') as f:
+                    f.write('dataRecordDump has Timed out !')
             move_files(Path().cwd(), out_path, files_to_move)
         return
 
@@ -213,6 +207,12 @@ def prepare_gipsyx_for_run_one_station(rinexpath, staDb, prep, rewrite):
 #            next(failed)
             cnt['failed'] += 1
             logger.error('rnxEditGde.py failed on {}...'.format(filename))
+        except TimeoutExpired:
+            logger.error('rnxEditGde.py timed out on {}, copying log files.'.format(rfn))
+            # next(failed)
+            cnt['failed'] += 1
+            with open(Path().cwd() / files_to_move[1], 'a') as f:
+                f.write('rnxEditGde.py has Timed out !')
         move_files(Path().cwd(), out_path, files_to_move)
         return
 
@@ -443,9 +443,10 @@ if __name__ == '__main__':
     import argparse
     import sys
     from aux_gps import configure_logger
+    from aux_gps import get_var
     from pathlib import Path
     # first check for GCORE path:
-    if len(get_var('GCORE')) == 0:
+    if get_var('GCORE') is None:
         raise ValueError('Run source ~/GipsyX-1.1/rc_GipsyX.sh first !')
     logger = configure_logger(name='gipsyx')
     parser = argparse.ArgumentParser(
