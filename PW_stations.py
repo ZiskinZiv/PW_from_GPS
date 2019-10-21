@@ -26,7 +26,7 @@ jslm_zwd_aligned = work_yuval / 'JSLM_zwd_aligned_with_physical_bet_dagan.nc'
 tela_ims = ims_path / '10mins/TEL-AVIV-COAST_178_TD_10mins.nc'
 alon_ims = ims_path / '10mins/ASHQELON-PORT_208_TD_10mins.nc'
 jslm_ims = ims_path / '10mins/JERUSALEM-CENTRE_23_TD_10mins.nc'
-rinex_on_geo = geo_path / 'Work_Files/PW_yuval/rinex'
+station_on_geo = geo_path / 'Work_Files/PW_yuval/GNSS_stations'
 PW_stations_path = work_yuval / '1minute'
 stations = pd.read_csv('All_gps_stations.txt', header=0, delim_whitespace=True,
                        index_col='name')
@@ -34,6 +34,89 @@ stations = pd.read_csv('All_gps_stations.txt', header=0, delim_whitespace=True,
 # TODO: finish clouds formulation in ts-tm modeling
 # TODO: finish playing with ts-tm modeling, various machine learning algos.
 # TODO: redo the hour, season and cloud selection in formulate_plot
+
+
+def run_error_analysis(station='tela', task='edit30hr'):
+    station_on_geo = geo_path / 'Work_Files/PW_yuval/GNSS_stations'
+    if task == 'edit30hr':
+        path = station_on_geo / station / 'rinex/30hr'
+        err, df = gipsyx_runs_error_analysis(path, glob_str='*.dr.gz')
+    elif task == 'run':
+        path = station_on_geo / station / 'rinex/30hr/results'
+        err, df = gipsyx_runs_error_analysis(path, glob_str='*.tdp')
+    return err, df
+
+    
+def gipsyx_runs_error_analysis(path, glob_str='*.tdp'):
+    from collections import Counter
+    from aux_gps import get_timedate_and_station_code_from_rinex
+    from aux_gps import path_glob
+    import pandas as pd
+    import logging
+
+    def find_errors(content_list, name):
+        keys = [x for x in content_list if 'KeyError' in x]
+        vals = [x for x in content_list if 'ValueError' in x]
+        excpt = [x for x in content_list if 'Exception' in x]
+        err = [x for x in content_list if 'Error' in x]
+        trouble = [x for x in content_list if 'Trouble' in x]
+        problem = [x for x in content_list if 'Problem' in x]
+        fatal = [x for x in content_list if 'FATAL' in x]
+        timed = [x for x in content_list if 'Timed' in x]
+        errors = keys + vals + excpt + err + trouble + problem + fatal + timed
+        if not errors:
+            dt, _ = get_timedate_and_station_code_from_rinex(name)
+            logger.warning('found new error on {} ({})'.format(name,  dt.strftime('%Y-%m-%d')))
+        return errors
+
+    logger = logging.getLogger('gipsyx_post_proccesser')
+    rfns = []
+    files = path_glob(path, glob_str, True)
+    for file in files:
+        # first get all the rinex filenames that gipsyx ran successfuly:
+        rfn = file.as_posix().split('/')[-1][0:12]
+        rfns.append(rfn)
+    if files:
+        logger.info('running error analysis for station {}'.format(rfn[0:4].upper()))
+    all_errors = []
+    errors = []
+    dates = []
+    rinex = []
+    files = path_glob(path, '*.err')
+    for file in files:
+        rfn = file.as_posix().split('/')[-1][0:12]
+        # now, filter the error files that were copyed but there is tdp file
+        # i.e., the gipsyx run was successful:
+        if rfn in rfns:
+            continue
+        else:
+            dt, _ = get_timedate_and_station_code_from_rinex(rfn)
+            dates.append(dt)
+            rinex.append(rfn)
+            with open(file) as f:
+                content = f.readlines()
+                # you may also want to remove whitespace characters like `\n` at
+                # the end of each line
+                content = [x.strip() for x in content]
+                all_errors.append(content)
+                errors.append(find_errors(content, rfn))
+    er = [','.join(x) for x in all_errors]
+    df = pd.DataFrame(data=rinex, index=dates, columns=['rinex'])
+    df['error'] = er
+    df = df.sort_index()
+    total = len(rfns) + len(df)
+    good = len(rfns)
+    bad = len(df)
+    logger.info('total files: {}, successful runs: {}, errornous runs: {}'.format(
+            total, good, bad))
+    logger.info('success percent: {0:.1f}%'.format(100.0 * good / total))
+    logger.info('error percent: {0:.1f}%'.format(100.0 * bad / total))
+    # now count the similar errors and sort:
+    flat_list = [item for sublist in errors for item in sublist]
+    counted_errors = Counter(flat_list)
+    errors_sorted = sorted(counted_errors.items(), key=lambda x: x[1],
+                           reverse=True)
+    return errors_sorted, df
 
 
 def get_zwd_from_sounding_and_compare_to_gps(phys_sound_file=phys_soundings,
