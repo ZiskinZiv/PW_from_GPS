@@ -14,7 +14,12 @@ def check_path(path):
     from pathlib import Path
     path = str(path)
     if not os.path.exists(path):
-        raise argparse.ArgumentTypeError(path + ' does not exist...')
+        try:
+            os.makedirs(path)
+        except OSError:
+            logger.error("Creation of the directory %s failed" % path)
+        else:
+            logger.info("Successfully created the directory %s" % path)
     return Path(path)
 
 
@@ -535,78 +540,6 @@ def analyse_results_ds_one_station(dss, field='WetZ', verbose=None,
 #    return errors_sorted, df
 
 
-def gipsyx_runs_error_analysis(path, glob_str='*.tdp'):
-    from collections import Counter
-    from aux_gps import get_timedate_and_station_code_from_rinex
-    from aux_gps import path_glob
-    import pandas as pd
-    import logging
-
-    def find_errors(content_list, name):
-        keys = [x for x in content_list if 'KeyError' in x]
-        vals = [x for x in content_list if 'ValueError' in x]
-        excpt = [x for x in content_list if 'Exception' in x]
-        err = [x for x in content_list if 'Error' in x]
-        trouble = [x for x in content_list if 'Trouble' in x]
-        problem = [x for x in content_list if 'Problem' in x]
-        fatal = [x for x in content_list if 'FATAL' in x]
-        timed = [x for x in content_list if 'Timed' in x]
-        errors = keys + vals + excpt + err + trouble + problem + fatal + timed
-        if not errors:
-            dt, _ = get_timedate_and_station_code_from_rinex(name)
-            logger.warning('found new error on {} ({})'.format(name,  dt.strftime('%Y-%m-%d')))
-        return errors
-
-    logger = logging.getLogger('gipsyx_post_proccesser')
-    rfns = []
-    files = path_glob(path, glob_str, True)
-    for file in files:
-        # first get all the rinex filenames that gipsyx ran successfuly:
-        rfn = file.as_posix().split('/')[-1][0:12]
-        rfns.append(rfn)
-    if files:
-        logger.info('running error analysis for station {}'.format(rfn[0:4].upper()))
-    all_errors = []
-    errors = []
-    dates = []
-    rinex = []
-    files = path_glob(path, '*.err')
-    for file in files:
-        rfn = file.as_posix().split('/')[-1][0:12]
-        # now, filter the error files that were copyed but there is tdp file
-        # i.e., the gipsyx run was successful:
-        if rfn in rfns:
-            continue
-        else:
-            dt, _ = get_timedate_and_station_code_from_rinex(rfn)
-            dates.append(dt)
-            rinex.append(rfn)
-            with open(file) as f:
-                content = f.readlines()
-                # you may also want to remove whitespace characters like `\n` at
-                # the end of each line
-                content = [x.strip() for x in content]
-                all_errors.append(content)
-                errors.append(find_errors(content, rfn))
-    er = [','.join(x) for x in all_errors]
-    df = pd.DataFrame(data=rinex, index=dates, columns=['rinex'])
-    df['error'] = er
-    df = df.sort_index()
-    total = len(rfns) + len(df)
-    good = len(rfns)
-    bad = len(df)
-    logger.info('total files: {}, successful runs: {}, errornous runs: {}'.format(
-            total, good, bad))
-    logger.info('success percent: {0:.1f}%'.format(100.0 * good / total))
-    logger.info('error percent: {0:.1f}%'.format(100.0 * bad / total))
-    # now count the similar errors and sort:
-    flat_list = [item for sublist in errors for item in sublist]
-    counted_errors = Counter(flat_list)
-    errors_sorted = sorted(counted_errors.items(), key=lambda x: x[1],
-                           reverse=True)
-    return errors_sorted, df
-
-
 def save_yearly_gipsyx_results(path, savepath):
     """call read one station for each year and save the results, then
     concat and save to a bigger raw file, can add postproccess function"""
@@ -814,7 +747,7 @@ if __name__ == '__main__':
     if args.tdppath is None:
         print('tdppath is a required argument, run with -h...')
         sys.exit()
-    station = args.tdppath.as_posix().split('/')[-3].upper()
+    station = args.tdppath.as_posix().split('/')[-4].upper()
     logger.info('Starting post proccessing {} station'.format(station))
     save_yearly_gipsyx_results(args.tdppath, args.savepath)
     post_procces_gipsyx_all_years(args.savepath, False)
