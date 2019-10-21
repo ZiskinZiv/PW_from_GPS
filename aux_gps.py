@@ -8,6 +8,22 @@ Created on Mon Jun 10 14:33:19 2019
 from PW_paths import work_yuval
 
 
+def get_var(varname):
+    """get a linux shell var (without the $)"""
+    import subprocess
+    CMD = 'echo $%s' % varname
+    p = subprocess.Popen(
+        CMD,
+        stdout=subprocess.PIPE,
+        shell=True,
+        executable='/bin/bash')
+    out = p.stdout.readlines()[0].strip().decode("utf-8")
+    if len(out) == 0:
+        return None
+    else:
+        return out
+
+
 def plot_tmseries_xarray(ds, fields=None, error_suffix='_error',
                          errorbar_alpha=0.5):
     """plot time-series plot w/o errorbars of a xarray dataset"""
