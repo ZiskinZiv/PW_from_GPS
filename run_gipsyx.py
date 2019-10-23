@@ -53,16 +53,21 @@ def read_organize_rinex(path, glob_str='*.Z'):
     logger = logging.getLogger('gipsyx')
     dts = []
     rfns = []
+    stations = []
     logger.info('reading and organizing rinex files in {}'.format(path))
     files = path_glob(path, glob_str)
     for file_and_path in files:
         filename = file_and_path.as_posix().split('/')[-1][0:12]
         dt, station = get_timedate_and_station_code_from_rinex(filename)
+        stations.append(station)
         dts.append(dt)
         rfns.append(filename)
-
+    # check for more station than one:
+    if len(set(stations)) > 1:
+        raise Exception('mixed station names in folder {}'.format(path))
     df = pd.DataFrame(data=rfns, index=dts)
     df = df.sort_index()
+    df = df[~df.index.duplicated()]
     full_time = pd.date_range(df.index[0], df.index[-1], freq='1D')
     df = df.reindex(full_time)
     df.columns = ['rinex']
