@@ -40,6 +40,29 @@ def check_station_name(name):
         return name
 
 
+def generate_rinex_reader(station):
+    from pathlib import Path
+    lines = []
+    cwd = Path().cwd()
+    print('created rinex header reader script with the following parameters:')
+    for curr_sta in station:
+        station_path = workpath / curr_sta
+        rinexpath = station_path / 'rinex'
+        savepath = pwpath
+        lines.append('cd {}'.format(station_path))
+        line = 'nohup python -u {}/rinex_header_reader.py'.format(pwpath)\
+            + ' --rinexpath {} --savepath {}'.format(rinexpath, savepath)\
+            + ' &>{}/nohup_{}_rnx_reader.txt&'.format(pwpath, curr_sta)
+        lines.append(line)
+        lines.append('cd {}'.format(pwpath))
+        print('station: {}, savepath: {}'.format(curr_sta, savepath))
+    with open(cwd / script_file, 'w') as file:
+        for item in lines:
+            file.write("%s\n" % item)
+    print('run the script with source {} !'.format(script_file))
+    return
+
+
 def generate_rinex_download(station, myear):
     from pathlib import Path
     lines = []
@@ -150,6 +173,8 @@ def generate_gipsyx_post(station, iqr_k):
 def task_switcher(args):
     if args.task == 'rinex_download':
         generate_rinex_download(args.station, args.myear)
+    elif args.task == 'rinex_reader':
+        generate_rinex_reader(args.station)
     elif args.task == 'drdump' or args.task == 'edit30hr' or args.task == 'run':
         generate_gipsyx_run(args.station, args.task, args.tree, args.staDb)
     elif args.task == 'post':
@@ -193,8 +218,8 @@ if __name__ == '__main__':
     required = parser.add_argument_group('required arguments')
     # remove this line: optional = parser...
     required.add_argument('--task', help="a task to preform, e.g., run_gipsyx, post_gipsyx, download_rinex."
-                          , choices=['rinex_download', 'drdump',
-                                     'edit30hr', 'run', 'post'])
+                          , choices=['rinex_download', 'rinex_reader',
+                                     'drdump', 'edit30hr', 'run', 'post'])
     required.add_argument('--station', help="GPS station name four lowercase letters,",
                           nargs='+', type=check_station_name)
     optional.add_argument('--myear', help='minimum year to begin search in garner site.',
