@@ -9,10 +9,11 @@ Created on Wed Oct 23 10:15:13 2019
 
 def produce_log_report(df, station, savepath):
     import logging
+    from pathlib import Path
     logger = logging.getLogger('rinex_hdr_reader')
     filename = '{}_log.txt'.format(station)
     logger.info('saving raw log file ({}) to {}'.format(filename, savepath))
-    df.to_csv(savepath / filename, sep=(' '))
+    df.to_csv(Path(savepath) / filename, sep=' ')
     return
 
 
@@ -43,10 +44,11 @@ def read_all_rinex_headers(rinexpath):
         logger.info('reading rnx header of {} ({}/{})'.format(filename, cnt,
                     total))
         cnt += 1
-    if len(set(name_list)) > 1:
-        raise Exception('path {} includes more than one station!'.format(rinexpath))
+#    if len(set(name_list)) > 1:
+#        raise Exception('path {} includes more than one station!'.format(rinexpath))
     station = list(set(name_list))[0]
     df = pd.DataFrame(rinex_list, index=dts, columns=['rfn'])
+    df['name'] = name_list
     df['ant'] = ant_list
     df['ant_seriel'] = aserial_list
     df['rec'] = rec_list
@@ -58,6 +60,8 @@ def read_all_rinex_headers(rinexpath):
 def read_one_rnx_file(rfn_with_path):
     import georinex as gr
     import pandas as pd
+    from pandas.errors import OutOfBoundsDatetime
+    from aux_gps import get_timedate_and_station_code_from_rinex
 
     def parse_field(field):
         field_new = [x.split(' ') for x in field]
@@ -73,7 +77,11 @@ def read_one_rnx_file(rfn_with_path):
     header['rec'] = rec
     name = [val for key, val in hdr.items() if 'NAME' in key]
     header['name'] = parse_field(name)[0]
-    dts = pd.to_datetime(hdr['t0'])
+    try:
+        dts = pd.to_datetime(hdr['t0'])
+    except OutOfBoundsDatetime:
+        rfn = rfn_with_path.as_posix().split('/')[-1][0:12]
+        dts = get_timedate_and_station_code_from_rinex(rfn, True)
     header['dt'] = dts
     return header
 
