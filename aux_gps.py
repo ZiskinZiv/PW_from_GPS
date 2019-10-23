@@ -258,8 +258,9 @@ def path_glob(path, glob_str='*.Z', return_empty_list=False):
     """returns all the files with full path(pathlib3 objs) if files exist in
     path, if not, returns FilenotFoundErro"""
     from pathlib import Path
-    if not isinstance(path, Path):
-        raise Exception('{} must be a pathlib object'.format(path))
+#    if not isinstance(path, Path):
+#        raise Exception('{} must be a pathlib object'.format(path))
+    path = Path(path)
     files_with_path = [file for file in path.glob(glob_str) if file.is_file]
     if not files_with_path and not return_empty_list:
         raise Exception('{} search in {} found no files.'.format(glob_str,
