@@ -34,8 +34,12 @@ def read_all_rinex_headers(rinexpath):
     total = len(path_glob(rinexpath))
     for rfn in sorted(path_glob(rinexpath)):
         filename = rfn.as_posix().split('/')[-1][0:12]
+        try:
+            dic = read_one_rnx_file(rfn)
+        except ValueError:
+            logger.error('error parsing rnx header of {}'.format(filename))
+            continue
         rinex_list.append(filename)
-        dic = read_one_rnx_file(rfn)
         ant_list.append(dic['ant'])
         aserial_list.append(dic['ant_serial'])
         rec_list.append(dic['rec'])
@@ -70,16 +74,31 @@ def read_one_rnx_file(rfn_with_path):
     hdr = gr.rinexheader(rfn_with_path)
     header = {}
     ant = [val for key, val in hdr.items() if 'ANT' in key]
-    header['ant'] = parse_field(ant)[1]
-    header['ant_serial'] = parse_field(ant)[0]
+    try:
+        header['ant'] = parse_field(ant)[1]
+    except IndexError:
+        header['ant'] = parse_field(ant)
+    try:
+        header['ant_serial'] = parse_field(ant)[0]
+    except IndexError:
+        header['ant_serial'] = parse_field(ant)
     rec = [val for key, val in hdr.items() if 'REC' in key]
-    rec = ' '.join(parse_field(rec)[1:3])
+    try:
+        rec = ' '.join(parse_field(rec)[1:3])
+    except IndexError:
+        rec = parse_field(rec)
     header['rec'] = rec
     name = [val for key, val in hdr.items() if 'NAME' in key]
-    header['name'] = parse_field(name)[0]
+    try:
+        header['name'] = parse_field(name)[0]
+    except IndexError:
+        header['name'] = parse_field(name)
     try:
         dts = pd.to_datetime(hdr['t0'])
     except OutOfBoundsDatetime:
+        rfn = rfn_with_path.as_posix().split('/')[-1][0:12]
+        dts = get_timedate_and_station_code_from_rinex(rfn, True)
+    except KeyError:
         rfn = rfn_with_path.as_posix().split('/')[-1][0:12]
         dts = get_timedate_and_station_code_from_rinex(rfn, True)
     header['dt'] = dts
