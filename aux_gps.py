@@ -8,6 +8,85 @@ Created on Mon Jun 10 14:33:19 2019
 from PW_paths import work_yuval
 
 
+def tar_dir(path_to_tar, glob_str_to_tar, filename, savepath, compresslevel=9,
+            with_dir_struct=False, verbose=False):
+    import tarfile as tr
+    from aux_gps import path_glob
+    """ compresses all glob_str_to_tar files (e.g., *.txt) in path_to_tar,
+    and save it all to savepath with filename as filename. by default adds .tar
+    suffix if not supplied by user. control compression level with
+    compresslevel (i.e., None means no compression)."""
+    def aname(file, arcname):
+        if arcname is None:
+            return None
+        else:
+            return file.as_posix().split('/')[-1]
+
+    files_to_tar = path_glob(path_to_tar, glob_str_to_tar)
+    if len(filename.split('.')) < 2:
+        filename += '.tar'
+        if verbose:
+            print('added .tar suffix to {}'.format(filename.split('.'[0])))
+    else:
+        filename = filename.split('.')[0]
+        filename += '.tar'
+        if verbose:
+            print('changed suffix to tar')
+    tarfile = savepath / filename
+    if compresslevel is None:
+        tar = tr.open(tarfile, "w")
+    else:
+        tar = tr.open(tarfile, "w:gz", compresslevel=compresslevel)
+    if not with_dir_struct:
+        arcname = True
+        if verbose:
+            print('files were archived without directory structure')
+    else:
+        arcname = None
+        if verbose:
+            print('files were archived with {} dir structure'.format(path_to_tar))
+    for file in files_to_tar:
+        tar.add(file, arcname=aname(file, arcname=arcname))
+    tar.close()
+    if verbose:
+        print('Compressed all {} files in {} to {}'.format(glob_str_to_tar,
+              path_to_tar, savepath / filename))
+    return
+
+
+def query_yes_no(question, default="no"):
+    """Ask a yes/no question via raw_input() and return their answer.
+
+    "question" is a string that is presented to the user.
+    "default" is the presumed answer if the user just hits <Enter>.
+        It must be "yes" (the default), "no" or None (meaning
+        an answer is required of the user).
+
+    The "answer" return value is True for "yes" or False for "no".
+    """
+    import sys
+    valid = {"yes": True, "y": True, "ye": True,
+             "no": False, "n": False}
+    if default is None:
+        prompt = " [y/n] "
+    elif default == "yes":
+        prompt = " [Y/n] "
+    elif default == "no":
+        prompt = " [y/N] "
+    else:
+        raise ValueError("invalid default answer: '%s'" % default)
+
+    while True:
+        sys.stdout.write(question + prompt)
+        choice = input().lower()
+        if default is not None and choice == '':
+            return valid[default]
+        elif choice in valid:
+            return valid[choice]
+        else:
+            sys.stdout.write("Please respond with 'yes' or 'no' "
+                             "(or 'y' or 'n').\n")
+
 def get_var(varname):
     """get a linux shell var (without the $)"""
     import subprocess
@@ -263,7 +342,7 @@ def path_glob(path, glob_str='*.Z', return_empty_list=False):
     path = Path(path)
     files_with_path = [file for file in path.glob(glob_str) if file.is_file]
     if not files_with_path and not return_empty_list:
-        raise Exception('{} search in {} found no files.'.format(glob_str,
+        raise FileNotFoundError('{} search in {} found no files.'.format(glob_str,
                         path))
     elif not files_with_path and return_empty_list:
         return files_with_path
