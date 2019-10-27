@@ -5,7 +5,8 @@ Created on Fri Oct 18 15:21:21 2019
 
 @author: shlomi
 """
-
+# TODO: add copy post files (just final) to be analysed in client computer
+# TODO: add backup option depending on task. use tarfile to compress
 
 def check_python_version(min_major=3, min_minor=6):
     import sys
@@ -38,6 +39,40 @@ def check_station_name(name):
         if len(name) != 4:
             raise argparse.ArgumentTypeError(name + ' should be 4 letters...')
         return name
+
+
+def generate_delete(station, task):
+    from aux_gps import query_yes_no
+    from aux_gps import path_glob
+    for curr_sta in station:
+        station_path = workpath / curr_sta
+        if task == 'drdump':
+            path = station_path / 'rinex/dr'
+            glob_str = '*.dr.gz'
+        elif task == 'edit30hr':
+            path = station_path / 'rinex/30hr'
+            glob_str = '*.dr.gz'
+        elif task == 'run':
+            path = station_path / 'rinex/hr30/results'
+            glob_str = '*.tdp'
+        elif task == 'post':
+            path = station_path / 'gipsyx_solutions'
+            glob_str = '*.nc'
+        try:
+            files_to_delete = path_glob(path, glob_str)
+        except FileNotFoundError:
+            print('skipping {} , because its empty or not existant..'.format(path))
+            continue
+        suff = glob_str.split('.')[-1]
+        print('WARNING for {}, ALL {} files in {} WILL BE DELETED!'.format(curr_sta, suff, path))
+        to_delete = query_yes_no('ARE YOU SURE ?')
+        if not to_delete:
+            print('files NOT deleted...')
+            continue
+        else:
+            [x.unlink() for x in files_to_delete]
+            print('FILES DELETED!')
+    return
 
 
 def generate_rinex_reader(station):
@@ -171,14 +206,17 @@ def generate_gipsyx_post(station, iqr_k):
 
 
 def task_switcher(args):
-    if args.task == 'rinex_download':
-        generate_rinex_download(args.station, args.myear)
-    elif args.task == 'rinex_reader':
-        generate_rinex_reader(args.station)
-    elif args.task == 'drdump' or args.task == 'edit30hr' or args.task == 'run':
-        generate_gipsyx_run(args.station, args.task, args.tree, args.staDb)
-    elif args.task == 'post':
-        generate_gipsyx_post(args.station, args.iqr_k)
+    if args.delete:
+        generate_delete(args.station, args.task)
+    else:
+        if args.task == 'rinex_download':
+            generate_rinex_download(args.station, args.myear)
+        elif args.task == 'rinex_reader':
+            generate_rinex_reader(args.station)
+        elif args.task == 'drdump' or args.task == 'edit30hr' or args.task == 'run':
+            generate_gipsyx_run(args.station, args.task, args.tree, args.staDb)
+        elif args.task == 'post':
+            generate_gipsyx_post(args.station, args.iqr_k)
     return
 
 
@@ -232,6 +270,7 @@ if __name__ == '__main__':
                           type=str)
     optional.add_argument('--iqr_k', help='iqr k data filter criterion',
                           type=float)
+    required.add_argument('--delete', action='store_true')  # its False
 #                          metavar=str(cds.start_year) + ' to ' + str(cds.end_year))
 #    optional.add_argument('--half', help='a spescific six months to download,\
 #                          e.g, 1 or 2', type=int, choices=[1, 2],
@@ -254,8 +293,6 @@ if __name__ == '__main__':
     # get the names of the stations in workpath:
     stations = path_glob(workpath, '*')
     stations = [x.as_posix().split('/')[-1] for x in stations if x.is_dir()]
-    if get_var('GCORE') is None:
-        raise ValueError('Run source ~/GipsyX-1.1/rc_GipsyX.sh first !')
     if args.task is None:
         print('task is a required argument, run with -h...')
         sys.exit()
@@ -266,15 +303,16 @@ if __name__ == '__main__':
         args.station = isr_stations
     # use ISR stations db for israeli stations and ocean loading also:
     if all(a in isr_stations for a in args.station):
-        args.staDb = pwpath / 'ISR.staDb'
         args.tree = pwpath / 'my_trees/ISROcnld'
     else:
         if args.staDb is not None:
             args.staDb = pwpath / args.staDb
-        elif args.staDb is None and args.task != 'rinex_download':
-            raise ValueError('please supply staDb file for non-israeli station')
+        else:
+            args.staDb = pwpath / 'ALL.staDb'
         if args.tree is not None:
             args.tree = pwpath / args.tree
+    if get_var('GCORE') is None and not args.delete:
+        raise ValueError('Run source ~/GipsyX-1.1/rc_GipsyX.sh first !')
     task_switcher(args)
     # print(parser.format_help())
 #    # print(vars(args))
