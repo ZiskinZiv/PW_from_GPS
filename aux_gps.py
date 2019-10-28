@@ -22,7 +22,10 @@ def tar_dir(path_to_tar, glob_str_to_tar, filename, savepath, compresslevel=9,
         else:
             return file.as_posix().split('/')[-1]
 
-    files_to_tar = path_glob(path_to_tar, glob_str_to_tar)
+    try:
+        files_to_tar = path_glob(path_to_tar, glob_str_to_tar)
+    except FileNotFoundError:
+        return FileNotFoundError
     if len(filename.split('.')) < 2:
         filename += '.tar'
         if verbose:
@@ -48,9 +51,8 @@ def tar_dir(path_to_tar, glob_str_to_tar, filename, savepath, compresslevel=9,
     for file in files_to_tar:
         tar.add(file, arcname=aname(file, arcname=arcname))
     tar.close()
-    if verbose:
-        print('Compressed all {} files in {} to {}'.format(glob_str_to_tar,
-              path_to_tar, savepath / filename))
+    print('Compressed all {} files in {} to {}'.format(glob_str_to_tar,
+          path_to_tar, savepath / filename))
     return
 
 
