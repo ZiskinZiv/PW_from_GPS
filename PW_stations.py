@@ -30,6 +30,7 @@ station_on_geo = geo_path / 'Work_Files/PW_yuval/GNSS_stations'
 PW_stations_path = work_yuval / '1minute'
 stations = pd.read_csv('All_gps_stations.txt', header=0, delim_whitespace=True,
                        index_col='name')
+GNSS = work_yuval / 'GNSS_stations'
 
 # TODO: finish clouds formulation in ts-tm modeling
 # TODO: finish playing with ts-tm modeling, various machine learning algos.
@@ -46,7 +47,7 @@ def run_error_analysis(station='tela', task='edit30hr'):
         err, df = gipsyx_runs_error_analysis(path, glob_str='*.tdp')
     return err, df
 
-    
+
 def gipsyx_runs_error_analysis(path, glob_str='*.tdp'):
     from collections import Counter
     from aux_gps import get_timedate_and_station_code_from_rinex
