@@ -9,42 +9,143 @@ Created on Thu May 16 14:24:40 2019
 from PW_paths import work_yuval
 sound_path = work_yuval / 'sounding'
 
-# write a command line tool to download data from Wyoming upper air soundings
 
-
-def evaluate_sin_to_tmsearies(da, time_dim='time', plot=True, amp=6.0,
-                              period=365.0, phase=30.0, offset=253.0,
-                              just_eval=False):
+def evaluate_sin_to_tmsearies(
+        da,
+        time_dim='time',
+        plot=True,
+        params_up={
+                'amp': 6.0,
+                'period': 365.0,
+                'phase': 30.0,
+                'offset': 253.0,
+                'a': 0.0,
+                'b': 0.0},
+        func='sine',
+        bounds=None,
+        just_eval=False):
     import pandas as pd
     import xarray as xr
     import numpy as np
+    from aux_gps import dim_intersection
     from scipy.optimize import curve_fit
+    from sklearn.metrics import mean_squared_error
 
-    def func(time, amp, period, phase, offset):
+    def sine(time, amp, period, phase, offset):
         f = amp * np.sin(2 * np.pi * (time / period + 1.0 / phase)) + offset
         return f
-    time = da[time_dim].dropna(time_dim).values
+
+    def sine_on_linear(time, amp, period, phase, offset, a):
+        f = a * time / 365.25 + amp * \
+            np.sin(2 * np.pi * (time / period + 1.0 / phase)) + offset
+        return f
+
+    def sine_on_quad(time, amp, period, phase, offset, a, b):
+        f = a * (time / 365.25) ** 2.0 + b * time / 365.25 + amp * \
+            np.sin(2 * np.pi * (time / period + 1.0 / phase)) + offset
+        return f
+    params={'amp': 6.0,
+            'period': 365.0,
+            'phase': 30.0,
+            'offset': 253.0,
+            'a': 0.0,
+            'b': 0.0}
+    params.update(params_up)
+    print(params)
+    lower = {}
+    upper = {}
+    if bounds is not None:
+        # lower = [(x - y) for x, y in zip(params, perc2)]
+        for key in params.keys():
+            lower[key] = -np.inf
+            upper[key] = np.inf
+        lower['phase'] = 0.01
+        upper['phase'] = 0.05
+        lower['offset'] = 46.2
+        upper['offset'] = 46.3
+        lower['a'] = 0.0001
+        upper['a'] = 0.002
+        upper['amp'] = 0.04
+        lower['amp'] = 0.02
+    else:
+        for key in params.keys():
+            lower[key] = -np.inf
+            upper[key] = np.inf
+    lower = [x for x in lower.values()]
+    upper = [x for x in upper.values()]
+    params = [x for x in params.values()]
+    da_no_nans = da.dropna(time_dim)
+    time = da_no_nans[time_dim].values
     time = pd.to_datetime(time)
     jul = time.to_julian_date()
-    jul -= round(jul[0])
-    if not just_eval:
-        ydata = da.values
-        popt, pcov = curve_fit(func, jul, ydata, p0=[amp, period, phase,
-                                                     offset])
-        amp = popt[0]
-        period = popt[1]
-        phase = popt[2]
-        offset = popt[3]
-        perr = np.sqrt(np.diag(pcov))
-        print('amp: {:.2f} +- {:.2f}'.format(amp, perr[0]))
-        print('period: {:.2f} +- {:.2f}'.format(period, perr[1]))
-        print('phase: {:.2f} +- {:.2f}'.format(phase, perr[2]))
-        print('offset: {:.2f} +- {:.2f}'.format(offset, perr[3]))
-    new = func(jul, amp, period, phase, offset)
+    jul -= jul[0]
+    jul_with_nans = pd.to_datetime(da[time_dim].values).to_julian_date()
+    jul_with_nans -= jul[0]
+    ydata = da_no_nans.values
+    if func == 'sine':
+        print('Model chosen: y = amp * sin (2*pi*(x/T + 1/phi)) + offset')
+        if not just_eval:
+            popt, pcov = curve_fit(sine, jul, ydata, p0=params[:-2],
+                                   bounds=(lower[:-2], upper[:-2]), ftol=1e-9,
+                                   xtol=1e-9)
+            amp = popt[0]
+            period = popt[1]
+            phase = popt[2]
+            offset = popt[3]
+            perr = np.sqrt(np.diag(pcov))
+            print('amp: {:.4f} +- {:.2f}'.format(amp, perr[0]))
+            print('period: {:.2f} +- {:.2f}'.format(period, perr[1]))
+            print('phase: {:.2f} +- {:.2f}'.format(phase, perr[2]))
+            print('offset: {:.2f} +- {:.2f}'.format(offset, perr[3]))
+        new = sine(jul_with_nans, amp, period, phase, offset)
+    elif func == 'sine_on_linear':
+        print('Model chosen: y = a * x + amp * sin (2*pi*(x/T + 1/phi)) + offset')
+        if not just_eval:
+            popt, pcov = curve_fit(sine_on_linear, jul, ydata, p0=params[:-1],
+                                   bounds=(lower[:-1], upper[:-1]), xtol=1e-11,
+                                   ftol=1e-11)
+            amp = popt[0]
+            period = popt[1]
+            phase = popt[2]
+            offset = popt[3]
+            a = popt[4]
+            perr = np.sqrt(np.diag(pcov))
+            print('amp: {:.4f} +- {:.2f}'.format(amp, perr[0]))
+            print('period: {:.2f} +- {:.2f}'.format(period, perr[1]))
+            print('phase: {:.2f} +- {:.2f}'.format(phase, perr[2]))
+            print('offset: {:.2f} +- {:.2f}'.format(offset, perr[3]))
+            print('a: {:.7f} +- {:.2f}'.format(a, perr[4]))
+        new = sine_on_linear(jul_with_nans, amp, period, phase, offset, a)
+    elif func == 'sine_on_quad':
+        print('Model chosen: y = a * x^2 + b * x + amp * sin (2*pi*(x/T + 1/phi)) + offset')
+        if not just_eval:
+            popt, pcov = curve_fit(sine_on_quad, jul, ydata, p0=params,
+                                   bounds=(lower, upper))
+            amp = popt[0]
+            period = popt[1]
+            phase = popt[2]
+            offset = popt[3]
+            a = popt[4]
+            b = popt[5]
+            perr = np.sqrt(np.diag(pcov))
+            print('amp: {:.4f} +- {:.2f}'.format(amp, perr[0]))
+            print('period: {:.2f} +- {:.2f}'.format(period, perr[1]))
+            print('phase: {:.2f} +- {:.2f}'.format(phase, perr[2]))
+            print('offset: {:.2f} +- {:.2f}'.format(offset, perr[3]))
+            print('a: {:.7f} +- {:.2f}'.format(a, perr[4]))
+            print('b: {:.7f} +- {:.2f}'.format(a, perr[5]))
+        new = sine_on_quad(jul_with_nans, amp, period, phase, offset, a, b)
     new_da = xr.DataArray(new, dims=[time_dim])
-    new_da[time_dim] = time
+    new_da[time_dim] = da[time_dim]
+    resid = new_da - da
+    rmean = np.mean(resid)
+    new_time = dim_intersection([da, new_da], time_dim)
+    rmse = np.sqrt(mean_squared_error(da.sel({time_dim: new_time}).values,
+                                      new_da.sel({time_dim: new_time}).values))
+    print('MEAN : {}'.format(rmean))
+    print('RMSE : {}'.format(rmse))
     if plot:
-        da.plot.line(marker='.', linewidth=0.)
+        da.plot.line(marker='.', linewidth=0., figsize=(20, 5))
         new_da.plot.line(marker='.', linewidth=0.)
     return new_da
 
