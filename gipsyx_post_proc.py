@@ -306,9 +306,10 @@ def replace_fields_in_ds(dss, da_repl, field='WetZ', verbose=None):
     import logging
     logger = logging.getLogger('gipsyx_post_proccesser')
     if verbose == 0:
-        print('replacing {} field.'.format(field))
+        logger.info('replacing {} field.'.format(field))
     # choose the field from the bigger dss:
-    nums = sorted(list(set([int(x.split('-')[1]) for x in dss])))
+    nums = sorted(list(set([int(x.split('-')[1])
+                            for x in dss if x.split('-')[0] == field])))
     ds = dss[['{}-{}'.format(field, i) for i in nums]]
     da_list = []
     for i, _ in enumerate(ds):
@@ -316,8 +317,13 @@ def replace_fields_in_ds(dss, da_repl, field='WetZ', verbose=None):
             break
         first = ds['{}-{}'.format(field, i)]
         second = ds['{}-{}'.format(field, i+1)]
-        min_time = first.dropna('time').time.min()
-        max_time = second.dropna('time').time.max()
+        try:
+            min_time = first.dropna('time').time.min()
+            max_time = second.dropna('time').time.max()
+        except ValueError:
+            if verbose == 1:
+                logger.warning('item {}, {} - {} is lonely'.format(field, i, i+1))
+            continue
         try:
             da = da_repl.sel(time=slice(min_time, max_time))
         except KeyError:
@@ -405,7 +411,8 @@ def analyse_results_ds_one_station(dss, field='WetZ', verbose=None,
     to_error_mean = [x + '_error' for x in to_smooth] + [x + '_error' for x in
                                                          to_simple_mean]
     # second, select the field to work on:
-    nums = sorted(list(set([int(x.split('-')[1]) for x in dss])))
+    nums = sorted(list(set([int(x.split('-')[1])
+                            for x in dss if x.split('-')[0] == field])))
     ds = dss[['{}-{}'.format(field, i) for i in nums]]
     df_list = []
     for i, _ in enumerate(ds):
@@ -658,7 +665,7 @@ def process_one_day_gipsyx_output(path_and_file, plot=False):
     # import pyproj
     import matplotlib.pyplot as plt
     # from aux_gps import get_latlonalt_error_from_geocent_error
-    df_raw = pd.read_fwf(path_and_file, header=None)
+    df_raw = pd.read_csv(path_and_file, header=None, delim_whitespace=True)
     # get all the vars from smoothFinal.tdp file and put it in a df_list:
     keys = ['WetZ', 'GradNorth', 'GradEast', 'Pos.X', 'Pos.Y', 'Pos.Z']
     df_list = [df_raw[df_raw.iloc[:, -1].str.contains(x)] for x in keys]
