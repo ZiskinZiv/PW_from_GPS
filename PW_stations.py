@@ -1785,6 +1785,150 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
     return da
 
 
+def israeli_gnss_stations_long_term_trend_analysis(gis_path=gis_path,
+                                                   plot=True):
+    import pandas as pd
+    from pathlib import Path
+    import geopandas as gpd
+    isr_stations = pd.read_csv(Path().cwd() / 'stations_approx_loc.txt',
+                               delim_whitespace=True)
+    isr_stations = isr_stations.index.tolist()
+    df_list = []
+    for station in isr_stations:
+        print('proccessing station: {}'.format(station))
+        try:
+            rds = get_long_trends_from_gnss_station(station, 'LR', False)
+        except FileNotFoundError:
+            print('didnt find {} in gipsyx solutions, skipping...'.format(station))
+            continue
+        df_list.append(rds.attrs)
+    df = pd.DataFrame(df_list)
+    df.set_index(df.station, inplace=True)
+    df.drop('station', axis=1, inplace=True)
+    rest = df.columns[3:].tolist()
+    df.columns = ['north_cm_per_year', 'east_cm_per_year', 'up_mm_per_year'] + rest
+    df['cm_per_year'] = np.sqrt(
+            df['north_cm_per_year'] ** 2.0 +
+            df['east_cm_per_year'] ** 2.0)
+    # define angle from east : i.e., x axis is east
+    df['angle_from_east'] = np.rad2deg(np.arctan(df['north_cm_per_year'].div(df['east_cm_per_year'])))
+    isr = gpd.read_file(gis_path / 'Israel_demog_yosh.shp')
+    isr.crs = {'init': 'epsg:4326'}
+    stations = gpd.GeoDataFrame(df,
+                                geometry=gpd.points_from_xy(df.lon,
+                                                            df.lat),
+                                crs=isr.crs)
+    stations_isr = gpd.sjoin(stations, isr, op='within')
+    if plot:
+        ax = isr.plot()
+        stations_isr.plot(ax=ax, column='cm_per_year', cmap='Greens',
+                          edgecolor='black', legend=True)
+        for x, y, label in zip(stations_isr.lon, stations_isr.lat,
+                               stations_isr.index):
+            ax.annotate(label, xy=(x, y), xytext=(3, 3),
+                        textcoords="offset points")
+    return stations_isr
+
+
+def get_long_trends_from_gnss_station(station='tela', modelname='LR',
+                                      plot=True):
+    from aux_gps import path_glob
+    import xarray as xr
+    import numpy as np
+    import pandas as pd
+    from aux_gps import plot_tmseries_xarray
+    path = GNSS / station / 'gipsyx_solutions'
+    file = path_glob(path, glob_str='*PPP*.nc')[0]
+    ds = xr.open_dataset(file)
+    # first do altitude [m]:
+    da_alt = ML_fit_model_to_tmseries(ds['alt'], modelname=modelname,
+                                      plot=False)
+    meters_per_day = da_alt.attrs['slope_per_day']
+    days = pd.to_timedelta(da_alt.time.max(
+    ).values - da_alt.time.min().values, unit='D')
+    years = days / np.timedelta64(1, 'Y')
+    meters_per_year = meters_per_day * days.days / years
+    da_alt.attrs['trend>mm_per_year'] = 1000.0 * meters_per_year
+    # now do lat[deg]:
+    one_degree_at_eq = 111.32  # km
+    lat0 = ds['lat'].dropna('time')[0].values.item()
+    factor = np.cos(np.deg2rad(lat0)) * one_degree_at_eq
+    da_lat = ML_fit_model_to_tmseries(ds['lat'], modelname=modelname,
+                                      plot=False)
+    degs_per_day = da_lat.attrs['slope_per_day']
+    days = pd.to_timedelta(da_lat.time.max(
+    ).values - da_lat.time.min().values, unit='D')
+    years = days / np.timedelta64(1, 'Y')
+    degs_per_year = degs_per_day * days.days / years
+    da_lat.attrs['trend>cm_per_year'] = factor * 1e5 * degs_per_year
+    da_lon = ML_fit_model_to_tmseries(ds['lon'], modelname=modelname,
+                                      plot=False)
+    degs_per_day = da_lon.attrs['slope_per_day']
+    days = pd.to_timedelta(da_lon.time.max(
+    ).values - da_lon.time.min().values, unit='D')
+    years = days / np.timedelta64(1, 'Y')
+    degs_per_year = degs_per_day * days.days / years
+    da_lon.attrs['trend>cm_per_year'] = factor * 1e5 * degs_per_year
+    rds = xr.Dataset()
+    rds['alt'] = ds['alt']
+    rds['lat'] = ds['lat']
+    rds['lon'] = ds['lon']
+    rds['alt_trend'] = da_alt
+    rds['lat_trend'] = da_lat
+    rds['lon_trend'] = da_lon
+    rds.attrs['lat_trend>cm_per_year'] = rds['lat_trend'].attrs['trend>cm_per_year']
+    rds.attrs['lon_trend>cm_per_year'] = rds['lon_trend'].attrs['trend>cm_per_year']
+    rds.attrs['alt_trend>mm_per_year'] = rds['alt_trend'].attrs['trend>mm_per_year']
+    rds.attrs['years'] = years
+    rds.attrs['station'] = station
+    rds.attrs['lat'] = ds['lat'].dropna('time')[0].values.item()
+    rds.attrs['lon'] = ds['lon'].dropna('time')[0].values.item()
+    rds.attrs['alt'] = ds['alt'].dropna('time')[0].values.item()
+    if plot:
+        plot_tmseries_xarray(rds)
+    return rds
+
+
+def ML_fit_model_to_tmseries(tms_da, modelname='LR', plot=True, verbose=False):
+    """fit a single time-series data-array with ML models specified in
+    ML_Switcher"""
+    import numpy as np
+    import xarray as xr
+    # find the time dim:
+    time_dim = list(set(tms_da.dims))[0]
+    # pick a model:
+    ml = ML_Switcher()
+    model = ml.pick_model(modelname)
+    # dropna for time-series:
+    tms_da_no_nan = tms_da.dropna(time_dim)
+    # df = tms_da_no_nan.to_dataframe()
+    # ind = df.index.factorize()[0].reshape(-1, 1)
+    # ind_with_nan = tms_da.to_dataframe().index.factorize()[0].reshape(-1, 1)
+    # change datetime units to days:
+    jul_with_nan = pd.to_datetime(tms_da[time_dim].values).to_julian_date()
+    jul_with_nan -= jul_with_nan[0]
+    jul_no_nan = pd.to_datetime(tms_da_no_nan[time_dim].values).to_julian_date()
+    jul_no_nan -= jul_no_nan[0]
+    jul_with_nan = np.array(jul_with_nan).reshape(-1, 1)
+    jul_no_nan = np.array(jul_no_nan).reshape(-1, 1)
+    model.fit(jul_no_nan, tms_da_no_nan.values)
+    new_y = model.predict(jul_with_nan).squeeze()
+    new_da = xr.DataArray(new_y, dims=[time_dim])
+    new_da[time_dim] = tms_da[time_dim]
+    if hasattr(model, 'coef_'):
+        new_da.attrs['slope_per_day'] = model.coef_[0]
+        if verbose:
+            print('slope_per_day: {}'.format(model.coef_[0]))
+    if hasattr(model, 'intercept_'):
+        new_da.attrs['intercept'] = model.intercept_
+        if verbose:
+            print('intercept: {}'.format(model.intercept_))
+    if plot:
+        tms_da.plot.line(marker='.', linewidth=0., color='b')
+        new_da.plot(color='r')
+    return new_da
+
+
 #def analyze_sounding_and_formulate(sound_path=sound_path,
 #                                   model_names = ['TSEN', 'LR'],
 #                                   res_save='LR'):
