@@ -7,8 +7,22 @@ Created on Thu Sep  5 11:24:01 2019
 """
 
 
-# TODO: check various gipsyx run parameters(e.g., postsmooth, elmin)
+# MEmORY saving tips:
+# 1   Avoid List Slicing:For example: for a = [0, 1, 2, 3, 4, 5],
+#  a[1:4] allocates a new array [1, 2, 3]
+# try to use function parameters or separate variables to track indices
+#  instead of slicing or altering a list.
 
+# 2Use List Indexing Sparingly
+# try to use “for item in array” for loops over arrays, before using
+#  “for index in range(len(array))” 
+
+# 3 String Concatenation
+# Instead of “+” for string concatenation, USE ''.join(iterable_object) or
+#  .format or % ! This makes a huge impact when the program deals with more
+#  data and/or longer strings.
+#4. Use Iterators and Generators
+# 5. Make use of libraries when possible
 def check_path(path):
     import os
     from pathlib import Path
@@ -157,8 +171,8 @@ def read_gipsyx_all_yearly_files(load_path, savepath=None, iqr_k=3.0,
         ds_list.append(dss)
     # now loop over ds_list and stitch yearly discontinuities:
     ds_list = stitch_yearly_files(ds_list)
-    logger.info('concating all years...')
-    ds = xr.concat(ds_list, 'time')
+    logger.info('merging all years...')
+    ds = xr.merge(ds_list)
     logger.info('fixing meta-data...')
     for da in ds.data_vars:
         old_keys = [x for x in ds[da].attrs.keys()]
