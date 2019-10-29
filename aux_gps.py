@@ -12,6 +12,7 @@ def tar_dir(path_to_tar, glob_str_to_tar, filename, savepath, compresslevel=9,
             with_dir_struct=False, verbose=False):
     import tarfile as tr
     from aux_gps import path_glob
+    import numpy as np
     """ compresses all glob_str_to_tar files (e.g., *.txt) in path_to_tar,
     and save it all to savepath with filename as filename. by default adds .tar
     suffix if not supplied by user. control compression level with
@@ -48,8 +49,14 @@ def tar_dir(path_to_tar, glob_str_to_tar, filename, savepath, compresslevel=9,
         arcname = None
         if verbose:
             print('files were archived with {} dir structure'.format(path_to_tar))
+    total = len(files_to_tar)
+    print('Found {} {} to tar in dir {}'.format(total, glob_str_to_tar, path_to_tar))
+    cnt = 0
     for file in files_to_tar:
         tar.add(file, arcname=aname(file, arcname=arcname))
+        cnt += 1
+#        if np.mod(cnt, 10) == 0:
+#            print('.', end=" ")
     tar.close()
     print('Compressed all {} files in {} to {}'.format(glob_str_to_tar,
           path_to_tar, savepath / filename))
@@ -106,7 +113,7 @@ def get_var(varname):
 
 
 def plot_tmseries_xarray(ds, fields=None, error_suffix='_error',
-                         errorbar_alpha=0.5):
+                         errorbar_alpha=0.5, trend_suffix='_trend'):
     """plot time-series plot w/o errorbars of a xarray dataset"""
     import numpy as np
     import matplotlib.pyplot as plt
@@ -118,9 +125,14 @@ def plot_tmseries_xarray(ds, fields=None, error_suffix='_error',
     if isinstance(fields, str):
         fields = [fields]
     error_fields = [x for x in ds.data_vars if error_suffix in x]
+    trend_fields = [x for x in ds.data_vars if trend_suffix in x]
     if fields is None and error_fields:
         all_fields = [x for x in ds.data_vars if error_suffix not in x]
+    elif fields is None and trend_fields:
+        all_fields = [x for x in ds.data_vars if trend_suffix not in x]
     elif fields is None and not error_fields:
+        all_fields = [x for x in ds.data_vars]
+    elif fields is None and not trend_fields:
         all_fields = [x for x in ds.data_vars]
     elif fields is not None and isinstance(fields, list):
         all_fields = sorted(fields)
@@ -135,6 +147,19 @@ def plot_tmseries_xarray(ds, fields=None, error_suffix='_error',
                             da.values + ds[error].values,
                             where=np.isfinite(da.values),
                             alpha=errorbar_alpha)
+        if trend_fields:
+            print('adding trends...')
+            trend = da.name + trend_suffix
+            da[trend].plot(ax=ax, color='r')
+            trend_attr = [x for x in da[trend].attrs.keys()
+                          if 'trend' in x][0]
+            if trend_attr:
+                trend_str = trend_attr.split('>')[-1]
+                trend_val = da[trend].attrs[trend_attr]
+                ax.text(0.1, 0.9, '{}: {:.2f}'.format(trend_str, trend_val),
+                        horizontalalignment='center',
+                        verticalalignment='top', color='green', fontsize=15,
+                        transform=ax.transAxes)
         ax.grid()
         ax.set_title(da.name)
         plt.tight_layout()
@@ -148,10 +173,22 @@ def plot_tmseries_xarray(ds, fields=None, error_suffix='_error',
             if error_fields:
                 print('adding errorbars fillbetween...')
                 ax.fill_between(da[time_dim].values,
-                                da.sel(var=field).values - ds[field+error_suffix].values,
-                                da.sel(var=field).values + ds[field+error_suffix].values,
+                                da.sel(var=field).values - ds[field + error_suffix].values,
+                                da.sel(var=field).values + ds[field + error_suffix].values,
                                 where=np.isfinite(da.sel(var=field).values),
                                 alpha=errorbar_alpha)
+            if trend_fields:
+                print('adding trends...')
+                ds[field + trend_suffix].plot(ax=ax, color='r')
+                trend_attr = [x for x in ds[field + trend_suffix].attrs.keys()
+                              if 'trend' in x][0]
+                if trend_attr:
+                    trend_str = trend_attr.split('>')[-1]
+                    trend_val = ds[field + trend_suffix].attrs[trend_attr]
+                    ax.text(0.1, 0.9, '{}: {:.2f}'.format(trend_str, trend_val),
+                            horizontalalignment='center',
+                            verticalalignment='top', color='green', fontsize=15,
+                            transform=ax.transAxes)
             try:
                 ax.set_ylabel('[' + ds[field].attrs['units'] + ']')
             except KeyError:
