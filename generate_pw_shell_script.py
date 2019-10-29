@@ -94,7 +94,7 @@ def generate_backup(station, task):
         savepath = station_path / 'backup'
         savepath.mkdir(parents=True, exist_ok=True)
         try:
-            tar_dir(path, glob_str, filename, savepath)
+            tar_dir(path, glob_str, filename, savepath, compresslevel=None)
         except FileNotFoundError:
             print(
                 'skipping {} , because no {} found in {}'.format(
