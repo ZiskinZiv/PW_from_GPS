@@ -1790,44 +1790,67 @@ def israeli_gnss_stations_long_term_trend_analysis(gis_path=gis_path,
     import pandas as pd
     from pathlib import Path
     import geopandas as gpd
-    isr_stations = pd.read_csv(Path().cwd() / 'stations_approx_loc.txt',
-                               delim_whitespace=True)
-    isr_stations = isr_stations.index.tolist()
-    df_list = []
-    for station in isr_stations:
-        print('proccessing station: {}'.format(station))
-        try:
-            rds = get_long_trends_from_gnss_station(station, 'LR', False)
-        except FileNotFoundError:
-            print('didnt find {} in gipsyx solutions, skipping...'.format(station))
-            continue
-        df_list.append(rds.attrs)
-    df = pd.DataFrame(df_list)
-    df.set_index(df.station, inplace=True)
-    df.drop('station', axis=1, inplace=True)
-    rest = df.columns[3:].tolist()
-    df.columns = ['north_cm_per_year', 'east_cm_per_year', 'up_mm_per_year'] + rest
-    df['cm_per_year'] = np.sqrt(
-            df['north_cm_per_year'] ** 2.0 +
-            df['east_cm_per_year'] ** 2.0)
-    # define angle from east : i.e., x axis is east
-    df['angle_from_east'] = np.rad2deg(np.arctan(df['north_cm_per_year'].div(df['east_cm_per_year'])))
-    isr = gpd.read_file(gis_path / 'Israel_demog_yosh.shp')
-    isr.crs = {'init': 'epsg:4326'}
+    import matplotlib.pyplot as plt
+    cwd = Path().cwd()
+    filename = 'israeli_long_term_tectonics_trends.txt'
+    if (cwd / filename).is_file():
+        df = pd.read_csv(cwd/filename, delim_whitespace=True,
+                         index_col='station')
+    else:
+        isr_stations = pd.read_csv(cwd / 'stations_approx_loc.txt',
+                                   delim_whitespace=True)
+        isr_stations = isr_stations.index.tolist()
+        df_list = []
+        for station in isr_stations:
+            print('proccessing station: {}'.format(station))
+            try:
+                rds = get_long_trends_from_gnss_station(station, 'LR', False)
+            except FileNotFoundError:
+                print('didnt find {} in gipsyx solutions, skipping...'.format(station))
+                continue
+            df_list.append(rds.attrs)
+        df = pd.DataFrame(df_list)
+        df.set_index(df.station, inplace=True)
+        df.drop('station', axis=1, inplace=True)
+        rest = df.columns[3:].tolist()
+        df.columns = ['north_cm_per_year', 'east_cm_per_year', 'up_mm_per_year'] + rest
+        df['cm_per_year'] = np.sqrt(
+                df['north_cm_per_year'] ** 2.0 +
+                df['east_cm_per_year'] ** 2.0)
+        # define angle from east : i.e., x axis is east
+        df['angle_from_east'] = np.rad2deg(np.arctan(df['north_cm_per_year'].div(df['east_cm_per_year'])))
+        df.to_csv(cwd / filename, sep=' ')
+        print('{} was saved to {}'.format(filename, cwd))
+    isr_with_yosh = gpd.read_file(gis_path / 'Israel_demog_yosh.shp')
+    isr_with_yosh.crs = {'init': 'epsg:4326'}
     stations = gpd.GeoDataFrame(df,
                                 geometry=gpd.points_from_xy(df.lon,
                                                             df.lat),
-                                crs=isr.crs)
-    stations_isr = gpd.sjoin(stations, isr, op='within')
+                                crs=isr_with_yosh.crs)
+    isr = gpd.sjoin(stations, isr_with_yosh, op='within')
+    isr['X'] = isr.geometry.x
+    isr['Y'] = isr.geometry.y
+    isr['U'] = isr.east_cm_per_year
+    isr['V'] = isr.north_cm_per_year
     if plot:
-        ax = isr.plot()
-        stations_isr.plot(ax=ax, column='cm_per_year', cmap='Greens',
-                          edgecolor='black', legend=True)
-        for x, y, label in zip(stations_isr.lon, stations_isr.lat,
-                               stations_isr.index):
+        isr.drop('dsea', axis=0, inplace=True)
+        ax = isr_with_yosh.plot(figsize=(10, 8))
+        isr[(isr['years'] <= 10.0) & (isr['years'] >= 5.0)].plot(ax=ax, markersize=50, color='y', edgecolor='k', marker='o', label='5-10 yrs')
+        isr[(isr['years'] <= 15.0) & (isr['years'] > 10.0)].plot(ax=ax, markersize=50, color='g', edgecolor='k', marker='o', label='10-15 yrs')
+        isr[(isr['years'] <= 20.0) & (isr['years'] > 15.0)].plot(ax=ax, markersize=50, color='c', edgecolor='k', marker='o', label='15-20 yrs')
+        isr[(isr['years'] <= 25.0) & (isr['years'] > 20.0)].plot(ax=ax, markersize=50, color='r', edgecolor='k', marker='o', label='20-25 yrs')
+        plt.legend(prop={'size': 12}, bbox_to_anchor=(1.05, 1.0), title='number of data years')
+        # isr.plot(ax=ax, column='cm_per_year', cmap='Greens',
+        #          edgecolor='black', legend=True)
+        Q = ax.quiver(isr['X'], isr['Y'], isr['U'], isr['V'],
+                      isr['cm_per_year'], cmap='Greens')
+        qk = ax.quiverkey(Q, 0.8, 0.9, 1, r'$1 \frac{cm}{yr}$', labelpos='E',
+                          coordinates='figure')
+        for x, y, label in zip(isr.lon, isr.lat,
+                               isr.index):
             ax.annotate(label, xy=(x, y), xytext=(3, 3),
                         textcoords="offset points")
-    return stations_isr
+    return isr
 
 
 def get_long_trends_from_gnss_station(station='tela', modelname='LR',
