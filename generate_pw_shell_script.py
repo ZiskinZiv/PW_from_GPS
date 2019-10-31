@@ -52,7 +52,7 @@ def generate_delete(station, task):
             path = station_path / 'rinex/30hr'
             glob_str = '*.dr.gz'
         elif task == 'run':
-            path = station_path / 'rinex/hr30/results'
+            path = station_path / 'rinex/30hr/results'
             glob_str = '*.tdp'
         elif task == 'post':
             path = station_path / 'gipsyx_solutions'
@@ -337,6 +337,7 @@ if __name__ == '__main__':
     # use ISR stations db for israeli stations and ocean loading also:
     if all(a in isr_stations for a in args.station):
         args.tree = pwpath / 'my_trees/ISROcnld'
+        args.staDb = pwpath / 'ALL.staDb'
     else:
         if args.staDb is not None:
             args.staDb = pwpath / args.staDb
