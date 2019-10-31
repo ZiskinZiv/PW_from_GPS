@@ -1786,7 +1786,7 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
 
 
 def israeli_gnss_stations_long_term_trend_analysis(gis_path=gis_path,
-                                                   plot=True):
+                                                   rel_plot='tela'):
     import pandas as pd
     from pathlib import Path
     import geopandas as gpd
@@ -1794,7 +1794,7 @@ def israeli_gnss_stations_long_term_trend_analysis(gis_path=gis_path,
     cwd = Path().cwd()
     filename = 'israeli_long_term_tectonics_trends.txt'
     if (cwd / filename).is_file():
-        df = pd.read_csv(cwd/filename, delim_whitespace=True,
+        df = pd.read_csv(cwd / filename, delim_whitespace=True,
                          index_col='station')
     else:
         isr_stations = pd.read_csv(cwd / 'stations_approx_loc.txt',
@@ -1806,19 +1806,35 @@ def israeli_gnss_stations_long_term_trend_analysis(gis_path=gis_path,
             try:
                 rds = get_long_trends_from_gnss_station(station, 'LR', False)
             except FileNotFoundError:
-                print('didnt find {} in gipsyx solutions, skipping...'.format(station))
+                print(
+                    'didnt find {} in gipsyx solutions, skipping...'.format(station))
                 continue
             df_list.append(rds.attrs)
         df = pd.DataFrame(df_list)
         df.set_index(df.station, inplace=True)
         df.drop('station', axis=1, inplace=True)
         rest = df.columns[3:].tolist()
-        df.columns = ['north_cm_per_year', 'east_cm_per_year', 'up_mm_per_year'] + rest
+        df.columns = [
+            'north_cm_per_year',
+            'east_cm_per_year',
+            'up_mm_per_year'] + rest
         df['cm_per_year'] = np.sqrt(
-                df['north_cm_per_year'] ** 2.0 +
-                df['east_cm_per_year'] ** 2.0)
+            df['north_cm_per_year'] ** 2.0 +
+            df['east_cm_per_year'] ** 2.0)
         # define angle from east : i.e., x axis is east
-        df['angle_from_east'] = np.rad2deg(np.arctan(df['north_cm_per_year'].div(df['east_cm_per_year'])))
+        df['angle_from_east'] = np.rad2deg(
+            np.arctan2(df['north_cm_per_year'], df['east_cm_per_year']))
+        for station in df.index:
+            df['rel_mm_north_{}'.format(station)] = (df['north_cm_per_year'] \
+                - df.loc[station, 'north_cm_per_year']) * 100.0
+            df['rel_mm_east_{}'.format(station)] = (df['east_cm_per_year'] \
+                - df.loc[station, 'east_cm_per_year']) * 100.0
+            df['rel_mm_per_year_{}'.format(station)] = np.sqrt(
+                df['rel_mm_north_{}'.format(station)] ** 2.0 +
+                df['rel_mm_east_{}'.format(station)] ** 2.0)
+            # define angle from east : i.e., x axis is east
+            df['rel_angle_from_east_{}'.format(station)] = np.rad2deg(np.arctan2(
+                df['rel_mm_north_{}'.format(station)], df['rel_mm_east_{}'.format(station)]))
         df.to_csv(cwd / filename, sep=' ')
         print('{} was saved to {}'.format(filename, cwd))
     isr_with_yosh = gpd.read_file(gis_path / 'Israel_demog_yosh.shp')
@@ -1832,9 +1848,10 @@ def israeli_gnss_stations_long_term_trend_analysis(gis_path=gis_path,
     isr['Y'] = isr.geometry.y
     isr['U'] = isr.east_cm_per_year
     isr['V'] = isr.north_cm_per_year
-    if plot:
+    if rel_plot is None:
         isr.drop('dsea', axis=0, inplace=True)
-        ax = isr_with_yosh.plot(figsize=(10, 8))
+        fig, ax = plt.subplots(figsize=(10, 8))
+        isr_with_yosh.plot(ax=ax)
         isr[(isr['years'] <= 10.0) & (isr['years'] >= 5.0)].plot(ax=ax, markersize=50, color='y', edgecolor='k', marker='o', label='5-10 yrs')
         isr[(isr['years'] <= 15.0) & (isr['years'] > 10.0)].plot(ax=ax, markersize=50, color='g', edgecolor='k', marker='o', label='10-15 yrs')
         isr[(isr['years'] <= 20.0) & (isr['years'] > 15.0)].plot(ax=ax, markersize=50, color='c', edgecolor='k', marker='o', label='15-20 yrs')
@@ -1842,45 +1859,111 @@ def israeli_gnss_stations_long_term_trend_analysis(gis_path=gis_path,
         plt.legend(prop={'size': 12}, bbox_to_anchor=(1.05, 1.0), title='number of data years')
         # isr.plot(ax=ax, column='cm_per_year', cmap='Greens',
         #          edgecolor='black', legend=True)
+        cmap = plt.get_cmap('spring', 10)
         Q = ax.quiver(isr['X'], isr['Y'], isr['U'], isr['V'],
-                      isr['cm_per_year'], cmap='Greens')
+                      isr['cm_per_year'], cmap=cmap)
+        fig.colorbar(Q, extend='max')
         qk = ax.quiverkey(Q, 0.8, 0.9, 1, r'$1 \frac{cm}{yr}$', labelpos='E',
                           coordinates='figure')
         for x, y, label in zip(isr.lon, isr.lat,
                                isr.index):
             ax.annotate(label, xy=(x, y), xytext=(3, 3),
                         textcoords="offset points")
-    return isr
+    elif rel_plot is not None:
+        isr.drop('dsea', axis=0, inplace=True)
+        fig, ax = plt.subplots(figsize=(10, 8))
+        isr_with_yosh.plot(ax=ax)
+        isr[(isr['years'] <= 10.0) & (isr['years'] >= 5.0)].plot(ax=ax, markersize=50, color='y', edgecolor='k', marker='o', label='5-10 yrs')
+        isr[(isr['years'] <= 15.0) & (isr['years'] > 10.0)].plot(ax=ax, markersize=50, color='g', edgecolor='k', marker='o', label='10-15 yrs')
+        isr[(isr['years'] <= 20.0) & (isr['years'] > 15.0)].plot(ax=ax, markersize=50, color='c', edgecolor='k', marker='o', label='15-20 yrs')
+        isr[(isr['years'] <= 25.0) & (isr['years'] > 20.0)].plot(ax=ax, markersize=50, color='r', edgecolor='k', marker='o', label='20-25 yrs')
+        plt.legend(prop={'size': 12}, bbox_to_anchor=(-0.15, 1.0), title='number of data years')
+        # isr.plot(ax=ax, column='cm_per_year', cmap='Greens',
+        #          edgecolor='black', legend=True)
+        isr['U'] = isr['rel_mm_east_{}'.format(rel_plot)]
+        isr['V'] = isr['rel_mm_north_{}'.format(rel_plot)]
+        cmap = plt.get_cmap('spring', 7)
+        Q = ax.quiver(isr['X'], isr['Y'], isr['U'], isr['V'],
+                      isr['rel_mm_per_year_{}'.format(rel_plot)],
+                      cmap=cmap)
+        qk = ax.quiverkey(Q, 0.8, 0.9, 1, r'$1 \frac{mm}{yr}$', labelpos='E',
+                          coordinates='figure')
+        fig.colorbar(Q, extend='max')
+        plt.title('Relative to {} station'.format(rel_plot))
+        for x, y, label in zip(isr.lon, isr.lat,
+                               isr.index):
+            ax.annotate(label, xy=(x, y), xytext=(3, 3),
+                        textcoords="offset points")
+        print(isr[['rel_mm_east_{}'.format(rel_plot),'rel_mm_north_{}'.format(rel_plot)]])
+    return df
 
 
-def load_gipsyx_results(station='tela', plot=['WetZ']):
+#def save_resampled_versions_gispyx_results(station='tela', sample_rate='H'):
+#    from aux_gps import path_glob
+#    import xarray as xr
+#    """resample gipsyx results nc files and save them.options for
+#    sample_rate are in sample dict"""
+#    path = GNSS / station / 'gipsyx_solutions'
+#    glob = '{}_PPP*.nc'.format(station.upper())
+#    try:
+#        file = path_glob(path, glob_str=glob)[0]
+#    except FileNotFoundError:
+#        print('did not find {} in gipsyx_solutions dir, skipping...'.format(station))
+#        return
+#    filename = file.as_posix().split('/')[-1].split('.')[0]
+#    years = filename.split('_')[-1]
+#    ds = xr.open_dataset(file)
+#    time_dim = list(set(ds.dims))[0]
+#    sample = {'H': 'hourly', 'W': 'weekly', 'MS': 'monthly'}
+#    print('resampaling {} to {}'.format(station, sample[sample_rate]))
+#    dsr = ds.resample({time_dim: sample_rate}, keep_attrs=True).mean(keep_attrs=True)
+#    new_filename = '_'.join([station.upper(), sample[sample_rate], 'PPP',
+#                             years])
+#    new_filename = new_filename + '.nc'
+#    print('saving resmapled station {} to {}'.format(station, path))
+#    comp = dict(zlib=True, complevel=9)  # best compression
+#    encoding = {var: comp for var in dsr.data_vars}
+#    dsr.to_netcdf(path / new_filename, 'w', encoding=encoding)
+#    print('Done!')
+#    return dsr
+
+
+def load_gipsyx_results(station='tela', sample_rate=None,
+                        plot_fields=['WetZ']):
+    """load and plot gipsyx solutions for station, to choose sample rate
+    different than 5 mins choose: 'H', 'W' or 'MS'"""
     from aux_gps import path_glob
     from aux_gps import plot_tmseries_xarray
     import xarray as xr
+    sample = {'H': 'hourly', 'W': 'weekly', 'MS': 'monthly'}
     path = GNSS / station / 'gipsyx_solutions'
-    file = path_glob(path, glob_str='*PPP*.nc')[0]
+    if sample_rate is None:
+        glob = '{}_PPP*.nc'.format(station.upper())
+        file = path_glob(path, glob_str=glob)[0]
+    else:
+        glob = '{}_{}_PPP*.nc'.format(station.upper(), sample[sample_rate])
+        file = path_glob(path, glob_str=glob)[0]
     ds = xr.open_dataset(file)
-    if plot is not None:
-        plot_tmseries_xarray(ds, plot)
+    if plot_fields is not None and plot_fields != 'all':
+        plot_tmseries_xarray(ds, plot_fields)
+    elif plot_fields == 'all':
+        plot_tmseries_xarray(ds, ['GradNorth', 'GradEast', 'WetZ', 'lat',
+                                  'lon', 'alt'])
     return ds
 
 
 def get_long_trends_from_gnss_station(station='tela', modelname='LR',
-                                      plot=None):
-    from aux_gps import path_glob
+                                      plot=True):
     import xarray as xr
     import numpy as np
-    import pandas as pd
     from aux_gps import plot_tmseries_xarray
-    ds = load_gipsyx_results(station, plot)
+    # dont try anonther model than LR except for lower-sampled data
+    ds = load_gipsyx_results(station, sample_rate=None, plot_fields=None)
     # first do altitude [m]:
     da_alt = ML_fit_model_to_tmseries(ds['alt'], modelname=modelname,
                                       plot=False)
-    meters_per_day = da_alt.attrs['slope_per_day']
-    days = pd.to_timedelta(da_alt.time.max(
-    ).values - da_alt.time.min().values, unit='D')
-    years = days / np.timedelta64(1, 'Y')
-    meters_per_year = meters_per_day * days.days / years
+    years = da_alt.attrs['total_years']
+    meters_per_year = da_alt.attrs['slope_per_year']
     da_alt.attrs['trend>mm_per_year'] = 1000.0 * meters_per_year
     # now do lat[deg]:
     one_degree_at_eq = 111.32  # km
@@ -1888,21 +1971,15 @@ def get_long_trends_from_gnss_station(station='tela', modelname='LR',
     factor = np.cos(np.deg2rad(lat0)) * one_degree_at_eq
     da_lat = ML_fit_model_to_tmseries(ds['lat'], modelname=modelname,
                                       plot=False)
-    degs_per_day = da_lat.attrs['slope_per_day']
-    days = pd.to_timedelta(da_lat.time.max(
-    ).values - da_lat.time.min().values, unit='D')
-    years = days / np.timedelta64(1, 'Y')
-    degs_per_year = degs_per_day * days.days / years
+    degs_per_year = da_lat.attrs['slope_per_year']
     da_lat.attrs['trend>cm_per_year'] = factor * 1e5 * degs_per_year
     da_lon = ML_fit_model_to_tmseries(ds['lon'], modelname=modelname,
                                       plot=False)
-    degs_per_day = da_lon.attrs['slope_per_day']
-    days = pd.to_timedelta(da_lon.time.max(
-    ).values - da_lon.time.min().values, unit='D')
-    years = days / np.timedelta64(1, 'Y')
-    degs_per_year = degs_per_day * days.days / years
+    degs_per_year = da_lon.attrs['slope_per_year']
     da_lon.attrs['trend>cm_per_year'] = factor * 1e5 * degs_per_year
     rds = xr.Dataset()
+    # the following attrs are being read to israeli_gnss_stations procedure
+    # above and used in its dataframe, so don't touch these attrs:
     rds['alt'] = ds['alt']
     rds['lat'] = ds['lat']
     rds['lon'] = ds['lon']
@@ -1927,6 +2004,7 @@ def ML_fit_model_to_tmseries(tms_da, modelname='LR', plot=True, verbose=False):
     ML_Switcher"""
     import numpy as np
     import xarray as xr
+    import pandas as pd
     # find the time dim:
     time_dim = list(set(tms_da.dims))[0]
     # pick a model:
@@ -1950,8 +2028,15 @@ def ML_fit_model_to_tmseries(tms_da, modelname='LR', plot=True, verbose=False):
     new_da[time_dim] = tms_da[time_dim]
     if hasattr(model, 'coef_'):
         new_da.attrs['slope_per_day'] = model.coef_[0]
+        days = pd.to_timedelta(tms_da.time.max(
+                ).values - tms_da.time.min().values, unit='D')
+        years = days / np.timedelta64(1, 'Y')
+        slope_per_year = model.coef_[0] * days.days / years
+        new_da.attrs['slope_per_year'] = slope_per_year
+        new_da.attrs['total_years'] = years
         if verbose:
             print('slope_per_day: {}'.format(model.coef_[0]))
+            print('slope_per_year: {}'.format(slope_per_year))
     if hasattr(model, 'intercept_'):
         new_da.attrs['intercept'] = model.intercept_
         if verbose:
