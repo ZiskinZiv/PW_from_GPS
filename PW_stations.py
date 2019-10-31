@@ -1853,16 +1853,26 @@ def israeli_gnss_stations_long_term_trend_analysis(gis_path=gis_path,
     return isr
 
 
+def load_gipsyx_results(station='tela', plot=['WetZ']):
+    from aux_gps import path_glob
+    from aux_gps import plot_tmseries_xarray
+    import xarray as xr
+    path = GNSS / station / 'gipsyx_solutions'
+    file = path_glob(path, glob_str='*PPP*.nc')[0]
+    ds = xr.open_dataset(file)
+    if plot is not None:
+        plot_tmseries_xarray(ds, plot)
+    return ds
+
+
 def get_long_trends_from_gnss_station(station='tela', modelname='LR',
-                                      plot=True):
+                                      plot=None):
     from aux_gps import path_glob
     import xarray as xr
     import numpy as np
     import pandas as pd
     from aux_gps import plot_tmseries_xarray
-    path = GNSS / station / 'gipsyx_solutions'
-    file = path_glob(path, glob_str='*PPP*.nc')[0]
-    ds = xr.open_dataset(file)
+    ds = load_gipsyx_results(station, plot)
     # first do altitude [m]:
     da_alt = ML_fit_model_to_tmseries(ds['alt'], modelname=modelname,
                                       plot=False)
