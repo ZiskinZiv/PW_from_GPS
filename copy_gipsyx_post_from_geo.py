@@ -117,15 +117,16 @@ def copy_post_from_geo(remote_path, station):
     for curr_sta in station:
         src_path = remote_path / curr_sta / 'gipsyx_solutions'
         try:
-            filepath = path_glob(src_path, '*PPP*.nc')[0]
+            filepaths = path_glob(src_path, '*PPP*.nc')
         except FileNotFoundError:
             print('{} final solution not found in {}'.format(curr_sta, src_path))
             continue
-        filename = filepath.as_posix().split('/')[-1]
-        src_path = src_path / filename
-        dst_path = workpath / curr_sta / 'gipsyx_solutions'
-        dst_path.mkdir(parents=True, exist_ok=True)
-        copy_with_progress(src_path, dst_path)
+        for filepath in filepaths:
+            filename = filepath.as_posix().split('/')[-1]
+            src_path = src_path / filename
+            dst_path = workpath / curr_sta / 'gipsyx_solutions'
+            dst_path.mkdir(parents=True, exist_ok=True)
+            copy_with_progress(src_path, dst_path)
     print('Done Copying GipsyX results!')
     return
 
