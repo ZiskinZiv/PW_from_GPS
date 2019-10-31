@@ -94,6 +94,55 @@ def plot_gipsy_field(ds, fields='WetZ', with_error=False):
     return fg
 
 
+def save_all_resampled_versions_gipsyx(load_path, sample):
+    for key in sample.keys():
+        save_resampled_versions_gispyx_results(load_path, sample, key)
+    return
+
+
+def save_resampled_versions_gispyx_results(load_path, sample,
+                                           sample_rate='1H'):
+    from aux_gps import path_glob
+    import xarray as xr
+    import logging
+    """resample gipsyx results nc files and save them.options for
+    sample_rate are in sample dict"""
+    logger = logging.getLogger('gipsyx_post_proccesser')
+    path = path_glob(load_path, '*.nc')[0]
+    station = path.as_posix().split('/')[-1].split('_')[0]
+    # path = GNSS / station / 'gipsyx_solutions'
+    glob = '{}_PPP*.nc'.format(station.upper())
+    try:
+        file = path_glob(load_path, glob_str=glob)[0]
+    except FileNotFoundError:
+        logger.warning('did not find {} in gipsyx_solutions dir, skipping...'.format(station))
+        return
+    filename = file.as_posix().split('/')[-1].split('.')[0]
+    years = filename.split('_')[-1]
+    ds = xr.open_dataset(file)
+    time_dim = list(set(ds.dims))[0]
+    logger.info('resampaling {} to {}'.format(station, sample[sample_rate]))
+    years = [str(x) for x in sorted(list(set(ds[time_dim].dt.year.values)))]
+    if sample_rate == '1H' or sample_rate == '3H':
+        dsr_list = []
+        for year in years:
+            logger.info('resampling {} of year {}'.format(sample_rate, year))
+            dsr = ds.sel({time_dim: year}).resample({time_dim: sample_rate}, keep_attrs=True, skipna=True).mean(keep_attrs=True)
+            dsr_list.append(dsr)
+        dsr = xr.concat(dsr_list, time_dim)
+    else:
+        dsr = ds.resample({time_dim: sample_rate}, keep_attrs=True, skipna=True).mean(keep_attrs=True)
+    new_filename = '_'.join([station.upper(), sample[sample_rate], 'PPP',
+                             years])
+    new_filename = new_filename + '.nc'
+    logger.info('saving resmapled station {} to {}'.format(station, load_path))
+    comp = dict(zlib=True, complevel=9)  # best compression
+    encoding = {var: comp for var in dsr.data_vars}
+    dsr.to_netcdf(load_path / new_filename, 'w', encoding=encoding)
+    logger.info('Done resampling!')
+    return
+
+
 def read_gipsyx_all_yearly_files(load_path, savepath=None, iqr_k=3.0,
                                  plot=False):
     """read, stitch and clean all yearly post proccessed ppp gipsyx solutions
@@ -193,6 +242,7 @@ def read_gipsyx_all_yearly_files(load_path, savepath=None, iqr_k=3.0,
     ds = transform_ds_to_lat_lon_alt(ds, ['X', 'Y', 'Z'], '_error', 'time')
     logger.info('reindexing fields with 5 mins frequency(i.e., inserting NaNs)')
     ds = xr_reindex_with_date_range(ds, 'time', '5min')
+    ds.attrs['station'] = station
     if plot:
         plot_gipsy_field(ds, None)
     if savepath is not None:
@@ -777,4 +827,7 @@ if __name__ == '__main__':
     else:
         iqr_k = args.iqr_k
     read_gipsyx_all_yearly_files(args.savepath, args.savepath, iqr_k, False)
+    sample = {'1H': 'hourly', '3H': '3hourly', 'D': 'Daily', 'W': 'weekly',
+              'MS': 'monthly'}
+    save_all_resampled_versions_gipsyx(args.savepath, sample)
     logger.info('Done post proccessing station {}.'.format(station))
