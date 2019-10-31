@@ -5,39 +5,70 @@ Created on Tue Jun 25 14:29:10 2019
 
 @author: ziskin
 """
-
+# TODO: add logger 
+# TODO: add option to just update recent data from 10 mins api
 
 def check_path(path):
     import os
+    from pathlib import Path
     path = str(path)
     if not os.path.exists(path):
         raise argparse.ArgumentTypeError(path + ' does not exist...')
-    return path
+    return Path(path)
+
+
+def generate_delete(savepath, channel_name):
+    from aux_gps import query_yes_no
+    from aux_gps import path_glob
+    try:
+        glob = '*_{}_10mins.nc'.format(channel_name)
+        files_to_delete = path_glob(savepath, glob)
+    except FileNotFoundError:
+        print('skipping {} , because its empty or not existant..'.format(savepath))
+        return
+    print('WARNING for channel {}, ALL nc files in {} WILL BE DELETED!'.format(channel_name, savepath))
+    to_delete = query_yes_no('ARE YOU SURE ?')
+    if not to_delete:
+        print('files NOT deleted...')
+    else:
+        [x.unlink() for x in files_to_delete]
+        print('FILES DELETED!')
+    return
 
 
 def download_all_10mins_ims(savepath, channel_name='TD'):
-    def get_already_dl_dict(savepath, channel_name):
-        import collections
-        dl_files = []
-        search_str = '*' + channel_name + '_10mins.nc'
-        for file in savepath.rglob(search_str):
-            dl_files.append(file.as_posix().split('/')[-1])
-        already_dl_id = [int(x.split('_')[1]) for x in dl_files]
-        already_dl_names = [x.split('_')[0] for x in dl_files]
-        already_dl = dict(zip(already_dl_id, already_dl_names))
-        od = collections.OrderedDict(sorted(already_dl.items()))
-        return od
-
+    from aux_gps import path_glob
+    import xarray as xr
+    glob = '*_{}_10mins.nc'.format(channel_name)
+    files = sorted(path_glob(savepath, glob, return_empty_list=True))
+    files = [x for x in files if x.is_file()]
+    time_dim = list(set(xr.open_dataarray(files[0]).dims))[0]
+    last_dates = [xr.open_dataarray(x)[time_dim][-1].values.item() for x in files]
+    st_id_downloaded = [int(x.as_posix().split('/')[-1].split('_')[1]) for x in files]
+    d = dict(zip(st_id_downloaded, last_dates))
     stations = ims_api_get_meta(active_only=True, channel_name=channel_name)
     for index, row in stations.iterrows():
         st_id = row['stationId']
-        od = get_already_dl_dict(savepath, channel_name)
-        if st_id not in od.keys():
+        if st_id not in d.keys():
             download_ims_single_station(savepath=savepath,
                                         channel_name=channel_name,
-                                        stationid=st_id)
+                                        stationid=st_id, update=None)
+        elif st_id in d.keys():
+            da = download_ims_single_station(savepath=savepath,
+                                             channel_name=channel_name,
+                                             stationid=st_id, update=d[st_id])
+            file = path_glob(savepath, '*_{}_{}_10mins.nc'.format(st_id, channel_name))[0]
+            da_old = xr.open_dataarray(file)
+            da = xr.concat([da, da_old], time_dim)
+            filename = '_'.join([stations['name'], str(st_id), channel_name,
+                                 '10mins']) + '.nc'
+            comp = dict(zlib=True, complevel=9)  # best compression
+            encoding = {var: comp for var in da.to_dataset().data_vars}
+            print('saving to {} to {}'.format(filename, savepath))
+            da.to_netcdf(savepath / filename, 'w', encoding=encoding)
+            print('done!')
         else:
-            print('station {} is already in {}, skipping...'.format(od[st_id],
+            print('station {} is already in {}, skipping...'.format(st_id,
                   savepath))
     return
 
@@ -59,6 +90,7 @@ if __name__ == '__main__':
     required.add_argument('--savepath', help="a full path to download the files, e.g., /home/ziskin/Work_Files/PW_yuval/IMS_T/10mins", type=check_path)
     required.add_argument('--channel', help="10 mins channel name , e.g., TD, BP or RH",
                           choices=channels)
+    required.add_argument('--delete', action='store_true')  # its False
     #optional.add_argument('--station', nargs='+',
     #                      help='GPS station name, 4 UPPERCASE letters',
     #                      type=check_station_name)
@@ -76,8 +108,9 @@ if __name__ == '__main__':
 #    elif args.field is None:
 #        print('field is a required argument, run with -h...')
 #        sys.exit()
-    if args.channel is not None:
-        savepath = Path(args.savepath)
-        download_all_10mins_ims(savepath, channel_name=args.channel)
+    if args.channel is not None and not args.delete:
+        download_all_10mins_ims(args.savepath, channel_name=args.channel)
+    elif args.delete:
+        generate_delete(args.savepath, args.channel)
     else:
         raise ValueError('need to specify channel name!')
