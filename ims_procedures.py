@@ -644,7 +644,7 @@ def ims_api_get_meta(active_only=True, channel_name='TD'):
 
 
 def download_ims_single_station(stationid, savepath=ims_path,
-                                channel_name='TD'):
+                                channel_name='TD', update=None):
     """download single station with channel_name from earliest to latest.
     if chanel_name is None, download all channels"""
     import requests
@@ -714,21 +714,24 @@ def download_ims_single_station(stationid, savepath=ims_path,
     stations_10mins = pd.DataFrame(r.json())
     meta = {}
     st_name = stations_10mins['name'].where(
-            stations_10mins['stationId'] == stationid).dropna().item()
+            stations_10mins['stationId'] == stationid).dropna()
     location = stations_10mins['location'].where(
-            stations_10mins['stationId'] == stationid).dropna().item()
+            stations_10mins['stationId'] == stationid).dropna()
     active = stations_10mins['active'].where(
-            stations_10mins['stationId'] == stationid).dropna().item()
-    meta['name'] = '-'.join(st_name.split(' '))
+            stations_10mins['stationId'] == stationid).dropna()
+    meta['name'] = '-'.join(st_name.iloc[0].split(' '))
     meta['id'] = stationid
-    meta['loc'] = location
-    meta['active'] = active
+    meta['loc'] = location.iloc[0]
+    meta['active'] = active.iloc[0]
     r_early = requests.get('https://api.ims.gov.il/v1/envista/stations/' +
                            str(stationid) + '/data/earliest', headers=headers)
     r_late = requests.get('https://api.ims.gov.il/v1/envista/stations/' +
                           str(stationid) + '/data/latest', headers=headers)
     data = r_early.json()['data'][0]
-    earliest = pd.to_datetime(data['datetime']).strftime('%Y-%m-%d')
+    if update is not None:
+        earliest = update + pd.Timedelta(10, unit='m')
+    else:
+        earliest = pd.to_datetime(data['datetime']).strftime('%Y-%m-%d')
     data = r_late.json()['data'][0]
     latest = pd.to_datetime(data['datetime']).strftime('%Y-%m-%d')
     print(
@@ -780,13 +783,16 @@ def download_ims_single_station(stationid, savepath=ims_path,
             df_all[value_name] = new_vals
             df_all.index.name = 'time'
             da = to_dataarray(df_all, meta)
-            filename = '_'.join([meta['name'], str(meta['id']), channel_name,
-                                 '10mins']) + '.nc'
-            comp = dict(zlib=True, complevel=9)  # best compression
-            encoding = {var: comp for var in da.to_dataset().data_vars}
-            print('saving to {} to {}'.format(filename, savepath))
-            da.to_netcdf(savepath / filename, 'w', encoding=encoding)
-            print('done!')
+            if update is not None:
+                return da
+            else:
+                filename = '_'.join([meta['name'], str(meta['id']), channel_name,
+                                     '10mins']) + '.nc'
+                comp = dict(zlib=True, complevel=9)  # best compression
+                encoding = {var: comp for var in da.to_dataset().data_vars}
+                print('saving to {} to {}'.format(filename, savepath))
+                da.to_netcdf(savepath / filename, 'w', encoding=encoding)
+                print('done!')
     # all channels download add support here:
     elif channel_name is None:
         print('getting all channels...')
