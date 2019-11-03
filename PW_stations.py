@@ -23,9 +23,9 @@ alon_zwd = work_yuval / 'gipsyx_results/alon_newocean/ALON_PPP_2005-2019.nc'
 tela_zwd_aligned = work_yuval / 'TELA_zwd_aligned_with_physical_bet_dagan.nc'
 alon_zwd_aligned = work_yuval / 'ALON_zwd_aligned_with_physical_bet_dagan.nc'
 jslm_zwd_aligned = work_yuval / 'JSLM_zwd_aligned_with_physical_bet_dagan.nc'
-tela_ims = ims_path / '10mins/TEL-AVIV-COAST_178_TD_10mins.nc'
-alon_ims = ims_path / '10mins/ASHQELON-PORT_208_TD_10mins.nc'
-jslm_ims = ims_path / '10mins/JERUSALEM-CENTRE_23_TD_10mins.nc'
+tela_ims = ims_path / '10mins/TEL-AVIV-COAST_178_TD_10mins_filled.nc'
+alon_ims = ims_path / '10mins/ASHQELON-PORT_208_TD_10mins_filled.nc'
+jslm_ims = ims_path / '10mins/JERUSALEM-CENTRE_23_TD_10mins_filled.nc'
 station_on_geo = geo_path / 'Work_Files/PW_yuval/GNSS_stations'
 PW_stations_path = work_yuval / '1minute'
 stations = pd.read_csv('All_gps_stations.txt', header=0, delim_whitespace=True,
@@ -35,6 +35,34 @@ GNSS = work_yuval / 'GNSS_stations'
 # TODO: finish clouds formulation in ts-tm modeling
 # TODO: finish playing with ts-tm modeling, various machine learning algos.
 # TODO: redo the hour, season and cloud selection in formulate_plot
+
+
+def build_df_lat_lon_alt_gnss_stations(gnss_path=GNSS, savepath=None):
+    from aux_gps import path_glob
+    import pandas as pd
+    stations_in_gnss = [x.as_posix().split('/')[-1]
+                        for x in path_glob(GNSS, '*')]
+    dss = [
+        load_gipsyx_results(
+            x,
+            sample_rate='MS',
+            plot_fields=None) for x in stations_in_gnss]
+    stations_not_found = [x for x in dss if isinstance(x, str)]
+    [stations_in_gnss.remove(x) for x in stations_not_found]
+    dss = [x for x in dss if not isinstance(x, str)]
+    lats = [x.dropna('time').lat[0].values.item() for x in dss]
+    lons = [x.dropna('time').lon[0].values.item() for x in dss]
+    alts = [x.dropna('time').alt[0].values.item() for x in dss]
+    df = pd.DataFrame(lats)
+    df.index = stations_in_gnss
+    df['lon'] = lons
+    df['alt'] = alts
+    df.columns = ['lat', 'lon', 'alt']
+    df.sort_index(inplace=True)
+    if savepath is not None:
+        filename = 'israeli_gnss_coords.txt'
+        df.to_csv(savepath/filename, sep=' ')
+    return df
 
 
 def run_error_analysis(station='tela', task='edit30hr'):
@@ -167,6 +195,13 @@ def fit_ts_tm_produce_ipw_and_compare_TELA(phys_sound_file=phys_soundings,
         results = ml_models_T_from_sounding(sound_path, categories, model,
                                             physical_file=phys_sound_file,
                                             times=times)
+    if categories is None:
+        compare_kwargs.update({'title': 'whole'})
+    else:
+        if isinstance(categories, str):
+            compare_kwargs.update({'title': [categories][0]})
+        elif isinstance(categories, list):
+            compare_kwargs.update({'title': 'hour_season'})
     zwd_and_tpw = xr.open_dataset(zwd_file)
     if times is not None:
         zwd_and_tpw = zwd_and_tpw.sel(time=slice(*times))
@@ -214,7 +249,7 @@ def align_physical_bet_dagan_soundings_pw_to_gps_station_zwd(
     if not (savepath / filename).is_file():
         print('saving {} to {}'.format(filename, savepath))
         # first load physical bet_dagan Tpw, Ts, Tm and dt_range:
-        phys = xr.open_dataset(phys_sound_file)
+        phys = xr.open_dataset(phys_soundPercipatable_file)
         # clean and merge:
         p_list = [get_unique_index(phys[x], 'sound_time')
                   for x in ['Ts', 'Tm', 'Tpw', 'dt_range']]
@@ -232,13 +267,13 @@ def align_physical_bet_dagan_soundings_pw_to_gps_station_zwd(
             min_time = phys_ds['dt_range'].isel(sound_time=i).sel(bnd='Min').values
             max_time = phys_ds['dt_range'].isel(sound_time=i).sel(bnd='Max').values
             wetz = zwd['WetZ'].sel(time=slice(min_time, max_time)).mean('time')
-            wetz_std = zwd['WetZ'].sel(time=slice(min_time, max_time)).std('time')
+            wetz_std = zwd['WetZ'].sel(tiPercipatableme=slice(min_time, max_time)).std('time')
             wetz_error = zwd['WetZ_error'].sel(time=slice(min_time, max_time)).mean('time')
             wz_std.append(wetz_std)
             wz_list.append(wetz)
             wz_error_list.append(wetz_error)
         wetz_gps = xr.DataArray(wz_list, dims='sound_time')
-        wetz_gps.name = '{}_WetZ'.format(station)
+        wetz_gps.name = '{}_WetZ'.format(Percipatablestation)
         wetz_gps_error = xr.DataArray(wz_error_list, dims='sound_time')
         wetz_gps_error.name = 'TELA_WetZ_error'
         wetz_gps_std = xr.DataArray(wz_list, dims='sound_time')
@@ -259,7 +294,7 @@ def align_physical_bet_dagan_soundings_pw_to_gps_station_zwd(
     else:
         print('found file!')
         zwd_and_tpw = xr.open_dataset(savepath / filename)
-        wetz = zwd_and_tpw['{}_WetZ'.format(station)]
+        wetz = zwd_and_tpw['{}_WetZ'.formPercipatableat(station)]
         wetz_error = zwd_and_tpw['{}_WetZ_error'.format(station)]
         # load the 10 mins temperature data from IMS:
         tela_T = xr.open_dataset(IMS_file)
@@ -1210,19 +1245,19 @@ def compare_to_sounding2(pw_from_gps, pw_from_sounding, station='TELA',
     if hour is not None:
         pw = pw.sel(time=pw['time.hour'] == hour)
     if title is None:
-        sup = sup = 'ipw is created using Bevis Tm formulation'
+        sup = 'TPW is created using Bevis Tm formulation'
     if title is not None:
         if title == 'hour':
-            sup = 'ipw is created using hourly Tm segmentation and formulation'
+            sup = 'TPW for {} is created using empirical hourly Tm segmentation and formulation'.format(station)
         elif title == 'season':
-            sup = 'ipw is created using seasonly Tm segmentation and formulation'
+            sup = 'TPW for {} is created using empirical seasonly Tm segmentation and formulation'.format(station)
         elif title == 'whole':
-            sup = 'ipw is created using whole Tm formulation'
+            sup = 'TPW for {} is created using whole empirical Tm formulation'.format(station)
         elif title == 'hour_season':
-            sup = 'ipw is created using seasonly and hourly Tm segmentation and formulation'
+            sup = 'TPW for {} is created using empirical seasonly and hourly Tm segmentation and formulation'.format(station)
     fig, ax = plt.subplots(1, 2, figsize=(20, 4),
                            gridspec_kw={'width_ratios': [3, 1]})
-    fig.suptitle(sup)
+    ax[0].set_title(sup)
     pw[[station, 'sound']].to_dataframe().plot(ax=ax[0], style='.')
     sns.distplot(
         pw['resid'].values,
@@ -1344,19 +1379,19 @@ def compare_to_sounding(sound_path=sound_path, gps=garner_path, station='TELA',
     if hour is not None:
         pw = pw.sel(time=pw['time.hour'] == hour)
     if title is None:
-        sup = sup = 'ipw is created using Bevis Tm formulation'
+        sup = 'PW is created using Bevis Tm formulation'
     if title is not None:
         if title == 'hour':
-            sup = 'ipw is created using hourly Tm segmentation and formulation'
+            sup = 'PW is created using hourly Tm segmentation and formulation'
         elif title == 'season':
-            sup = 'ipw is created using seasonly Tm segmentation and formulation'
+            sup = 'PW is created using seasonly Tm segmentation and formulation'
         elif title == 'whole':
-            sup = 'ipw is created using whole Tm formulation'
+            sup = 'PW is created using whole Tm formulation'
         elif title == 'hour_season':
-            sup = 'ipw is created using seasonly and hourly Tm segmentation and formulation'
+            sup = 'PW is created using seasonly and hourly Tm segmentation and formulation'
     fig, ax = plt.subplots(1, 2, figsize=(20, 4),
                            gridspec_kw={'width_ratios': [3, 1]})
-    fig.suptitle(sup)
+    fig.suptitle(sup, fontweight='bold')
     pw[[station, 'sound']].to_dataframe().plot(ax=ax[0], style='.')
     sns.distplot(
         pw['resid'].values,
@@ -1560,7 +1595,7 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
         print('no categories selected, using full data.')
         fig, axes = plt.subplots(1, 2, figsize=(10, 7))
         fig.suptitle(
-            'Water vapor weighted mean atmospheric temperature vs. bet dagan sounding station surface temperature')
+                'Bet Dagan WV weighted mean atmosphric temperature(Tm) vs. surface temperature(Ts)', fontweight='bold')
         X = ds.ts.values.reshape(-1, 1)
         y = ds.tm.values
         [model.fit(X, y) for model in models]
@@ -1594,6 +1629,8 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
 #        linex = np.array([ds.ts.min().item(), ds.ts.max().item()])
 #        liney = a * linex + b
 #        axes[0].plot(linex, liney, c='r')
+        bevis_tm = ds.ts.values * 0.72 + 70.0
+        axes[0].plot(ds.ts.values, bevis_tm, c='purple')
         min_, max_ = axes[0].get_ylim()
         [axes[0].plot(X, newy, c=colors[i]) for i, newy in enumerate(predict)]
         [axes[0].text(0.01, pos[i],
@@ -1601,7 +1638,10 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
                                                        coefs[i], inters[i]),
                       transform=axes[0].transAxes, color=colors[i],
                       fontsize=12) for i in range(len(coefs))]
-
+        axes[0].text(0.01, 0.9,
+                      'Bevis 1992 et al. a: 0.72, b: 70.0',
+                      transform=axes[0].transAxes, color='purple',
+                      fontsize=12)
 #        axes[0].text(0.01, 0.9, 'a: {:.2f}, b: {:.2f}'.format(a, b),
 #                     transform=axes[0].transAxes, color='black', fontsize=12)
         axes[0].text(0.1, 0.85, 'n={}'.format(ds.ts.size),
@@ -1641,6 +1681,9 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
             trained = []
             fig, axes = plt.subplots(1, len(vals), sharey=True, sharex=True,
                                      figsize=(15, 8))
+            fig.suptitle(
+                'Bet Dagan WV weighted mean atmosphric temperature(Tm) vs. surface temperature(Ts) using {} selection criteria'.format(key.split('.')[-1]), fontweight='bold',x=0.5, y=1.0)
+
             for i, val in enumerate(vals):
                 ts = ds.ts.where(ds[key] == val).dropna(time_dim)
                 tm = ds.tm.where(ds[key] == val).dropna(time_dim)
@@ -1682,7 +1725,9 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
 #                linex = np.array([x.min().item(), x.max().item()])
 #                liney = tmul * linex + toff
 #                axes[i].plot(linex, liney, c='r')
-                axes[i].plot(ts.values, ts.values, c='k', alpha=0.2)
+                # unmark the following line to disable plotting y=x line:
+#                bevis_tm = ts.values * 0.72 + 70.0
+#                axes[i].plot(ts.values, bevis_tm, c='k')
                 min_, max_ = axes[i].get_ylim()
                 [axes[i].plot(X, newy, c=colors[j]) for j, newy in
                  enumerate(predict)]
@@ -1713,6 +1758,8 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
             trained = []
             fig, axes = plt.subplots(len(vals[0]), len(vals[1]), sharey=True,
                                      sharex=True, figsize=(15, 8))
+            fig.suptitle(
+                'Bet Dagan WV weighted mean atmosphric temperature(Tm) vs. surface temperature(Ts) using {} and {} selection criteria'.format(keys[0].split('.')[-1], keys[1].split('.')[-1]), fontweight='bold',x=0.5, y=1.0)
             for i, val0 in enumerate(vals[0]):
                 trained0 = []
                 for j, val1 in enumerate(vals[1]):
@@ -1757,7 +1804,7 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
                     # linex = np.array([x.min().item(), x.max().item()])
                     # liney = tmul * linex + toff
                     # axes[i, j].plot(linex, liney, c='r')
-                    axes[i, j].plot(ts.values, ts.values, c='k', alpha=0.2)
+                    # axes[i, j].plot(ts.values, ts.values, c='k', alpha=0.2)
                     min_, max_ = axes[i, j].get_ylim()
 
                     [axes[i, j].text(0.01, pos[k],
@@ -1935,14 +1982,23 @@ def load_gipsyx_results(station='tela', sample_rate=None,
     from aux_gps import path_glob
     from aux_gps import plot_tmseries_xarray
     import xarray as xr
-    sample = {'H': 'hourly', 'W': 'weekly', 'MS': 'monthly'}
+    sample = {'1H': 'hourly', '3H': '3hourly', 'D': 'Daily', 'W': 'weekly',
+              'MS': 'monthly'}
     path = GNSS / station / 'gipsyx_solutions'
     if sample_rate is None:
         glob = '{}_PPP*.nc'.format(station.upper())
-        file = path_glob(path, glob_str=glob)[0]
+        try:
+            file = path_glob(path, glob_str=glob)[0]
+        except FileNotFoundError as e:
+            print(e)
+            return station
     else:
         glob = '{}_{}_PPP*.nc'.format(station.upper(), sample[sample_rate])
-        file = path_glob(path, glob_str=glob)[0]
+        try:
+            file = path_glob(path, glob_str=glob)[0]
+        except FileNotFoundError as e:
+            print(e)
+            return station
     ds = xr.open_dataset(file)
     if plot_fields is not None and plot_fields != 'all':
         plot_tmseries_xarray(ds, plot_fields)
