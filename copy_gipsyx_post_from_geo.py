@@ -115,15 +115,16 @@ def copy_with_progress(src, dst, *, follow_symlinks=True):
 def copy_post_from_geo(remote_path, station):
     from aux_gps import path_glob
     for curr_sta in station:
-        src_path = remote_path / curr_sta / 'gipsyx_solutions'
+        src_rigid_path = remote_path / curr_sta / 'gipsyx_solutions'
         try:
-            filepaths = path_glob(src_path, '*PPP*.nc')
+            filepaths = path_glob(src_rigid_path, '*PPP*.nc')
         except FileNotFoundError:
             print('{} final solution not found in {}'.format(curr_sta, src_path))
             continue
         for filepath in filepaths:
             filename = filepath.as_posix().split('/')[-1]
-            src_path = src_path / filename
+            print(filename)
+            src_path = src_rigid_path / filename
             dst_path = workpath / curr_sta / 'gipsyx_solutions'
             dst_path.mkdir(parents=True, exist_ok=True)
             copy_with_progress(src_path, dst_path)
