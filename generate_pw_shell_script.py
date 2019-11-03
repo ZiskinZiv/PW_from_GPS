@@ -335,7 +335,7 @@ if __name__ == '__main__':
     if args.station == ['isr1']:
         args.station = isr_stations
     # use ISR stations db for israeli stations and ocean loading also:
-    if all(a in isr_stations for a in args.station):
+    if all(a in isr_stations for a in args.station) and args.tree is None and args.staDb is None:
         args.tree = pwpath / 'my_trees/ISROcnld'
         args.staDb = pwpath / 'ALL.staDb'
     else:
