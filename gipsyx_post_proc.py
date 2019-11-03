@@ -118,7 +118,7 @@ def save_resampled_versions_gispyx_results(load_path, sample,
         logger.warning('did not find {} in gipsyx_solutions dir, skipping...'.format(station))
         return
     filename = file.as_posix().split('/')[-1].split('.')[0]
-    years = filename.split('_')[-1]
+    years_str = filename.split('_')[-1]
     ds = xr.open_dataset(file)
     time_dim = list(set(ds.dims))[0]
     logger.info('resampaling {} to {}'.format(station, sample[sample_rate]))
@@ -133,7 +133,7 @@ def save_resampled_versions_gispyx_results(load_path, sample,
     else:
         dsr = ds.resample({time_dim: sample_rate}, keep_attrs=True, skipna=True).mean(keep_attrs=True)
     new_filename = '_'.join([station.upper(), sample[sample_rate], 'PPP',
-                             years])
+                             years_str])
     new_filename = new_filename + '.nc'
     logger.info('saving resmapled station {} to {}'.format(station, load_path))
     comp = dict(zlib=True, complevel=9)  # best compression
