@@ -115,7 +115,8 @@ def save_resampled_versions_gispyx_results(load_path, sample,
     try:
         file = path_glob(load_path, glob_str=glob)[0]
     except FileNotFoundError:
-        logger.warning('did not find {} in gipsyx_solutions dir, skipping...'.format(station))
+        logger.warning(
+            'did not find {} in gipsyx_solutions dir, skipping...'.format(station))
         return
     filename = file.as_posix().split('/')[-1].split('.')[0]
     years_str = filename.split('_')[-1]
@@ -127,11 +128,14 @@ def save_resampled_versions_gispyx_results(load_path, sample,
         dsr_list = []
         for year in years:
             logger.info('resampling {} of year {}'.format(sample_rate, year))
-            dsr = ds.sel({time_dim: year}).resample({time_dim: sample_rate}, keep_attrs=True, skipna=True).mean(keep_attrs=True)
+            dsr = ds.sel({time_dim: year}).resample(
+                {time_dim: sample_rate}, keep_attrs=True, skipna=True).mean(keep_attrs=True)
             dsr_list.append(dsr)
         dsr = xr.concat(dsr_list, time_dim)
     else:
-        dsr = ds.resample({time_dim: sample_rate}, keep_attrs=True, skipna=True).mean(keep_attrs=True)
+        dsr = ds.resample({time_dim: sample_rate},
+                          keep_attrs=True,
+                          skipna=True).mean(keep_attrs=True)
     new_filename = '_'.join([station.upper(), sample[sample_rate], 'PPP',
                              years_str])
     new_filename = new_filename + '.nc'
