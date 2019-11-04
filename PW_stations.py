@@ -249,7 +249,7 @@ def align_physical_bet_dagan_soundings_pw_to_gps_station_zwd(
     if not (savepath / filename).is_file():
         print('saving {} to {}'.format(filename, savepath))
         # first load physical bet_dagan Tpw, Ts, Tm and dt_range:
-        phys = xr.open_dataset(phys_soundPercipatable_file)
+        phys = xr.open_dataset(phys_sound_file)
         # clean and merge:
         p_list = [get_unique_index(phys[x], 'sound_time')
                   for x in ['Ts', 'Tm', 'Tpw', 'dt_range']]
@@ -267,13 +267,13 @@ def align_physical_bet_dagan_soundings_pw_to_gps_station_zwd(
             min_time = phys_ds['dt_range'].isel(sound_time=i).sel(bnd='Min').values
             max_time = phys_ds['dt_range'].isel(sound_time=i).sel(bnd='Max').values
             wetz = zwd['WetZ'].sel(time=slice(min_time, max_time)).mean('time')
-            wetz_std = zwd['WetZ'].sel(tiPercipatableme=slice(min_time, max_time)).std('time')
+            wetz_std = zwd['WetZ'].sel(time=slice(min_time, max_time)).std('time')
             wetz_error = zwd['WetZ_error'].sel(time=slice(min_time, max_time)).mean('time')
             wz_std.append(wetz_std)
             wz_list.append(wetz)
             wz_error_list.append(wetz_error)
         wetz_gps = xr.DataArray(wz_list, dims='sound_time')
-        wetz_gps.name = '{}_WetZ'.format(Percipatablestation)
+        wetz_gps.name = '{}_WetZ'.format(station)
         wetz_gps_error = xr.DataArray(wz_error_list, dims='sound_time')
         wetz_gps_error.name = 'TELA_WetZ_error'
         wetz_gps_std = xr.DataArray(wz_list, dims='sound_time')
@@ -294,7 +294,7 @@ def align_physical_bet_dagan_soundings_pw_to_gps_station_zwd(
     else:
         print('found file!')
         zwd_and_tpw = xr.open_dataset(savepath / filename)
-        wetz = zwd_and_tpw['{}_WetZ'.formPercipatableat(station)]
+        wetz = zwd_and_tpw['{}_WetZ'.format(station)]
         wetz_error = zwd_and_tpw['{}_WetZ_error'.format(station)]
         # load the 10 mins temperature data from IMS:
         tela_T = xr.open_dataset(IMS_file)
@@ -1973,6 +1973,34 @@ def israeli_gnss_stations_long_term_trend_analysis(gis_path=gis_path,
 #    dsr.to_netcdf(path / new_filename, 'w', encoding=encoding)
 #    print('Done!')
 #    return dsr
+def load_GNSS_TD(station='tela', sample_rate=None, plot=True):
+    """load and plot temperature for station from IMS, to choose
+    sample rate different than 5 mins choose: 'H', 'W' or 'MS'"""
+    from aux_gps import path_glob
+    from aux_gps import plot_tmseries_xarray
+    import xarray as xr
+    sample = {'1H': 'hourly', '3H': '3hourly', 'D': 'Daily', 'W': 'weekly',
+              'MS': 'monthly'}
+    path = ims_path
+    if sample_rate is None:
+        glob = 'GNSS_5mins_TD_ALL*.nc'
+        try:
+            file = path_glob(path, glob_str=glob)[0]
+        except FileNotFoundError as e:
+            print(e)
+            return station
+    else:
+        glob = 'GNSS_{}_TD_ALL*.nc'.format(sample[sample_rate])
+        try:
+            file = path_glob(path, glob_str=glob)[0]
+        except FileNotFoundError as e:
+            print(e)
+            return station
+    ds = xr.open_dataset(file)
+    da = ds[station]
+    if plot:
+        plot_tmseries_xarray(da)
+    return da
 
 
 def load_gipsyx_results(station='tela', sample_rate=None,
