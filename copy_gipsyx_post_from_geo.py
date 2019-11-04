@@ -119,7 +119,8 @@ def copy_post_from_geo(remote_path, station):
         try:
             filepaths = path_glob(src_rigid_path, '*PPP*.nc')
         except FileNotFoundError:
-            print('{} final solution not found in {}'.format(curr_sta, src_path))
+            print('{} final solution not found in {}'.format(curr_sta,
+                  src_rigid_path))
             continue
         for filepath in filepaths:
             filename = filepath.as_posix().split('/')[-1]
