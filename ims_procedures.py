@@ -111,6 +111,7 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
                                               variogram='spherical',
                                               n_neighbors=3,
                                               start_year='1996',
+                                              cut_days_ago=3,
                                               plot=False,
                                               verbose=False,
                                               savepath=ims_path):
@@ -123,6 +124,7 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
     import matplotlib.pyplot as plt
     import geopandas as gpd
     from sklearn.neighbors import KNeighborsRegressor
+    # import time
 
     def pick_model(method, variogram, n_neighbors):
         if method == 'okrig':
@@ -141,16 +143,20 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
             raise Exception('{} is not supported yet...'.format(method))
         return model
 
-    def prepare_Xy(ts_lr_neutral, Tloc_df):
+    def prepare_Xy(ts_lr_neutral, T_lats, T_lons):
         import numpy as np
+        df = ts_lr_neutral.to_frame()
+        df['lat'] = T_lats
+        df['lon'] = T_lons
+        # df = df.dropna(axis=0)
         c = np.linspace(
-            Tloc_df['lat'].min().item(),
-            Tloc_df['lat'].max().item(),
-            Tloc_df['lat'].shape[0])
+            df['lat'].min().item(),
+            df['lat'].max().item(),
+            df['lat'].shape[0])
         r = np.linspace(
-            Tloc_df['lon'].min().item(),
-            Tloc_df['lon'].max().item(),
-            Tloc_df['lon'].shape[0])
+            df['lon'].min().item(),
+            df['lon'].max().item(),
+            df['lon'].shape[0])
         rr, cc = np.meshgrid(r, c)
         vals = ~np.isnan(ts_lr_neutral)
         X = np.column_stack([rr[vals, vals], cc[vals, vals]])
@@ -159,30 +165,30 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
         y = ts_lr_neutral[vals]
         return X, y
 
-    def neutrilize_t(Tloc_df, dt_col, lapse_rate):
-            ts_lr_neutral = (
-                    Tloc_df[dt_col] +
-                    lapse_rate *
-                    Tloc_df['alt'] /
-                    1000.0).values
-            return ts_lr_neutral
+    def neutrilize_t(ts_vs_alt, lapse_rate):
+        ts_lr_neutral = (ts_vs_alt +
+                         lapse_rate *
+                         ts_vs_alt.index /
+                         1000.0)
+        return ts_lr_neutral
 
-    def choose_dt_and_lapse_rate(tdf, dt, Tloc_df, lapse_rate):
+    def choose_dt_and_lapse_rate(tdf, dt, T_alts, lapse_rate):
         ts = tdf.loc[dt, :]
-        dt_col = dt.strftime('%Y-%m-%d %H:%M')
-        ts.name = dt_col
-        Tloc_df = Tloc_df.join(ts, how='right')
-        Tloc_df = Tloc_df.dropna(axis=0)
-        # ts_vs_alt = pd.Series(ts.values, index=Tloc_df['alt']).dropna()
-        [a, b] = np.polyfit(Tloc_df['alt'].values,
-                            Tloc_df[dt_col].values, 1)
+        # dt_col = dt.strftime('%Y-%m-%d %H:%M')
+        # ts.name = dt_col
+        # Tloc_df = Tloc_df.join(ts, how='right')
+        # Tloc_df = Tloc_df.dropna(axis=0)
+        ts_vs_alt = pd.Series(ts.values, index=T_alts)
+        ts_vs_alt_for_fit = ts_vs_alt.dropna()
+        [a, b] = np.polyfit(ts_vs_alt_for_fit.index.values,
+                            ts_vs_alt_for_fit.values, 1)
         if lapse_rate == 'auto':
             lapse_rate = np.abs(a) * 1000
             if lapse_rate < 5.0:
                 lapse_rate = 5.0
             elif lapse_rate > 10.0:
                 lapse_rate = 10.0
-        return Tloc_df, lapse_rate
+        return ts_vs_alt, lapse_rate
 #    import time
     dt = pd.to_datetime(dt)
     # read Israeli GNSS sites coords:
@@ -210,7 +216,7 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
     time_dim = list(set(ds.dims))[0]
     # slice to a starting year(1996?):
     ds = ds.sel({time_dim: slice(start_year, None)})
-    years = list(set(ds[time_dim].dt.year.values))
+    years = sorted(list(set(ds[time_dim].dt.year.values)))
     # get coords and alts of IMS stations:
     T_alts = np.array([ds[x].attrs['station_alt'] for x in ds])
     T_lats = np.array([ds[x].attrs['station_lat'] for x in ds])
@@ -218,19 +224,22 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
     print('loading IMS_TD of israeli stations 10mins freq..')
     # transform to dataframe and add coords data to df:
     tdf = ds.to_dataframe()
-    Tloc_df = pd.DataFrame(T_lats, index=tdf.columns)
-    Tloc_df.columns = ['lat']
-    Tloc_df['lon'] = T_lons
-    Tloc_df['alt'] = T_alts
+    if cut_days_ago is not None:
+        # use cut_days_ago to drop last x days of data:
+        # this is vital bc towards the newest data, TD becomes scarce bc not
+        # all of the stations data exists...
+        n = cut_days_ago * 144
+        tdf.drop(tdf.tail(n).index, inplace=True)
+        print('last date to be handled is {}'.format(tdf.index[-1]))
     # use this to solve for a specific datetime:
     if dt is not None:
         dt_col = dt.strftime('%Y-%m-%d %H:%M')
 #        t0 = time.time()
         # prepare the ims coords and temp df(Tloc_df) and the lapse rate:
-        Tloc_df, lapse_rate = choose_dt_and_lapse_rate(tdf, dt, Tloc_df, lapse_rate)
+        ts_vs_alt, lapse_rate = choose_dt_and_lapse_rate(tdf, dt, T_alts, lapse_rate)
         if plot:
             fig, ax_lapse = plt.subplots(figsize=(10, 6))
-            sns.regplot(data=Tloc_df, x='alt', y=dt_col, color='r',
+            sns.regplot(x=ts_vs_alt.index, y=ts_vs_alt.values, color='r',
                         scatter_kws={'color': 'b'}, ax=ax_lapse)
             suptitle = dt.strftime('%Y-%m-%d %H:%M')
             ax_lapse.set_xlabel('Altitude [m]')
@@ -242,10 +251,10 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
             ax_lapse.grid()
             ax_lapse.set_title(suptitle, fontsize=14, fontweight='bold')
         # neutrilize the lapse rate effect:
-        ts_lr_neutral = neutrilize_t(Tloc_df, dt_col, lapse_rate)
+        ts_lr_neutral = neutrilize_t(ts_vs_alt, lapse_rate)
         # prepare the regressors(IMS stations coords) and the
         # target(IMS temperature at the coords):
-        X, y = prepare_Xy(ts_lr_neutral, Tloc_df)
+        X, y = prepare_Xy(ts_lr_neutral, T_lats, T_lons)
         # pick the model and params:
         model = pick_model(method, variogram, n_neighbors)
         # fit the model:
@@ -257,6 +266,10 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
         # fix for lapse rate:
         df[dt_col] -= lapse_rate * df['alt'] / 1000.0
         # concat gnss stations and Tloc DataFrames:
+        Tloc_df = pd.DataFrame(T_lats, index=tdf.columns)
+        Tloc_df.columns = ['lat']
+        Tloc_df['lon'] = T_lons
+        Tloc_df['alt'] = T_alts
         all_df = pd.concat([df, Tloc_df],axis=0)
         # fname = gis_path / 'ne_10m_admin_0_sovereignty.shp'
         # fname = gis_path / 'gadm36_ISR_0.shp'
@@ -292,33 +305,72 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
                     'israeli_gnss_coords.txt',
                     delim_whitespace=True,
                     header=0)
+            cnt = 1
+            dt_col_list = []
+            inter_list = []
+            # t0 = time.time()
+#            t1 = time.time()
+#            t2 = time.time()
+#            t3 = time.time()
+#            t4 = time.time()
+#            t5 = time.time()
+#            t6 = time.time()
+#            t7 = time.time()
+#            t8 = time.time()
             for dt in dts:
                 dt_col = dt.strftime('%Y-%m-%d %H:%M')
-                print('working on {}'.format(dt_col))
+                if np.mod(cnt, 144) == 0:
+                    # t1 = time.time()
+                    print('working on {}'.format(dt_col)) 
+                    # print('time1:{:.2f} seconds'.format(t1-t0))
+                    # t0 = time.time()
                 # prepare the ims coords and temp df(Tloc_df) and
                 # the lapse rate:
-                Tloc_df, lapse_rate = choose_dt_and_lapse_rate(
-                    tdf, dt, Tloc_df, lapse_rate)
+                ts_vs_alt, lapse_rate = choose_dt_and_lapse_rate(tdf, dt, T_alts, lapse_rate)
+#                if np.mod(cnt, 144) == 0:
+#                    t2 = time.time()
+#                    print('time2: {:.4f}'.format((t2-t1)*144))
                 # neutrilize the lapse rate effect:
-                ts_lr_neutral = neutrilize_t(Tloc_df, dt_col, lapse_rate)
+                ts_lr_neutral = neutrilize_t(ts_vs_alt, lapse_rate)
                 # prepare the regressors(IMS stations coords) and the
                 # target(IMS temperature at the coords):
-                X, y = prepare_Xy(ts_lr_neutral, Tloc_df)
+#                if np.mod(cnt, 144) == 0:
+#                    t3 = time.time()
+#                    print('time3: {:.4f}'.format((t3-t2)*144))
+                X, y = prepare_Xy(ts_lr_neutral, T_lats, T_lons)
+#                if np.mod(cnt, 144) == 0:
+#                    t4 = time.time()
+#                    print('time4: {:.4f}'.format((t4-t3)*144))
                 # pick model and params:
                 model = pick_model(method, variogram, n_neighbors)
+#                if np.mod(cnt, 144) == 0:
+#                    t5 = time.time()
+#                    print('time5: {:.4f}'.format((t5-t4)*144))
                 # fit the model:
                 model.fit(X, y)
+#                if np.mod(cnt, 144) == 0:
+#                    t6 = time.time()
+#                    print('time6: {:.4f}'.format((t6-t5)*144))
                 # predict at the GNSS stations coords:
                 interpolated = model.predict(gps_lons_lats_as_cols).reshape((gps_lats.shape))
-                # add prediction to df:
-                df[dt_col] = interpolated
+#                if np.mod(cnt, 144) == 0:
+#                    t7 = time.time()
+#                    print('time7: {:.4f}'.format((t7-t6)*144))
                 # fix for lapse rate:
-                df[dt_col] -= lapse_rate * df['alt'] / 1000.0
+                interpolated -= lapse_rate * df['alt'].values / 1000.0
+#                if np.mod(cnt, 144) == 0:
+#                    t8 = time.time()
+#                    print('time8: {:.4f}'.format((t8-t7)*144))
+                # add to list:
+                dt_col_list.append(dt_col)
+                inter_list.append(interpolated)
+                cnt += 1
             # convert to dataset:
-            da = xr.DataArray(df.iloc[:, 3:].values, dims=['station', 'time'])
+            # da = xr.DataArray(df.iloc[:, 3:].values, dims=['station', 'time'])
+            da = xr.DataArray(inter_list, dims=['time', 'station'])
             da['station'] = df.index
-            da['time'] = df.iloc[:, 3:].columns.values
-            da['time'] = pd.to_datetime(da['time'])
+            da['time'] = pd.to_datetime(dt_col_list)
+            da = da.sortby('time')
             ds = da.to_dataset(dim='station')
             for da in ds:
                 ds[da].attrs['units'] = 'degC'
@@ -326,11 +378,103 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
             ds.to_netcdf(savepath / filename, 'w')
             print('saved {} to {}'.format(filename, savepath))
             # return
+        print('concatenating all TD years...')
+        concat_GNSS_TD(savepath)
 #    t1 = time.time()
     # geo_snap = geo_pandas_time_snapshot(var='TD', datetime=dt, plot=False)
 #    total = t1-t0
 #    print(total)
     return
+
+
+def resample_GNSS_TD(path=ims_path):
+    from aux_gps import path_glob
+    import xarray as xr
+
+    def resample_GNSS_TD(ds, path, sample, sample_rate='1H'):
+        # station = da.name
+        print('resampaling all GNSS stations to {}'.format(sample[sample_rate]))
+        years = [str(x)
+                 for x in sorted(list(set(ds[time_dim].dt.year.values)))]
+        ymin = ds[time_dim].min().dt.year.item()
+        ymax = ds[time_dim].max().dt.year.item()
+        years_str = '{}_{}'.format(ymin, ymax)
+        if sample_rate == '1H' or sample_rate == '3H':
+            dsr_list = []
+            for year in years:
+                print('resampling {} of year {}'.format(sample_rate, year))
+                dsr = ds.sel({time_dim: year}).resample(
+                         {time_dim: sample_rate}, keep_attrs=True, skipna=True).mean(keep_attrs=True)
+                dsr_list.append(dsr)
+            print('concatenating...')
+            dsr = xr.concat(dsr_list, time_dim)
+        else:
+            if sample_rate == '5min':
+                dsr = ds.resample({time_dim: sample_rate}, keep_attrs=True,
+                                  skipna=True).ffill()
+            else:
+                dsr = ds.resample({time_dim: sample_rate},
+                                  keep_attrs=True,
+                                  skipna=True).mean(keep_attrs=True)
+        new_filename = '_'.join(['GNSS', sample[sample_rate], 'TD_ALL',
+                                 years_str])
+        new_filename = new_filename + '.nc'
+        print('saving all resmapled GNSS stations to {}'.format(path))
+        comp = dict(zlib=True, complevel=9)  # best compression
+        encoding = {var: comp for var in dsr.data_vars}
+        dsr.to_netcdf(path / new_filename, 'w', encoding=encoding)
+        print('Done resampling!')
+        return
+    # first, load GNSS_TD_ALL:
+    str_glob = 'GNSS_TD_ALL*.nc'
+    file = path_glob(path, str_glob)[0]
+    ds = xr.open_dataset(file)
+    ds.load()
+    time_dim = list(set(ds.dims))[0]
+    sample = {'5min': '5mins', '1H': 'hourly', '3H': '3hourly',
+              'D': 'Daily', 'W': 'weekly', 'MS': 'monthly'}
+    for key in sample.keys():
+        resample_GNSS_TD(ds, path, sample, sample_rate=key)
+    
+#    for sta in stations:
+#        # take each station's TD and copy to GNSS folder 'temperature':
+#        savepath = GNSS / sta / 'temperature'
+#        savepath.mkdir(parents=True, exist_ok=True)
+#        # first save a 5-min resampled version and save:
+#        da = ds[sta].resample(time='5min').ffill()
+#        ymin = da[time_dim].min().dt.year.item()
+#        ymax = da[time_dim].max().dt.year.item()
+#        years_str = '{}_{}'.format(ymin, ymax)
+#        new_filename = '_'.join([sta.upper(), 'TD', years_str])
+#        new_filename = new_filename + '.nc'
+#        print('saving resmapled station {} to {}'.format(sta, savepath))
+#        comp = dict(zlib=True, complevel=9)  # best compression
+#        encoding = {var: comp for var in da.to_dataset(name=da.name).data_vars}
+#        da.to_netcdf(savepath / new_filename, 'w', encoding=encoding)
+#        print('Done resampling!')
+#        # finally, resample to all samples and save:
+#        for key in sample.keys():
+#            resample_GNSS_TD(da, savepath, sample, sample_rate=key)
+    return
+
+
+def concat_GNSS_TD(path=ims_path):
+    import xarray as xr
+    from aux_gps import path_glob
+    files = path_glob(path, 'GNSS_TD_*.nc')
+    years = sorted([file.as_posix().split('/')[-1].split('_')[-1].split('.')[0]
+                    for file in files])
+    ds_list = [xr.open_dataset(x) for x in files]
+    time_dim = list(set(ds_list[0].dims))[0]
+    ds = xr.concat(ds_list, time_dim)
+    ds = ds.sortby(time_dim)
+    comp = dict(zlib=True, complevel=9)  # best compression
+    encoding = {var: comp for var in ds.data_vars}
+    filename = 'GNSS_TD_ALL_{}-{}.nc'.format(years[0], years[-1])
+    print('saving...')
+    ds.to_netcdf(path / filename, 'w', encoding=encoding)
+    print('{} was saved to {}'.format(filename, path))
+    return ds
 
 
 def Interpolating_models_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
