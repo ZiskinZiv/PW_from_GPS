@@ -729,25 +729,94 @@ def produce_geo_df(gis_path=gis_path):
     return geo_df
 
 
+def save_GNSS_PW_israeli_stations(savepath=work_yuval):
+    from pathlib import Path
+    import pandas as pd
+    import xarray as xr
+    sample = {'1H': 'hourly', '3H': '3hourly', 'D': 'Daily', 'W': 'weekly',
+              'MS': 'monthly'}
+    filename = 'israeli_gnss_coords.txt'
+    df = pd.read_csv(Path().cwd() / filename, header=0, delim_whitespace=True)
+    stations = df.index.tolist()
+    ds_list = []
+    for sta in stations:
+        print(sta, '5mins')
+        pw = produce_GNSS_station_PW(sta, None, plot=False)
+        ds_list.append(pw)
+    ds = xr.merge(ds_list)
+    if savepath is not None:
+        filename = 'GNSS_PW.nc'
+        print('saving {} to {}'.format(filename, savepath))
+        comp = dict(zlib=True, complevel=9)  # best compression
+        encoding = {var: comp for var in ds.data_vars}
+        ds.to_netcdf(savepath / filename, 'w', encoding=encoding)
+    for skey in sample.keys():
+        ds_list = []
+        for sta in stations:
+            print(sta, sample[skey])
+            pw = produce_GNSS_station_PW(sta, skey, plot=False)
+            ds_list.append(pw)
+        ds = xr.merge(ds_list)
+        if savepath is not None:
+            filename = 'GNSS_{}_PW.nc'.format(sample[skey])
+            print('saving {} to {}'.format(filename, savepath))
+            comp = dict(zlib=True, complevel=9)  # best compression
+            encoding = {var: comp for var in ds.data_vars}
+            ds.to_netcdf(savepath / filename, 'w', encoding=encoding)
+    print('Done!')
+    return
+
+
+def produce_GNSS_station_PW(station='tela', sample_rate=None, model=None,
+                            phys=None, plot=True):
+    from aux_gps import plot_tmseries_xarray
+    """use phys=phys_soundings to use physical bet dagan radiosonde report,
+    otherwise phys=None to use wyoming data. model=None is LR, model='bevis'
+    is Bevis 1992-1994 et al. model
+    use sample_rate=None to use full 5 min sample_rate"""
+    sample = {'1H': 'hourly', '3H': '3hourly', 'D': 'Daily', 'W': 'weekly',
+              'MS': 'monthly'}
+    zwd = load_gipsyx_results(station, sample_rate, plot_fields=None)
+    Ts = load_GNSS_TD(station, sample_rate, False)
+    if model is None:
+        mda = ml_models_T_from_sounding(categories=None, models=['LR'],
+                                        physical_file=phys, plot=False)
+    elif model == 'bevis':
+        mda = None
+    PW = produce_single_station_IPW(zwd, Ts, mda)
+    PW = PW.rename({'PW': station})
+    PW = PW.rename({'PW_error': '{}_error'.format(station)})
+    if plot:
+        plot_tmseries_xarray(PW)
+    return PW
+
+
 def produce_single_station_IPW(zwd, Tds, mda=None, model_name='LR'):
     """input is zwd from gipsy or garner, Tds is the temperature of the
     station, mda is the Ts-Tm relationsship ml models dataarray, model is
     the ml model chosen."""
     import xarray as xr
     # hours = dict(zip([12, 0], ['noon', 'midnight']))
-    try:
-        zwd.name = 'WetZ'
-    except AttributeError:
-        print('zwd has no name attribute ?')
-        zwd.name = 'WetZ'
+    if isinstance(zwd, xr.Dataset):
+        try:
+            zwd_error = zwd['WetZ_error']
+            zwd = zwd['WetZ']
+        except KeyError:
+            raise('no error field in zwd dataset...')
     if mda is None:
         # Bevis 1992 relationship:
         print('Using Bevis 1992-1994 Ts-Tm relationship.')
-        kappa_ds, _ = kappa_ml(Tds, model=None)
+        kappa_ds, kappa_err = kappa_ml(Tds, model=None)
         ipw = kappa_ds * zwd
+        ipw_error = kappa_ds * zwd_error + zwd * kappa_err
+        ipw_error.name = 'PW_error'
+        ipw_error.attrs['long_name'] = 'Precipitable Water standard error'
+        ipw_error.attrs['units'] = 'kg / m^2'
         ipw.name = 'PW'
         ipw.attrs['long_name'] = 'Precipitable Water'
         ipw.attrs['units'] = 'kg / m^2'
+        ipw = ipw.to_dataset(name='PW')
+        ipw['PW_error'] = ipw_error
         ipw.attrs['description'] = 'whole data Tm formulation using Bevis etal. 1992'
         print('Done!')
         return ipw
@@ -769,11 +838,17 @@ def produce_single_station_IPW(zwd, Tds, mda=None, model_name='LR'):
 #        Tmul = mda.sel(parameter='slope').values.item()
 #        Toff = mda.sel(parameter='intercept').values.item()
         m = mda.sel(name=model_name).values.item()
-        kappa_ds, _ = kappa_ml(Tds, model=m)
+        kappa_ds, kappa_err = kappa_ml(Tds, model=m, slope_err=mda.attrs['LR_whole_stderr_slope'])
         ipw = kappa_ds * zwd
+        ipw_error = kappa_ds * zwd_error + zwd * kappa_err
+        ipw_error.name = 'PW_error'
+        ipw_error.attrs['long_name'] = 'Precipitable Water standard error'
+        ipw_error.attrs['units'] = 'kg / m^2'
         ipw.name = 'PW'
         ipw.attrs['long_name'] = 'Precipitable Water'
         ipw.attrs['units'] = 'kg / m^2'
+        ipw = ipw.to_dataset(name='PW')
+        ipw['PW_error'] = ipw_error
         ipw.attrs['description'] = 'whole data Tm formulation using {} model'.format(
             model_name)
         print('Done!')
@@ -786,7 +861,7 @@ def produce_single_station_IPW(zwd, Tds, mda=None, model_name='LR'):
             print('working on hour {}'.format(hr_num))
             sliced = Tds.where(Tds[h_key] == hr_num).dropna(time_dim)
             m = mda.sel({'name': model_name, h_key: hr_num}).values.item()
-            kappa_part, _ = kappa_ml(sliced, model=m)
+            kappa_part, kappa_err = kappa_ml(sliced, model=m)
             kappa_list.append(kappa_part)
         des_attrs = 'hourly data Tm formulation using {} model'.format(
             model_name)
@@ -798,7 +873,7 @@ def produce_single_station_IPW(zwd, Tds, mda=None, model_name='LR'):
             print('working on season {}'.format(season))
             sliced = Tds.where(Tds[s_key] == season).dropna('time')
             m = mda.sel({'name': model_name, s_key: season}).values.item()
-            kappa_part, _ = kappa_ml(sliced, model=m)
+            kappa_part, kappa_err = kappa_ml(sliced, model=m)
             kappa_list.append(kappa_part)
         des_attrs = 'seasonly data Tm formulation using {} model'.format(
             model_name)
@@ -847,19 +922,21 @@ def produce_single_station_IPW(zwd, Tds, mda=None, model_name='LR'):
                     time_dim).where(Tds[h_key] == hr_num).dropna(time_dim)
                 m = mda.sel({'name': model_name, s_key: season,
                              h_key: hr_num}).values.item()
-                kappa_part, _ = kappa_ml(sliced, model=m)
+                kappa_part, kappe_err = kappa_ml(sliced, model=m)
                 kappa_list.append(kappa_part)
         des_attrs = 'hourly and seasonly data Tm formulation using {} model'.format(model_name)
     kappa_ds = xr.concat(kappa_list, time_dim)
     ipw = kappa_ds * zwd
+    ipw_error = kappa_ds * zwd_error + zwd * kappa_err
+    ipw_error.name = 'PW_error'
+    ipw_error.attrs['long_name'] = 'Precipitable Water standard error'
+    ipw_error.attrs['units'] = 'kg / m^2'
     ipw.name = 'PW'
-#    kappa_dict = dict(zip([item for sublist in mda_list for item in sublist],
-#                          [item for sublist in mda_vals for item in sublist]))
-#    for k, v in kappa_dict.items():
-#        ipw.attrs[k] = v
     ipw.attrs['long_name'] = 'Precipitable Water'
     ipw.attrs['units'] = 'kg / m^2'
-    ipw.attrs['description'] = des_attrs
+    ipw = ipw.to_dataset(name='PW')
+    ipw['PW_error'] = ipw_error
+    ipw.attrs['description'] = 'whole data Tm formulation using Bevis etal. 1992'
     print('Done!')
     ipw = ipw.reset_coords(drop=True)
     return ipw
@@ -965,7 +1042,7 @@ def check_Tm_func(Tmul_num=10, Ts_num=6, Toff_num=15):
 
 
 def kappa_ml(T, model=None, k2=22.1, k3=3.776e5, dk3=0.004e5, dk2=2.2,
-             verbose=False, no_error=False):
+             verbose=False, no_error=False, slope_err=None):
     """T in celsious, anton says k2=22.1 is better, """
     import numpy as np
     import xarray as xr
@@ -1012,7 +1089,10 @@ def kappa_ml(T, model=None, k2=22.1, k3=3.776e5, dk3=0.004e5, dk2=2.2,
         Tm = T.dropna('time').copy(deep=False,
                                    data=model.predict((273.15 + Tnp)))
         Tm = Tm.reindex(time=T['time'])
-        dTm = model.coef_[0] * dT
+        if slope_err is not None:
+            dTm = model.coef_[0] * dT + slope_err * Tm
+        else:
+            dTm = model.coef_[0] * dT
         # Tm = model.predict((273.15 + T))
     Rv = 461.52  # [Rv] = J / (kg * K) = (Pa * m^3) / (kg * K)
     # (1e-2 mbar * m^3) / (kg * K)
@@ -1477,7 +1557,7 @@ def compare_to_sounding(sound_path=sound_path, gps=garner_path, station='TELA',
 
 def ml_models_T_from_sounding(sound_path=sound_path, categories=None,
                               models=['LR', 'TSEN'], physical_file=None,
-                              times=['2005', '2019']):
+                              times=['2005', '2019'], plot=True):
     """calls formulate_plot to analyse and model the ts-tm connection from
     radiosonde(bet-dagan). options for categories:season, hour, clouds
     you can choose some ,all or none categories"""
@@ -1513,7 +1593,7 @@ def ml_models_T_from_sounding(sound_path=sound_path, categories=None,
     if 'hour' in possible_cats:
         pos_cats_dict['{}.hour'.format(time_dim)] = h_order
     if categories is None:
-        results = formulate_plot(ds, model_names=models)
+        results = formulate_plot(ds, model_names=models, plot=plot)
     if categories is not None:
         if not isinstance(categories, list):
             categories = [categories]
@@ -1524,7 +1604,8 @@ def ml_models_T_from_sounding(sound_path=sound_path, categories=None,
         categories = [x.replace(x, time_dim + '.' + x) if x ==
                       'season' or x == 'hour' else x for x in categories]
         results = formulate_plot(ds, pos_cats_dict=pos_cats_dict,
-                                 chosen_cats=categories, model_names=models)
+                                 chosen_cats=categories, model_names=models,
+                                 plot=plot)
     results.attrs['time_dim'] = time_dim
     return results
 
@@ -1567,7 +1648,7 @@ def ml_models_T_from_sounding(sound_path=sound_path, categories=None,
 
 
 def formulate_plot(ds, model_names=['LR', 'TSEN'],
-                   pos_cats_dict=None, chosen_cats=None):
+                   pos_cats_dict=None, chosen_cats=None, plot=True):
     """accepts pos_cat (dict) with keys : hour, season ,and appropriate
     values, and chosen keys and returns trained sklearn models with
     the same slices.
@@ -1577,6 +1658,7 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
     import matplotlib.pyplot as plt
     import seaborn as sns
     from sklearn.metrics import mean_squared_error
+    from aux_gps import standard_error_slope
     time_dim = list(set(ds.dims))[0]
     print('time dim is: {}'.format(time_dim))
     sns.set_style('darkgrid')
@@ -1593,8 +1675,9 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
     models = [ml.pick_model(x) for x in model_names]
     if chosen_cats is None:
         print('no categories selected, using full data.')
-        fig, axes = plt.subplots(1, 2, figsize=(10, 7))
-        fig.suptitle(
+        if plot:
+            fig, axes = plt.subplots(1, 2, figsize=(10, 7))
+            fig.suptitle(
                 'Bet Dagan WV weighted mean atmosphric temperature(Tm) vs. surface temperature(Ts)', fontweight='bold')
         X = ds.ts.values.reshape(-1, 1)
         y = ds.tm.values
@@ -1615,51 +1698,55 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
         except AttributeError:
             hue = None
             pass
-        g = sns.scatterplot(
-            data=df,
-            x='ts',
-            y='tm',
-            hue=hue,
-            marker='.',
-            s=100,
-            ax=axes[0])
-        g.legend(loc='best')
+        if plot:
+            g = sns.scatterplot(
+                data=df,
+                x='ts',
+                y='tm',
+                hue=hue,
+                marker='.',
+                s=100,
+                ax=axes[0])
+            g.legend(loc='best')
 
         # axes[0].scatter(x=ds.ts.values, y=ds.tm.values, marker='.', s=10)
 #        linex = np.array([ds.ts.min().item(), ds.ts.max().item()])
 #        liney = a * linex + b
 #        axes[0].plot(linex, liney, c='r')
         bevis_tm = ds.ts.values * 0.72 + 70.0
-        axes[0].plot(ds.ts.values, bevis_tm, c='purple')
-        min_, max_ = axes[0].get_ylim()
-        [axes[0].plot(X, newy, c=colors[i]) for i, newy in enumerate(predict)]
-        [axes[0].text(0.01, pos[i],
-                      '{} a: {:.2f}, b: {:.2f}'.format(model_names[i],
-                                                       coefs[i], inters[i]),
-                      transform=axes[0].transAxes, color=colors[i],
-                      fontsize=12) for i in range(len(coefs))]
-        axes[0].text(0.01, 0.9,
-                      'Bevis 1992 et al. a: 0.72, b: 70.0',
-                      transform=axes[0].transAxes, color='purple',
-                      fontsize=12)
-#        axes[0].text(0.01, 0.9, 'a: {:.2f}, b: {:.2f}'.format(a, b),
-#                     transform=axes[0].transAxes, color='black', fontsize=12)
-        axes[0].text(0.1, 0.85, 'n={}'.format(ds.ts.size),
-                     verticalalignment='top', horizontalalignment='center',
-                     transform=axes[0].transAxes, color='blue', fontsize=12)
-        axes[0].set_xlabel('Ts [K]')
-        axes[0].set_ylabel('Tm [K]')
+        if plot:
+            axes[0].plot(ds.ts.values, bevis_tm, c='purple')
+            min_, max_ = axes[0].get_ylim()
+            [axes[0].plot(X, newy, c=colors[i]) for i, newy in enumerate(predict)]
+            [axes[0].text(0.01, pos[i],
+                          '{} a: {:.2f}, b: {:.2f}'.format(model_names[i],
+                                                           coefs[i], inters[i]),
+                          transform=axes[0].transAxes, color=colors[i],
+                          fontsize=12) for i in range(len(coefs))]
+            axes[0].text(0.01, 0.9,
+                         'Bevis 1992 et al. a: 0.72, b: 70.0',
+                         transform=axes[0].transAxes, color='purple',
+                         fontsize=12)
+    #        axes[0].text(0.01, 0.9, 'a: {:.2f}, b: {:.2f}'.format(a, b),
+    #                     transform=axes[0].transAxes, color='black', fontsize=12)
+            axes[0].text(0.1, 0.85, 'n={}'.format(ds.ts.size),
+                         verticalalignment='top', horizontalalignment='center',
+                         transform=axes[0].transAxes, color='blue', fontsize=12)
+            axes[0].set_xlabel('Ts [K]')
+            axes[0].set_ylabel('Tm [K]')
         # resid = ds.tm.values - ds.ts.values * a - b
         resid = predict[0] - y
-        sns.distplot(resid, bins=25, color='c', label='residuals', ax=axes[1])
+        if plot:
+            sns.distplot(resid, bins=25, color='c', label='residuals', ax=axes[1])
         rmean = np.mean(resid)
         rmse = np.sqrt(mean_squared_error(predict[0], y))
-        _, max_ = axes[1].get_ylim()
-        axes[1].text(rmean + rmean / 10, max_ - max_ / 10,
-                     'Mean: {:.2f}, RMSE: {:.2f}'.format(rmean, rmse))
-        axes[1].axvline(rmean, color='r', linestyle='dashed', linewidth=1)
-        axes[1].set_xlabel('Residuals [K]')
-        fig.tight_layout()
+        if plot:
+            _, max_ = axes[1].get_ylim()
+            axes[1].text(rmean + rmean / 10, max_ - max_ / 10,
+                         'Mean: {:.2f}, RMSE: {:.2f}'.format(rmean, rmse))
+            axes[1].axvline(rmean, color='r', linestyle='dashed', linewidth=1)
+            axes[1].set_xlabel('Residuals [K]')
+            fig.tight_layout()
         da = xr.DataArray(models, dims=['name'])
         da['name'] = model_names
         da.name = 'all_data_trained_models'
@@ -1679,10 +1766,11 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
 #            residuals = []
 #            rmses = []
             trained = []
-            fig, axes = plt.subplots(1, len(vals), sharey=True, sharex=True,
-                                     figsize=(15, 8))
-            fig.suptitle(
-                'Bet Dagan WV weighted mean atmosphric temperature(Tm) vs. surface temperature(Ts) using {} selection criteria'.format(key.split('.')[-1]), fontweight='bold',x=0.5, y=1.0)
+            if plot:
+                fig, axes = plt.subplots(1, len(vals), sharey=True, sharex=True,
+                                         figsize=(15, 8))
+                fig.suptitle(
+                        'Bet Dagan WV weighted mean atmosphric temperature(Tm) vs. surface temperature(Ts) using {} selection criteria'.format(key.split('.')[-1]), fontweight='bold',x=0.5, y=1.0)
 
             for i, val in enumerate(vals):
                 ts = ds.ts.where(ds[key] == val).dropna(time_dim)
@@ -1705,11 +1793,12 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
                 # resid = new_tm - y.values
                 # rmses.append(np.sqrt(mean_squared_error(y.values, new_tm)))
                 # residuals.append(resid)
-                axes[i].text(0.15, 0.85, 'n={}'.format(ts.size),
-                             verticalalignment='top',
-                             horizontalalignment='center',
-                             transform=axes[i].transAxes, color='blue',
-                             fontsize=12)
+                if plot:
+                    axes[i].text(0.15, 0.85, 'n={}'.format(ts.size),
+                                 verticalalignment='top',
+                                 horizontalalignment='center',
+                                 transform=axes[i].transAxes, color='blue',
+                                 fontsize=12)
                 df = ts.to_dataframe()
                 df['tm'] = tm
 #                df[other_keys[0]] = other_val0
@@ -1717,32 +1806,33 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
 #                g = sns.scatterplot(data=df, x='ts', y='tm', marker='.', s=100,
 #                                    ax=axes[i], hue=other_keys[0],
 #                                    style=other_keys[1])
-                g = sns.scatterplot(data=df, x='ts', y='tm', marker='.', s=100,
-                                    ax=axes[i])
-                g.legend(loc='upper right')
-                # axes[i, j].scatter(x=x.values, y=y.values, marker='.', s=10)
-                axes[i].set_title('{}:{}'.format(key, val))
-#                linex = np.array([x.min().item(), x.max().item()])
-#                liney = tmul * linex + toff
-#                axes[i].plot(linex, liney, c='r')
-                # unmark the following line to disable plotting y=x line:
-#                bevis_tm = ts.values * 0.72 + 70.0
-#                axes[i].plot(ts.values, bevis_tm, c='k')
-                min_, max_ = axes[i].get_ylim()
-                [axes[i].plot(X, newy, c=colors[j]) for j, newy in
-                 enumerate(predict)]
-                [axes[i].text(0.01, pos[j],
-                              '{} a: {:.2f}, b: {:.2f}'.format(model_names[j],
-                                                               coefs[j],
-                                                               inters[j]),
-                              transform=axes[i].transAxes, color=colors[j],
-                              fontsize=12) for j in range(len(coefs))]
-#                axes[i].text(0.015, 0.9, 'a: {:.2f}, b: {:.2f}'.format(
-#                             tmul, toff), transform=axes[i].transAxes,
-#                             color='black', fontsize=12)
-                axes[i].set_xlabel('Ts [K]')
-                axes[i].set_ylabel('Tm [K]')
-                fig.tight_layout()
+                if plot:
+                    g = sns.scatterplot(data=df, x='ts', y='tm', marker='.', s=100,
+                                        ax=axes[i])
+                    g.legend(loc='upper right')
+                    # axes[i, j].scatter(x=x.values, y=y.values, marker='.', s=10)
+                    axes[i].set_title('{}:{}'.format(key, val))
+    #                linex = np.array([x.min().item(), x.max().item()])
+    #                liney = tmul * linex + toff
+    #                axes[i].plot(linex, liney, c='r')
+                    # unmark the following line to disable plotting y=x line:
+    #                bevis_tm = ts.values * 0.72 + 70.0
+    #                axes[i].plot(ts.values, bevis_tm, c='k')
+                    min_, max_ = axes[i].get_ylim()
+                    [axes[i].plot(X, newy, c=colors[j]) for j, newy in
+                     enumerate(predict)]
+                    [axes[i].text(0.01, pos[j],
+                                  '{} a: {:.2f}, b: {:.2f}'.format(model_names[j],
+                                                                   coefs[j],
+                                                                   inters[j]),
+                                  transform=axes[i].transAxes, color=colors[j],
+                                  fontsize=12) for j in range(len(coefs))]
+    #                axes[i].text(0.015, 0.9, 'a: {:.2f}, b: {:.2f}'.format(
+    #                             tmul, toff), transform=axes[i].transAxes,
+    #                             color='black', fontsize=12)
+                    axes[i].set_xlabel('Ts [K]')
+                    axes[i].set_ylabel('Tm [K]')
+                    fig.tight_layout()
                 trained.append(models)
             da = xr.DataArray(trained, dims=[key, 'name'])
             da['name'] = model_names
@@ -1756,10 +1846,11 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
 #            residuals = []
 #            rmses = []
             trained = []
-            fig, axes = plt.subplots(len(vals[0]), len(vals[1]), sharey=True,
-                                     sharex=True, figsize=(15, 8))
-            fig.suptitle(
-                'Bet Dagan WV weighted mean atmosphric temperature(Tm) vs. surface temperature(Ts) using {} and {} selection criteria'.format(keys[0].split('.')[-1], keys[1].split('.')[-1]), fontweight='bold',x=0.5, y=1.0)
+            if plot:
+                fig, axes = plt.subplots(len(vals[0]), len(vals[1]), sharey=True,
+                                         sharex=True, figsize=(15, 8))
+                fig.suptitle(
+                    'Bet Dagan WV weighted mean atmosphric temperature(Tm) vs. surface temperature(Ts) using {} and {} selection criteria'.format(keys[0].split('.')[-1], keys[1].split('.')[-1]), fontweight='bold',x=0.5, y=1.0)
             for i, val0 in enumerate(vals[0]):
                 trained0 = []
                 for j, val1 in enumerate(vals[1]):
@@ -1783,44 +1874,46 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
 #                    resid = new_tm - y.values
 #                    rmses.append(np.sqrt(mean_squared_error(y.values, new_tm)))
 #                    residuals.append(resid)
-                    axes[i, j].text(0.15, 0.85, 'n={}'.format(ts.size),
-                                    verticalalignment='top',
-                                    horizontalalignment='center',
-                                    transform=axes[i, j].transAxes,
-                                    color='blue', fontsize=12)
+                    if plot:
+                        axes[i, j].text(0.15, 0.85, 'n={}'.format(ts.size),
+                                        verticalalignment='top',
+                                        horizontalalignment='center',
+                                        transform=axes[i, j].transAxes,
+                                        color='blue', fontsize=12)
                     df = ts.to_dataframe()
                     df['tm'] = tm
                     # df[other_keys[0]] = other_val
 #                    g = sns.scatterplot(data=df, x='ts', y='tm', marker='.',
 #                                        s=100, ax=axes[i, j],
 #                                        hue=other_keys[0])
-                    g = sns.scatterplot(data=df, x='ts', y='tm', marker='.',
-                                        s=100, ax=axes[i, j])
-                    g.legend(loc='upper right')
-                    # axes[i, j].scatter(x=x.values, y=y.values, marker='.', s=10)
-                    # axes[i, j].set_title('{}:{}'.format(key, val))
-                    [axes[i, j].plot(X, newy, c=colors[k]) for k, newy in
-                     enumerate(predict)]
-                    # linex = np.array([x.min().item(), x.max().item()])
-                    # liney = tmul * linex + toff
-                    # axes[i, j].plot(linex, liney, c='r')
-                    # axes[i, j].plot(ts.values, ts.values, c='k', alpha=0.2)
-                    min_, max_ = axes[i, j].get_ylim()
-
-                    [axes[i, j].text(0.01, pos[k],
-                                     '{} a: {:.2f}, b: {:.2f}'.format(model_names[k],
-                                                                      coefs[k],
-                                                                      inters[k]),
-                                     transform=axes[i, j].transAxes, color=colors[k],
-                                     fontsize=12) for k in range(len(coefs))]
-#                    axes[i, j].text(0.015, 0.9, 'a: {:.2f}, b: {:.2f}'.format(
-#                                 tmul, toff), transform=axes[i, j].transAxes,
-#                                 color='black', fontsize=12)
-                    axes[i, j].set_xlabel('Ts [K]')
-                    axes[i, j].set_ylabel('Tm [K]')
-                    axes[i, j].set_title('{}:{}, {}:{}'.format(keys[0], val0,
-                                                               keys[1], val1))
-                    fig.tight_layout()
+                    if plot:
+                        g = sns.scatterplot(data=df, x='ts', y='tm', marker='.',
+                                            s=100, ax=axes[i, j])
+                        g.legend(loc='upper right')
+                        # axes[i, j].scatter(x=x.values, y=y.values, marker='.', s=10)
+                        # axes[i, j].set_title('{}:{}'.format(key, val))
+                        [axes[i, j].plot(X, newy, c=colors[k]) for k, newy in
+                         enumerate(predict)]
+                        # linex = np.array([x.min().item(), x.max().item()])
+                        # liney = tmul * linex + toff
+                        # axes[i, j].plot(linex, liney, c='r')
+                        # axes[i, j].plot(ts.values, ts.values, c='k', alpha=0.2)
+                        min_, max_ = axes[i, j].get_ylim()
+    
+                        [axes[i, j].text(0.01, pos[k],
+                                         '{} a: {:.2f}, b: {:.2f}'.format(model_names[k],
+                                                                          coefs[k],
+                                                                          inters[k]),
+                                         transform=axes[i, j].transAxes, color=colors[k],
+                                         fontsize=12) for k in range(len(coefs))]
+    #                    axes[i, j].text(0.015, 0.9, 'a: {:.2f}, b: {:.2f}'.format(
+    #                                 tmul, toff), transform=axes[i, j].transAxes,
+    #                                 color='black', fontsize=12)
+                        axes[i, j].set_xlabel('Ts [K]')
+                        axes[i, j].set_ylabel('Tm [K]')
+                        axes[i, j].set_title('{}:{}, {}:{}'.format(keys[0], val0,
+                                                                   keys[1], val1))
+                        fig.tight_layout()
                     trained0.append(models)
                 trained.append(trained0)
             da = xr.DataArray(trained, dims=keys + ['name'])
@@ -1829,6 +1922,10 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
             da[keys[1]] = vals[1]
         else:
             raise ValueError('size of categories must be <=2')
+    X = ds.ts.values
+    y = ds.tm.values
+    std_err = standard_error_slope(X, y)
+    da.attrs['LR_whole_stderr_slope'] = std_err
     return da
 
 
@@ -2019,14 +2116,14 @@ def load_gipsyx_results(station='tela', sample_rate=None,
             file = path_glob(path, glob_str=glob)[0]
         except FileNotFoundError as e:
             print(e)
-            return station
+            # return station
     else:
         glob = '{}_{}_PPP*.nc'.format(station.upper(), sample[sample_rate])
         try:
             file = path_glob(path, glob_str=glob)[0]
         except FileNotFoundError as e:
             print(e)
-            return station
+            # return station
     ds = xr.open_dataset(file)
     if plot_fields is not None and plot_fields != 'all':
         plot_tmseries_xarray(ds, plot_fields)
