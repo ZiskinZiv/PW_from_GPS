@@ -8,6 +8,23 @@ Created on Mon Jun 10 14:33:19 2019
 from PW_paths import work_yuval
 
 
+def standard_error_slope(X, y):
+    """ get the standard error of the slope of the linear regression,
+    works in the case that X is a vector only"""
+    import numpy as np
+    ssxm, ssxym, ssyxm, ssym = np.cov(X, y, bias=1).flat
+    r_num = ssxym
+    r_den = np.sqrt(ssxm * ssym)
+    if r_den == 0.0:
+        r = 0.0
+    else:
+        r = r_num / r_den
+    n = len(X)
+    df = n - 2
+    sterrest = np.sqrt((1 - r**2) * ssym / ssxm / df)
+    return sterrest
+
+
 def tar_dir(path_to_tar, glob_str_to_tar, filename, savepath, compresslevel=9,
             with_dir_struct=False, verbose=False):
     import tarfile as tr
@@ -140,6 +157,7 @@ def plot_tmseries_xarray(ds, fields=None, error_suffix='_error',
     if len(all_fields) == 1:
         da = ds[all_fields[0]]
         ax = da.plot(figsize=(20, 4), color='b')[0].axes
+        ax.grid()
         if error_fields:
             print('adding errorbars fillbetween...')
             error = da.name + error_suffix
@@ -170,6 +188,7 @@ def plot_tmseries_xarray(ds, fields=None, error_suffix='_error',
         fg = da.plot(row='var', sharex=True, sharey=False, figsize=(20, 15),
                      hue='var', color='k')
         for i, (ax, field) in enumerate(zip(fg.axes.flatten(), all_fields)):
+            ax.grid()
             if error_fields:
                 print('adding errorbars fillbetween...')
                 ax.fill_between(da[time_dim].values,
