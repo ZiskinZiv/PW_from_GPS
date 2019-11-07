@@ -8,6 +8,78 @@ Created on Mon Jun 10 14:33:19 2019
 from PW_paths import work_yuval
 
 
+def fft_xr(xarray, units='cpy', nan_fill='mean', plot=True):
+    import numpy as np
+    import pandas as pd
+    import matplotlib.pyplot as plt
+    import xarray as xr
+#    import matplotlib
+#    matplotlib.rcParams['text.usetex'] = True
+    def fft_da(da, units, nan_fill, periods):
+        time_dim = list(set(da.dims))[0]
+        try:
+            p_units = da.attrs['units']
+        except KeyError:
+            p_units = 'amp'
+        if nan_fill == 'mean':
+            x = da.fillna(da.mean(time_dim))
+        # infer freq of time series:
+        sp_str = pd.infer_freq(x[time_dim].values)
+        if not sp_str:
+            raise('Didnt find a frequency for {}, check for nans!'.format(da.name))
+        sp_str = [char for char in sp_str]
+        mul = int(sp_str[0])
+        period = sp_str[1]
+        p_name = periods[period][0]
+        p_val = mul * periods[period][1]
+        print('found {} {} frequency in {} time-series'.format(mul, p_name, da.name))
+        # run fft:
+        p = 20 * np.log10(np.abs(np.fft.rfft(x)))
+        if units == 'cpy':
+            unit_freq = 1.0 / periods['Y'][1]  # in Hz
+            unit_freq_in_time_series = unit_freq * p_val   # in Hz
+        f = np.linspace(0, unit_freq_in_time_series / 2, len(p))
+        f_in_unit_freq = f / unit_freq
+        p_units = r'{}$^2$/{}'.format(p_units, units)
+        power = xr.DataArray(p, dims=['freq'])
+        power.name = da.name
+        power['freq'] = f_in_unit_freq
+        power['freq'].attrs['long_name'] = 'Frequency'
+        power['freq'].attrs['units'] = units
+        power.attrs['long_name'] = 'Power'
+        power.attrs['units'] = p_units
+        return power
+
+    periods = {'N': ['nanoseconds', 1e-9],
+               'U': ['microseconds', 1e-6],
+               'us': ['microseconds', 1e-6],
+               'L': ['milliseconds', 1e-3],
+               'ms': ['milliseconds', 1e-3],
+               'T': ['minutes', 60.0],
+               'min': ['minutes', 60.0],
+               'H': ['hours', 3600.0],
+               'D': ['days', 86400.0],
+               'W': ['weeks', 604800.0],
+               'MS': ['months', 86400.0 * 30],
+               'Y': ['years', 86400.0 * 365.25]
+               }
+    if isinstance(xarray, xr.DataArray):
+        power = fft_da(xarray, units, nan_fill, periods)
+        if plot:
+            power.plot.line(xscale='log', yscale='log')
+        return power
+    elif isinstance(xarray, xr.Dataset):
+        p_list = []
+        for da in xarray:
+            p_list.append(fft_da(xarray[da], units, nan_fill, periods))
+        ds = xr.merge(p_list)
+        da_from_ds = ds.to_array(dim='station')
+        if plot:
+            da_from_ds.plot.line(xscale='log', yscale='log', hue='station')
+        return ds
+    return
+
+
 def standard_error_slope(X, y):
     """ get the standard error of the slope of the linear regression,
     works in the case that X is a vector only"""
