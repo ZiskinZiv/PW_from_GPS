@@ -6,6 +6,77 @@ Created on Mon Jun 10 14:33:19 2019
 @author: ziskin
 """
 from PW_paths import work_yuval
+# TODO: build curve fit tool with various function model: power, sum of sin ...
+# TODO: no need to build it, use lmfit instead:
+# TODO: check if lmfit accepts- datetimeindex, xarrays and NaNs.
+# TODO: if not, build func to replace datetimeindex to numbers and vise versa
+
+
+def lmfit_params(model_name):
+    from lmfit.parameter import Parameters
+    sin_params = Parameters()
+    # add with tuples: (NAME VALUE VARY MIN  MAX  EXPR  BRUTE_STEP)
+    amp = ['sin_amp', 50, True, None, None, None, None]
+    phase = ['sin_phase', 0, True, None, None, None, None]
+    freq = ['sin_freq', 1/365.0, True, None, None, None]
+    sin_params.add(*amp)
+    sin_params.add(*phase)
+    sin_params.add(*freq)
+    line_params = Parameters()
+    slope = ['line_slope', 1e-6, True, None, None, None, None]
+    intercept = ['line_intercept', 58.6, True, None, None, None, None]
+    line_params.add(*slope)
+    line_params.add(*intercept)
+    if model_name == 'sin_linear':
+        return line_params + sin_params
+    elif model_name == 'sin':
+        return sin_params
+    elif model_name == 'line':
+        return line_params
+    elif model_name == 'sum_sin':
+        amp[0] = 'sin0_amp'
+        phase[0] = 'sin0_phase'
+        freq[0] = 'sin0_freq'
+
+def fit_da_to_model(da, params, model_dict={'model_name': 'sin'},
+                    method='leastsq', plot=True):
+    """options for modelname:'sin', 'sin_line', 'line', 'sin_constant', and
+    'sum_sin'"""
+    import matplotlib.pyplot as plt
+    import pandas as pd
+    time_dim = list(set(da.dims))[0]
+    lm = lmfit_model_switcher()
+    model = lm.pick_model(**model_dict)
+    print(model)
+    jul, jul_no_nans = get_julian_dates_from_da(da)
+    y = da.dropna(time_dim).values
+    result = model.fit(**params, data=y, time=jul_no_nans, method=method)
+    fit_y = result.eval(**result.best_values, time=jul)
+    print(result.best_values)
+    if plot:
+        fig, ax = plt.subplots(figsize=(8, 6))
+        da.plot.line(marker='.', linewidth=0., color='b', ax=ax)
+        dt = pd.to_datetime(da[time_dim].values)
+        ax.plot(dt, fit_y, c='r')
+        plt.legend(['data', 'fit'])
+    return result
+
+
+def get_julian_dates_from_da(da):
+    """transform the time dim of a dataarray to julian dates(days since)"""
+    import pandas as pd
+    # get time dim:
+    time_dim = list(set(da.dims))[0]
+    # convert to days since 2000 (julian_date):
+    jul = pd.to_datetime(da[time_dim].values).to_julian_date()
+    # normalize all days to first entry:
+    first_day = jul[0]
+    jul -= first_day
+    # do the same but without nans:
+    jul_no_nans = pd.to_datetime(
+            da.dropna(time_dim)[time_dim].values).to_julian_date()
+    jul_no_nans -= first_day
+    return jul.values, jul_no_nans.values
 
 
 def fft_xr(xarray, units='cpy', nan_fill='mean', plot=True):
@@ -15,6 +86,7 @@ def fft_xr(xarray, units='cpy', nan_fill='mean', plot=True):
     import xarray as xr
 #    import matplotlib
 #    matplotlib.rcParams['text.usetex'] = True
+
     def fft_da(da, units, nan_fill, periods):
         time_dim = list(set(da.dims))[0]
         try:
@@ -27,20 +99,26 @@ def fft_xr(xarray, units='cpy', nan_fill='mean', plot=True):
         sp_str = pd.infer_freq(x[time_dim].values)
         if not sp_str:
             raise('Didnt find a frequency for {}, check for nans!'.format(da.name))
-        sp_str = [char for char in sp_str]
-        mul = int(sp_str[0])
-        period = sp_str[1]
+        if len(sp_str) > 1:
+            sp_str = [char for char in sp_str]
+            mul = int(sp_str[0])
+            period = sp_str[1]
+        elif len(sp_str) == 1:
+            mul = 1
+            period = sp_str[0]
         p_name = periods[period][0]
+        # number of seconds in freq units in time-series:
         p_val = mul * periods[period][1]
         print('found {} {} frequency in {} time-series'.format(mul, p_name, da.name))
         # run fft:
         p = 20 * np.log10(np.abs(np.fft.rfft(x)))
         if units == 'cpy':
             unit_freq = 1.0 / periods['Y'][1]  # in Hz
-            unit_freq_in_time_series = unit_freq * p_val   # in Hz
-        f = np.linspace(0, unit_freq_in_time_series / 2, len(p))
+            # unit_freq_in_time_series = unit_freq * p_val   # in Hz
+        # f = np.linspace(0, unit_freq_in_time_series / 2, len(p))
+        f = np.linspace(0, (1 / p_val) / 2, len(p))
         f_in_unit_freq = f / unit_freq
-        p_units = r'{}$^2$/{}'.format(p_units, units)
+        p_units = '{}^2/{}'.format(p_units, units)
         power = xr.DataArray(p, dims=['freq'])
         power.name = da.name
         power['freq'] = f_in_unit_freq
@@ -66,7 +144,9 @@ def fft_xr(xarray, units='cpy', nan_fill='mean', plot=True):
     if isinstance(xarray, xr.DataArray):
         power = fft_da(xarray, units, nan_fill, periods)
         if plot:
-            power.plot.line(xscale='log', yscale='log')
+            fig, ax = plt.subplots(figsize=(6, 8))
+            power.plot.line(ax=ax, xscale='log', yscale='log')
+            ax.grid()
         return power
     elif isinstance(xarray, xr.Dataset):
         p_list = []
@@ -74,8 +154,17 @@ def fft_xr(xarray, units='cpy', nan_fill='mean', plot=True):
             p_list.append(fft_da(xarray[da], units, nan_fill, periods))
         ds = xr.merge(p_list)
         da_from_ds = ds.to_array(dim='station')
+        try:
+            ds.attrs['full_name'] = 'Power spectra for {}'.format(xarray.attrs['full_name'])
+        except KeyError:
+            pass
         if plot:
-            da_from_ds.plot.line(xscale='log', yscale='log', hue='station')
+            da_mean = da_from_ds.mean('station')
+            da_mean.attrs = da_from_ds.attrs
+            # da_from_ds.plot.line(xscale='log', yscale='log', hue='station')
+            fig, ax = plt.subplots(figsize=(8, 6))
+            da_mean.plot.line(ax=ax, xscale='log', yscale='log')
+            ax.grid()
         return ds
     return
 
@@ -335,8 +424,11 @@ def dt_to_np64(time_coord, unit='m', convert_back=False):
     return new_time
 
 
-def xr_reindex_with_date_range(ds, time_dim='time', freq='5min'):
+def xr_reindex_with_date_range(ds, drop=True, freq='5min'):
     import pandas as pd
+    time_dim = list(set(ds.dims))[0]
+    if drop:
+        ds = ds.dropna(time_dim)
     start = pd.to_datetime(ds[time_dim].min().item())
     end = pd.to_datetime(ds[time_dim].max().item())
     new_time = pd.date_range(start, end, freq=freq)
@@ -776,3 +868,64 @@ def desc_nan(data, verbose=True):
         for varname in data.data_vars.keys():
             non_nans = nan_da(data[varname])
     return non_nans
+
+
+class lmfit_model_switcher(object):
+    def pick_model(self, model_name, *args, **kwargs):
+        """Dispatch method"""
+        method_name = str(model_name)
+        # Get the method from 'self'. Default to a lambda.
+        method = getattr(self, method_name, lambda: "Invalid ML Model")
+        # Call the method as we return it
+        return method(*args, **kwargs)
+
+    def line(self, line_pre='line_'):
+        from lmfit import Model
+
+        def func(time, slope, intercept):
+            f = slope * time + intercept
+            return f
+        return Model(func, independent_vars=['time'], prefix=line_pre)
+
+    def sin(self, sin_pre='sin_'):
+        from lmfit import Model
+
+        def func(time, amp, freq, phase):
+            import numpy as np
+            f = amp * np.sin(2 * np.pi * freq * (time - phase))
+            return f
+        return Model(func, independent_vars=['time'], prefix=sin_pre)
+
+    def sin_constant(self, sin_pre='sin_', con_pre='constant_'):
+        from lmfit.models import ConstantModel
+
+        constant = ConstantModel(prefix=con_pre)
+        lmfit = lmfit_model_switcher()
+        sin = lmfit.pick_model('sin', sin_pre)
+        return sin + constant
+
+    def sin_linear(self, sin_pre='sin_', line_pre='line_'):
+        lmfit = lmfit_model_switcher()
+        sin = lmfit.pick_model('sin', sin_pre)
+        line = lmfit.pick_model('line', line_pre)
+        return sin + line
+
+    def sum_sin(self, k):
+        lmfit = lmfit_model_switcher()
+        sin = lmfit.pick_model('sin', 'sin0_')
+        for k in range(k-1):
+            sin += lmfit.pick_model('sin', 'sin{}_'.format(k+1))
+        return sin
+
+    def sum_sin_constant(self, k, con_pre='constant_'):
+        from lmfit.models import ConstantModel
+        constant = ConstantModel(prefix=con_pre)
+        lmfit = lmfit_model_switcher()
+        sum_sin = lmfit.pick_model('sum_sin', k)
+        return sum_sin + constant
+
+    def sum_sin_linear(self, k, line_pre='line_'):
+        lmfit = lmfit_model_switcher()
+        sum_sin = lmfit.pick_model('sum_sin', k)
+        line = lmfit.pick_model('line', line_pre)
+        return sum_sin + line
