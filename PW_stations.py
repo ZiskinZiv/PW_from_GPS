@@ -1993,7 +1993,7 @@ def israeli_gnss_stations_long_term_trend_analysis(gis_path=gis_path,
     isr['U'] = isr.east_cm_per_year
     isr['V'] = isr.north_cm_per_year
     if rel_plot is None:
-        isr.drop('dsea', axis=0, inplace=True)
+        # isr.drop('dsea', axis=0, inplace=True)
         fig, ax = plt.subplots(figsize=(10, 8))
         isr_with_yosh.plot(ax=ax)
         isr[(isr['years'] <= 10.0) & (isr['years'] >= 5.0)].plot(ax=ax, markersize=50, color='y', edgecolor='k', marker='o', label='5-10 yrs')
@@ -2014,7 +2014,7 @@ def israeli_gnss_stations_long_term_trend_analysis(gis_path=gis_path,
             ax.annotate(label, xy=(x, y), xytext=(3, 3),
                         textcoords="offset points")
     elif rel_plot is not None:
-        isr.drop('dsea', axis=0, inplace=True)
+        # isr.drop('dsea', axis=0, inplace=True)
         fig, ax = plt.subplots(figsize=(10, 8))
         isr_with_yosh.plot(ax=ax)
         isr[(isr['years'] <= 10.0) & (isr['years'] >= 5.0)].plot(ax=ax, markersize=50, color='y', edgecolor='k', marker='o', label='5-10 yrs')
@@ -2101,35 +2101,67 @@ def load_GNSS_TD(station='tela', sample_rate=None, plot=True):
 
 
 def load_gipsyx_results(station='tela', sample_rate=None,
-                        plot_fields=['WetZ']):
+                        plot_fields=['WetZ'], field_all=None):
     """load and plot gipsyx solutions for station, to choose sample rate
-    different than 5 mins choose: 'H', 'W' or 'MS'"""
+    different than 5 mins choose: 'H', 'W' or 'MS', use field_all to select
+    one field (e.g., WetZ) and get a dataset with all stations with
+    the one field."""
     from aux_gps import path_glob
     from aux_gps import plot_tmseries_xarray
     import xarray as xr
+    import pandas as pd
+    from pathlib import Path
+
+    def load_one_results_ds(station, sample_rate, plot_fields=None):
+        path = GNSS / station / 'gipsyx_solutions'
+        if sample_rate is None:
+            glob = '{}_PPP*.nc'.format(station.upper())
+            try:
+                file = path_glob(path, glob_str=glob)[0]
+                sample_rate = '5 mins'
+            except FileNotFoundError as e:
+                print(e)
+                return None
+        else:
+            glob = '{}_{}_PPP*.nc'.format(station.upper(), sample[sample_rate])
+            try:
+                file = path_glob(path, glob_str=glob)[0]
+            except FileNotFoundError as e:
+                print(e)
+                return None
+        ds = xr.open_dataset(file)
+        print('loaded {} station with a {} sample rate'.format(station,
+                                                               sample_rate))
+        if plot_fields is not None and plot_fields != 'all':
+            plot_tmseries_xarray(ds, plot_fields)
+        elif plot_fields == 'all':
+            plot_tmseries_xarray(ds, ['GradNorth', 'GradEast', 'WetZ', 'lat',
+                                      'lon', 'alt'])
+        return ds
+
     sample = {'1H': 'hourly', '3H': '3hourly', 'D': 'Daily', 'W': 'weekly',
               'MS': 'monthly'}
-    path = GNSS / station / 'gipsyx_solutions'
-    if sample_rate is None:
-        glob = '{}_PPP*.nc'.format(station.upper())
-        try:
-            file = path_glob(path, glob_str=glob)[0]
-        except FileNotFoundError as e:
-            print(e)
-            # return station
+    if field_all is None:
+        ds = load_one_results_ds(station, sample_rate, plot_fields)
     else:
-        glob = '{}_{}_PPP*.nc'.format(station.upper(), sample[sample_rate])
-        try:
-            file = path_glob(path, glob_str=glob)[0]
-        except FileNotFoundError as e:
-            print(e)
-            # return station
-    ds = xr.open_dataset(file)
-    if plot_fields is not None and plot_fields != 'all':
-        plot_tmseries_xarray(ds, plot_fields)
-    elif plot_fields == 'all':
-        plot_tmseries_xarray(ds, ['GradNorth', 'GradEast', 'WetZ', 'lat',
-                                  'lon', 'alt'])
+        print('Loading field {} for all stations'.format(field_all))
+        cwd = Path().cwd()
+        df = pd.read_csv(cwd / 'israeli_gnss_coords.txt', header=0,
+                         delim_whitespace=True)
+        stations = df.index.tolist()
+        da_list = []
+        stations_to_put = []
+        for sta in stations:
+            ds = load_one_results_ds(sta, sample_rate, plot_fields=None)
+            if ds is not None:
+                da_list.append(ds[field_all])
+                stations_to_put.append(sta)
+            else:
+                print('skipping station {}'.format(sta))
+                continue
+        ds = xr.concat(da_list, dim='station')
+        ds['station'] = stations_to_put
+        ds = ds.to_dataset(dim='station')
     return ds
 
 
@@ -2140,6 +2172,8 @@ def get_long_trends_from_gnss_station(station='tela', modelname='LR',
     from aux_gps import plot_tmseries_xarray
     # dont try anonther model than LR except for lower-sampled data
     ds = load_gipsyx_results(station, sample_rate=None, plot_fields=None)
+    if ds is None:
+        raise FileNotFoundError
     # first do altitude [m]:
     da_alt = ML_fit_model_to_tmseries(ds['alt'], modelname=modelname,
                                       plot=False)
