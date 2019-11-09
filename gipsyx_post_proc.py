@@ -631,7 +631,9 @@ def save_yearly_gipsyx_results(path, savepath):
     logger.info('found {} _smoothFinal tdp files in {} to process.'.format(tot, path))
     dtt = pd.to_timedelta(est_time_per_single_run, unit='s') * tot
     extra_dtt = pd.to_timedelta(0.4, unit='s') * tot
+    resample_dtt = pd.to_timedelta(0.75, unit='s') * tot
     dtt += extra_dtt
+    dtt += resample_dtt
     logger.info('estimated time to completion of run: {}'.format(dtt))
     logger.info('check again in {}'.format(pd.Timestamp.now() + dtt))
     rfns = [x.as_posix().split('/')[-1][0:12] for x in files]
