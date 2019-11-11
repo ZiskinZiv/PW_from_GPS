@@ -38,13 +38,16 @@ def lmfit_params(model_name):
         phase[0] = 'sin0_phase'
         freq[0] = 'sin0_freq'
 
+
 def fit_da_to_model(da, params, model_dict={'model_name': 'sin'},
-                    method='leastsq', plot=True):
+                    method='leastsq', times=None, plot=True):
     """options for modelname:'sin', 'sin_line', 'line', 'sin_constant', and
     'sum_sin'"""
     import matplotlib.pyplot as plt
     import pandas as pd
     time_dim = list(set(da.dims))[0]
+    if times is not None:
+        da = da.sel({time_dim: slice(*times)})
     lm = lmfit_model_switcher()
     model = lm.pick_model(**model_dict)
     print(model)
@@ -290,12 +293,18 @@ def get_var(varname):
         return out
 
 
-def plot_tmseries_xarray(ds, fields=None, error_suffix='_error',
+def plot_tmseries_xarray(ds, fields=None, points=False, error_suffix='_error',
                          errorbar_alpha=0.5, trend_suffix='_trend'):
     """plot time-series plot w/o errorbars of a xarray dataset"""
     import numpy as np
     import matplotlib.pyplot as plt
     import xarray as xr
+    if points:
+        ma = '.'  # marker
+        lw = 0.  # linewidth
+    else:
+        ma = None  # marker
+        lw = 1.0  # linewidth
     if isinstance(ds, xr.DataArray):
         ds = ds.to_dataset()
 #    if len(ds.dims) > 1:
@@ -317,7 +326,7 @@ def plot_tmseries_xarray(ds, fields=None, error_suffix='_error',
     time_dim = list(set(ds[all_fields].dims))[0]
     if len(all_fields) == 1:
         da = ds[all_fields[0]]
-        ax = da.plot(figsize=(20, 4), color='b')[0].axes
+        ax = da.plot(figsize=(20, 4), color='b', marker=ma, linewidth=lw)[0].axes
         ax.grid()
         if error_fields:
             print('adding errorbars fillbetween...')
@@ -339,7 +348,7 @@ def plot_tmseries_xarray(ds, fields=None, error_suffix='_error',
                         horizontalalignment='center',
                         verticalalignment='top', color='green', fontsize=15,
                         transform=ax.transAxes)
-        ax.grid()
+        ax.grid(True)
         ax.set_title(da.name)
         plt.tight_layout()
         plt.subplots_adjust(top=0.93)
@@ -347,9 +356,9 @@ def plot_tmseries_xarray(ds, fields=None, error_suffix='_error',
     else:
         da = ds[all_fields].to_array('var')
         fg = da.plot(row='var', sharex=True, sharey=False, figsize=(20, 15),
-                     hue='var', color='k')
+                     hue='var', color='k', marker=ma, linewidth=lw)
         for i, (ax, field) in enumerate(zip(fg.axes.flatten(), all_fields)):
-            ax.grid()
+            ax.grid(True)
             if error_fields:
                 print('adding errorbars fillbetween...')
                 ax.fill_between(da[time_dim].values,
@@ -374,7 +383,7 @@ def plot_tmseries_xarray(ds, fields=None, error_suffix='_error',
             except KeyError:
                 pass
             ax.lines[0].set_color('C{}'.format(i))
-            ax.grid()
+            ax.grid(True)
         # fg.fig.suptitle()
         fg.fig.subplots_adjust(left=0.1, top=0.93)
     return fg
