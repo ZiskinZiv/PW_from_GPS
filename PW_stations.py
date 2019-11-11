@@ -2111,6 +2111,7 @@ def load_gipsyx_results(station='tela', sample_rate=None,
     import xarray as xr
     import pandas as pd
     from pathlib import Path
+    import matplotlib.pyplot as plt
 
     def load_one_results_ds(station, sample_rate, plot_fields=None):
         path = GNSS / station / 'gipsyx_solutions'
@@ -2133,14 +2134,37 @@ def load_gipsyx_results(station='tela', sample_rate=None,
         print('loaded {} station with a {} sample rate'.format(station,
                                                                sample_rate))
         if plot_fields is not None and plot_fields != 'all':
-            plot_tmseries_xarray(ds, plot_fields)
+            fg = plot_tmseries_xarray(ds, plot_fields, points=points)
+            try:
+                # Axes object need to use .figure to access figure:
+                fg.figure.suptitle(
+                    'Station: {}'.format(
+                        ds.attrs['station']),
+                    fontweight='bold')
+                fg.figure.subplots_adjust(top=0.90)
+            except AttributeError:
+                # while FacetGrid object needs .fig to access figure:
+                fg.fig.suptitle(
+                    'Station: {}'.format(
+                        ds.attrs['station']),
+                    fontweight='bold')
+                fg.fig.subplots_adjust(top=0.93)
         elif plot_fields == 'all':
-            plot_tmseries_xarray(ds, ['GradNorth', 'GradEast', 'WetZ', 'lat',
-                                      'lon', 'alt'])
+            fg = plot_tmseries_xarray(ds, ['GradNorth', 'GradEast', 'WetZ',
+                                           'lat', 'lon', 'alt'], points=points)
+            fg.fig.suptitle(
+                'Station: {}'.format(
+                    ds.attrs['station']),
+                fontweight='bold')
+            fg.fig.subplots_adjust(top=0.93)
         return ds
 
     sample = {'1H': 'hourly', '3H': '3hourly', 'D': 'Daily', 'W': 'weekly',
               'MS': 'monthly'}
+    if sample_rate is None:
+        points = False
+    else:
+        points = True
     if field_all is None:
         ds = load_one_results_ds(station, sample_rate, plot_fields)
     else:
