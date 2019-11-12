@@ -135,28 +135,29 @@ def single_station_rinex_garner_download(save_dir, minimum_year=None,
 
 
 def single_station_rinex_using_wget(save_dir, minimum_year=None,
-                                    station='tela'):
+                                    station='tela', db='garner'):
     import subprocess
     from subprocess import CalledProcessError
     from aux_gps import datetime_to_rinex_filename
     from aux_gps import get_timedate_and_station_code_from_rinex
     import pandas as pd
     import logging
-    import os
+    # import os
     logger = logging.getLogger('rinex_garner')
     savepath = save_dir
     cnt = 0
-    logger.info('Starting rinex download for station {} using wget'.format(station))
-    if not os.path.exists(savepath):
-        try:
-            os.makedirs(savepath)
-            logger.info('Creating {} for station {}'.format(savepath, station))
-        except OSError:
-            logger.error("Creation of the directory %s failed" % savepath)
-        else:
-            logger.info("Successfully created the directory %s" % savepath)
-    else:
-        logger.warning('Folder {} already exists.'.format(savepath))
+    logger.info('Starting rinex download for station {} using wget from {} ftp site'.format(station, db))
+#    if not os.path.exists(savepath):
+#        try:
+#            os.makedirs(savepath)
+#            logger.info('Creating {} for station {}'.format(savepath, station))
+#        except OSError:
+#            logger.error("Creation of the directory %s failed" % savepath)
+#        else:
+#            logger.info("Successfully created the directory %s" % savepath)
+    savepath.mkdir(parents=True, exist_ok=True)
+#    else:
+#        logger.warning('Folder {} already exists.'.format(savepath))
     if minimum_year is not None:
         logger.info('starting search from year {}'.format(minimum_year))
         dts = pd.date_range('{}-01-01'.format(minimum_year), '2019-10-15',
@@ -174,14 +175,20 @@ def single_station_rinex_using_wget(save_dir, minimum_year=None,
             continue
         dt = get_timedate_and_station_code_from_rinex(rfn, just_dt=True)
         year = dt.year
+        yrd = '{}{}'.format(str(year)[-2:], 'd')
         dayofyear = dt.dayofyear
         if len(str(dayofyear)) == 1:
             dayofyear = '00' + str(dayofyear)
         elif len(str(dayofyear)) == 2:
             dayofyear = '0' + str(dayofyear)
-        command = 'wget -q -P {}'.format(savepath)\
-            + ' http://anonymous:shlomiziskin%40gmail.com@garner.ucsd.edu'\
-            + '/pub/rinex/{}/{}/{}'.format(year, dayofyear, filename)
+        if db == 'garner':
+            command = 'wget -q -P {}'.format(savepath)\
+                + ' http://anonymous:shlomiziskin%40gmail.com@garner.ucsd.edu'\
+                + '/pub/rinex/{}/{}/{}'.format(year, dayofyear, filename)
+        elif db == 'cddis':
+            command = 'wget -q -P {}'.format(savepath)\
+                + ' ftp://anonymous:shlomiziskin%40gmail.com@cddis.nasa.gov/gnss/data/daily/'\
+                + '{}/{}/{}/{}'.format(year, dayofyear, yrd, filename)
         try:
             subprocess.run(command, shell=True, check=True)
             logger.info('Downloaded {} to {}.'.format(filename, savepath))
@@ -260,6 +267,8 @@ if __name__ == '__main__':
                           type=check_station_name)
     optional.add_argument('--myear', help='minimum year to begin search in garner site.',
                           type=check_year)
+    optional.add_argument('--db', help='database to download rinex files from.',
+                          choices=['garner', 'cddis'])
     optional.add_argument('--hr_only', help='download only _hr files...',
                           choices=['True'])
 #                          metavar=str(cds.start_year) + ' to ' + str(cds.end_year))
@@ -282,10 +291,12 @@ if __name__ == '__main__':
             if args.myear is not None:
                 single_station_rinex_using_wget(path,
                                                 minimum_year=args.myear,
-                                                station=args.station)
+                                                station=args.station,
+                                                db=args.db)
             else:
                 single_station_rinex_using_wget(path,
-                                                station=args.station)
+                                                station=args.station,
+                                                db=args.db)
         else:
             raise ValueError('need to specify station!')
     elif args.mode == 'orbital':
