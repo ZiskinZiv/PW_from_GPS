@@ -1929,12 +1929,47 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
     return da
 
 
-def israeli_gnss_stations_long_term_trend_analysis(gis_path=gis_path,
-                                                   rel_plot='tela'):
+station_continous_times = {
+    # a station - continous data times dict:
+    'alon': [None, None],
+    'bshm': ['2010', '2017'],  # strong dis behaviour
+    'csar': [None, '2017'],  # small glich in the end
+    'drag': ['2004', None],  # small glich in the begining
+    'dsea': [None, '2016'],
+    'elat': ['2013', None],   # gliches in the begining, then up and then down
+    'elro': ['2005', '2009'],  # up and down, chose up period
+    'gilb': ['2005', None],
+    'hrmn': [None, None],   # spikes(WetZ), positive spikes in alt due to snow
+    'jslm': ['2006', None],
+    'kabr': ['2013', None],  # strong dis behaviour
+    'katz': ['2011', '2016'],  # dis behaviour
+    'klhv': [None, None],
+    'lhav': ['2004', '2006'],  # dis behaviour
+    'mrav': [None, None],
+    'nizn': ['2015-09', None],  # something in the begining
+    'nrif': ['2012', None],
+    'nzrt': [None, None],
+    'ramo': ['2006', None],  # somethin in begining
+    'slom': ['2015-07', '2017-07'],  # strong dis behaviour, ups and downs
+    'spir': ['2015', '2018'],   # big glich in the end
+    'tela': ['2005', None],   # gap in 2003-2004 , glich in 2004
+    'yosh': [None, None],
+    'yrcm': ['2011', None]  # small glich in begining
+}
+
+
+
+
+def israeli_gnss_stations_long_term_trend_analysis(
+        gis_path=gis_path,
+        rel_plot='tela',
+        times_dict=station_continous_times):
     import pandas as pd
     from pathlib import Path
     import geopandas as gpd
     import matplotlib.pyplot as plt
+    from aux_gps import geo_annotate
+    import contextily as ctx
     cwd = Path().cwd()
     filename = 'israeli_long_term_tectonics_trends.txt'
     if (cwd / filename).is_file():
@@ -1948,7 +1983,12 @@ def israeli_gnss_stations_long_term_trend_analysis(gis_path=gis_path,
         for station in isr_stations:
             print('proccessing station: {}'.format(station))
             try:
-                rds = get_long_trends_from_gnss_station(station, 'LR', False)
+                rds = get_long_trends_from_gnss_station(
+                    station, 'LR', plot=False, times=times_dict[station])
+            except KeyError:
+                print(
+                    'didnt find {} key in times_dict, skipping...'.format(station))
+                continue
             except FileNotFoundError:
                 print(
                     'didnt find {} in gipsyx solutions, skipping...'.format(station))
@@ -1969,16 +2009,18 @@ def israeli_gnss_stations_long_term_trend_analysis(gis_path=gis_path,
         df['angle_from_east'] = np.rad2deg(
             np.arctan2(df['north_cm_per_year'], df['east_cm_per_year']))
         for station in df.index:
-            df['rel_mm_north_{}'.format(station)] = (df['north_cm_per_year'] \
-                - df.loc[station, 'north_cm_per_year']) * 100.0
-            df['rel_mm_east_{}'.format(station)] = (df['east_cm_per_year'] \
-                - df.loc[station, 'east_cm_per_year']) * 100.0
+            df['rel_mm_north_{}'.format(station)] = (
+                df['north_cm_per_year'] - df.loc[station, 'north_cm_per_year']) * 100.0
+            df['rel_mm_east_{}'.format(station)] = (
+                df['east_cm_per_year'] - df.loc[station, 'east_cm_per_year']) * 100.0
             df['rel_mm_per_year_{}'.format(station)] = np.sqrt(
                 df['rel_mm_north_{}'.format(station)] ** 2.0 +
                 df['rel_mm_east_{}'.format(station)] ** 2.0)
             # define angle from east : i.e., x axis is east
             df['rel_angle_from_east_{}'.format(station)] = np.rad2deg(np.arctan2(
                 df['rel_mm_north_{}'.format(station)], df['rel_mm_east_{}'.format(station)]))
+            df['rel_up_mm_per_year_{}'.format(
+                station)] = df['up_mm_per_year'] - df.loc[station, 'up_mm_per_year']
         df.to_csv(cwd / filename, sep=' ')
         print('{} was saved to {}'.format(filename, cwd))
     isr_with_yosh = gpd.read_file(gis_path / 'Israel_demog_yosh.shp')
@@ -1988,6 +2030,8 @@ def israeli_gnss_stations_long_term_trend_analysis(gis_path=gis_path,
                                                             df.lat),
                                 crs=isr_with_yosh.crs)
     isr = gpd.sjoin(stations, isr_with_yosh, op='within')
+    isr_with_yosh = isr_with_yosh.to_crs(epsg=3857)
+    isr = isr.to_crs(epsg=3857)
     isr['X'] = isr.geometry.x
     isr['Y'] = isr.geometry.y
     isr['U'] = isr.east_cm_per_year
@@ -1995,29 +2039,36 @@ def israeli_gnss_stations_long_term_trend_analysis(gis_path=gis_path,
     if rel_plot is None:
         # isr.drop('dsea', axis=0, inplace=True)
         fig, ax = plt.subplots(figsize=(10, 8))
-        isr_with_yosh.plot(ax=ax)
-        isr[(isr['years'] <= 10.0) & (isr['years'] >= 5.0)].plot(ax=ax, markersize=50, color='y', edgecolor='k', marker='o', label='5-10 yrs')
+        isr_with_yosh.plot(ax=ax, alpha=0.0)
+        ctx.add_basemap(ax, url=ctx.sources.ST_TERRAIN)
+        ax.set_axis_off()
+        isr[(isr['years'] <= 5.0) & (isr['years'] >= 0.0)].plot(ax=ax, markersize=50, color='m', edgecolor='k', marker='o', label='0-5 yrs')
+        isr[(isr['years'] <= 10.0) & (isr['years'] > 5.0)].plot(ax=ax, markersize=50, color='y', edgecolor='k', marker='o', label='5-10 yrs')
         isr[(isr['years'] <= 15.0) & (isr['years'] > 10.0)].plot(ax=ax, markersize=50, color='g', edgecolor='k', marker='o', label='10-15 yrs')
         isr[(isr['years'] <= 20.0) & (isr['years'] > 15.0)].plot(ax=ax, markersize=50, color='c', edgecolor='k', marker='o', label='15-20 yrs')
         isr[(isr['years'] <= 25.0) & (isr['years'] > 20.0)].plot(ax=ax, markersize=50, color='r', edgecolor='k', marker='o', label='20-25 yrs')
-        plt.legend(prop={'size': 12}, bbox_to_anchor=(1.05, 1.0), title='number of data years')
+        plt.legend(prop={'size': 12}, bbox_to_anchor=(-0.15, 1.0), title='number of data years')
         # isr.plot(ax=ax, column='cm_per_year', cmap='Greens',
         #          edgecolor='black', legend=True)
         cmap = plt.get_cmap('spring', 10)
-        Q = ax.quiver(isr['X'], isr['Y'], isr['U'], isr['V'],
-                      isr['cm_per_year'], cmap=cmap)
-        fig.colorbar(Q, extend='max')
-        qk = ax.quiverkey(Q, 0.8, 0.9, 1, r'$1 \frac{cm}{yr}$', labelpos='E',
-                          coordinates='figure')
-        for x, y, label in zip(isr.lon, isr.lat,
-                               isr.index):
-            ax.annotate(label, xy=(x, y), xytext=(3, 3),
-                        textcoords="offset points")
+#        Q = ax.quiver(isr['X'], isr['Y'], isr['U'], isr['V'],
+#                      isr['cm_per_year'], cmap=cmap)
+        Q = ax.quiver(isr['X'], isr['Y'], isr['U'], isr['V'], cmap=cmap)
+#        fig.colorbar(Q, extend='max')
+#        qk = ax.quiverkey(Q, 0.8, 0.9, 1, r'$1 \frac{cm}{yr}$', labelpos='E',
+#                          coordinates='figure')
+        geo_annotate(ax, isr.geometry.x, isr.geometry.y, isr.index, xytext=(3, 3))
+        geo_annotate(ax, isr.geometry.x, isr.geometry.y, isr['up_mm_per_year'],
+                     xytext=(3, -6), fmt='{:.2f}', fw='bold',
+                     colorupdown=True)
+        geo_annotate(ax, isr.geometry.x, isr.geometry.y, isr['cm_per_year'],
+                     xytext=(-25, 3), fmt='{:.2f}', c='k', fw='normal')
     elif rel_plot is not None:
         # isr.drop('dsea', axis=0, inplace=True)
         fig, ax = plt.subplots(figsize=(10, 8))
         isr_with_yosh.plot(ax=ax)
-        isr[(isr['years'] <= 10.0) & (isr['years'] >= 5.0)].plot(ax=ax, markersize=50, color='y', edgecolor='k', marker='o', label='5-10 yrs')
+        isr[(isr['years'] <= 5.0) & (isr['years'] >= 0.0)].plot(ax=ax, markersize=50, color='m', edgecolor='k', marker='o', label='0-5 yrs')
+        isr[(isr['years'] <= 10.0) & (isr['years'] > 5.0)].plot(ax=ax, markersize=50, color='y', edgecolor='k', marker='o', label='5-10 yrs')
         isr[(isr['years'] <= 15.0) & (isr['years'] > 10.0)].plot(ax=ax, markersize=50, color='g', edgecolor='k', marker='o', label='10-15 yrs')
         isr[(isr['years'] <= 20.0) & (isr['years'] > 15.0)].plot(ax=ax, markersize=50, color='c', edgecolor='k', marker='o', label='15-20 yrs')
         isr[(isr['years'] <= 25.0) & (isr['years'] > 20.0)].plot(ax=ax, markersize=50, color='r', edgecolor='k', marker='o', label='20-25 yrs')
@@ -2027,17 +2078,25 @@ def israeli_gnss_stations_long_term_trend_analysis(gis_path=gis_path,
         isr['U'] = isr['rel_mm_east_{}'.format(rel_plot)]
         isr['V'] = isr['rel_mm_north_{}'.format(rel_plot)]
         cmap = plt.get_cmap('spring', 7)
-        Q = ax.quiver(isr['X'], isr['Y'], isr['U'], isr['V'],
-                      isr['rel_mm_per_year_{}'.format(rel_plot)],
-                      cmap=cmap)
-        qk = ax.quiverkey(Q, 0.8, 0.9, 1, r'$1 \frac{mm}{yr}$', labelpos='E',
-                          coordinates='figure')
-        fig.colorbar(Q, extend='max')
+#        Q = ax.quiver(isr['X'], isr['Y'], isr['U'], isr['V'],
+#                      isr['rel_mm_per_year_{}'.format(rel_plot)],
+#                      cmap=cmap)
+        Q = ax.quiver(isr['X'], isr['Y'], isr['U'], isr['V'], cmap=cmap)
+#        qk = ax.quiverkey(Q, 0.8, 0.9, 1, r'$1 \frac{mm}{yr}$', labelpos='E',
+#                          coordinates='figure')
+#        fig.colorbar(Q, extend='max')
         plt.title('Relative to {} station'.format(rel_plot))
-        for x, y, label in zip(isr.lon, isr.lat,
-                               isr.index):
-            ax.annotate(label, xy=(x, y), xytext=(3, 3),
-                        textcoords="offset points")
+        geo_annotate(ax, isr.lon, isr.lat, isr.index, xytext=(3, 3))
+        geo_annotate(ax, isr.lon, isr.lat, isr['rel_up_mm_per_year_{}'.format(rel_plot)],
+                     xytext=(3, -6), fmt='{:.2f}', fw='bold',
+                     colorupdown=True)
+        geo_annotate(ax, isr.lon, isr.lat,
+                     isr['rel_mm_per_year_{}'.format(rel_plot)],
+                     xytext=(-21, 3), fmt='{:.2f}', c='k', fw='normal')
+#        for x, y, label in zip(isr.lon, isr.lat,
+#                               isr.index):
+#            ax.annotate(label, xy=(x, y), xytext=(3, 3),
+#                        textcoords="offset points")
         print(isr[['rel_mm_east_{}'.format(rel_plot),'rel_mm_north_{}'.format(rel_plot)]])
     return df
 
@@ -2190,15 +2249,18 @@ def load_gipsyx_results(station='tela', sample_rate=None,
 
 
 def get_long_trends_from_gnss_station(station='tela', modelname='LR',
-                                      plot=True):
+                                      plot=True, times=None):
     import xarray as xr
     import numpy as np
     from aux_gps import plot_tmseries_xarray
     # dont try anonther model than LR except for lower-sampled data
-    ds = load_gipsyx_results(station, sample_rate=None, plot_fields=None)
+    ds = load_gipsyx_results(station, sample_rate='1H', plot_fields=None)
     if ds is None:
         raise FileNotFoundError
     # first do altitude [m]:
+    if times is not None:
+        time_dim = list(set(ds.dims))[0]
+        ds = ds.sel({time_dim: slice(*times)})
     da_alt = ML_fit_model_to_tmseries(ds['alt'], modelname=modelname,
                                       plot=False)
     years = da_alt.attrs['total_years']
