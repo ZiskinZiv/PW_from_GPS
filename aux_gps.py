@@ -12,6 +12,53 @@ from PW_paths import work_yuval
 # TODO: if not, build func to replace datetimeindex to numbers and vise versa
 
 
+def geo_annotate(ax, lons, lats, labels, xytext=(3, 3), fmt=None, c='k',
+                 fw='normal', fs=None, colorupdown=False):
+    for x, y, label in zip(lons, lats, labels):
+        if colorupdown:
+            if float(label) >= 0.0:
+                c = 'r'
+            elif float(label) < 0.0:
+                c = 'b'
+        if fmt is not None:
+            ax.annotate(fmt.format(label), xy=(x, y), xytext=xytext,
+                        textcoords="offset points", color=c, fontweight=fw,
+                        fontsize=fs)
+        else:
+            ax.annotate(label, xy=(x, y), xytext=xytext,
+                        textcoords="offset points", color=c, fontweight=fw,
+                        fontsize=fs)
+    return
+
+
+def piecewise_linear_fit(da, k=1, plot=True):
+    """return dataarray with coords k "piece" indexing to k parts of
+    datetime. k=None means get all datetime index"""
+    import numpy as np
+    import xarray as xr
+    time_dim = list(set(da.dims))[0]
+    time_no_nans = da.dropna(time_dim)[time_dim]
+    time_pieces = np.array_split(time_no_nans.values, k)
+    params = lmfit_params('line')
+    best_values = []
+    best_fits = []
+    for piece in time_pieces:
+        dap = da.sel({time_dim: piece})
+        result = fit_da_to_model(dap, params, model_dict={'model_name': 'line'},
+                                 method='leastsq', plot=False, verbose=False)
+        best_values.append(result.best_values)
+        best_fits.append(result.best_fit)
+    bfs = np.concatenate(best_fits)
+    tps = np.concatenate(time_pieces)
+    da_final = xr.DataArray(bfs, dims=[time_dim])
+    da_final[time_dim] = tps
+    if plot:
+        ax = plot_tmseries_xarray(da, points=True)
+        for piece in time_pieces:
+            da_final.sel({time_dim: piece}).plot(color='r', ax=ax)
+    return da_final
+
+
 def lmfit_params(model_name):
     from lmfit.parameter import Parameters
     sin_params = Parameters()
@@ -40,7 +87,7 @@ def lmfit_params(model_name):
 
 
 def fit_da_to_model(da, params, model_dict={'model_name': 'sin'},
-                    method='leastsq', times=None, plot=True):
+                    method='leastsq', times=None, plot=True, verbose=True):
     """options for modelname:'sin', 'sin_line', 'line', 'sin_constant', and
     'sum_sin'"""
     import matplotlib.pyplot as plt
@@ -50,12 +97,14 @@ def fit_da_to_model(da, params, model_dict={'model_name': 'sin'},
         da = da.sel({time_dim: slice(*times)})
     lm = lmfit_model_switcher()
     model = lm.pick_model(**model_dict)
-    print(model)
+    if verbose:
+        print(model)
     jul, jul_no_nans = get_julian_dates_from_da(da)
     y = da.dropna(time_dim).values
     result = model.fit(**params, data=y, time=jul_no_nans, method=method)
     fit_y = result.eval(**result.best_values, time=jul)
-    print(result.best_values)
+    if verbose:
+        print(result.best_values)
     if plot:
         fig, ax = plt.subplots(figsize=(8, 6))
         da.plot.line(marker='.', linewidth=0., color='b', ax=ax)
@@ -574,7 +623,7 @@ def path_glob(path, glob_str='*.Z', return_empty_list=False):
     files_with_path = [file for file in path.glob(glob_str) if file.is_file]
     if not files_with_path and not return_empty_list:
         raise FileNotFoundError('{} search in {} found no files.'.format(glob_str,
-                        path))
+                                path))
     elif not files_with_path and return_empty_list:
         return files_with_path
     else:
