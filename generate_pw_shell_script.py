@@ -128,7 +128,7 @@ def generate_rinex_reader(station):
     return
 
 
-def generate_rinex_download(station, myear):
+def generate_rinex_download(station, myear, db):
     from pathlib import Path
     lines = []
     cwd = Path().cwd()
@@ -139,19 +139,27 @@ def generate_rinex_download(station, myear):
         savepath = (station_path / 'rinex')
         savepath.mkdir(parents=True, exist_ok=True)
         lines.append('cd {}'.format(station_path))
-        if myear is None:
+        if db is None:
+            db = 'garner'
+        if myear is None and db == 'garner':
             line = 'nohup python -u {}/single_rinex_station_download_from_garner.py'.format(pwpath)\
-                + ' --path {} --mode rinex --station {}'.format(savepath, curr_sta)\
-                + ' &>{}/nohup_{}_download.txt&'.format(pwpath, curr_sta)
-        else:
+                + ' --path {} --mode rinex --station {} --db {}'.format(savepath, curr_sta, db)\
+                + ' --myear {} &>{}/nohup_{}_download.txt&'.format(1988, pwpath, curr_sta)
+        elif myear is None and db == 'cddis':
             line = 'nohup python -u {}/single_rinex_station_download_from_garner.py'.format(pwpath)\
-                + ' --path {} --mode rinex --station {}'.format(savepath, curr_sta)\
+                + ' --path {} --mode rinex --station {} --db {}'.format(savepath, curr_sta, db)\
+                + ' --myear {} &>{}/nohup_{}_download.txt&'.format(1992, pwpath, curr_sta)
+        elif myear is not None:
+            line = 'nohup python -u {}/single_rinex_station_download_from_garner.py'.format(pwpath)\
+                + ' --path {} --mode rinex --station {} --db {}'.format(savepath, curr_sta, db)\
                 + ' --myear {} &>{}/nohup_{}_download.txt&'.format(myear, pwpath, curr_sta)
         lines.append(line)
         lines.append('cd {}'.format(pwpath))
         print('station: {}, savepath: {}'.format(curr_sta, savepath))
         if myear is not None:
             print('station: {}, myear: {}'.format(curr_sta, myear))
+        if db is not None:
+            print('station: {}, db: {}'.format(curr_sta, db))
     with open(cwd / script_file, 'w') as file:
         for item in lines:
             file.write("%s\n" % item)
@@ -242,7 +250,7 @@ def task_switcher(args):
         generate_backup(args.station, args.task)
     else:
         if args.task == 'rinex_download':
-            generate_rinex_download(args.station, args.myear)
+            generate_rinex_download(args.station, args.myear, args.db)
         elif args.task == 'rinex_reader':
             generate_rinex_reader(args.station)
         elif args.task == 'drdump' or args.task == 'edit30hr' or args.task == 'run':
@@ -302,6 +310,8 @@ if __name__ == '__main__':
                           type=str)
     optional.add_argument('--iqr_k', help='iqr k data filter criterion',
                           type=float)
+    optional.add_argument('--db', help='database to download rinex files from.',
+                          choices=['garner', 'cddis'])
     required.add_argument('--delete', action='store_true')  # its False
     required.add_argument('--backup', action='store_true')  # its False
 #                          metavar=str(cds.start_year) + ' to ' + str(cds.end_year))
