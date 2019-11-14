@@ -1960,9 +1960,11 @@ station_continous_times = {
 
 
 
+
+
 def israeli_gnss_stations_long_term_trend_analysis(
         gis_path=gis_path,
-        rel_plot='tela',
+        rel_plot='tela', show_names=True,
         times_dict=station_continous_times):
     import pandas as pd
     from pathlib import Path
@@ -2036,68 +2038,106 @@ def israeli_gnss_stations_long_term_trend_analysis(
     isr['Y'] = isr.geometry.y
     isr['U'] = isr.east_cm_per_year
     isr['V'] = isr.north_cm_per_year
-    if rel_plot is None:
+    if rel_plot is not None:
+        isr['U'] = isr['rel_mm_east_{}'.format(rel_plot)]
+        isr['V'] = isr['rel_mm_north_{}'.format(rel_plot)]
+        title = 'Relative to {} station'.format(rel_plot)
+        vertical_label = isr['rel_up_mm_per_year_{}'.format(rel_plot)]
+        horizontal_label = isr['rel_mm_per_year_{}'.format(rel_plot)]
+    else:
+        title = ''
+        vertical_label = isr['up_mm_per_year']
+        horizontal_label = isr['cm_per_year']
         # isr.drop('dsea', axis=0, inplace=True)
-        fig, ax = plt.subplots(figsize=(10, 8))
-        isr_with_yosh.plot(ax=ax, alpha=0.0)
-        ctx.add_basemap(ax, url=ctx.sources.ST_TERRAIN)
-        ax.set_axis_off()
-        isr[(isr['years'] <= 5.0) & (isr['years'] >= 0.0)].plot(ax=ax, markersize=50, color='m', edgecolor='k', marker='o', label='0-5 yrs')
-        isr[(isr['years'] <= 10.0) & (isr['years'] > 5.0)].plot(ax=ax, markersize=50, color='y', edgecolor='k', marker='o', label='5-10 yrs')
-        isr[(isr['years'] <= 15.0) & (isr['years'] > 10.0)].plot(ax=ax, markersize=50, color='g', edgecolor='k', marker='o', label='10-15 yrs')
-        isr[(isr['years'] <= 20.0) & (isr['years'] > 15.0)].plot(ax=ax, markersize=50, color='c', edgecolor='k', marker='o', label='15-20 yrs')
-        isr[(isr['years'] <= 25.0) & (isr['years'] > 20.0)].plot(ax=ax, markersize=50, color='r', edgecolor='k', marker='o', label='20-25 yrs')
-        plt.legend(prop={'size': 12}, bbox_to_anchor=(-0.15, 1.0), title='number of data years')
-        # isr.plot(ax=ax, column='cm_per_year', cmap='Greens',
-        #          edgecolor='black', legend=True)
-        cmap = plt.get_cmap('spring', 10)
+    #fig, ax = plt.subplots(figsize=(20, 10))
+    ax = isr_with_yosh.plot(alpha=0.0, figsize=(6, 15))
+    ctx.add_basemap(ax, url=ctx.sources.ST_TERRAIN)
+    ax.set_axis_off()
+    if show_names:
+        ax.plot(
+            [],
+            [],
+            ' ',
+            label=r'$^{\frac{mm}{year}}\bigcirc^{name}_{\frac{mm}{year}}$')
+    else:
+        ax.plot(
+            [],
+            [],
+            ' ',
+            label=r'$^{\frac{mm}{year}}\bigcirc_{\frac{mm}{year}}$')
+    ax.plot([], [], ' ', label='station:')
+    isr[(isr['years'] <= 5.0) & (isr['years'] >= 0.0)].plot(
+        ax=ax, markersize=50, color='m', edgecolor='k', marker='o', label='0-5 yrs')
+    isr[(isr['years'] <= 10.0) & (isr['years'] > 5.0)].plot(
+        ax=ax, markersize=50, color='y', edgecolor='k', marker='o', label='5-10 yrs')
+    isr[(isr['years'] <= 15.0) & (isr['years'] > 10.0)].plot(
+        ax=ax, markersize=50, color='g', edgecolor='k', marker='o', label='10-15 yrs')
+    isr[(isr['years'] <= 20.0) & (isr['years'] > 15.0)].plot(
+        ax=ax, markersize=50, color='c', edgecolor='k', marker='o', label='15-20 yrs')
+    isr[(isr['years'] <= 25.0) & (isr['years'] > 20.0)].plot(
+        ax=ax, markersize=50, color='r', edgecolor='k', marker='o', label='20-25 yrs')
+    handles, labels = plt.gca().get_legend_handles_labels()
+    order = [2, 3, 4, 5, 1, 0]
+    plt.legend([handles[idx] for idx in order],[labels[idx] for idx in order],
+               prop={'size': 10}, bbox_to_anchor=(-0.15, 1.0),
+               title='number of data years')
+    plt.setp(plt.gca().get_legend().get_texts(), fontsize='x-large')
+    # isr.plot(ax=ax, column='cm_per_year', cmap='Greens',
+    #          edgecolor='black', legend=True)
+    cmap = plt.get_cmap('spring', 10)
 #        Q = ax.quiver(isr['X'], isr['Y'], isr['U'], isr['V'],
 #                      isr['cm_per_year'], cmap=cmap)
-        Q = ax.quiver(isr['X'], isr['Y'], isr['U'], isr['V'], cmap=cmap)
+    Q = ax.quiver(isr['X'], isr['Y'], isr['U'], isr['V'], cmap=cmap)
 #        fig.colorbar(Q, extend='max')
 #        qk = ax.quiverkey(Q, 0.8, 0.9, 1, r'$1 \frac{cm}{yr}$', labelpos='E',
 #                          coordinates='figure')
-        geo_annotate(ax, isr.geometry.x, isr.geometry.y, isr.index, xytext=(3, 3))
-        geo_annotate(ax, isr.geometry.x, isr.geometry.y, isr['up_mm_per_year'],
-                     xytext=(3, -6), fmt='{:.2f}', fw='bold',
-                     colorupdown=True)
-        geo_annotate(ax, isr.geometry.x, isr.geometry.y, isr['cm_per_year'],
-                     xytext=(-25, 3), fmt='{:.2f}', c='k', fw='normal')
-    elif rel_plot is not None:
-        # isr.drop('dsea', axis=0, inplace=True)
-        fig, ax = plt.subplots(figsize=(10, 8))
-        isr_with_yosh.plot(ax=ax)
-        isr[(isr['years'] <= 5.0) & (isr['years'] >= 0.0)].plot(ax=ax, markersize=50, color='m', edgecolor='k', marker='o', label='0-5 yrs')
-        isr[(isr['years'] <= 10.0) & (isr['years'] > 5.0)].plot(ax=ax, markersize=50, color='y', edgecolor='k', marker='o', label='5-10 yrs')
-        isr[(isr['years'] <= 15.0) & (isr['years'] > 10.0)].plot(ax=ax, markersize=50, color='g', edgecolor='k', marker='o', label='10-15 yrs')
-        isr[(isr['years'] <= 20.0) & (isr['years'] > 15.0)].plot(ax=ax, markersize=50, color='c', edgecolor='k', marker='o', label='15-20 yrs')
-        isr[(isr['years'] <= 25.0) & (isr['years'] > 20.0)].plot(ax=ax, markersize=50, color='r', edgecolor='k', marker='o', label='20-25 yrs')
-        plt.legend(prop={'size': 12}, bbox_to_anchor=(-0.15, 1.0), title='number of data years')
-        # isr.plot(ax=ax, column='cm_per_year', cmap='Greens',
-        #          edgecolor='black', legend=True)
-        isr['U'] = isr['rel_mm_east_{}'.format(rel_plot)]
-        isr['V'] = isr['rel_mm_north_{}'.format(rel_plot)]
-        cmap = plt.get_cmap('spring', 7)
-#        Q = ax.quiver(isr['X'], isr['Y'], isr['U'], isr['V'],
-#                      isr['rel_mm_per_year_{}'.format(rel_plot)],
-#                      cmap=cmap)
-        Q = ax.quiver(isr['X'], isr['Y'], isr['U'], isr['V'], cmap=cmap)
-#        qk = ax.quiverkey(Q, 0.8, 0.9, 1, r'$1 \frac{mm}{yr}$', labelpos='E',
-#                          coordinates='figure')
-#        fig.colorbar(Q, extend='max')
-        plt.title('Relative to {} station'.format(rel_plot))
-        geo_annotate(ax, isr.lon, isr.lat, isr.index, xytext=(3, 3))
-        geo_annotate(ax, isr.lon, isr.lat, isr['rel_up_mm_per_year_{}'.format(rel_plot)],
-                     xytext=(3, -6), fmt='{:.2f}', fw='bold',
-                     colorupdown=True)
-        geo_annotate(ax, isr.lon, isr.lat,
-                     isr['rel_mm_per_year_{}'.format(rel_plot)],
-                     xytext=(-21, 3), fmt='{:.2f}', c='k', fw='normal')
-#        for x, y, label in zip(isr.lon, isr.lat,
-#                               isr.index):
-#            ax.annotate(label, xy=(x, y), xytext=(3, 3),
-#                        textcoords="offset points")
-        print(isr[['rel_mm_east_{}'.format(rel_plot),'rel_mm_north_{}'.format(rel_plot)]])
+    if show_names:
+        annot1 = geo_annotate(ax, isr.geometry.x, isr.geometry.y, isr.index,
+                              xytext=(3, 3))
+        annot2 = geo_annotate(ax, isr.geometry.x, isr.geometry.y,
+                              vertical_label, xytext=(3, -10),
+                              fmt='{:.1f}', fw='bold', colorupdown=True)
+        annot3 = geo_annotate(ax, isr.geometry.x, isr.geometry.y,
+                              horizontal_label, xytext=(-20, 3),
+                              fmt='{:.1f}', c='k', fw='normal')
+    # plt.legend(handles=[annot1, annot2, annot3])
+    plt.title(title)
+    plt.tight_layout()
+#    elif rel_plot is not None:
+#        # isr.drop('dsea', axis=0, inplace=True)
+#        fig, ax = plt.subplots(figsize=(10, 8))
+#        isr_with_yosh.plot(ax=ax)
+#        isr[(isr['years'] <= 5.0) & (isr['years'] >= 0.0)].plot(ax=ax, markersize=50, color='m', edgecolor='k', marker='o', label='0-5 yrs')
+#        isr[(isr['years'] <= 10.0) & (isr['years'] > 5.0)].plot(ax=ax, markersize=50, color='y', edgecolor='k', marker='o', label='5-10 yrs')
+#        isr[(isr['years'] <= 15.0) & (isr['years'] > 10.0)].plot(ax=ax, markersize=50, color='g', edgecolor='k', marker='o', label='10-15 yrs')
+#        isr[(isr['years'] <= 20.0) & (isr['years'] > 15.0)].plot(ax=ax, markersize=50, color='c', edgecolor='k', marker='o', label='15-20 yrs')
+#        isr[(isr['years'] <= 25.0) & (isr['years'] > 20.0)].plot(ax=ax, markersize=50, color='r', edgecolor='k', marker='o', label='20-25 yrs')
+#        plt.legend(prop={'size': 12}, bbox_to_anchor=(-0.15, 1.0), title='number of data years')
+#        # isr.plot(ax=ax, column='cm_per_year', cmap='Greens',
+#        #          edgecolor='black', legend=True)
+#        isr['U'] = isr['rel_mm_east_{}'.format(rel_plot)]
+#        isr['V'] = isr['rel_mm_north_{}'.format(rel_plot)]
+#        cmap = plt.get_cmap('spring', 7)
+##        Q = ax.quiver(isr['X'], isr['Y'], isr['U'], isr['V'],
+##                      isr['rel_mm_per_year_{}'.format(rel_plot)],
+##                      cmap=cmap)
+#        Q = ax.quiver(isr['X'], isr['Y'], isr['U'], isr['V'], cmap=cmap)
+##        qk = ax.quiverkey(Q, 0.8, 0.9, 1, r'$1 \frac{mm}{yr}$', labelpos='E',
+##                          coordinates='figure')
+##        fig.colorbar(Q, extend='max')
+#        plt.title('Relative to {} station'.format(rel_plot))
+#        geo_annotate(ax, isr.lon, isr.lat, isr.index, xytext=(3, 3))
+#        geo_annotate(ax, isr.lon, isr.lat, isr['rel_up_mm_per_year_{}'.format(rel_plot)],
+#                     xytext=(3, -6), fmt='{:.2f}', fw='bold',
+#                     colorupdown=True)
+#        geo_annotate(ax, isr.lon, isr.lat,
+#                     isr['rel_mm_per_year_{}'.format(rel_plot)],
+#                     xytext=(-21, 3), fmt='{:.2f}', c='k', fw='normal')
+##        for x, y, label in zip(isr.lon, isr.lat,
+##                               isr.index):
+##            ax.annotate(label, xy=(x, y), xytext=(3, 3),
+##                        textcoords="offset points")
+#        # print(isr[['rel_mm_east_{}'.format(rel_plot),'rel_mm_north_{}'.format(rel_plot)]])
     return df
 
 
