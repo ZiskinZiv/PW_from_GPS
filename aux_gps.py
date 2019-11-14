@@ -21,14 +21,14 @@ def geo_annotate(ax, lons, lats, labels, xytext=(3, 3), fmt=None, c='k',
             elif float(label) < 0.0:
                 c = 'b'
         if fmt is not None:
-            ax.annotate(fmt.format(label), xy=(x, y), xytext=xytext,
-                        textcoords="offset points", color=c, fontweight=fw,
-                        fontsize=fs)
+            annot = ax.annotate(fmt.format(label), xy=(x, y), xytext=xytext,
+                                textcoords="offset points", color=c,
+                                fontweight=fw, fontsize=fs)
         else:
-            ax.annotate(label, xy=(x, y), xytext=xytext,
-                        textcoords="offset points", color=c, fontweight=fw,
-                        fontsize=fs)
-    return
+            annot = ax.annotate(label, xy=(x, y), xytext=xytext,
+                                textcoords="offset points", color=c,
+                                fontweight=fw, fontsize=fs)
+    return annot
 
 
 def piecewise_linear_fit(da, k=1, plot=True):
