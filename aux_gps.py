@@ -12,6 +12,33 @@ from PW_paths import work_yuval
 # TODO: if not, build func to replace datetimeindex to numbers and vise versa
 
 
+def slice_task_date_range(files, date_range, task='non-specific'):
+    from aux_gps import get_timedate_and_station_code_from_rinex
+    import pandas as pd
+    from pathlib import Path
+    import logging
+    """ return a slice files object (list of rfn Paths) with the correct
+    within the desired date range"""
+    logger = logging.getLogger('gipsyx')
+    date_range = pd.to_datetime(date_range)
+    logger.info(
+        'performing {}  task within the dates: {} to {}'.format(task,
+                                                                date_range[0].strftime(
+                                                                    '%Y-%m-%d'),
+                                                                date_range[1].strftime('%Y-%m-%d')))
+    if not files:
+        return files
+    path = Path(files[0].as_posix().split('/')[0])
+    rfns = [x.as_posix().split('/')[-1][0:12] for x in files]
+    dts = get_timedate_and_station_code_from_rinex(rfns)
+    rfn_series = pd.Series(rfns, index=dts)
+    rfn_series = rfn_series.sort_index()
+    mask = (rfn_series.index >= date_range[0]) & (
+            rfn_series.index <= date_range[1])
+    files = [path / x for x in rfn_series.loc[mask].values]
+    return files
+
+
 def geo_annotate(ax, lons, lats, labels, xytext=(3, 3), fmt=None, c='k',
                  fw='normal', fs=None, colorupdown=False):
     for x, y, label in zip(lons, lats, labels):
@@ -238,11 +265,9 @@ def standard_error_slope(X, y):
     return sterrest
 
 
-def tar_dir(path_to_tar, glob_str_to_tar, filename, savepath, compresslevel=9,
+def tar_dir(files_with_path_to_tar, filename, savepath, compresslevel=9,
             with_dir_struct=False, verbose=False):
     import tarfile as tr
-    from aux_gps import path_glob
-    import numpy as np
     """ compresses all glob_str_to_tar files (e.g., *.txt) in path_to_tar,
     and save it all to savepath with filename as filename. by default adds .tar
     suffix if not supplied by user. control compression level with
@@ -253,10 +278,7 @@ def tar_dir(path_to_tar, glob_str_to_tar, filename, savepath, compresslevel=9,
         else:
             return file.as_posix().split('/')[-1]
 
-    try:
-        files_to_tar = path_glob(path_to_tar, glob_str_to_tar)
-    except FileNotFoundError:
-        return FileNotFoundError
+    path_to_tar = files_with_path_to_tar[0].as_posix().split('/')[0]
     if len(filename.split('.')) < 2:
         filename += '.tar'
         if verbose:
@@ -279,16 +301,16 @@ def tar_dir(path_to_tar, glob_str_to_tar, filename, savepath, compresslevel=9,
         arcname = None
         if verbose:
             print('files were archived with {} dir structure'.format(path_to_tar))
-    total = len(files_to_tar)
-    print('Found {} {} to tar in dir {}'.format(total, glob_str_to_tar, path_to_tar))
+    total = len(files_with_path_to_tar)
+    print('Found {} files to tar in dir {}'.format(total, path_to_tar))
     cnt = 0
-    for file in files_to_tar:
+    for file in files_with_path_to_tar:
         tar.add(file, arcname=aname(file, arcname=arcname))
         cnt += 1
 #        if np.mod(cnt, 10) == 0:
 #            print('.', end=" ")
     tar.close()
-    print('Compressed all {} files in {} to {}'.format(glob_str_to_tar,
+    print('Compressed all files in {} to {}'.format(
           path_to_tar, savepath / filename))
     return
 
@@ -643,19 +665,31 @@ def find_cross_points(df, cols=None):
     return df
 
 
-def datetime_to_rinex_filename(station='tela', dt='2012-05-07'):
+def get_rinex_filename_from_datetime(station='tela', dt='2012-05-07'):
     """return rinex filename from datetime string"""
     import pandas as pd
-    day = pd.to_datetime(dt, format='%Y-%m-%d').dayofyear
-    year = pd.to_datetime(dt, format='%Y-%m-%d').year
-    if len(str(day)) == 1:
-        str_day = '00' + str(day) + '0'
-    elif len(str(day)) == 2:
-        str_day = '0' + str(day) + '0'
-    elif len(str(day)) == 3:
-        str_day = str(day) + '0'
-    filename = station.lower() + str_day + '.' + str(year)[2:4] + 'd'
-    return filename
+
+    def filename_from_single_date(station, date):
+        day = pd.to_datetime(date, format='%Y-%m-%d').dayofyear
+        year = pd.to_datetime(date, format='%Y-%m-%d').year
+        if len(str(day)) == 1:
+            str_day = '00' + str(day) + '0'
+        elif len(str(day)) == 2:
+            str_day = '0' + str(day) + '0'
+        elif len(str(day)) == 3:
+            str_day = str(day) + '0'
+        filename = station.lower() + str_day + '.' + str(year)[2:4] + 'd'
+        return filename
+
+    if isinstance(dt, list):
+        filenames = []
+        for date in dt:
+            filename = filename_from_single_date(station, date)
+            filenames.append(filename)
+        return filenames
+    else:
+        filename = filename_from_single_date(station, date)
+        return filename
 
 
 def get_timedate_and_station_code_from_rinex(rinex_str='tela0010.05d',
@@ -663,15 +697,28 @@ def get_timedate_and_station_code_from_rinex(rinex_str='tela0010.05d',
     """return datetime from rinex2 format"""
     import pandas as pd
     import datetime
-    station = rinex_str[0:4]
-    days = int(rinex_str[4:7])
-    year = rinex_str[-3:-1]
-    Year = datetime.datetime.strptime(year, '%y').strftime('%Y')
-    dt = datetime.datetime(int(Year), 1, 1) + datetime.timedelta(days - 1)
-    if just_dt:
-        return pd.to_datetime(dt)
+
+    def get_dt_from_single_rinex(rinex_str):
+        station = rinex_str[0:4]
+        days = int(rinex_str[4:7])
+        year = rinex_str[-3:-1]
+        Year = datetime.datetime.strptime(year, '%y').strftime('%Y')
+        dt = datetime.datetime(int(Year), 1, 1) + datetime.timedelta(days - 1)
+        dt = pd.to_datetime(dt)
+        return dt, station.upper()
+
+    if isinstance(rinex_str, list):
+        dt_list = []
+        for rstr in rinex_str:
+            dt, station = get_dt_from_single_rinex(rstr)
+            dt_list.append(dt)
+        return dt_list
     else:
-        return pd.to_datetime(dt), station.upper()
+        dt, station = get_dt_from_single_rinex(rinex_str)
+    if just_dt:
+        return dt
+    else:
+        return dt, station
 
 
 def configure_logger(name='general', filename=None):
