@@ -43,10 +43,11 @@ def move_files(path_orig, path_dest, files, out_files=None, verbose=False):
     return
 
 
-def read_organize_rinex(path, glob_str='*.Z'):
+def read_organize_rinex(path, glob_str='*.Z', date_range=None):
     """read and organize the rinex file names for 30 hour run"""
     from aux_gps import get_timedate_and_station_code_from_rinex
     from aux_gps import path_glob
+    from aux_gps import slice_task_date_range
     import pandas as pd
     import numpy as np
     import logging
@@ -56,6 +57,8 @@ def read_organize_rinex(path, glob_str='*.Z'):
     stations = []
     logger.info('reading and organizing rinex files in {}'.format(path))
     files = path_glob(path, glob_str)
+    if date_range is not None:
+        files = slice_task_date_range(files, date_range, 'read_organize_rinex')
     for file_and_path in files:
         filename = file_and_path.as_posix().split('/')[-1][0:12]
         dt, station = get_timedate_and_station_code_from_rinex(filename)
@@ -115,7 +118,8 @@ def check_file_in_cwd(filename):
     return file_and_path
 
 
-def prepare_gipsyx_for_run_one_station(rinexpath, staDb, prep, rewrite):
+def prepare_gipsyx_for_run_one_station(rinexpath, staDb, prep, rewrite,
+                                       date_range=None):
     """rinex editing and merging command-line utility, 3 values for prep:
         0) drdump: run dataRecordDump on all rinex files in rinexpath
         1) edit24hr: run rnxEditGde.py with staDb on all datarecords files in
@@ -129,6 +133,7 @@ def prepare_gipsyx_for_run_one_station(rinexpath, staDb, prep, rewrite):
     import subprocess
     from subprocess import CalledProcessError
     from subprocess import TimeoutExpired
+    from aux_gps import slice_task_date_range
     from aux_gps import path_glob
     import logging
     import pandas as pd
@@ -137,17 +142,32 @@ def prepare_gipsyx_for_run_one_station(rinexpath, staDb, prep, rewrite):
     # from itertools import count
     from pathlib import Path
 
-    def run_dataRecorDump_on_all_files(rinexpath, out_path, rewrite):
+    def run_dataRecorDump_on_all_files(rinexpath, out_path, rewrite,
+                                       date_range=None):
         """runs dataRecordDump on all files in rinexpath(where all and only
         rinex files exist), saves the datarecord files to out_path. rewrite
         is a flag that overwrites the files in out_path even if they already
         exist there."""
-        try:
-            out_path.mkdir()
-        except FileExistsError:
-            logger.info(
-                '{} already exists, using that folder.'.format(out_path))
+        logger.info('running dataRecordDump...')
+        est_time_per_single_run = 1.0  # seconds
+        out_path.mkdir(parents=True, exist_ok=True)
         files = path_glob(rinexpath, '*.Z')
+        files_already_done = path_glob(out_path, '*.dr.gz', True)
+        if date_range is not None:
+            files = slice_task_date_range(files, date_range, 'drdump')
+            files_already_done = slice_task_date_range(files_already_done,
+                                                       date_range,
+                                                       'already done drdump')
+        tot = len(files)
+        logger.info('found {} rinex Z files in {} to run.'.format(tot,
+                                                                  rinexpath))
+        tot_final = len(files_already_done)
+        logger.info('found {} data records dr.gz files in {}'.format(tot_final,
+                    out_path))
+        tot_to_run = tot - tot_final
+        dtt = pd.to_timedelta(est_time_per_single_run, unit='s') * tot_to_run
+        logger.info('estimated time to completion of run: {}'.format(dtt))
+        logger.info('check again in {}'.format(pd.Timestamp.now() + dtt))
         for file_and_path in files:
             filename = file_and_path.as_posix().split('/')[-1][0:12]
             dr_file = out_path / '{}.dr.gz'.format(filename)
@@ -255,25 +275,15 @@ def prepare_gipsyx_for_run_one_station(rinexpath, staDb, prep, rewrite):
     logger.info('working with {}'.format(staDb))
     if rewrite:
         logger.warning('overwrite files mode initiated.')
-    rinex_df = read_organize_rinex(rinexpath)
+    rinex_df = read_organize_rinex(rinexpath, date_range)
     cnt = {'succ': 0, 'failed': 0}
 #    succ = count(1)
 #    failed = count(1)
     # rinex_df = rinex_df.fillna(999)
     dr_path = rinexpath / 'dr'
     if prep == 'drdump':
-        logger.info('running dataRecordDump for all files.')
-        est_time_per_single_run = 1.0  # seconds
-        tot = len(path_glob(rinexpath, '*.Z'))
-        logger.info('found {} rinex Z files in {} to run.'.format(tot, rinexpath))
-        tot_final = len(path_glob(dr_path, '*.dr.gz', True))
-        logger.info('found {} data records dr.gz files in {}'.format(tot_final,
-                    dr_path))
-        tot_to_run = tot - tot_final
-        dtt = pd.to_timedelta(est_time_per_single_run, unit='s') * tot_to_run
-        logger.info('estimated time to completion of run: {}'.format(dtt))
-        logger.info('check again in {}'.format(pd.Timestamp.now() + dtt))
-        run_dataRecorDump_on_all_files(rinexpath, dr_path, rewrite)
+        run_dataRecorDump_on_all_files(rinexpath, dr_path, rewrite,
+                                       date_range=None)
     elif prep == 'edit24hr':
         logger.info('running rnxEditGde.py with 24hr setting for all files.')
         hr24 = rinexpath / '24hr'
@@ -292,9 +302,14 @@ def prepare_gipsyx_for_run_one_station(rinexpath, staDb, prep, rewrite):
             'running drMerge.py/rnxEditGde.py with 30hr setting for all files(when available).')
         hr30 = rinexpath / '30hr'
         est_time_per_single_run = 4.0  # seconds
-        tot = len(path_glob(dr_path, '*.dr.gz'))
+        tot = rinex_df['30hr'].size  # len(path_glob(dr_path, '*.dr.gz'))
         logger.info('found {} data records dr.gz files in {} to run.'.format(tot, dr_path))
-        tot_final = len(path_glob(hr30, '*.dr.gz', True))
+        files_already_done = path_glob(hr30, '*.dr.gz', True)
+        if date_range is not None:
+            files_already_done = slice_task_date_range(files_already_done,
+                                                       date_range,
+                                                       'already done edit30hr')
+        tot_final = len(files_already_done)
         logger.info('found {} edited and merged dr.gz files in {}'.format(tot_final,
                     hr30))
         tot_to_run = tot - tot_final
@@ -352,7 +367,7 @@ def prepare_gipsyx_for_run_one_station(rinexpath, staDb, prep, rewrite):
     return
 
 
-def run_gd2e_for_one_station(dr_path, staDb, tree, rewrite):
+def run_gd2e_for_one_station(dr_path, staDb, tree, rewrite, date_range=None):
     """runs gd2e.py for all datarecodrs in one folder(dr_path) with staDb.
     rewrite: overwrite the results tdp in dr_path / results."""
     from pathlib import Path
@@ -363,6 +378,7 @@ def run_gd2e_for_one_station(dr_path, staDb, tree, rewrite):
     import logging
     from aux_gps import get_timedate_and_station_code_from_rinex
     from aux_gps import path_glob
+    from aux_gps import slice_task_date_range
     import pandas as pd
     logger = logging.getLogger('gipsyx')
     logger.info(
@@ -382,6 +398,8 @@ def run_gd2e_for_one_station(dr_path, staDb, tree, rewrite):
 #    failed = count(1)
     cnt = {'succ': 0, 'failed': 0}
     files = path_glob(dr_path, '*.dr.gz')
+    if date_range is not None:
+        files = slice_task_date_range(files, date_range, 'run')
     tot = len(files)
     logger.info('found {} dr.gz files in {} to run.'.format(tot, dr_path))
     tot_final = len(path_glob(results_path, '*_smoothFinal.tdp', True))
@@ -395,7 +413,7 @@ def run_gd2e_for_one_station(dr_path, staDb, tree, rewrite):
     for file_and_path in files:
         rfn = file_and_path.as_posix().split('/')[-1][0:12]
         dt, station = get_timedate_and_station_code_from_rinex(rfn)
-        final_tdp = rfn + '_smoothFinal.tdp'
+        final_tdp = '{}_smoothFinal.tdp'.format(rfn)
         logger.info(
             'processing {} ({}, {}/{})'.format(
                 rfn,
@@ -411,11 +429,16 @@ def run_gd2e_for_one_station(dr_path, staDb, tree, rewrite):
         > {}.log 2>{}.err'.format(
             file_and_path.as_posix(), station, staDb.as_posix(), tree, rfn,
             rfn)
-        files_to_move = [rfn + x for x in ['.log', '.err']]
+        files_to_move = ['{}{}'.format(rfn, x)
+                         for x in ['.log', '.err']]
+        more_files = ['finalResiduals.out', 'smoothFinal.tdp']
+        more_files_rfn = ['{}_{}'.format(rfn, x) for x in more_files]
         try:
             subprocess.run(command, shell=True, check=True, timeout=300)
-            move_files(Path().cwd(), results_path, 'smoothFinal.tdp',
-                       final_tdp)
+            move_files(Path().cwd(), results_path, more_files,
+                       more_files_rfn)
+            move_files(Path().cwd(), results_path, 'Summary',
+                       '{}_Summary.txt'.format(rfn))
             # next(succ)
             cnt['succ'] += 1
         except CalledProcessError:
@@ -429,6 +452,7 @@ def run_gd2e_for_one_station(dr_path, staDb, tree, rewrite):
             with open(Path().cwd() / files_to_move[1], 'a') as f:
                 f.write('GipsyX run has Timed out !')
         move_files(Path().cwd(), results_path, files_to_move)
+        move_files(Path().cwd(), results_path, 'debug.tree', '{}_debug.tree'.format(rfn))
     logger.info('Done!')
     # total = next(failed) + next(succ) - 2
     total = cnt['succ'] + cnt['failed']
@@ -470,6 +494,8 @@ if __name__ == '__main__':
         '--staDb',
         help='add a station DB file for antennas and receivers in rinexpath',
         type=check_file_in_cwd)
+    optional.add_argument('--daterange', help='add specific date range, can be one day',
+                          type=str, nargs=2)
     optional.add_argument('--prep', help='call rinex rnxEditGde/drMerge or dataRecorDump',
                           choices=['drdump', 'edit24hr', 'edit30hr'])
     optional.add_argument('--tree', help='gipsyX tree directory.',
@@ -490,9 +516,10 @@ if __name__ == '__main__':
         args.staDb = '$GOA_VAR/sta_info/sta_db_qlflinn'
     if args.prep is not None:
         prepare_gipsyx_for_run_one_station(args.rinexpath, args.staDb,
-                                           args.prep, args.rewrite)
+                                           args.prep, args.rewrite,
+                                           args.daterange)
     elif args.prep is None:
         if args.tree is None:
             args.tree = Path(' ')
         run_gd2e_for_one_station(args.rinexpath, args.staDb, args.tree,
-                                 args.rewrite)
+                                 args.rewrite, args.daterange)
