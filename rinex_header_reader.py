@@ -17,9 +17,10 @@ def produce_log_report(df, station, savepath):
     return
 
 
-def read_all_rinex_headers(rinexpath):
+def read_all_rinex_headers(rinexpath, dates):
     import pandas as pd
     from aux_gps import path_glob
+    from aux_gps import slice_task_date_range
     import logging
     logger = logging.getLogger('rinex_hdr_reader')
     ant_list = []
@@ -31,8 +32,11 @@ def read_all_rinex_headers(rinexpath):
     logger.info('staring to read rnx files headers.')
     logger.info('proccessing {}'.format(rinexpath))
     cnt = 0
-    total = len(path_glob(rinexpath))
-    for rfn in sorted(path_glob(rinexpath)):
+    files = path_glob(rinexpath)
+    if dates is not None:
+        files = slice_task_date_range(files, dates, 'rinex header reader')
+    total = len(files)
+    for rfn in sorted(files):
         filename = rfn.as_posix().split('/')[-1][0:12]
         try:
             dic = read_one_rnx_file(rfn)
@@ -121,13 +125,15 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='a command line tool for ' +
                                      'reading rnx file headers for one station' +
                                      'and produce a log file.')
-    # optional = parser._action_groups.pop()
+    optional = parser._action_groups.pop()
     required = parser.add_argument_group('required arguments')
     # remove this line: optional = parser...
     required.add_argument('--rinexpath', help="a main path to the rinex files." +
                           " files, e.g., /home/ziskin/rinex/", type=check_path)
     required.add_argument('--savepath', help="a path to save the log report." +
                           " files, e.g., /home/ziskin/", type=check_path)
+    optional.add_argument('--daterange', help='add specific date range, can be one day',
+                          type=str, nargs=2)
     # parser._action_groups.append(optional)  # added this line
     args = parser.parse_args()
     # print(parser.format_help())
@@ -135,5 +141,5 @@ if __name__ == '__main__':
     if args.rinexpath is None:
         print('rinexpath is a required argument, run with -h...')
         sys.exit()
-    df, station = read_all_rinex_headers(args.rinexpath)
+    df, station = read_all_rinex_headers(args.rinexpath, args.daterange)
     produce_log_report(df, station, args.savepath)
