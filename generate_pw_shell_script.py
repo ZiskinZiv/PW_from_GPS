@@ -40,9 +40,10 @@ def check_station_name(name):
         return name
 
 
-def generate_delete(station, task):
+def generate_delete(station, task, dates):
     from aux_gps import query_yes_no
     from aux_gps import path_glob
+    from aux_gps import slice_task_date_range
     for curr_sta in station:
         station_path = workpath / curr_sta
         if task == 'drdump':
@@ -59,11 +60,17 @@ def generate_delete(station, task):
             glob_str = '*.nc'
         try:
             files_to_delete = path_glob(path, glob_str)
+            if dates is not None:
+                files_to_delete = slice_task_date_range(files_to_delete, dates,
+                                                        'delete')
+            fnum = len(files_to_delete)
         except FileNotFoundError:
             print('skipping {} , because its empty or not existant..'.format(path))
             continue
         suff = glob_str.split('.')[-1]
-        print('WARNING for {}, ALL {} files in {} WILL BE DELETED!'.format(curr_sta, suff, path))
+        print(
+            'WARNING for {}, ALL {} files({}) in {} WILL BE DELETED!'.format(
+                curr_sta, suff, fnum, path))
         to_delete = query_yes_no('ARE YOU SURE ?')
         if not to_delete:
             print('files NOT deleted...')
@@ -74,8 +81,9 @@ def generate_delete(station, task):
     return
 
 
-def generate_backup(station, task):
+def generate_backup(station, task, dates):
     from aux_gps import tar_dir
+    from aux_gps import slice_task_date_range
     for curr_sta in station:
         station_path = workpath / curr_sta
         if task == 'drdump':
@@ -93,8 +101,11 @@ def generate_backup(station, task):
         filename = '{}_{}_backup.tar.gz'.format(curr_sta, task)
         savepath = station_path / 'backup'
         savepath.mkdir(parents=True, exist_ok=True)
+        files_to_tar = path_glob(path, glob_str)
+        if dates is not None:
+            files_to_tar = slice_task_date_range(files_to_tar, dates, 'backup')
         try:
-            tar_dir(path, glob_str, filename, savepath, compresslevel=None)
+            tar_dir(files_to_tar, filename, savepath, compresslevel=None)
         except FileNotFoundError:
             print(
                 'skipping {} , because no {} found in {}'.format(
@@ -105,7 +116,7 @@ def generate_backup(station, task):
     return
 
 
-def generate_rinex_reader(station):
+def generate_rinex_reader(station, dates):
     from pathlib import Path
     lines = []
     cwd = Path().cwd()
@@ -116,8 +127,10 @@ def generate_rinex_reader(station):
         savepath = pwpath
         lines.append('cd {}'.format(station_path))
         line = 'nohup python -u {}/rinex_header_reader.py'.format(pwpath)\
-            + ' --rinexpath {} --savepath {}'.format(rinexpath, savepath)\
-            + ' &>{}/nohup_{}_rnx_reader.txt&'.format(pwpath, curr_sta)
+            + ' --rinexpath {} --savepath {}'.format(rinexpath, savepath)
+        if dates is not None:
+            line += ' --daterange {} {}'.format(dates[0], dates[1])
+        line += ' &>{}/nohup_{}_rnx_reader.txt&'.format(pwpath, curr_sta)
         lines.append(line)
         lines.append('cd {}'.format(pwpath))
         print('station: {}, savepath: {}'.format(curr_sta, savepath))
@@ -141,15 +154,13 @@ def generate_rinex_download(station, myear, db):
         lines.append('cd {}'.format(station_path))
         if db is None:
             db = 'garner'
-        if myear is None and db == 'garner':
-            line = 'nohup python -u {}/single_rinex_station_download_from_garner.py'.format(pwpath)\
+            db_year = 1988
+        elif db == 'cddis':
+            db_year = 1992
+        line = 'nohup python -u {}/single_rinex_station_download_from_garner.py'.format(pwpath)\
                 + ' --path {} --mode rinex --station {} --db {}'.format(savepath, curr_sta, db)\
-                + ' --myear {} &>{}/nohup_{}_download.txt&'.format(1988, pwpath, curr_sta)
-        elif myear is None and db == 'cddis':
-            line = 'nohup python -u {}/single_rinex_station_download_from_garner.py'.format(pwpath)\
-                + ' --path {} --mode rinex --station {} --db {}'.format(savepath, curr_sta, db)\
-                + ' --myear {} &>{}/nohup_{}_download.txt&'.format(1992, pwpath, curr_sta)
-        elif myear is not None:
+                + ' --myear {}'.format(db_year)
+        if myear is not None:
             line = 'nohup python -u {}/single_rinex_station_download_from_garner.py'.format(pwpath)\
                 + ' --path {} --mode rinex --station {} --db {}'.format(savepath, curr_sta, db)\
                 + ' --myear {} &>{}/nohup_{}_download.txt&'.format(myear, pwpath, curr_sta)
@@ -167,7 +178,7 @@ def generate_rinex_download(station, myear, db):
     return
 
 
-def generate_gipsyx_run(station, task, tree, staDb):
+def generate_gipsyx_run(station, task, tree, staDb, dates):
     from pathlib import Path
     lines = []
     cwd = Path().cwd()
@@ -178,26 +189,22 @@ def generate_gipsyx_run(station, task, tree, staDb):
         runpath = station_path / 'rinex/30hr'
         lines.append('cd {}'.format(station_path))
         if task == 'drdump' or task == 'edit30hr':
+            line = 'nohup python -u {}/run_gipsyx.py'.format(pwpath)\
+                    + ' --rinexpath {} --prep {}'.format(rinexpath, task)\
+                    + ' --staDb {}'.format(staDb)
             if tree is not None:
-                line = 'nohup python -u {}/run_gipsyx.py'.format(pwpath)\
-                    + ' --rinexpath {} --prep {}'.format(rinexpath, task)\
-                    + ' --staDb {} --tree {}'.format(staDb, tree)\
-                    + ' &>{}/nohup_{}_{}.txt&'.format(pwpath, curr_sta, task)
-            else:
-                line = 'nohup python -u {}/run_gipsyx.py'.format(pwpath)\
-                    + ' --rinexpath {} --prep {}'.format(rinexpath, task)\
-                    + ' --staDb {}'.format(staDb)\
-                    + ' &>{}/nohup_{}_{}.txt&'.format(pwpath, curr_sta, task)
+                line += ' --tree {}'.format(tree)
+            if dates is not None:
+                line += ' --daterange {} {}'.format(dates[0], dates[1])
+            line += ' &>{}/nohup_{}_{}.txt&'.format(pwpath, curr_sta, task)
         elif task == 'run':
+            line = 'nohup python -u {}/run_gipsyx.py'.format(pwpath)\
+                    + ' --rinexpath {} --staDb {}'.format(runpath, staDb)
             if tree is not None:
-                line = 'nohup python -u {}/run_gipsyx.py'.format(pwpath)\
-                    + ' --rinexpath {} --staDb {}'.format(runpath, staDb)\
-                    + ' --tree {}'.format(tree)\
-                    + ' &>{}/nohup_{}_{}.txt&'.format(pwpath, curr_sta, task)
-            else:
-                line = 'nohup python -u {}/run_gipsyx.py'.format(pwpath)\
-                    + ' --rinexpath {} --staDb {}'.format(runpath, staDb)\
-                    + ' &>{}/nohup_{}_{}.txt&'.format(pwpath, curr_sta, task)
+                line += ' --tree {}'.format(tree)
+            if dates is not None:
+                line += ' --daterange {} {}'.format(dates[0], dates[1])
+            line += ' &>{}/nohup_{}_{}.txt&'.format(pwpath, curr_sta, task)
         lines.append(line)
         lines.append('cd {}'.format(pwpath))
         print('station: {}, task: {}'.format(curr_sta, task))
@@ -245,16 +252,17 @@ def generate_gipsyx_post(station, iqr_k):
 
 def task_switcher(args):
     if args.delete:
-        generate_delete(args.station, args.task)
+        generate_delete(args.station, args.task, args.daterange)
     elif args.backup:
-        generate_backup(args.station, args.task)
+        generate_backup(args.station, args.task, args.daterange)
     else:
         if args.task == 'rinex_download':
             generate_rinex_download(args.station, args.myear, args.db)
         elif args.task == 'rinex_reader':
-            generate_rinex_reader(args.station)
+            generate_rinex_reader(args.station, args.daterange)
         elif args.task == 'drdump' or args.task == 'edit30hr' or args.task == 'run':
-            generate_gipsyx_run(args.station, args.task, args.tree, args.staDb)
+            generate_gipsyx_run(args.station, args.task, args.tree, args.staDb,
+                                args.daterange)
         elif args.task == 'post':
             generate_gipsyx_post(args.station, args.iqr_k)
     return
@@ -302,6 +310,8 @@ if __name__ == '__main__':
                           nargs='+', type=check_station_name)
     optional.add_argument('--myear', help='minimum year to begin search in garner site.',
                           type=check_year)
+    optional.add_argument('--daterange', help='add specific date range, can be one day',
+                          type=str, nargs=2)
     optional.add_argument(
         '--staDb',
         help='add a station DB file for antennas and receivers in rinexpath',
