@@ -86,7 +86,7 @@ def piecewise_linear_fit(da, k=1, plot=True):
     return da_final
 
 
-def lmfit_params(model_name):
+def lmfit_params(model_name, k=None):
     from lmfit.parameter import Parameters
     sin_params = Parameters()
     # add with tuples: (NAME VALUE VARY MIN  MAX  EXPR  BRUTE_STEP)
@@ -101,22 +101,32 @@ def lmfit_params(model_name):
     intercept = ['line_intercept', 58.6, True, None, None, None, None]
     line_params.add(*slope)
     line_params.add(*intercept)
+    if k is not None:
+        sum_sin_params = Parameters()
+        for mode in range(k):
+            amp[0] = 'sin{}_amp'.format(mode)
+            phase[0] = 'sin{}_phase'.format(mode)
+            freq[0] = 'sin{}_freq'.format(mode)
+            sum_sin_params.add(*amp)
+            sum_sin_params.add(*phase)
+            sum_sin_params.add(*freq)
     if model_name == 'sin_linear':
         return line_params + sin_params
     elif model_name == 'sin':
         return sin_params
     elif model_name == 'line':
         return line_params
-    elif model_name == 'sum_sin':
-        amp[0] = 'sin0_amp'
-        phase[0] = 'sin0_phase'
-        freq[0] = 'sin0_freq'
+    elif model_name == 'sum_sin' and k is not None:
+        return sum_sin_params
+    elif model_name == 'sum_sin_linear' and k is not None:
+        return sum_sin_params + line_params
 
 
 def fit_da_to_model(da, params, model_dict={'model_name': 'sin'},
                     method='leastsq', times=None, plot=True, verbose=True):
     """options for modelname:'sin', 'sin_line', 'line', 'sin_constant', and
     'sum_sin'"""
+    # for sum_sin or sum_sin_linear use model_dict={'model_name': 'sum_sin', k:3}
     import matplotlib.pyplot as plt
     import pandas as pd
     time_dim = list(set(da.dims))[0]
@@ -177,7 +187,7 @@ def fft_xr(xarray, units='cpy', nan_fill='mean', plot=True):
         # infer freq of time series:
         sp_str = pd.infer_freq(x[time_dim].values)
         if not sp_str:
-            raise('Didnt find a frequency for {}, check for nans!'.format(da.name))
+            raise Exception('Didnt find a frequency for {}, check for nans!'.format(da.name))
         if len(sp_str) > 1:
             sp_str = [char for char in sp_str]
             mul = int(sp_str[0])
