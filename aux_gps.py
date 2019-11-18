@@ -665,7 +665,7 @@ def find_cross_points(df, cols=None):
     return df
 
 
-def get_rinex_filename_from_datetime(station='tela', dt='2012-05-07'):
+def get_rinex_filename_from_datetime(station, dt='2012-05-07'):
     """return rinex filename from datetime string"""
     import pandas as pd
 
@@ -688,7 +688,7 @@ def get_rinex_filename_from_datetime(station='tela', dt='2012-05-07'):
             filenames.append(filename)
         return filenames
     else:
-        filename = filename_from_single_date(station, date)
+        filename = filename_from_single_date(station, dt)
         return filename
 
 
