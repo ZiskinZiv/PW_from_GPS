@@ -2169,6 +2169,36 @@ def israeli_gnss_stations_long_term_trend_analysis(
 #    dsr.to_netcdf(path / new_filename, 'w', encoding=encoding)
 #    print('Done!')
 #    return dsr
+
+
+def produce_PW_anomalies(pw_da, grp1='hour', grp2='dayofyear', plot=True):
+    from aux_gps import time_series_stack2
+    import numpy as np
+    import matplotlib.pyplot as plt
+    time_dim = list(set(pw_da.dims))[0]
+    gr1 = time_dim + '.' + grp1
+    gr2 = time_dim + '.' + grp2
+    stacked_pw = time_series_stack2(pw_da, grp1=grp1, grp2=grp2, plot=plot)
+    pw_anom = pw_da.copy(deep=True)
+    # pw_np = np.empty(pw_da.values.shape)
+    for grp1item in stacked_pw[grp1]:
+        print(grp1item)
+        for grp2item in stacked_pw[grp2]:
+            times = pw_anom.where(pw_anom[gr1]==grp1item, drop=True).where(pw_anom[gr2]==grp2item, drop=True)[time_dim]
+            pw_anom.loc[{time_dim:times}] -= stacked_pw.sel({grp1: grp1item, grp2: grp2item})
+#    for i, time in enumerate(pw_da[time_dim]):
+#        grp1val = getattr(time.dt, grp1).values.item()
+#        grp2val = getattr(time.dt, grp2).values.item()
+#        mean_val = stacked_pw.sel({grp1: grp1val, grp2: grp2val}).values.item()
+#        pw_np[i] = pw_da.isel({time_dim: i}).values.item() - mean_val
+#        # pw_anom.loc[{time_dim: time}] = pw_da.sel({time_dim: time}) - mean_val
+#    pw_anom = pw_da.copy(data=pw_np)
+    if plot:
+        fig, ax = plt.subplots(figsize=(10, 8))
+        pw_anom.plot.pcolormesh(ax=ax)
+    return pw_anom
+
+
 def load_GNSS_TD(station='tela', sample_rate=None, plot=True):
     """load and plot temperature for station from IMS, to choose
     sample rate different than 5 mins choose: 'H', 'W' or 'MS'"""
