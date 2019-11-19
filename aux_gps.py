@@ -470,6 +470,118 @@ def plot_tmseries_xarray(ds, fields=None, points=False, error_suffix='_error',
     return fg
 
 
+def flip_xy_axes(ax, ylim=None):
+    if ylim is None:
+        new_y_lim = ax.get_xlim()
+    else:
+        new_y_lim = ylim
+    new_x_lim = ax.get_ylim()
+    ylabel = ax.get_xlabel()
+    xlabel = ax.get_ylabel()
+    newx = ax.lines[0].get_ydata()
+    newy = ax.lines[0].get_xdata()
+    # set new x- and y- data for the line
+    # ax.margins(y=0)
+    ax.lines[0].set_xdata(newx)
+    ax.lines[0].set_ydata(newy)
+    ax.set_xlim(new_x_lim)
+    ax.set_ylim(new_y_lim)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.invert_xaxis()
+    ax.invert_yaxis()
+    ax.invert_yaxis()
+    return ax
+
+
+def time_series_stack2(time_da, time_dim='time', grp1='hour', grp2='month',
+                       plot=True):
+    import xarray as xr
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import matplotlib.ticker as tck
+    grp_obj1 = time_da.groupby(time_dim + '.' + grp1)
+    s_list = []
+    for grp_name, grp_inds in grp_obj1.groups.items():
+        da = time_da.isel({time_dim: grp_inds})
+        # da = da.rename({time_dim: grp + '_' + str(grp_name)})
+        # da.name += '_' + grp + '_' + str(grp_name)
+        s_list.append(da)
+    grps1 = [x for x in grp_obj1.groups.keys()]
+    stacked_da = xr.concat(s_list, dim=grp1)
+    stacked_da[grp1] = grps1
+    s_list = []
+    for grp_val in grps1:
+        da = stacked_da.sel({grp1: grp_val}).groupby(time_dim + '.' + grp2).mean()
+        s_list.append(da)
+    stacked_da2 = xr.concat(s_list, dim=grp1)
+    if plot:
+        try:
+            units = time_da.attrs['units']
+        except KeyError:
+            units = ''
+        try:
+            station = time_da.attrs['station']
+        except KeyError:
+            station = ''
+        try:
+            name = time_da.name
+        except KeyError:
+            name = ''
+        SMALL_SIZE = 12
+        MEDIUM_SIZE = 16
+        BIGGER_SIZE = 18
+        plt.rc('font', size=SMALL_SIZE)          # controls default text sizes
+        plt.rc('axes', titlesize=SMALL_SIZE)     # fontsize of the axes title
+        plt.rc('axes', labelsize=MEDIUM_SIZE)    # fontsize of the x and y labels
+        plt.rc('xtick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
+        plt.rc('ytick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
+        plt.rc('legend', fontsize=SMALL_SIZE)    # legend fontsize
+        plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
+        grp1_mean = stacked_da2.mean(grp1)
+        grp2_mean = stacked_da2.mean(grp2)
+        fig = plt.figure(figsize=(16, 10), dpi=80)
+        grid = plt.GridSpec(2, 2, width_ratios=[1, 4], height_ratios=[5, 1], wspace=0, hspace=0)
+        # grid = plt.GridSpec(2, 2, hspace=0.5, wspace=0.2)
+#        ax_main = fig.add_subplot(grid[:-1, :-1])
+#        ax_left = fig.add_subplot(grid[:-1, 0], xticklabels=[], yticklabels=[])
+#        ax_bottom = fig.add_subplot(grid[-1, 0:-1], xticklabels=[], yticklabels=[])
+        ax_main = fig.add_subplot(grid[0, 1])
+        ax_left = fig.add_subplot(grid[0, 0])
+        ax_left.grid()
+        ax_bottom = fig.add_subplot(grid[1, 1])
+        ax_bottom.grid()
+        pcl = stacked_da2.T.plot.pcolormesh(ax = ax_main, add_colorbar=False, cmap=plt.cm.get_cmap('viridis', 19), snap=True)
+        ax_main.xaxis.set_minor_locator(tck.AutoMinorLocator())
+        ax_main.tick_params(direction='out', top='on', bottom='off', left='off', right='on', labelleft='off', labelbottom='off', labeltop='on', labelright='on', which='major')
+        ax_main.tick_params(direction='out', top='on', bottom='off', left='off', right='on', which='minor')
+        ax_main.grid(True, which='major', axis='both', linestyle='-', color='k', alpha=0.2)
+        ax_main.grid(True, which='minor', axis='both', linestyle='--', color='k', alpha=0.2)
+        ax_main.tick_params(top='on', bottom='off', left='off', right='on', labelleft='off', labelbottom='off', labeltop='on', labelright='on')
+        bottom_limit = ax_main.get_xlim()
+        left_limit = ax_main.get_ylim()
+        grp1_mean.plot(ax=ax_left)
+        grp2_mean.plot(ax=ax_bottom)
+        ax_bottom.set_xlim(bottom_limit)
+        ax_left = flip_xy_axes(ax_left, left_limit)
+        ax_bottom.set_ylabel(units)
+        ax_left.set_xlabel(units)
+        fig.subplots_adjust(right=0.8)
+        # divider = make_axes_locatable(ax_main)
+        # cax1 = divider.append_axes("right", size="5%", pad=0.2)
+        # [left, bottom, width, height] of figure:
+        cbar_ax = fig.add_axes([0.85, 0.15, 0.02, 0.75])
+        # fig.colorbar(pcl, orientation="vertical", pad=0.2, label=units)
+        pcl_ticks = np.linspace(stacked_da2.min().item(), stacked_da2.max().item(), 11)
+        cbar = fig.colorbar(pcl, cax=cbar_ax, label=units, ticks=pcl_ticks)
+        cbar.set_ticklabels(['{:.1f}'.format(x) for x in pcl_ticks])
+        title = ' '.join([name, station])
+        fig.suptitle(title, fontweight='bold', fontsize=15)
+        # fig.colorbar(pcl, ax=ax_main)
+        # plt.colorbar(pcl, cax=ax_main)
+    return stacked_da2
+
+
 def time_series_stack(time_da, time_dim='time', grp='hour', plot=True):
     import xarray as xr
     grp_obj = time_da.groupby(time_dim + '.' + grp)
