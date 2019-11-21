@@ -494,6 +494,71 @@ def flip_xy_axes(ax, ylim=None):
     return ax
 
 
+def time_series_stack(time_da, time_dim='time', grp1='hour', grp2='month'):
+    import xarray as xr
+    import numpy as np
+    import pandas as pd
+    freq = pd.infer_freq(time_da[time_dim].values)
+    name = time_da.name
+    time_da.attrs['freq'] = freq
+    attrs = time_da.attrs
+    time_da = time_da.dropna(time_dim)
+    # group grp1 and concat:
+    grp_obj1 = time_da.groupby(time_dim + '.' + grp1)
+    s_list = []
+    for grp_name, grp_inds in grp_obj1.groups.items():
+        da = time_da.isel({time_dim: grp_inds})
+        s_list.append(da)
+    grps1 = [x for x in grp_obj1.groups.keys()]
+    stacked_da = xr.concat(s_list, dim=grp1)
+    stacked_da[grp1] = grps1
+    # group over the concated da and concat again:
+    grp_obj2 = stacked_da.groupby(time_dim + '.' + grp2)
+    s_list = []
+    for grp_name, grp_inds in grp_obj2.groups.items():
+        da = stacked_da.isel({time_dim: grp_inds})
+        s_list.append(da)
+    grps2 = [x for x in grp_obj2.groups.keys()]
+    stacked_da = xr.concat(s_list, dim=grp2)
+    stacked_da[grp2] = grps2
+    # numpy part: loop over both dims and dropna:
+    vals = []
+    dts = []
+    for i, grp1_val in enumerate(stacked_da[grp1]):
+        da = stacked_da.sel({grp1: grp1_val})
+        for j, grp2_val in enumerate(da[grp2]):
+            val = da.sel({grp2: grp2_val}).dropna(time_dim)
+            vals.append(val.values)
+            dts.append(val[time_dim].values)
+    max_size = max([len(x) for x in vals])
+    raw = np.empty(
+        (stacked_da[grp1].shape[0] *
+         stacked_da[grp2].shape[0],
+         max_size)) * np.nan
+    concat_sizes = [max_size - len(x) for x in vals]
+    concat_arrys = [np.empty((x))*np.nan for x in concat_sizes]
+    concat_vals = [np.concatenate(x) for x in list(zip(vals, concat_arrys))]
+    # 1970-01-01 is the not a time for this time-series:
+    concat_arrys = [np.zeros((x), dtype='datetime64[ns]') for x in concat_sizes]
+    concat_dts = [np.concatenate(x) for x in list(zip(dts, concat_arrys))]
+    concat_vals = np.array(concat_vals)
+    concat_dts = np.array(concat_dts)
+    concat_vals = concat_vals.reshape((stacked_da[grp1].shape[0],
+                                       stacked_da[grp2].shape[0],
+                                       max_size))
+    concat_dts = concat_dts.reshape((stacked_da[grp1].shape[0],
+                                     stacked_da[grp2].shape[0],
+                                     max_size))
+    sda = xr.Dataset()
+    sda.attrs = attrs
+    sda[name] = xr.DataArray(concat_vals, dims=[grp1, grp2, 'rest'])
+    sda[time_dim] = xr.DataArray(concat_dts, dims=[grp1, grp2, 'rest'])
+    sda[grp1] = grps1
+    sda[grp2] = grps2
+    sda['rest'] = range(max_size)
+    return sda
+
+
 def time_series_stack2(time_da, time_dim='time', grp1='hour', grp2='month',
                        plot=True):
     import xarray as xr
@@ -582,32 +647,32 @@ def time_series_stack2(time_da, time_dim='time', grp1='hour', grp2='month',
     return stacked_da2
 
 
-def time_series_stack(time_da, time_dim='time', grp='hour', plot=True):
-    import xarray as xr
-    grp_obj = time_da.groupby(time_dim + '.' + grp)
-    s_list = []
-    for grp_name, grp_inds in grp_obj.groups.items():
-        da = time_da.isel({time_dim: grp_inds})
-        # da = da.rename({time_dim: grp + '_' + str(grp_name)})
-        # da.name += '_' + grp + '_' + str(grp_name)
-        s_list.append(da)
-    grps = [x for x in grp_obj.groups.keys()]
-    stacked_da = xr.concat(s_list, dim=grp)
-    stacked_da[grp] = grps
-    if 'year' in grp:
-        resample_span = '1Y'
-    elif grp == 'month':
-        resample_span = '1Y'
-    elif grp == 'day':
-        resample_span = '1MS'
-    elif grp == 'hour':
-        resample_span = '1D'
-    elif grp == 'minute':
-        resample_span = '1H'
-    stacked_da = stacked_da.resample({time_dim: resample_span}).mean(time_dim)
-    if plot:
-        stacked_da.T.plot.pcolormesh(figsize=(6, 8))
-    return stacked_da
+#def time_series_stack_decraped(time_da, time_dim='time', grp='hour', plot=True):
+#    import xarray as xr
+#    grp_obj = time_da.groupby(time_dim + '.' + grp)
+#    s_list = []
+#    for grp_name, grp_inds in grp_obj.groups.items():
+#        da = time_da.isel({time_dim: grp_inds})
+#        # da = da.rename({time_dim: grp + '_' + str(grp_name)})
+#        # da.name += '_' + grp + '_' + str(grp_name)
+#        s_list.append(da)
+#    grps = [x for x in grp_obj.groups.keys()]
+#    stacked_da = xr.concat(s_list, dim=grp)
+#    stacked_da[grp] = grps
+#    if 'year' in grp:
+#        resample_span = '1Y'
+#    elif grp == 'month':
+#        resample_span = '1Y'
+#    elif grp == 'day':
+#        resample_span = '1MS'
+#    elif grp == 'hour':
+#        resample_span = '1D'
+#    elif grp == 'minute':
+#        resample_span = '1H'
+#    stacked_da = stacked_da.resample({time_dim: resample_span}).mean(time_dim)
+#    if plot:
+#        stacked_da.T.plot.pcolormesh(figsize=(6, 8))
+#    return stacked_da
 
 
 def dt_to_np64(time_coord, unit='m', convert_back=False):
