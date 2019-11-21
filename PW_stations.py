@@ -2172,30 +2172,54 @@ def israeli_gnss_stations_long_term_trend_analysis(
 
 
 def produce_PW_anomalies(pw_da, grp1='hour', grp2='dayofyear', plot=True):
-    from aux_gps import time_series_stack2
-    import numpy as np
+    from aux_gps import time_series_stack
+    import xarray as xr
+    from aux_gps import get_unique_index
+    from aux_gps import xr_reindex_with_date_range
+    from scipy import stats
     import matplotlib.pyplot as plt
     time_dim = list(set(pw_da.dims))[0]
-    gr1 = time_dim + '.' + grp1
-    gr2 = time_dim + '.' + grp2
-    stacked_pw = time_series_stack2(pw_da, grp1=grp1, grp2=grp2, plot=plot)
-    pw_anom = pw_da.copy(deep=True)
-    # pw_np = np.empty(pw_da.values.shape)
-    for grp1item in stacked_pw[grp1]:
-        print(grp1item)
-        for grp2item in stacked_pw[grp2]:
-            times = pw_anom.where(pw_anom[gr1]==grp1item, drop=True).where(pw_anom[gr2]==grp2item, drop=True)[time_dim]
-            pw_anom.loc[{time_dim:times}] -= stacked_pw.sel({grp1: grp1item, grp2: grp2item})
-#    for i, time in enumerate(pw_da[time_dim]):
-#        grp1val = getattr(time.dt, grp1).values.item()
-#        grp2val = getattr(time.dt, grp2).values.item()
-#        mean_val = stacked_pw.sel({grp1: grp1val, grp2: grp2val}).values.item()
-#        pw_np[i] = pw_da.isel({time_dim: i}).values.item() - mean_val
-#        # pw_anom.loc[{time_dim: time}] = pw_da.sel({time_dim: time}) - mean_val
-#    pw_anom = pw_da.copy(data=pw_np)
+    fname = pw_da.name
+    print('computing anomalies for {}'.format(fname))
+    stacked_pw = time_series_stack(pw_da, time_dim=time_dim, grp1=grp1,
+                                   grp2=grp2)
+    pw_anom = stacked_pw.copy(deep=True)
+    attrs = pw_anom.attrs
+    rest_dim = [x for x in stacked_pw.dims if x != grp1 and x != grp2][0]
+    # compute mean on rest dim and remove it from stacked_da:
+    rest_mean = stacked_pw[fname].mean(rest_dim)
+    for rest in stacked_pw[rest_dim].values:
+        pw_anom[fname].loc[{rest_dim: rest}] -= rest_mean
+    # now, flatten anomalies to restore the time-series structure:
+    vals = pw_anom[fname].values.ravel()
+    times = pw_anom[time_dim].values.ravel()
+    pw_anom = xr.DataArray(vals, dims=[time_dim])
+    pw_anom.attrs = attrs
+    pw_anom[time_dim] = times
+    pw_anom = get_unique_index(pw_anom)
+    pw_anom = pw_anom.sortby(time_dim)
+    pw_anom = xr_reindex_with_date_range(pw_anom, freq=pw_anom.attrs['freq'])
     if plot:
-        fig, ax = plt.subplots(figsize=(10, 8))
-        pw_anom.plot.pcolormesh(ax=ax)
+        fig, (ax1, ax2) = plt.subplots(1, 2, gridspec_kw={'width_ratios': [4, 1]})
+        pw = pw_anom.dropna(time_dim).values
+        pw_anom.plot(ax=ax1)
+        pw_anom.plot.hist(bins=100, density=True, ax=ax2)
+        xt = ax2.get_xticks()
+        xmin, xmax = min(xt), max(xt)
+        lnspc = np.linspace(xmin, xmax, len(pw_anom.values))
+        # lets try the normal distribution first
+        m, s = stats.norm.fit(pw)  # get mean and standard deviation
+        # now get theoretical values in our interval
+        pdf_g = stats.norm.pdf(lnspc, m, s)
+        ax2.plot(lnspc, pdf_g, label="Norm")  # plot it
+        # exactly same as above
+        ag, bg, cg = stats.gamma.fit(pw)
+        pdf_gamma = stats.gamma.pdf(lnspc, ag, bg, cg)
+        ax2.plot(lnspc, pdf_gamma, label="Gamma")
+        # guess what :)
+        ab, bb, cb, db = stats.beta.fit(pw)
+        pdf_beta = stats.beta.pdf(lnspc, ab, bb, cb, db)
+        ax2.plot(lnspc, pdf_beta, label="Beta")
     return pw_anom
 
 
