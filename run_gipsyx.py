@@ -275,7 +275,7 @@ def prepare_gipsyx_for_run_one_station(rinexpath, staDb, prep, rewrite,
     logger.info('working with {}'.format(staDb))
     if rewrite:
         logger.warning('overwrite files mode initiated.')
-    rinex_df = read_organize_rinex(rinexpath, date_range)
+    rinex_df = read_organize_rinex(rinexpath, date_range=date_range)
     cnt = {'succ': 0, 'failed': 0}
 #    succ = count(1)
 #    failed = count(1)
@@ -302,7 +302,7 @@ def prepare_gipsyx_for_run_one_station(rinexpath, staDb, prep, rewrite,
             'running drMerge.py/rnxEditGde.py with 30hr setting for all files(when available).')
         hr30 = rinexpath / '30hr'
         est_time_per_single_run = 4.0  # seconds
-        tot = rinex_df['30hr'].size  # len(path_glob(dr_path, '*.dr.gz'))
+        tot = rinex_df['30hr'].value_counts().sum()  # len(path_glob(dr_path, '*.dr.gz'))
         logger.info('found {} data records dr.gz files in {} to run.'.format(tot, dr_path))
         files_already_done = path_glob(hr30, '*.dr.gz', True)
         if date_range is not None:
