@@ -11,7 +11,7 @@ import numpy as np
 from PW_paths import work_yuval
 from PW_paths import work_path
 from PW_paths import geo_path
-
+from pathlib import Path
 garner_path = work_yuval / 'garner'
 ims_path = work_yuval / 'IMS_T'
 gis_path = work_yuval / 'gis'
@@ -30,16 +30,72 @@ station_on_geo = geo_path / 'Work_Files/PW_yuval/GNSS_stations'
 PW_stations_path = work_yuval / '1minute'
 stations = pd.read_csv('All_gps_stations.txt', header=0, delim_whitespace=True,
                        index_col='name')
+logs_path = geo_path / 'Python_Projects/PW_from_GPS/log_files'
 GNSS = work_yuval / 'GNSS_stations'
-
+cwd = Path().cwd()
 # TODO: finish clouds formulation in ts-tm modeling
 # TODO: finish playing with ts-tm modeling, various machine learning algos.
 # TODO: redo the hour, season and cloud selection in formulate_plot
 
 
+def plug_in_approx_loc_gnss_stations(log_path=logs_path, file_path=cwd):
+    from aux_gps import path_glob
+    import pandas as pd
+
+    def plug_loc_to_log_file(logfile, loc):
+    
+        def replace_field(content_list, string, replacment):
+            pos = [(i, x) for i, x in enumerate(content_list)
+                 if string in x][0][0]
+            con = content_list[pos].split(':')
+            con[-1] = ' {}'.format(replacment)
+            con = ':'.join(con)
+            content_list[pos] = con
+            return content_list
+
+        with open(logfile) as f:
+            content = f.read().splitlines()
+            repl = [
+                    'X coordinate (m)',
+                    'Y coordinate (m)',
+                    'Z coordinate (m)',
+                    'Latitude (deg)',
+                    'Longitude (deg)',
+                    'Elevation (m)']
+            location = [loc['X'], loc['Y'], loc['Z'], '+' +
+                        str(loc['lat']), '+' + str(loc['lon']), loc['alt']]
+        for rep, loca in list(zip(repl, location)):
+            try:
+                content = replace_field(content, rep, loca)
+            except IndexError:
+                print('did not found {} field...'.format(rep))
+                pass
+        with open(logfile, 'w') as f:
+            for item in content:
+                f.write('{}\n'.format(item))
+        print('writing {}'.format(logfile))
+        return
+
+    # load gnss accurate loc:
+    acc_loc_df = pd.read_csv(file_path / 'israeli_gnss_coords.txt',
+                             delim_whitespace=True)
+    log_files = path_glob(log_path, '*updated_by_shlomi*.log')
+    for logfile in log_files:
+        st_log = logfile.as_posix().split('/')[-1].split('_')[0]
+        try:
+            loc = acc_loc_df.loc[st_log, :]
+        except KeyError:
+            print('station {} not found in accurate location df, skipping'.format(st_log))
+            continue
+        plug_loc_to_log_file(logfile, loc)
+    print('Done!')
+    return
+
+
 def build_df_lat_lon_alt_gnss_stations(gnss_path=GNSS, savepath=None):
     from aux_gps import path_glob
     import pandas as pd
+    import pyproj
     stations_in_gnss = [x.as_posix().split('/')[-1]
                         for x in path_glob(GNSS, '*')]
     dss = [
@@ -47,17 +103,25 @@ def build_df_lat_lon_alt_gnss_stations(gnss_path=GNSS, savepath=None):
             x,
             sample_rate='MS',
             plot_fields=None) for x in stations_in_gnss]
-    stations_not_found = [x for x in dss if isinstance(x, str)]
-    [stations_in_gnss.remove(x) for x in stations_not_found]
+    # stations_not_found = [x for x in dss if isinstance(x, str)]
+    # [stations_in_gnss.remove(x) for x in stations_in_gnss if x is None]
     dss = [x for x in dss if not isinstance(x, str)]
+    dss = [x for x in dss if x is not None]
     lats = [x.dropna('time').lat[0].values.item() for x in dss]
     lons = [x.dropna('time').lon[0].values.item() for x in dss]
     alts = [x.dropna('time').alt[0].values.item() for x in dss]
     df = pd.DataFrame(lats)
-    df.index = stations_in_gnss
+    df.index = [x.attrs['station'].lower() for x in dss]
     df['lon'] = lons
     df['alt'] = alts
     df.columns = ['lat', 'lon', 'alt']
+    ecef = pyproj.Proj(proj='geocent', ellps='WGS84', datum='WGS84')
+    lla = pyproj.Proj(proj='latlong', ellps='WGS84', datum='WGS84')
+    X, Y, Z = pyproj.transform(lla, ecef, df['lon'].values, df['lat'].values,
+                               df['alt'].values, radians=False)
+    df['X'] = X
+    df['Y'] = Y
+    df['Z'] = Z
     df.sort_index(inplace=True)
     if savepath is not None:
         filename = 'israeli_gnss_coords.txt'
@@ -592,6 +656,8 @@ def produce_geo_gps_stations(path=gis_path, file='All_gps_stations.txt',
                              plot=True):
     import geopandas as gpd
     import xarray as xr
+    from pathlib import Path
+    from aux_gps import get_latlonalt_error_from_geocent_error
     stations_df = pd.read_csv(file, index_col='name',
                               delim_whitespace=True)
     isr_dem = xr.open_rasterio(path / 'israel_dem.tif')
@@ -601,7 +667,7 @@ def produce_geo_gps_stations(path=gis_path, file='All_gps_stations.txt',
         lon = row['lon']
         alt = isr_dem.sel(band=1, x=lon, y=lat, method='nearest').values.item()
         alt_list.append(float(alt))
-    stations_df['alt'] = alt_list
+    stations_df['alt_dem'] = alt_list
     isr = gpd.read_file(path / 'israel_demog2012.shp')
     isr.crs = {'init': 'epsg:4326'}
     stations = gpd.GeoDataFrame(stations_df,
@@ -609,6 +675,25 @@ def produce_geo_gps_stations(path=gis_path, file='All_gps_stations.txt',
                                                             stations_df.lat),
                                 crs=isr.crs)
     stations_isr = gpd.sjoin(stations, isr, op='within')
+    stations_approx = pd.read_csv(Path().cwd()/'stations_approx_loc.txt',
+                                  delim_whitespace=True)
+    lon, lat, alt = get_latlonalt_error_from_geocent_error(
+            stations_approx['X'].values, stations_approx['Y'].values,
+            stations_approx['Z'].values)
+    stations_approx.columns = ['approx_X', 'approx_Y', 'approx_Z']
+    stations_approx['approx_lat'] = lat
+    stations_approx['approx_lon'] = lon
+    stations_approx['approx_alt'] = alt
+    stations_isr_df = pd.DataFrame(stations_isr.drop(columns=['geometry', 'index_right']))
+    compare_df = stations_isr_df.join(stations_approx)
+    alt_list = []
+    for index, row in compare_df.iterrows():
+        lat = row['approx_lat']
+        lon = row['approx_lon']
+        alt = isr_dem.sel(band=1, x=lon, y=lat, method='nearest').values.item()
+        alt_list.append(float(alt))
+    compare_df['approx_alt_dem'] = alt_list
+    return compare_df
     if plot:
         ax = isr.plot()
         stations_isr.plot(ax=ax, column='alt', cmap='Greens',
