@@ -804,7 +804,7 @@ def transform_ds_to_lat_lon_alt(ds, coords_name=['X', 'Y', 'Z'],
     return ds
 
 
-def get_latlonalt_error_from_geocent_error(X, Y, Z, xe, ye, ze):
+def get_latlonalt_error_from_geocent_error(X, Y, Z, xe=None, ye=None, ze=None):
     """returns the value and error in lat(decimal degree), lon(decimal degree)
     and alt(meters) for X, Y, Z in geocent coords (in meters), all input is
     lists or np.arrays"""
@@ -812,14 +812,17 @@ def get_latlonalt_error_from_geocent_error(X, Y, Z, xe, ye, ze):
     ecef = pyproj.Proj(proj='geocent', ellps='WGS84', datum='WGS84')
     lla = pyproj.Proj(proj='latlong', ellps='WGS84', datum='WGS84')
     lon, lat, alt = pyproj.transform(ecef, lla, X, Y, Z, radians=False)
-    lon_pe, lat_pe, alt_pe = pyproj.transform(ecef, lla, X + xe, Y + ye,
-                                              Z + ze, radians=False)
-    lon_me, lat_me, alt_me = pyproj.transform(ecef, lla, X - xe, Y - ye,
-                                              Z - ze, radians=False)
-    lon_e = (lon_pe - lon_me) / 2.0
-    lat_e = (lat_pe - lat_me) / 2.0
-    alt_e = (alt_pe - alt_me) / 2.0
-    return lon, lat, alt, lon_e, lat_e, alt_e
+    if (xe is not None) and (ye is not None) and (ze is not None):
+        lon_pe, lat_pe, alt_pe = pyproj.transform(ecef, lla, X + xe, Y + ye,
+                                                  Z + ze, radians=False)
+        lon_me, lat_me, alt_me = pyproj.transform(ecef, lla, X - xe, Y - ye,
+                                                  Z - ze, radians=False)
+        lon_e = (lon_pe - lon_me) / 2.0
+        lat_e = (lat_pe - lat_me) / 2.0
+        alt_e = (alt_pe - alt_me) / 2.0
+        return lon, lat, alt, lon_e, lat_e, alt_e
+    else:
+        return lon, lat, alt
 
 
 def path_glob(path, glob_str='*.Z', return_empty_list=False):
