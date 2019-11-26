@@ -384,10 +384,12 @@ def replace_fields_in_ds(dss, da_repl, field='WetZ', verbose=None):
         if i == len(ds) - 1:
             break
         first = ds['{}-{}'.format(field, i)]
+        time0 = list(set(first.dims))[0]
         second = ds['{}-{}'.format(field, i+1)]
+        time1 = list(set(second.dims))[0]
         try:
-            min_time = first.dropna('time').time.min()
-            max_time = second.dropna('time').time.max()
+            min_time = first.dropna(time0)[time0].min()
+            max_time = second.dropna(time1)[time1].max()
         except ValueError:
             if verbose == 1:
                 logger.warning('item {}, {} - {} is lonely'.format(field, i, i+1))
@@ -401,10 +403,12 @@ def replace_fields_in_ds(dss, da_repl, field='WetZ', verbose=None):
         if verbose == 1:
             logger.info('proccesing {} and {}'.format(first.name, second.name))
         # utime = dim_union([first, second], 'time')
-        first_time = set(first.dropna('time').time.values).difference(set(da.time.values))
-        second_time = set(second.dropna('time').time.values).difference(set(da.time.values))
-        first = first.sel(time=list(first_time))
-        second = second.sel(time=list(second_time))
+        first_time = set(first.dropna(time0)[time0].values).difference(set(da.time.values))
+        second_time = set(second.dropna(time1)[time1].values).difference(set(da.time.values))
+        first = first.sel({time0: list(first_time)})
+        second = second.sel({time1: list(second_time)})
+        first = first.rename({time0: 'time'})
+        second = second.rename({time1: 'time'})
         da_list.append(xr.concat([first, da, second], 'time'))
     da_final = xr.concat(da_list, 'time')
     da_final = da_final.sortby('time')
@@ -450,21 +454,27 @@ def analyse_results_ds_one_station(dss, field='WetZ', verbose=None,
     def select_two_ds_from_gipsyx_results(ds, names=['WetZ_0', 'WetZ_1'],
                                           hours_offset=None):
         """selects two dataarrays from the raw gipsyx results dataset"""
-        from aux_gps import dim_intersection
+        import pandas as pd
         import xarray as xr
-        time = dim_intersection([ds[names[0]], ds[names[1]]], dim='time')
+        time0 = list(set(ds[names[0]].dims))[0]
+        time1 = list(set(ds[names[1]].dims))[0]
+        time = list(set(ds[names[0]][time0].values).intersection(set(ds[names[1]][time1].values)))
+        # time = dim_intersection([ds[names[0]], ds[names[1]]], dim='time')
         if not time:
             return None
+        time = pd.to_datetime(time)
         if hours_offset is not None:
             # freq = pd.infer_freq(time)
             start = time[0] - pd.DateOffset(hours=hours_offset)
             end = time[-1] + pd.DateOffset(hours=hours_offset)
             # time = pd.date_range(start, end, freq=freq)
-            first = ds[names[0]].sel(time=slice(start, end))
-            second = ds[names[1]].sel(time=slice(start, end))
+            first = ds[names[0]].sel({time0: slice(start, end)})
+            second = ds[names[1]].sel({time1: slice(start, end)})
         else:
-            first = ds[names[0]].sel(time=time)
-            second = ds[names[1]].sel(time=time)
+            first = ds[names[0]].sel({time0: time})
+            second = ds[names[1]].sel({time1: time})
+        first = first.rename({time0: 'time'})
+        second = second.rename({time1: 'time'})
         two = xr.Dataset()
         two[first.name] = first
         two[second.name] = second
@@ -647,7 +657,7 @@ def save_yearly_gipsyx_results(path, savepath):
         if (savepath / filename).is_file():
             logger.warning('{} already in {}, skipping...'.format(filename, savepath))
             continue
-        ds, _ = read_one_station_gipsyx_results(path, savepath, year)
+        _, _ = read_one_station_gipsyx_results(path, savepath, year)
     total = cnt['failed'] + cnt['succ']
     logger.info('Total files: {}, success: {}, failed: {}'.format(
             total, cnt['succ'], cnt['failed']))
@@ -711,6 +721,7 @@ def read_one_station_gipsyx_results(path, savepath=None,
     dss_new = []
     for i, ds in enumerate(dss):
         keys_to_rename = [x for x in ds.data_vars.keys()]
+        keys_to_rename.append('time')
         values_to_rename = [x + '-{}'.format(i) for x in keys_to_rename]
         dict_to_rename = dict(zip(keys_to_rename, values_to_rename))
         dss_new.append(ds.rename(dict_to_rename))
