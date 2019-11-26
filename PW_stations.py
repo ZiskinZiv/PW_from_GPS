@@ -695,7 +695,6 @@ def produce_geo_gps_stations(path=gis_path, file='All_gps_stations.txt',
         alt = isr_dem.sel(band=1, x=lon, y=lat, method='nearest').values.item()
         alt_list.append(float(alt))
     compare_df['approx_alt_dem'] = alt_list
-    return compare_df
     if plot:
         ax = isr.plot()
         stations_isr.plot(ax=ax, column='alt', cmap='Greens',
@@ -2256,6 +2255,23 @@ def israeli_gnss_stations_long_term_trend_analysis(
 #    dsr.to_netcdf(path / new_filename, 'w', encoding=encoding)
 #    print('Done!')
 #    return dsr
+def produce_all_GNSS_PW_anomalies(load_path=work_yuval, grp1='hour',
+                                  grp2='dayofyear', savepath=work_yuval):
+    import xarray as xr
+    GNSS_pw = xr.open_dataset(load_path / 'GNSS_hourly_PW.nc')
+    anom_list = []
+    stations_only = [x for x in GNSS_pw.data_vars if '_error' not in x]
+    for station in stations_only:
+        pw_anom = produce_PW_anomalies(GNSS_pw[station], grp1, grp2, False)
+        anom_list.append(pw_anom)
+    GNSS_pw_anom = xr.merge(anom_list)
+    if savepath is not None:
+        filename = 'GNSS_PW_hourly_anom_{}_{}.nc'.format(grp1, grp2)
+        comp = dict(zlib=True, complevel=9)  # best compression
+        encoding = {var: comp for var in GNSS_pw_anom.data_vars}
+        GNSS_pw_anom.to_netcdf(savepath / filename, 'w', encoding=encoding)
+        print('Done!')
+    return GNSS_pw_anom
 
 
 def produce_PW_anomalies(pw_da, grp1='hour', grp2='dayofyear', plot=True):
@@ -2286,6 +2302,8 @@ def produce_PW_anomalies(pw_da, grp1='hour', grp2='dayofyear', plot=True):
     pw_anom = get_unique_index(pw_anom)
     pw_anom = pw_anom.sortby(time_dim)
     pw_anom = xr_reindex_with_date_range(pw_anom, freq=pw_anom.attrs['freq'])
+    pw_anom.name = fname
+    pw_anom.attrs['description'] = 'anomalies are computed from {} and {} groupings'.format(grp1, grp2)
     if plot:
         fig, (ax1, ax2) = plt.subplots(1, 2, gridspec_kw={'width_ratios': [4, 1]})
         pw = pw_anom.dropna(time_dim).values
