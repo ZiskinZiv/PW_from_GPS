@@ -12,6 +12,45 @@ from PW_paths import work_yuval
 # TODO: if not, build func to replace datetimeindex to numbers and vise versa
 
 
+def normalize_xr(data, time_dim='time', norm=1, down_bound=-1.,
+                 upper_bound=1., verbose=True):
+    attrs = data.attrs
+    avg = data.mean(time_dim, keep_attrs=True)
+    sd = data.std(time_dim, keep_attrs=True)
+    if norm == 0:
+        data = data
+        norm_str = 'No'
+    elif norm == 1:
+        data = (data-avg)/sd
+        norm_str = '(data-avg)/std'
+    elif norm == 2:
+        data = (data-avg)/avg
+        norm_str = '(data-avg)/avg'
+    elif norm == 3:
+        data = data/avg
+        norm_str = '(data/avg)'
+    elif norm == 4:
+        data = data/sd
+        norm_str = '(data)/std'
+    elif norm == 5:
+        dh = data.max()
+        dl = data.min()
+        # print dl
+        data = (((data-dl)*(upper_bound-down_bound))/(dh-dl))+down_bound
+        norm_str = 'mapped between ' + str(down_bound) + ' and ' + str(upper_bound)
+        # print data
+        if verbose:
+            print('Data is ' + norm_str)
+    elif norm == 6:
+        data = data-avg
+        norm_str = 'data-avg'
+    if verbose and norm != 5:
+            print('Preforming ' + norm_str + ' Normalization')
+    data.attrs = attrs
+    data.attrs['Normalize'] = norm_str
+    return data
+
+
 def slice_task_date_range(files, date_range, task='non-specific'):
     from aux_gps import get_timedate_and_station_code_from_rinex
     import pandas as pd
@@ -531,15 +570,12 @@ def time_series_stack(time_da, time_dim='time', grp1='hour', grp2='month'):
             vals.append(val.values)
             dts.append(val[time_dim].values)
     max_size = max([len(x) for x in vals])
-    raw = np.empty(
-        (stacked_da[grp1].shape[0] *
-         stacked_da[grp2].shape[0],
-         max_size)) * np.nan
     concat_sizes = [max_size - len(x) for x in vals]
-    concat_arrys = [np.empty((x))*np.nan for x in concat_sizes]
+    concat_arrys = [np.empty((x)) * np.nan for x in concat_sizes]
     concat_vals = [np.concatenate(x) for x in list(zip(vals, concat_arrys))]
     # 1970-01-01 is the not a time for this time-series:
-    concat_arrys = [np.zeros((x), dtype='datetime64[ns]') for x in concat_sizes]
+    concat_arrys = [np.zeros((x), dtype='datetime64[ns]')
+                    for x in concat_sizes]
     concat_dts = [np.concatenate(x) for x in list(zip(dts, concat_arrys))]
     concat_vals = np.array(concat_vals)
     concat_dts = np.array(concat_dts)
