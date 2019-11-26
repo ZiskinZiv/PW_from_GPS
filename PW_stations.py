@@ -558,7 +558,8 @@ def parameter_study_ts_tm_TELA_bet_dagan(tel_aviv_IMS_file, path=work_yuval,
             rds.RMSE.plot.pcolormesh(ax=ax[1])
         else:
             fg_mean = rds.MEAN.plot.pcolormesh(row='hour', col='season',
-                                               figsize=(20, 10), cmap='seismic')
+                                               figsize=(20, 10),
+                                               cmap='seismic')
             [ax.grid() for ax in fg_mean.fig.axes]
             # fg_mean.fig.tight_layout()
             # fg_mean.fig.subplots_adjust(right=0.9)
@@ -684,7 +685,8 @@ def produce_geo_gps_stations(path=gis_path, file='All_gps_stations.txt',
     stations_approx['approx_lat'] = lat
     stations_approx['approx_lon'] = lon
     stations_approx['approx_alt'] = alt
-    stations_isr_df = pd.DataFrame(stations_isr.drop(columns=['geometry', 'index_right']))
+    stations_isr_df = pd.DataFrame(stations_isr.drop(columns=['geometry',
+                                                              'index_right']))
     compare_df = stations_isr_df.join(stations_approx)
     alt_list = []
     for index, row in compare_df.iterrows():
