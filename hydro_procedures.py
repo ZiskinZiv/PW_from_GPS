@@ -10,6 +10,9 @@ from PW_paths import work_yuval
 hydro_path = work_yuval / 'hydro'
 gis_path = work_yuval / 'gis'
 
+# TODO: slice hydro data for 1996-2019
+# TODO: slice 4-5 stations around a 5-km radius from the GNSS stations
+# TODO: hope for 1 continous hydro time series and work with it
 
 def read_hydro_metadata(path=hydro_path, gis_path=gis_path, plot=True):
     import pandas as pd
