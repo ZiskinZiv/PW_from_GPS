@@ -18,7 +18,7 @@ def read_hydro_metadata(path=hydro_path, gis_path=gis_path, plot=True):
     import pandas as pd
     import geopandas as gpd
     import xarray as xr
-    df = pd.read_excel(hydro_path / 'קטלוג_תחנות_הידרומטריות.xlsx',
+    df = pd.read_excel(hydro_path / 'hydro_stations_metadata.xlsx',
                        header=4)
     # drop last row:
     df.drop(df.tail(1).index, inplace=True)  # drop last n rows
@@ -64,7 +64,7 @@ def read_hydro_metadata(path=hydro_path, gis_path=gis_path, plot=True):
 def read_tides(path=hydro_path):
     from aux_gps import path_glob
     import pandas as pd
-    files = path_glob(path, 'דוח_גאויות*.xlsx')
+    files = path_glob(path, 'tide_report*.xlsx')
     df_list = []
     for file in files:
         df = pd.read_excel(file, header=4)
@@ -118,7 +118,7 @@ def read_tides(path=hydro_path):
 
 def text_process_hydrographs(path=hydro_path, gis_path=gis_path):
     from aux_gps import path_glob
-    files = path_glob(path, 'ספיקה_רגעית_בתחנות_הידרומטריות*.txt')
+    files = path_glob(path, 'hydro_flow*.txt')
     for i, file in enumerate(files):
         print(file)
         with open(file, 'r') as f:
