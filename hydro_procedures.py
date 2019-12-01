@@ -14,6 +14,27 @@ gis_path = work_yuval / 'gis'
 # TODO: slice 4-5 stations around a 5-km radius from the GNSS stations
 # TODO: hope for 1 continous hydro time series and work with it
 
+
+def get_hydro_near_GNSS(radius=5.0, n=5, hydro_path=hydro_path,
+                        gis_path=gis_path, plot=True):
+    import pandas as pd
+    import geopandas as gpd
+    from pathlib import Path
+    df = pd.read_csv(Path().cwd() / 'israeli_gnss_coords.txt',
+                     delim_whitespace=True)
+    df = df[['lon', 'lat']]
+    gnss = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.lon, df.lat),
+                            crs={'init': 'epsg:4326'})
+    gnss = gnss.to_crs({'init': 'epsg:2039'})
+    hydro_meta = read_hydro_metadata(hydro_path, gis_path, plot=False)
+    hydro_meta = hydro_meta.to_crs({'init': 'epsg:2039'})
+    hydro_list = []
+    for index, row in gnss.iterrows():
+        hydro_meta[index] = hydro_meta.geometry.distance(row['geometry'])
+        hydro_list.append(hydro_meta[hydro_meta[index] <= radius * 1000])
+    return hydro_list
+
+
 def read_hydro_metadata(path=hydro_path, gis_path=gis_path, plot=True):
     import pandas as pd
     import geopandas as gpd
