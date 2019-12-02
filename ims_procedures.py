@@ -1092,177 +1092,6 @@ def ims_api_get_meta(active_only=True, channel_name='TD'):
     return stations_10mins
 
 
-def download_ims_single_station(stationid, savepath=ims_path,
-                                channel_name='TD', update=None):
-    """download single station with channel_name from earliest to latest.
-    if chanel_name is None, download all channels"""
-    import requests
-    import pandas as pd
-    # TODO: add all channels download...
-
-    def parse_ims_to_df(raw_data, ch_name):
-        """gets ims station raw data, i.e., r.json()['data'] and returns
-        a pandas dataframe"""
-        import pandas as pd
-        if ch_name is not None:
-            datetimes = [x['datetime'] for x in raw_data]
-            data = [x['channels'][0] for x in raw_data]
-            df = pd.DataFrame.from_records(data,
-                                           index=pd.to_datetime(datetimes,
-                                                                utc=True))
-            df.drop(['alias', 'description'], axis=1, inplace=True)
-            cols = [ch_name + '_' + x for x in df.columns]
-            df.columns = cols
-        elif ch_name is None:
-            # add all channels d/l here:
-            datetimes = [x['datetime'] for x in raw_data]
-            names = [x['name'] for x in data['channels']]
-            keys = [*data['channels'][0].keys()]
-        return df
-
-    def to_dataarray(df, meta):
-        # add all channels d/l here:
-        import pandas as pd
-        ds = df.to_xarray()
-        ds['time'] = pd.to_datetime(ds.time)
-        channel_name = [*ds.data_vars.keys()][0].split('_')[0]
-        channel_id = ds[channel_name + '_id'].isel(time=0).values.item()
-        to_drop = [x for x in ds.data_vars.keys() if 'value' not in x]
-        ds = ds.drop(to_drop)
-        da = ds[channel_name + '_value'].reset_coords(drop=True)
-        da.name = meta['name']
-        da.attrs['channel_id'] = int(channel_id)
-        da.attrs['channel_name'] = channel_name
-        da.attrs['station_name'] = meta['name']
-        da.attrs['station_id'] = meta['id']
-        da.attrs['active'] = meta['active']
-        da.attrs['station_lat'] = str(meta['loc']['latitude'])
-        da.attrs['station_lon'] = str(meta['loc']['longitude'])
-        for key, value in da.attrs.items():
-            print(key, value)
-        return da
-
-    def get_dates_list(start_date, end_date):
-        """divide the date span into full 1 years and a remainder, tolist"""
-        import numpy as np
-        import pandas as pd
-        end_date = pd.to_datetime(end_date)
-        start_date = pd.to_datetime(start_date)
-        s_year = start_date.year
-        e_year = end_date.year
-        years = np.arange(s_year, e_year + 1)
-        dates = [start_date.replace(year=x) for x in years]
-        if (end_date - dates[-1]).days > 0:
-            dates.append(end_date)
-        return dates
-
-    myToken = 'f058958a-d8bd-47cc-95d7-7ecf98610e47'
-    headers = {'Authorization': 'ApiToken ' + myToken}
-    r = requests.get('https://api.ims.gov.il/v1/envista/stations/',
-                     headers=headers)
-    stations_10mins = pd.DataFrame(r.json())
-    meta = {}
-    st_name = stations_10mins['name'].where(
-            stations_10mins['stationId'] == stationid).dropna()
-    location = stations_10mins['location'].where(
-            stations_10mins['stationId'] == stationid).dropna()
-    active = stations_10mins['active'].where(
-            stations_10mins['stationId'] == stationid).dropna()
-    meta['name'] = '-'.join(st_name.iloc[0].split(' '))
-    meta['id'] = stationid
-    meta['loc'] = location.iloc[0]
-    meta['active'] = active.iloc[0]
-    r_early = requests.get('https://api.ims.gov.il/v1/envista/stations/' +
-                           str(stationid) + '/data/earliest', headers=headers)
-    r_late = requests.get('https://api.ims.gov.il/v1/envista/stations/' +
-                          str(stationid) + '/data/latest', headers=headers)
-    data = r_early.json()['data'][0]
-    if update is not None:
-        earliest = update + pd.Timedelta(10, unit='m')
-    else:
-        earliest = pd.to_datetime(data['datetime']).strftime('%Y-%m-%d')
-    data = r_late.json()['data'][0]
-    latest = pd.to_datetime(data['datetime']).strftime('%Y-%m-%d')
-    print(
-         'Downloading station {} with id: {}, from {} to {}'.format(
-                 st_name,
-                 stationid,
-                 earliest,
-                 latest))
-    # one channel download:
-    if channel_name is not None:
-        channel_id = [x['id'] for x in data['channels']
-                      if x['name'] == channel_name]
-        if channel_id:
-            print('getting just {} channel with id: {}'.format(channel_name,
-                                                               channel_id[0]))
-            ch_id = channel_id[0]
-            dates = get_dates_list(earliest, latest)
-            df_list = []
-            for i in range(len(dates) - 1):
-                first_date = dates[i].strftime('%Y/%m/%d')
-                last_date = dates[i + 1].strftime('%Y/%m/%d')
-                print('proccesing dates: {} to {}'.format(first_date,
-                                                          last_date))
-                dl_command = ('https://api.ims.gov.il/v1/envista/stations/' +
-                              str(stationid) + '/data/' + str(ch_id) +
-                              '?from=' + first_date + '&to=' + last_date)
-                r = requests.get(dl_command, headers=headers)
-                if r.status_code == 204:  # i.e., no content:
-                    print('no content for this search, skipping...')
-                    continue
-                print('parsing to dataframe...')
-                df_list.append(parse_ims_to_df(r.json()['data'], channel_name))
-            print('concatanating df and transforming to xarray...')
-            df_all = pd.concat(df_list)
-            # only valid results:
-            # df_valid = df_all[df_all['valid']]
-            df_all.index.name = 'time'
-            # remove duplicated index values:
-            df_all = df_all[~df_all.index.duplicated()]
-            first = df_all.index[0]
-            last = df_all.index[-1]
-            new_index = pd.date_range(first, last, freq='10min')
-            df_all = df_all.reindex(new_index)
-            valid_name = channel_name + '_valid'
-            value_name = channel_name + '_value'
-            df_all[valid_name].fillna(False, inplace=True)
-            # replace non valid measurments with nans
-            new_vals = df_all[value_name].where(df_all[valid_name])
-            df_all[value_name] = new_vals
-            df_all.index.name = 'time'
-            da = to_dataarray(df_all, meta)
-            if update is not None:
-                return da
-            else:
-                filename = '_'.join([meta['name'], str(meta['id']), channel_name,
-                                     '10mins']) + '.nc'
-                comp = dict(zlib=True, complevel=9)  # best compression
-                encoding = {var: comp for var in da.to_dataset().data_vars}
-                print('saving to {} to {}'.format(filename, savepath))
-                da.to_netcdf(savepath / filename, 'w', encoding=encoding)
-                print('done!')
-    # all channels download add support here:
-    elif channel_name is None:
-        print('getting all channels...')
-        dates = get_dates_list(earliest, latest)
-        df_list = []
-        for i in range(len(dates) - 1):
-            first_date = dates[i].strftime('%Y/%m/%d')
-            last_date = dates[i + 1].strftime('%Y/%m/%d')
-            print('proccesing dates: {} to {}'.format(first_date,
-                                                      last_date))
-            dl_command = ('https://api.ims.gov.il/v1/envista/stations/' +
-                          str(stationid) + '/data?from=' + first_date +
-                          '&to=' + last_date)
-            r = requests.get(dl_command, headers=headers)
-            if r.status_code == 204:  # i.e., no content:
-                print('no content for this search, skipping...')
-                break
-            print('parsing to dataframe...')
-            df_list.append(parse_ims_to_df(r.json()['data'], None))
-    return
-
 #def download_ims_data(geo_df, path, end_date='2019-04-15'):
 #    import requests
 #    import glob
@@ -1357,9 +1186,10 @@ def download_ims_single_station(stationid, savepath=ims_path,
 #    return
 
 
-def fill_fix_all_10mins_TD_stations(path=ims_10mins_path,
-                                    savepath=ims_path,
-                                    unique_index=True, clim='dayofyear'):
+def fill_fix_all_10mins_IMS_stations(path=ims_10mins_path,
+                                     savepath=ims_path,
+                                     unique_index=True, field='TD',
+                                     clim='dayofyear'):
     """loop over all TD 10mins stations and first fix their lat/lon/alt from
     metadata file and then fill them with clim, then save them
     use specific station names to slice irrelevant data"""
@@ -1367,11 +1197,13 @@ def fill_fix_all_10mins_TD_stations(path=ims_10mins_path,
     from aux_gps import path_glob
     # TODO: redo this analysis with adding the hourly TD data
     meta = read_ims_metadata_from_files(freq='10mins')
-    files = path_glob(path, '*TD_10mins.nc')
+    files = path_glob(path, '*{}_10mins.nc'.format(field))
     cnt = 1
+    da_list = []
     for file_and_path in files:
         da = xr.open_dataarray(file_and_path)
-        print('post-proccessing temperature data for {} station, ({}/{})'.format(da.name, cnt, len(files)))
+        print('post-proccessing {} data for {} station, ({}/{})'.format(field,
+              da.name, cnt, len(files)))
         sid = da.attrs['station_id']
         row = meta[meta.ID == sid]
         if da.name == 'ARIEL':
@@ -1382,6 +1214,7 @@ def fill_fix_all_10mins_TD_stations(path=ims_10mins_path,
             row = meta[meta.ID == 380]
             print('{} station is sliced and fixed!'.format(da.name))
         elif da.name == 'PARAN-20060124':
+            da = da.loc['1995-04-01':]
             row = meta[meta.ID == 207]
             print('{} station is fixed!'.format(da.name))
         elif da.name == 'MIZPE-RAMON-20120927':
@@ -1398,22 +1231,68 @@ def fill_fix_all_10mins_TD_stations(path=ims_10mins_path,
             continue
         no_row_in_meta = row.empty
         assert not no_row_in_meta
+        if field == 'Rain':
+            if da.name == 'YOTVATA':
+                da = da.loc['2009-09-01':]
+                print('{} station is sliced!'.format(da.name))
+            elif da.name == 'ELAT':
+                da = da.loc['2002-11-25':]
+                print('{} station is sliced!'.format(da.name))
+            elif da.name == 'ELON':
+                da = da.loc['1999-02-01':]
+                print('{} station is sliced!'.format(da.name))
+            elif da.name == 'QEVUZAT-YAVNE':
+                da = da.loc['2000-02-05':]
+                print('{} station is sliced!'.format(da.name))
+            elif da.name == 'ZOMET-HANEGEV':
+                da = da.loc['2005-11-21':]
+                print('{} station is sliced!'.format(da.name))
+            elif da.name == 'JERUSALEM-CENTRE':
+                da = da.loc['1995-11-13':]
+                print('{} station is sliced!'.format(da.name))                
+            elif da.name == 'NETIV-HALAMED-HE':
+                da = da.loc['1995-10-15':]
+                print('{} station is sliced!'.format(da.name))
+            elif da.name == 'GAT':
+                da = da.loc['2007-10-01':]
+                print('{} station is sliced!'.format(da.name))
+            elif da.name == 'AVNE-ETAN':
+                da = da.loc['1993-07-01':]
+                print('{} station is sliced!'.format(da.name))
+            elif da.name == 'ROSH-HANIQRA':
+                da = da.loc['2007-09-01':]
+                print('{} station is sliced!'.format(da.name))
+            elif da.name == 'TAVOR-KADOORIE':
+                da = da.loc['1995-01-15':]
+                print('{} station is sliced!'.format(da.name))
+            elif da.name == 'EN-KARMEL':
+                da = da.loc['1993-12-01':]
+                print('{} station is sliced!'.format(da.name))
         # if no_row_in_meta:
         #     print('{} not exist in meta'.format(da.name))
         da.attrs['station_lat'] = row.lat.values.item()
         da.attrs['station_lon'] = row.lon.values.item()
         da.attrs['station_alt'] = row.alt.values.item()
-        fill_missing_single_ims_station(da, unique_index=unique_index,
-                                        clim_period=clim, savepath=path,
-                                        verbose=False)
+        if field == 'TD':
+            fill_missing_single_ims_station(da, unique_index=unique_index,
+                                            clim_period=clim, savepath=path,
+                                            verbose=False)
+        else:
+            da_list.append(da)
         cnt += 1
-    print('Done filling all stations!')
-    files = path_glob(path, '*TD_10mins_filled.nc')
-    dsl = [xr.open_dataarray(file) for file in files]
-    print('merging all filled files...')
+    if field == 'TD':
+        print('Done filling all stations!')
+        files = path_glob(path, '*TD_10mins_filled.nc')
+        dsl = [xr.open_dataarray(file) for file in files]
+    else:
+        dsl = da_list
+    print('merging all files...')
     ds = xr.merge(dsl)
     if savepath is not None:
-        filename = 'IMS_TD_israeli_10mins_filled.nc'
+        if field == 'TD':
+            filename = 'IMS_TD_israeli_10mins_filled.nc'
+        else:
+            filename = 'IMS_{}_israeli_10mins.nc'.format(field)
         print('saving {} to {}'.format(filename, savepath))
         comp = dict(zlib=True, complevel=9)  # best compression
         encoding = {var: comp for var in ds.data_vars}
