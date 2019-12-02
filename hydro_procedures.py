@@ -32,7 +32,23 @@ def get_hydro_near_GNSS(radius=5.0, n=5, hydro_path=hydro_path,
     for index, row in gnss.iterrows():
         hydro_meta[index] = hydro_meta.geometry.distance(row['geometry'])
         hydro_list.append(hydro_meta[hydro_meta[index] <= radius * 1000])
-    return hydro_list
+    sel_hydro = pd.concat(hydro_list)
+    if plot:
+        isr = gpd.read_file(gis_path / 'Israel_and_Yosh.shp')
+        isr.crs = {'init': 'epsg:4326'}
+        gnss = gnss.to_crs({'init': 'epsg:4326'})
+        sel_hydro = sel_hydro.to_crs({'init': 'epsg:4326'})
+        ax = isr.plot()
+        gnss.plot(ax=ax, color='green', edgecolor='black')
+        for x, y, label in zip(gnss.lon, gnss.lat, gnss.index):
+            ax.annotate(label, xy=(x, y), xytext=(3, 3),
+                        textcoords="offset points")
+        sel_hydro.plot(ax=ax, color='red', edgecolor='black')
+        for x, y, label in zip(sel_hydro.lon, sel_hydro.lat,
+                               sel_hydro.id):
+            ax.annotate(label, xy=(x, y), xytext=(3, 3),
+                        textcoords="offset points")
+    return sel_hydro
 
 
 def read_hydro_metadata(path=hydro_path, gis_path=gis_path, plot=True):
