@@ -123,15 +123,15 @@ def read_tides(path=hydro_path):
         df = df[~df.hydro_year.isnull()]
         df['id'] = df['id'].astype(int)
         df['tide_start'] = pd.to_datetime(
-            df['tide_start_date']) + pd.to_timedelta(
+            df['tide_start_date'], dayfirst=True) + pd.to_timedelta(
             df['tide_start_hour'].add(':00'), unit='m', errors='coerce')
         df['tide_end'] = pd.to_datetime(
-            df['tide_end_date']) + pd.to_timedelta(
+            df['tide_end_date'], dayfirst=True) + pd.to_timedelta(
             df['tide_end_hour'].add(':00'),
             unit='m',
             errors='coerce')
         df['tide_max'] = pd.to_datetime(
-            df['tide_max_date']) + pd.to_timedelta(
+            df['tide_max_date'], dayfirst=True) + pd.to_timedelta(
             df['tide_max_hour'].add(':00'),
             unit='m',
             errors='coerce')
