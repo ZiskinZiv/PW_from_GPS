@@ -13,7 +13,13 @@ gis_path = work_yuval / 'gis'
 # TODO: slice hydro data for 1996-2019
 # TODO: slice 4-5 stations around a 5-km radius from the GNSS stations
 # TODO: hope for 1 continous hydro time series and work with it
+# TODO: get each tide event (with threshold) and take a few days before(parameter)
+# and mean this time-span of the PW time-series (or anomalies) and present it with graphs
 
+
+def get_n_days_pw_hydro_event(pw_da, hs_id, ndays=5):
+    # dims = (time, tide_start)
+    return ds
 
 def get_hydro_near_GNSS(radius=5.0, n=5, hydro_path=hydro_path,
                         gis_path=gis_path, plot=True):
@@ -101,6 +107,8 @@ def read_hydro_metadata(path=hydro_path, gis_path=gis_path, plot=True):
 def read_tides(path=hydro_path):
     from aux_gps import path_glob
     import pandas as pd
+    import xarray as xr
+    from aux_gps import get_unique_index
     files = path_glob(path, 'tide_report*.xlsx')
     df_list = []
     for file in files:
@@ -150,7 +158,62 @@ def read_tides(path=hydro_path):
         df_list.append(df)
     df = pd.concat(df_list)
     dfs = [x for _, x in df.groupby('id')]
-    return df
+    ds_list = []
+    meta_df = read_hydro_metadata(path, gis_path, False)
+    for df in dfs:
+        st_id = df['id'].iloc[0]
+        st_name = df['name'].iloc[0]
+        print('proccessing station number: {}, {}'.format(st_id, st_name))
+        meta = meta_df[meta_df['id'] == st_id]
+        ds = xr.Dataset()
+        df.set_index('tide_start', inplace=True)
+        attrs = {}
+        attrs['station_name'] = st_name
+        if not meta.empty:
+            attrs['lon'] = meta.lon.values.item()
+            attrs['lat'] = meta.lat.values.item()
+            attrs['alt'] = meta.alt.values.item()
+            attrs['drainage_basin_area'] = meta.area.values.item()
+            attrs['active'] = meta.active.values.item()
+        attrs['units'] = 'm'
+        max_height = df['max_height'].to_xarray()
+        max_height.name = 'TS_{}_max_height'.format(st_id)
+        max_height.attrs = attrs
+        max_flow = df['max_flow[m^3/sec]'].to_xarray()
+        max_flow.name = 'TS_{}_max_flow'.format(st_id)
+        attrs['units'] = 'm^3/sec'
+        max_flow.attrs = attrs
+        attrs['units'] = 'MCM'
+        tide_vol = df['tide_vol[MCM]'].to_xarray()
+        tide_vol.name = 'TS_{}_tide_vol'.format(st_id)
+        tide_vol.attrs = attrs
+        attrs.pop('units')
+#        tide_start = df['tide_start'].to_xarray()
+#        tide_start.name = 'TS_{}_tide_start'.format(st_id)
+#        tide_start.attrs = attrs
+        tide_end = df['tide_end'].to_xarray()
+        tide_end.name = 'TS_{}_tide_end'.format(st_id)
+        tide_end.attrs = attrs
+        tide_max = df['tide_max'].to_xarray()
+        tide_max.name = 'TS_{}_tide_max'.format(st_id)
+        tide_max.attrs = attrs
+        ds['{}'.format(max_height.name)] = max_height
+        ds['{}'.format(max_flow.name)] = max_flow
+        ds['{}'.format(tide_vol.name)] = tide_vol
+#         ds['{}'.format(tide_start.name)] = tide_start
+        ds['{}'.format(tide_end.name)] = tide_end
+        ds['{}'.format(tide_max.name)] = tide_max
+        ds_list.append(ds)
+    dsu = [get_unique_index(x, dim='tide_start') for x in ds_list]
+    print('merging...')
+    ds = xr.merge(dsu)
+    filename = 'hydro_tides.nc'
+    print('saving {} to {}'.format(filename, path))
+    comp = dict(zlib=True, complevel=9)  # best compression
+    encoding = {var: comp for var in ds.data_vars}
+    ds.to_netcdf(path / filename, 'w', encoding=encoding)
+    print('Done!')
+    return ds
 
 
 def text_process_hydrographs(path=hydro_path, gis_path=gis_path):
