@@ -462,7 +462,7 @@ def analyse_results_ds_one_station(dss, field='WetZ', verbose=None,
         # time = dim_intersection([ds[names[0]], ds[names[1]]], dim='time')
         if not time:
             return None
-        time = pd.to_datetime(time)
+        time = sorted(pd.to_datetime(time))
         if hours_offset is not None:
             # freq = pd.infer_freq(time)
             start = time[0] - pd.DateOffset(hours=hours_offset)
