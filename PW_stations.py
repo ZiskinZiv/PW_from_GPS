@@ -815,7 +815,7 @@ def produce_geo_df(gis_path=gis_path):
     return geo_df
 
 
-def save_GNSS_PW_israeli_stations(savepath=work_yuval):
+def save_GNSS_PW_israeli_stations(savepath=work_yuval, phys=phys_soundings):
     from pathlib import Path
     import pandas as pd
     import xarray as xr
@@ -827,7 +827,7 @@ def save_GNSS_PW_israeli_stations(savepath=work_yuval):
     ds_list = []
     for sta in stations:
         print(sta, '5mins')
-        pw = produce_GNSS_station_PW(sta, None, plot=False)
+        pw = produce_GNSS_station_PW(sta, None, plot=False, phys=phys)
         ds_list.append(pw)
     ds = xr.merge(ds_list)
     if savepath is not None:
@@ -840,7 +840,7 @@ def save_GNSS_PW_israeli_stations(savepath=work_yuval):
         ds_list = []
         for sta in stations:
             print(sta, sample[skey])
-            pw = produce_GNSS_station_PW(sta, skey, plot=False)
+            pw = produce_GNSS_station_PW(sta, skey, plot=False, phys=phys)
             ds_list.append(pw)
         ds = xr.merge(ds_list)
         if savepath is not None:
