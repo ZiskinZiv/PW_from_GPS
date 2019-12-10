@@ -45,13 +45,15 @@ def aggregate_get_ndays_pw_hydro(pw_da, hs_ids, max_flow_thresh=None,
         ax.set_ylabel('PW [mm]', color=color)
         ax2 = ax.twinx()
         color = 'tab:red'
+        events = []
         for mf in max_flows_list:
             mf.plot.line(marker='X', linewidth=0., color=color, ax=ax2)
+            events.append(mf.size)
         ax2.tick_params(axis='y', labelcolor=color)
         ax.grid()
         ax2.set_title(
-            'PW in station {} {} days before tide events'.format(
-                pw_da.name, ndays))
+            'PW in station {} {} days before tide events ({} total)'.format(
+                pw_da.name, ndays, sum(events)))
         ax2.set_ylabel('max_flow [m^3/sec]', color=color)
         fig.tight_layout()
         fig, ax = plt.subplots()
@@ -62,14 +64,14 @@ def aggregate_get_ndays_pw_hydro(pw_da, hs_ids, max_flow_thresh=None,
         ax.set_xlabel('Days before tide event')
         ax.set_ylabel('PW [mm]')
         ax.grid()
-        ax.legend(['station_{}'.format(x) for x in hs_ids])
+        fmt = list(zip(hs_ids, events))
+        ax.legend(['station #{} ({} events)'.format(x, y) for x, y in fmt])
         ax.set_title(
-            'Mean PW for {} tide events near {} station'.format(
-                da.tide_start.size, pw_da.name))
+            'Mean PW for tide stations near {} station'.format(pw_da.name))
         if max_flow_thresh is not None:
             ax.set_title(
-                'Mean PW for {} tide events (above {} m^3/sec) near {} station'.format(
-                    da.tide_start.size, max_flow_thresh, pw_da.name))
+                'Mean PW for tide stations (above {} m^3/sec) near {} station'.format(
+                    max_flow_thresh, pw_da.name))
     return dass
 
 
