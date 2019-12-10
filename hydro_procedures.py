@@ -17,9 +17,156 @@ gis_path = work_yuval / 'gis'
 # and mean this time-span of the PW time-series (or anomalies) and present it with graphs
 
 
-def get_n_days_pw_hydro_event(pw_da, hs_id, ndays=5):
-    # dims = (time, tide_start)
-    return ds
+def aggregate_get_ndays_pw_hydro(pw_da, hs_ids, max_flow_thresh=None,
+                                 hydro_path=hydro_path, ndays=5, plot=True):
+    import xarray as xr
+    import matplotlib.pyplot as plt
+    das = []
+    max_flows_list = []
+    pw_ndays_list = []
+    for sid in hs_ids:
+        max_flows, pw_ndays, da = get_n_days_pw_hydro_all(pw_da, sid,
+                                                          max_flow_thresh=max_flow_thresh,
+                                                          hydro_path=hydro_path,
+                                                          ndays=ndays,
+                                                          return_max_flows=True,
+                                                          plot=False)
+        das.append(da)
+        pw_ndays_list.append(pw_ndays)
+        max_flows_list.append(max_flows)
+    pw_ndays = xr.concat(pw_ndays_list, 'time')
+    dass = xr.concat(das, 'station')
+    dass['station'] = hs_ids
+    if plot:
+        fig, ax = plt.subplots(figsize=(20, 4))
+        color = 'tab:blue'
+        pw_ndays.plot.line(marker='.', linewidth=0., color=color, ax=ax)
+        ax.tick_params(axis='y', labelcolor=color)
+        ax.set_ylabel('PW [mm]', color=color)
+        ax2 = ax.twinx()
+        color = 'tab:red'
+        for mf in max_flows_list:
+            mf.plot.line(marker='X', linewidth=0., color=color, ax=ax2)
+        ax2.tick_params(axis='y', labelcolor=color)
+        ax.grid()
+        ax2.set_title(
+            'PW in station {} {} days before tide events'.format(
+                pw_da.name, ndays))
+        ax2.set_ylabel('max_flow [m^3/sec]', color=color)
+        fig.tight_layout()
+        fig, ax = plt.subplots()
+        for sid in hs_ids:
+            dass.sel(
+                station=sid).mean('tide_start').plot.line(
+                marker='.', linewidth=0., ax=ax)
+        ax.set_xlabel('Days before tide event')
+        ax.set_ylabel('PW [mm]')
+        ax.grid()
+        ax.legend(['station_{}'.format(x) for x in hs_ids])
+        ax.set_title(
+            'Mean PW for {} tide events near {} station'.format(
+                da.tide_start.size, pw_da.name))
+        if max_flow_thresh is not None:
+            ax.set_title(
+                'Mean PW for {} tide events (above {} m^3/sec) near {} station'.format(
+                    da.tide_start.size, max_flow_thresh, pw_da.name))
+    return dass
+
+
+def get_n_days_pw_hydro_all(pw_da, hs_id, max_flow_thresh=None,
+                            hydro_path=hydro_path, ndays=5,
+                            return_max_flows=False, plot=True):
+    """calculate the mean of the PW ndays before all tide events in specific
+    hydro station. can use max_flow_thresh to get only event with al least
+    this max_flow i.e., big tide events"""
+    # important, DO NOT dropna pw_da!
+    import xarray as xr
+    import matplotlib.pyplot as plt
+
+    def get_n_days_pw_hydro_one_event(pw_da, tide_start, ndays=ndays):
+        import pandas as pd
+        freq = pd.infer_freq(pw_da.time.values)
+        # for now, work with 5 mins data:
+        if freq == '5T':
+            points = int(ndays) * 24 * 12
+        lag = pd.timedelta_range(end=0, periods=points, freq=freq)
+        time_arr = pd.to_datetime(pw_da.time.values)
+        tide_start = pd.to_datetime(tide_start).round(freq)
+        ts_loc = time_arr.get_loc(tide_start)
+        # days = pd.Timedelta(ndays, unit='D')
+        # time_slice = [tide_start - days, tide_start]
+        # pw = pw_da.sel(time=slice(*time_slice))
+        pw = pw_da.isel(time=slice(ts_loc - points, ts_loc))
+        return pw, lag
+
+    # first load tides data:
+    all_tides = xr.open_dataset(hydro_path / 'hydro_tides.nc')
+    # get all tides for specific station without nans:
+    sta_slice = [x for x in all_tides.data_vars if str(hs_id) in x]
+    tides = all_tides[sta_slice].dropna('tide_start')
+    tide_starts = tides['tide_start'].where(
+        ~tides.isnull()).dropna('tide_start')['tide_start']
+    # get max flow tides data:
+    mf = [x for x in tides.data_vars if 'max_flow' in x]
+    max_flows = tides[mf].dropna('tide_start').to_array('max_flow').squeeze()
+    # slice minmum time for convenience:
+    min_pw_time = pw_da.dropna('time').time.min().values
+    tide_starts = tide_starts.sel(tide_start=slice(min_pw_time, None))
+    max_flows = max_flows.sel(tide_start=slice(min_pw_time, None))
+    if max_flow_thresh is not None:
+        # pick only big events:
+        max_flows = max_flows.where(
+            max_flows > max_flow_thresh).dropna('tide_start')
+        tide_starts = tide_starts.where(
+            max_flows > max_flow_thresh).dropna('tide_start')
+    pw_list = []
+    for ts in tide_starts.values:
+        pw, lag = get_n_days_pw_hydro_one_event(pw_da, ts, ndays=ndays)
+        pw.attrs['ts'] = ts
+        pw_list.append(pw)
+    # filter events that no PW exists:
+    pw_list = [x for x in pw_list if x.dropna('time').size > 0]
+    da = xr.DataArray([x.values for x in pw_list], dims=['tide_start', 'lag'])
+    da['tide_start'] = [x.attrs['ts'] for x in pw_list]  # tide_starts
+    da['lag'] = lag
+    # da.name = pw_da.name + '_tide_events'
+    da.attrs = pw_da.attrs
+    if max_flow_thresh is not None:
+        da.attrs['max_flow_minimum'] = max_flow_thresh
+    pw_ndays = xr.concat(pw_list, 'time')
+    if plot:
+        fig, ax = plt.subplots(figsize=(20, 4))
+        color = 'tab:blue'
+        pw_ndays.plot.line(marker='.', linewidth=0., color=color, ax=ax)
+        ax.tick_params(axis='y', labelcolor=color)
+        ax.set_ylabel('PW [mm]', color=color)
+        ax2 = ax.twinx()
+        color = 'tab:red'
+        max_flows.plot.line(marker='X', linewidth=0., color=color, ax=ax2)
+        ax2.tick_params(axis='y', labelcolor=color)
+        ax.grid()
+        ax2.set_title(
+            'PW in station {} {} days before tide events'.format(
+                pw_da.name, ndays))
+        ax2.set_ylabel('max_flow [m^3/sec]', color=color)
+        fig.tight_layout()
+        fig, ax = plt.subplots()
+        da.mean('tide_start').plot.line(marker='.', linewidth=0., ax=ax)
+        ax.set_xlabel('Days before tide event')
+        ax.set_ylabel('PW [mm]')
+        ax.grid()
+        ax.set_title(
+            'Mean PW for {} tide events near {} station'.format(
+                da.tide_start.size, pw_da.name))
+        if max_flow_thresh is not None:
+            ax.set_title(
+                'Mean PW for {} tide events (above {} m^3/sec) near {} station'.format(
+                    da.tide_start.size, max_flow_thresh, pw_da.name))
+    if return_max_flows:
+        return max_flows, pw_ndays, da
+    else:
+        return da
+
 
 def get_hydro_near_GNSS(radius=5.0, n=5, hydro_path=hydro_path,
                         gis_path=gis_path, plot=True):
