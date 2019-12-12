@@ -17,6 +17,65 @@ gis_path = work_yuval / 'gis'
 # and mean this time-span of the PW time-series (or anomalies) and present it with graphs
 
 
+def loop_over_gnss_hydro_and_aggregate(sel_hydro, pw_anom=False,
+                                       max_flow_thresh=None,
+                                       hydro_path=hydro_path,
+                                       work_yuval=work_yuval, ndays=5,
+                                       plot=True, plot_all=False):
+    import xarray as xr
+    import matplotlib.pyplot as plt
+    if pw_anom:
+        gnss_pw = xr.open_dataset(work_yuval / 'GNSS_PW_hourly_anom_hour_dayofyear.nc')
+    else:
+        gnss_pw = xr.open_dataset(work_yuval / 'GNSS_PW.nc')
+    just_pw = [x for x in gnss_pw.data_vars if '_error' not in x]
+    gnss_pw = gnss_pw[just_pw]
+    da_list = []
+    for gnss_sta in just_pw:
+        print('proccessing station {}'.format(gnss_sta))
+        sliced = sel_hydro[~sel_hydro[gnss_sta].isnull()]
+        hydro_ids = [x for x in sliced.id.values]
+        if not hydro_ids:
+            print(
+                'skipping {} station since no close hydro stations...'.format(gnss_sta))
+            continue
+        else:
+            try:
+                dass = aggregate_get_ndays_pw_hydro(
+                    gnss_pw[gnss_sta],
+                    hydro_ids,
+                    max_flow_thresh=max_flow_thresh,
+                    ndays=ndays,
+                    plot=plot_all)
+                da_list.append(dass)
+            except ValueError as e:
+                print('skipping {} because {}'.format(gnss_sta, e))
+                continue
+    ds = xr.merge(da_list)
+    if plot:
+        names = [x for x in ds.data_vars]
+        fig, ax = plt.subplots()
+        for name in names:
+            ds.mean('station').mean('tide_start')[name].plot.line(
+                marker='.', linewidth=0., ax=ax)
+        ax.set_xlabel('Days before tide event')
+        ax.set_ylabel('PW [mm]')
+        ax.grid()
+        hstations = [ds[x].attrs['hydro_stations'] for x in ds.data_vars]
+        events = [ds[x].attrs['total_events'] for x in ds.data_vars]
+        fmt = list(zip(names, hstations, events))
+        ax.legend(['{} with {} stations ({} total events)'.format(x, y, z)
+                   for x, y, z in fmt])
+        if pw_anom:
+            title = 'Mean PW anomalies for tide stations near all GNSS stations'
+        else:
+            title = 'Mean PW for tide stations near all GNSS stations'
+        if max_flow_thresh is not None:
+            title += ' (max_flow > {} m^3/sec)'.format(max_flow_thresh)
+        ax.set_title(title)
+    return ds
+
+
 def aggregate_get_ndays_pw_hydro(pw_da, hs_ids, max_flow_thresh=None,
                                  hydro_path=hydro_path, ndays=5, plot=True):
     import xarray as xr
@@ -24,19 +83,38 @@ def aggregate_get_ndays_pw_hydro(pw_da, hs_ids, max_flow_thresh=None,
     das = []
     max_flows_list = []
     pw_ndays_list = []
+    if not isinstance(hs_ids, list):
+        hs_ids = [int(hs_ids)]
+    else:
+        hs_ids = [int(x) for x in hs_ids]
+    used_ids = []
+    events = []
     for sid in hs_ids:
-        max_flows, pw_ndays, da = get_n_days_pw_hydro_all(pw_da, sid,
-                                                          max_flow_thresh=max_flow_thresh,
-                                                          hydro_path=hydro_path,
-                                                          ndays=ndays,
-                                                          return_max_flows=True,
-                                                          plot=False)
-        das.append(da)
-        pw_ndays_list.append(pw_ndays)
-        max_flows_list.append(max_flows)
+        print('proccessing hydro station {}'.format(sid))
+        try:
+            max_flows, pw_ndays, da = get_n_days_pw_hydro_all(pw_da, sid,
+                                                              max_flow_thresh=max_flow_thresh,
+                                                              hydro_path=hydro_path,
+                                                              ndays=ndays,
+                                                              return_max_flows=True,
+                                                              plot=False)
+            das.append(da)
+            pw_ndays_list.append(pw_ndays)
+            max_flows_list.append(max_flows)
+            used_ids.append(sid)
+            events.append(max_flows.size)
+        except KeyError as e:
+            print('{}, skipping...'.format(e))
+            continue
+        except ValueError as e:
+            print('{}, skipping...'.format(e))
+            continue
     pw_ndays = xr.concat(pw_ndays_list, 'time')
     dass = xr.concat(das, 'station')
-    dass['station'] = hs_ids
+    dass['station'] = used_ids
+    dass.name = pw_da.name
+    dass.attrs['hydro_stations'] = len(used_ids)
+    dass.attrs['total_events'] = sum(events)
     if plot:
         fig, ax = plt.subplots(figsize=(20, 4))
         color = 'tab:blue'
@@ -45,10 +123,8 @@ def aggregate_get_ndays_pw_hydro(pw_da, hs_ids, max_flow_thresh=None,
         ax.set_ylabel('PW [mm]', color=color)
         ax2 = ax.twinx()
         color = 'tab:red'
-        events = []
         for mf in max_flows_list:
             mf.plot.line(marker='X', linewidth=0., color=color, ax=ax2)
-            events.append(mf.size)
         ax2.tick_params(axis='y', labelcolor=color)
         ax.grid()
         ax2.set_title(
@@ -57,14 +133,14 @@ def aggregate_get_ndays_pw_hydro(pw_da, hs_ids, max_flow_thresh=None,
         ax2.set_ylabel('max_flow [m^3/sec]', color=color)
         fig.tight_layout()
         fig, ax = plt.subplots()
-        for sid in hs_ids:
+        for sid in used_ids:
             dass.sel(
                 station=sid).mean('tide_start').plot.line(
                 marker='.', linewidth=0., ax=ax)
         ax.set_xlabel('Days before tide event')
         ax.set_ylabel('PW [mm]')
         ax.grid()
-        fmt = list(zip(hs_ids, events))
+        fmt = list(zip(used_ids, events))
         ax.legend(['station #{} ({} events)'.format(x, y) for x, y in fmt])
         ax.set_title(
             'Mean PW for tide stations near {} station'.format(pw_da.name))
@@ -91,6 +167,8 @@ def get_n_days_pw_hydro_all(pw_da, hs_id, max_flow_thresh=None,
         # for now, work with 5 mins data:
         if freq == '5T':
             points = int(ndays) * 24 * 12
+        elif freq == 'H':
+            points = int(ndays) * 24
         lag = pd.timedelta_range(end=0, periods=points, freq=freq)
         time_arr = pd.to_datetime(pw_da.time.values)
         tide_start = pd.to_datetime(tide_start).round(freq)
@@ -105,6 +183,8 @@ def get_n_days_pw_hydro_all(pw_da, hs_id, max_flow_thresh=None,
     all_tides = xr.open_dataset(hydro_path / 'hydro_tides.nc')
     # get all tides for specific station without nans:
     sta_slice = [x for x in all_tides.data_vars if str(hs_id) in x]
+    if not sta_slice:
+        raise KeyError('hydro station {} not found in database'.format(hs_id))
     tides = all_tides[sta_slice].dropna('tide_start')
     tide_starts = tides['tide_start'].where(
         ~tides.isnull()).dropna('tide_start')['tide_start']
@@ -115,6 +195,9 @@ def get_n_days_pw_hydro_all(pw_da, hs_id, max_flow_thresh=None,
     min_pw_time = pw_da.dropna('time').time.min().values
     tide_starts = tide_starts.sel(tide_start=slice(min_pw_time, None))
     max_flows = max_flows.sel(tide_start=slice(min_pw_time, None))
+    # filter if hydro station data ends before gnss pw:
+    if tide_starts.size == 0:
+        raise ValueError('tides data end before gnss data begin')
     if max_flow_thresh is not None:
         # pick only big events:
         max_flows = max_flows.where(
@@ -183,11 +266,15 @@ def get_hydro_near_GNSS(radius=5.0, n=5, hydro_path=hydro_path,
     gnss = gnss.to_crs({'init': 'epsg:2039'})
     hydro_meta = read_hydro_metadata(hydro_path, gis_path, plot=False)
     hydro_meta = hydro_meta.to_crs({'init': 'epsg:2039'})
-    hydro_list = []
     for index, row in gnss.iterrows():
+        # hdict[index] = hydro_meta.geometry.distance(row['geometry'])
         hydro_meta[index] = hydro_meta.geometry.distance(row['geometry'])
-        hydro_list.append(hydro_meta[hydro_meta[index] <= radius * 1000])
-    sel_hydro = pd.concat(hydro_list)
+        hydro_meta[index] = hydro_meta[index].where(
+            hydro_meta[index] <= radius * 1000)
+    gnss_list = [x for x in gnss.index]
+    # get only stations within desired radius
+    mask = ~hydro_meta.loc[:, gnss_list].isnull().all(axis=1)
+    sel_hydro = hydro_meta.copy()[mask]  # pd.concat(hydro_list)
     if plot:
         isr = gpd.read_file(gis_path / 'Israel_and_Yosh.shp')
         isr.crs = {'init': 'epsg:4326'}
