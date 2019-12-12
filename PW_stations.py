@@ -2255,10 +2255,14 @@ def israeli_gnss_stations_long_term_trend_analysis(
 #    dsr.to_netcdf(path / new_filename, 'w', encoding=encoding)
 #    print('Done!')
 #    return dsr
-def produce_all_GNSS_PW_anomalies(load_path=work_yuval, grp1='hour',
-                                  grp2='dayofyear', savepath=work_yuval):
+def produce_all_GNSS_PW_anomalies(load_path=work_yuval, sample='hourly',
+                                  grp1='hour', grp2='dayofyear',
+                                  savepath=work_yuval):
     import xarray as xr
-    GNSS_pw = xr.open_dataset(load_path / 'GNSS_hourly_PW.nc')
+    if sample is None:
+        GNSS_pw = xr.open_dataset(load_path / 'GNSS_PW.nc')
+    else:
+        GNSS_pw = xr.open_dataset(load_path / 'GNSS_{}_PW.nc'.format(sample))
     anom_list = []
     stations_only = [x for x in GNSS_pw.data_vars if '_error' not in x]
     for station in stations_only:
@@ -2266,7 +2270,10 @@ def produce_all_GNSS_PW_anomalies(load_path=work_yuval, grp1='hour',
         anom_list.append(pw_anom)
     GNSS_pw_anom = xr.merge(anom_list)
     if savepath is not None:
-        filename = 'GNSS_PW_hourly_anom_{}_{}.nc'.format(grp1, grp2)
+        if sample is not None:
+            filename = 'GNSS_PW_{}_anom_{}_{}.nc'.format(sample, grp1, grp2)
+        else:
+            filename = 'GNSS_PW_anom_{}_{}.nc'.format(grp1, grp2)
         comp = dict(zlib=True, complevel=9)  # best compression
         encoding = {var: comp for var in GNSS_pw_anom.data_vars}
         GNSS_pw_anom.to_netcdf(savepath / filename, 'w', encoding=encoding)
