@@ -534,13 +534,18 @@ def flip_xy_axes(ax, ylim=None):
 
 
 def time_series_stack(time_da, time_dim='time', grp1='hour', grp2='month'):
+    """Takes a time-series xr.DataArray objects and reshapes it using
+    grp1 and grp2. outout is a xr.Dataset that includes the reshaped DataArray
+    , its datetime-series and the grps."""
     import xarray as xr
     import numpy as np
     import pandas as pd
+    # try to infer the freq and put it into attrs for later reconstruction:
     freq = pd.infer_freq(time_da[time_dim].values)
     name = time_da.name
     time_da.attrs['freq'] = freq
     attrs = time_da.attrs
+    # drop all NaNs:
     time_da = time_da.dropna(time_dim)
     # group grp1 and concat:
     grp_obj1 = time_da.groupby(time_dim + '.' + grp1)
@@ -551,7 +556,7 @@ def time_series_stack(time_da, time_dim='time', grp1='hour', grp2='month'):
     grps1 = [x for x in grp_obj1.groups.keys()]
     stacked_da = xr.concat(s_list, dim=grp1)
     stacked_da[grp1] = grps1
-    # group over the concated da and concat again:
+    # group over the concatenated da and concat again:
     grp_obj2 = stacked_da.groupby(time_dim + '.' + grp2)
     s_list = []
     for grp_name, grp_inds in grp_obj2.groups.items():
@@ -560,7 +565,8 @@ def time_series_stack(time_da, time_dim='time', grp1='hour', grp2='month'):
     grps2 = [x for x in grp_obj2.groups.keys()]
     stacked_da = xr.concat(s_list, dim=grp2)
     stacked_da[grp2] = grps2
-    # numpy part: loop over both dims and dropna:
+    # numpy part:
+    # first, loop over both dims and drop NaNs, append values and datetimes:
     vals = []
     dts = []
     for i, grp1_val in enumerate(stacked_da[grp1]):
@@ -569,22 +575,26 @@ def time_series_stack(time_da, time_dim='time', grp1='hour', grp2='month'):
             val = da.sel({grp2: grp2_val}).dropna(time_dim)
             vals.append(val.values)
             dts.append(val[time_dim].values)
+    # second, we get the max of the vals after the second groupby:
     max_size = max([len(x) for x in vals])
+    # we fill NaNs and NaT for the remainder of them:
     concat_sizes = [max_size - len(x) for x in vals]
     concat_arrys = [np.empty((x)) * np.nan for x in concat_sizes]
     concat_vals = [np.concatenate(x) for x in list(zip(vals, concat_arrys))]
-    # 1970-01-01 is the not a time for this time-series:
+    # 1970-01-01 is the NaT for this time-series:
     concat_arrys = [np.zeros((x), dtype='datetime64[ns]')
                     for x in concat_sizes]
     concat_dts = [np.concatenate(x) for x in list(zip(dts, concat_arrys))]
     concat_vals = np.array(concat_vals)
     concat_dts = np.array(concat_dts)
+    # finally , we reshape them:
     concat_vals = concat_vals.reshape((stacked_da[grp1].shape[0],
                                        stacked_da[grp2].shape[0],
                                        max_size))
     concat_dts = concat_dts.reshape((stacked_da[grp1].shape[0],
                                      stacked_da[grp2].shape[0],
                                      max_size))
+    # create a Dataset and DataArrays for them:
     sda = xr.Dataset()
     sda.attrs = attrs
     sda[name] = xr.DataArray(concat_vals, dims=[grp1, grp2, 'rest'])
