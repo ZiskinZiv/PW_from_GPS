@@ -533,6 +533,28 @@ def flip_xy_axes(ax, ylim=None):
     return ax
 
 
+def time_series_stack_with_splits(
+        time_da, time_dim='time', grp1='hour', grp2='month', k_splits=5):
+    """this does not work with 5 min sample rate...366x24x117470x8bytesperitem ~= 7000 GB of memory"""
+    import numpy as np
+    import pandas as pd
+    import xarray as xr
+    splits = np.array_split(time_da.dropna(time_dim)[time_dim].values,
+                            k_splits)
+    da_chunks = []
+    print('using {} splits.'.format(k_splits))
+    for time_chunck in splits:
+        min_time = pd.to_datetime(time_chunck.min()).strftime('%Y-%m-%d')
+        max_time = pd.to_datetime(time_chunck.max()).strftime('%Y-%m-%d')
+        print('proccessing {} to {}'.format(min_time, max_time))
+        splitted_da = time_da.sel({time_dim: time_chunck})
+        da = time_series_stack(splitted_da, time_dim,
+                               grp1, grp2)
+        da_chunks.append(da)
+    ds = xr.concat(da_chunks, 'rest')
+    return ds
+
+
 def time_series_stack(time_da, time_dim='time', grp1='hour', grp2='month'):
     """Takes a time-series xr.DataArray objects and reshapes it using
     grp1 and grp2. outout is a xr.Dataset that includes the reshaped DataArray
