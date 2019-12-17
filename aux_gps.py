@@ -12,6 +12,19 @@ from PW_paths import work_yuval
 # TODO: if not, build func to replace datetimeindex to numbers and vise versa
 
 
+def create_X_windowed_samples_from_time_series(ts_da, time_dim='time',
+                                               window='1D'):
+    """make it faster, much faster"""
+    import pandas as pd
+    window_dt = pd.Timedelta(window)
+    X_list = []
+    for dt in ts_da[time_dim]:
+        dt_max = dt + window_dt
+        X = ts_da.sel({time_dim: slice(dt, dt_max)})
+        X_list.append(X)
+    return X_list
+
+
 def normalize_xr(data, time_dim='time', norm=1, down_bound=-1.,
                  upper_bound=1., verbose=True):
     attrs = data.attrs
