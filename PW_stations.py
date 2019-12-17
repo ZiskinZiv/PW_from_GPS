@@ -12,6 +12,7 @@ from PW_paths import work_yuval
 from PW_paths import work_path
 from PW_paths import geo_path
 from pathlib import Path
+hydro_path = work_yuval / 'hydro'
 garner_path = work_yuval / 'garner'
 ims_path = work_yuval / 'IMS_T'
 gis_path = work_yuval / 'gis'
@@ -2255,6 +2256,25 @@ def israeli_gnss_stations_long_term_trend_analysis(
 #    dsr.to_netcdf(path / new_filename, 'w', encoding=encoding)
 #    print('Done!')
 #    return dsr
+
+
+def GNSS_pw_to_X_using_window(gnss_path=work_yuval, hydro_path=hydro_path,
+                              station='tela', window='1D', sample='hourly',
+                              hydro_station=60190):
+    """assemble n window length gnss_pw data array with datetimes and
+    a boolean array of positive or negative tide events"""
+    import xarray as xr
+    # read PW and select station:
+    GNSS_pw = xr.open_dataset(gnss_path / 'GNSS_{}_PW.nc'.format(sample))
+    pw = GNSS_pw[station]
+    # create 1 day length data chunks from pw:
+    
+    # read tides and select station:
+    tides = xr.open_dataset(hydro_path / 'hydro_tides.nc')
+    tide = tides['TS_{}_max_flow'.format(hydro_station)].dropna('tide_start')
+    return X, y    
+
+
 def produce_all_GNSS_PW_anomalies(load_path=work_yuval, sample='hourly',
                                   grp1='hour', grp2='dayofyear',
                                   savepath=work_yuval):
@@ -2341,7 +2361,7 @@ def load_GNSS_TD(station='tela', sample_rate=None, plot=True):
     from aux_gps import path_glob
     from aux_gps import plot_tmseries_xarray
     import xarray as xr
-    sample = {'1H': 'hourly', '3H': '3hourly', 'D': 'Daily', 'W': 'weekly',
+    sample = {'1H': 'hourly', '3H': '3hourly', 'D': 'daily', 'W': 'weekly',
               'MS': 'monthly'}
     path = ims_path
     if sample_rate is None:
