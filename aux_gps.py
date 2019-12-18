@@ -12,17 +12,35 @@ from PW_paths import work_yuval
 # TODO: if not, build func to replace datetimeindex to numbers and vise versa
 
 
-def create_X_windowed_samples_from_time_series(ts_da, time_dim='time',
-                                               window='1D'):
-    """make it faster, much faster"""
+def time_series_stack_with_window(ts_da, time_dim='time',
+                                  window='1D'):
+    """make it faster, much faster using isel and then cocant to dataset
+    save also the datetimes"""
     import pandas as pd
+    import xarray as xr
     window_dt = pd.Timedelta(window)
-    X_list = []
-    for dt in ts_da[time_dim]:
-        dt_max = dt + window_dt
-        X = ts_da.sel({time_dim: slice(dt, dt_max)})
-        X_list.append(X)
-    return X_list
+    freq = pd.infer_freq(ts_da[time_dim].values)
+    freq_td = pd.Timedelta('1' + freq, unit=freq)
+    window_points = int(window_dt / freq_td)
+    inds = []
+    end_index = ts_da[time_dim].size - window_points
+    index_to_run_over = range(0, end_index)
+    for i in range(end_index):
+        inds.append([i, i + window_points])
+    arr_list = []
+    arr_time_list = []
+    ts_arr = ts_da.values
+    ts_time_arr = ts_da[time_dim].values
+    for ind in inds:
+        arr_list.append(ts_arr[ind[0]: ind[1]])
+        arr_time_list.append(ts_time_arr[ind[0]: ind[1]])
+    ds = xr.Dataset()
+    ds[ts_da.name] = xr.DataArray(arr_list, dims=['start_date', 'points'])
+    ds[ts_da.name].attrs = ts_da.attrs
+    ds[time_dim] = xr.DataArray(arr_time_list, dims=['start_date', 'points'])
+    ds['start_date'] = ts_da.isel({time_dim: index_to_run_over})[time_dim].values
+    ds['points'] = range(window_points)
+    return ds
 
 
 def normalize_xr(data, time_dim='time', norm=1, down_bound=-1.,
