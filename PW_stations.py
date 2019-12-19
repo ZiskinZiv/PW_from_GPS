@@ -2256,6 +2256,25 @@ def israeli_gnss_stations_long_term_trend_analysis(
 #    dsr.to_netcdf(path / new_filename, 'w', encoding=encoding)
 #    print('Done!')
 #    return dsr
+def classify_tide_events(gnss_path=work_yuval, hydro_path=hydro_path,
+                         station='tela', window='1D', sample='hourly',
+                         hydro_station=48130):
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.model_selection import train_test_split
+    from sklearn.metrics import confusion_matrix
+    from sklearn.metrics import classification_report
+    kwargs = locals()
+    [kwargs.pop(key) for key in ['LogisticRegression', 'confusion_matrix', 'train_test_split',
+                'classification_report']]
+    lr = LogisticRegression(n_jobs=-1)
+    X, y = GNSS_pw_to_X_using_window(**kwargs)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=0)
+    lr.fit(X_train, y_train)
+    y_pred = lr.predict(X_test)
+    confusion_matrix = confusion_matrix(y_test, y_pred)
+    print(confusion_matrix)
+    print(classification_report(y_test, y_pred))
+    return lr
 
 
 def GNSS_pw_to_X_using_window(gnss_path=work_yuval, hydro_path=hydro_path,
@@ -2264,15 +2283,39 @@ def GNSS_pw_to_X_using_window(gnss_path=work_yuval, hydro_path=hydro_path,
     """assemble n window length gnss_pw data array with datetimes and
     a boolean array of positive or negative tide events"""
     import xarray as xr
+    from aux_gps import time_series_stack_with_window
     # read PW and select station:
     GNSS_pw = xr.open_dataset(gnss_path / 'GNSS_{}_PW.nc'.format(sample))
     pw = GNSS_pw[station]
     # create 1 day length data chunks from pw:
-    
+    ds_X = time_series_stack_with_window(pw, window='1D')
+    # dropna:
+    ds_X = ds_X.dropna('start_date')
+    X = ds_X[station]
     # read tides and select station:
     tides = xr.open_dataset(hydro_path / 'hydro_tides.nc')
-    tide = tides['TS_{}_max_flow'.format(hydro_station)].dropna('tide_start')
-    return X, y    
+    # select station:
+    tide = tides['TS_{}_max_flow'.format(hydro_station)]
+    # dropna:
+    tide = tide.dropna('tide_start')
+    # resample to ds_X time:
+    tide = tide.resample(tide_start=ds_X.attrs['freq']).mean()
+    tide = tide.dropna('tide_start')
+    # now build y:
+    y = np.empty(X.values.shape[0], dtype=bool)
+    start_date = X.start_date.values
+    points = X.points.size
+    tide_start = tide.tide_start.values
+    for i in range(len(start_date) - points):
+        st = start_date[i + points]
+        if st in tide_start:
+            y[i] = True
+        else:
+            y[i] = False
+    y = xr.DataArray(y, dims=['start_date'])
+    y['start_date'] = start_date
+    y.name = 'tide_events'
+    return X, y
 
 
 def produce_all_GNSS_PW_anomalies(load_path=work_yuval, sample='hourly',
