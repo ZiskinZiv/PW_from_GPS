@@ -20,7 +20,9 @@ def time_series_stack_with_window(ts_da, time_dim='time',
     import xarray as xr
     window_dt = pd.Timedelta(window)
     freq = pd.infer_freq(ts_da[time_dim].values)
-    freq_td = pd.Timedelta('1' + freq, unit=freq)
+    if not any(i.isdigit() for i in freq):
+        freq = '1' + freq
+    freq_td = pd.Timedelta(freq)
     window_points = int(window_dt / freq_td)
     inds = []
     end_index = ts_da[time_dim].size - window_points
@@ -40,6 +42,7 @@ def time_series_stack_with_window(ts_da, time_dim='time',
     ds[time_dim] = xr.DataArray(arr_time_list, dims=['start_date', 'points'])
     ds['start_date'] = ts_da.isel({time_dim: index_to_run_over})[time_dim].values
     ds['points'] = range(window_points)
+    ds.attrs['freq'] = freq
     return ds
 
 
