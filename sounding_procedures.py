@@ -330,6 +330,10 @@ def read_one_physical_radiosonde_report(path_file, lower_cutoff=None,
     station_num = int(df[df.loc[:, 0].str.contains("STATION")].iloc[0, 3])
     # extract cloud code:
     cloud_code = df[df.loc[:, 0].str.contains("CLOUD")].iloc[0, 3]
+    # extract sonde_type:
+    sonde_type = df[df.loc[:, 5].fillna('NaN').str.contains("TYPE")].iloc[0, 7:9]
+    sonde_type = sonde_type.dropna()
+    sonde_type = '_'.join(sonde_type.to_list())
     # change col names to:
     df.columns = ['Time', 'Temp', 'RH', 'Press', 'H-Sur', 'H-Msl', 'EL',
                   'AZ', 'W.D', 'W.S']
@@ -362,11 +366,11 @@ def read_one_physical_radiosonde_report(path_file, lower_cutoff=None,
     tm = calculate_tm(df, lower=lower_cutoff, upper=upper_cutoff)
     ts = df['Temp'][0] + 273.15
     units.update(Dewpt='deg_C', WVpress='hPa', Mixratio='gr/kg', Rho='kg/m^3')
-    extra = np.array([ts, tm, tpw, cloud_code]).reshape(1, -1)
-    df_extra = pd.DataFrame(data=extra, columns=['Ts', 'Tm', 'Tpw', 'Cloud_code'])
+    extra = np.array([ts, tm, tpw, cloud_code, sonde_type]).reshape(1, -1)
+    df_extra = pd.DataFrame(data=extra, columns=['Ts', 'Tm', 'Tpw', 'Cloud_code', 'Sonde_type'])
     for col in ['Ts', 'Tm', 'Tpw']:
         df_extra[col] = pd.to_numeric(df_extra[col])
-    units_extra = {'Ts': 'K', 'Tm': 'K', 'Tpw': 'kg/m^2', 'Cloud_code': ''}
+    units_extra = {'Ts': 'K', 'Tm': 'K', 'Tpw': 'kg/m^2', 'Cloud_code': '', 'Sonde_type': ''}
     meta = {'units': units, 'units_extra': units_extra, 'station': station_num}
     if verbose:
         print('datetime: {}, TPW: {:.2f} '.format(df.index[0], tpw))
