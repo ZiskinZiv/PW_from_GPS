@@ -1040,23 +1040,23 @@ def read_ims_metadata_from_files(path=gis_path, freq='10mins'):
     return ims
 
 
-def produce_geo_ims(path, filename='IMS_10mins_meta_data.xlsx',
-                    closed_stations=False, plot=True):
-    import geopandas as gpd
-    import numpy as np
-    isr = gpd.read_file(path / 'israel_demog2012.shp')
-    isr.crs = {'init': 'epsg:4326'}
-    ims = read_ims_metadata_from_files(path, filename)
-    if closed_stations:
-        ims = ims[np.isnat(ims.closing_date)]
-    geo_ims = gpd.GeoDataFrame(ims, geometry=gpd.points_from_xy(ims.lon,
-                                                                ims.lat),
-                               crs=isr.crs)
-    if plot:
-        ax = isr.plot()
-        geo_ims.plot(ax=ax, column='alt', cmap='Reds', edgecolor='black',
-                     legend=True)
-    return geo_ims
+#def produce_geo_ims(path, filename='IMS_10mins_meta_data.xlsx',
+#                    closed_stations=False, plot=True):
+#    import geopandas as gpd
+#    import numpy as np
+#    isr = gpd.read_file(path / 'israel_demog2012.shp')
+#    isr.crs = {'init': 'epsg:4326'}
+#    ims = read_ims_metadata_from_files(path, filename)
+#    if closed_stations:
+#        ims = ims[np.isnat(ims.closing_date)]
+#    geo_ims = gpd.GeoDataFrame(ims, geometry=gpd.points_from_xy(ims.lon,
+#                                                                ims.lat),
+#                               crs=isr.crs)
+#    if plot:
+#        ax = isr.plot()
+#        geo_ims.plot(ax=ax, column='alt', cmap='Reds', edgecolor='black',
+#                     legend=True)
+#    return geo_ims
 
 
 def ims_api_get_meta(active_only=True, channel_name='TD'):
@@ -1189,7 +1189,7 @@ def ims_api_get_meta(active_only=True, channel_name='TD'):
 def fill_fix_all_10mins_IMS_stations(path=ims_10mins_path,
                                      savepath=ims_path,
                                      unique_index=True, field='TD',
-                                     clim='dayofyear'):
+                                     clim='dayofyear', fix_only=False):
     """loop over all TD 10mins stations and first fix their lat/lon/alt from
     metadata file and then fill them with clim, then save them
     use specific station names to slice irrelevant data"""
@@ -1273,24 +1273,30 @@ def fill_fix_all_10mins_IMS_stations(path=ims_10mins_path,
         da.attrs['station_lat'] = row.lat.values.item()
         da.attrs['station_lon'] = row.lon.values.item()
         da.attrs['station_alt'] = row.alt.values.item()
-        if field == 'TD':
+        if field == 'TD' and not fix_only:
             fill_missing_single_ims_station(da, unique_index=unique_index,
                                             clim_period=clim, savepath=path,
                                             verbose=False)
+        elif field == 'TD' and fix_only:
+            da_list.append(da)
         else:
             da_list.append(da)
         cnt += 1
-    if field == 'TD':
+    if field == 'TD' and not fix_only:
         print('Done filling all stations!')
         files = path_glob(path, '*TD_10mins_filled.nc')
         dsl = [xr.open_dataarray(file) for file in files]
+    elif field == 'TD' and fix_only:
+        dsl = da_list
     else:
         dsl = da_list
     print('merging all files...')
     ds = xr.merge(dsl)
     if savepath is not None:
-        if field == 'TD':
+        if field == 'TD' and not fix_only:
             filename = 'IMS_TD_israeli_10mins_filled.nc'
+        elif field == 'TD' and fix_only:
+            filename = 'IMS_{}_israeli_10mins.nc'.format(field)
         else:
             filename = 'IMS_{}_israeli_10mins.nc'.format(field)
         print('saving {} to {}'.format(filename, savepath))
