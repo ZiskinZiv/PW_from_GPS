@@ -1820,7 +1820,7 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
                 y='tm',
                 hue=hue,
                 marker='.',
-                s=100,
+                s=100, linewidth=0, alpha=0.5,
                 ax=axes[0])
             g.legend(loc='best')
 
@@ -1830,7 +1830,8 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
 #        axes[0].plot(linex, liney, c='r')
         bevis_tm = ds.ts.values * 0.72 + 70.0
         if plot:
-            axes[0].plot(ds.ts.values, bevis_tm, c='purple')
+            # plot bevis:
+            # axes[0].plot(ds.ts.values, bevis_tm, c='purple')
             min_, max_ = axes[0].get_ylim()
             [axes[0].plot(X, newy, c=colors[i]) for i, newy in enumerate(predict)]
             [axes[0].text(0.01, pos[i],
@@ -1838,10 +1839,10 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
                                                            coefs[i], inters[i]),
                           transform=axes[0].transAxes, color=colors[i],
                           fontsize=12) for i in range(len(coefs))]
-            axes[0].text(0.01, 0.9,
-                         'Bevis 1992 et al. a: 0.72, b: 70.0',
-                         transform=axes[0].transAxes, color='purple',
-                         fontsize=12)
+            # axes[0].text(0.01, 0.8,
+            #              'Bevis 1992 et al. a: 0.72, b: 70.0',
+            #              transform=axes[0].transAxes, color='purple',
+            #              fontsize=12)
     #        axes[0].text(0.01, 0.9, 'a: {:.2f}, b: {:.2f}'.format(a, b),
     #                     transform=axes[0].transAxes, color='black', fontsize=12)
             axes[0].text(0.1, 0.85, 'n={}'.format(ds.ts.size),
@@ -1923,7 +1924,7 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
 #                                    style=other_keys[1])
                 if plot:
                     g = sns.scatterplot(data=df, x='ts', y='tm', marker='.', s=100,
-                                        ax=axes[i])
+                                        ax=axes[i], linewidth=0, alpha=0.5)
                     g.legend(loc='upper right')
                     # axes[i, j].scatter(x=x.values, y=y.values, marker='.', s=10)
                     axes[i].set_title('{}:{}'.format(key, val))
@@ -2003,7 +2004,8 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
 #                                        hue=other_keys[0])
                     if plot:
                         g = sns.scatterplot(data=df, x='ts', y='tm', marker='.',
-                                            s=100, ax=axes[i, j])
+                                            s=100, ax=axes[i, j], linewidth=0,
+                                            alpha=0.5)
                         g.legend(loc='upper right')
                         # axes[i, j].scatter(x=x.values, y=y.values, marker='.', s=10)
                         # axes[i, j].set_title('{}:{}'.format(key, val))
