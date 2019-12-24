@@ -12,12 +12,103 @@ from PW_paths import work_yuval
 # TODO: if not, build func to replace datetimeindex to numbers and vise versa
 
 
+def consecutive_runs(arr, num=False):
+    import numpy as np
+    import pandas as pd
+    """get the index ranges (min, max) of the ~num condition.
+    num can be 1 or 0 or True or False"""
+    # Create an array that is 1 where a is num, and pad each end with an extra
+    # 1.
+    if isinstance(arr, pd.DataFrame):
+        a = arr.squeeze().values
+        name = arr.columns[0]
+    elif isinstance(arr, np.ndarray):
+        a = arr
+    elif isinstance(arr, list):
+        a = np.array(arr)
+    isone = np.concatenate(([1], np.equal(a, num).view(np.int8), [1]))
+    absdiff = np.abs(np.diff(isone))
+    # Runs start and end where absdiff is 1.
+    ranges = np.where(absdiff == 1)[0].reshape(-1, 2)
+    A = pd.DataFrame(ranges)
+    A['2'] = A.iloc[:, 1] - A.iloc[:, 0]
+    if isinstance(arr, pd.DataFrame):
+        if isinstance(num, bool):
+            notnum = not num
+        elif num == 1:
+            notnum = 0
+        elif num == 0:
+            notnum = 1
+        A.columns = [
+            '{}_{}_start'.format(
+                name, notnum), '{}_{}_end'.format(
+                name, notnum), 'total_{}'.format(notnum)]
+    return A
+
+
+def gantt_chart(ds, title='RINEX files availability for the Israeli GNSS stations'):
+    import pandas as pd
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import seaborn as sns
+    import matplotlib.dates as mdates
+    sns.set_palette(sns.color_palette("tab10", len(ds)))
+    fig, ax = plt.subplots(figsize=(20, 6))
+    names = [x for x in ds]
+    vals = range(1, len(ds) + 1)
+    xmin = pd.to_datetime(ds.time.min().values) - pd.Timedelta(1, unit='W')
+    xmax = pd.to_datetime(ds.time.max().values) + pd.Timedelta(1, unit='W')
+    colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+#    dt_min_list = []
+#    dt_max_list = []
+    for i, da in enumerate(ds):
+        print(da)
+        df = ds[da].notnull().to_dataframe()
+        A = consecutive_runs(df, num=False)
+        dt_min = df.iloc[A['{}_True_start'.format(da)]].index
+        try:
+            dt_max = df.iloc[A['{}_True_end'.format(da)]].index
+        except IndexError:
+            dt_max = df.iloc[A['{}_True_end'.format(da)][:-1]]
+            end = pd.DataFrame(index=[df.index[-1]], data=[False],columns=[da])
+            dt_max = dt_max.append(end)
+            dt_max = dt_max.index
+        y = len(ds) + 1 - np.ones(dt_min.shape) * (i + 1)
+#        y_list.append(y)
+#        dt_min_list.append(dt_min)
+#        dt_max_list.append(dt_max)
+        # v = int(calc(i, max = len(ds)))
+        plt.hlines(y, dt_min, dt_max, linewidth=10, color=colors[i])
+        #plt.show()
+        # ds[da][~ds[da].isnull()] = i + 1
+        # ds[da] = ds[da].fillna(0)
+    # yticks and their labels:
+    ax.set_yticks(vals)
+    ax.set_yticklabels(names[::-1], fontweight='bold', fontsize=12)
+    [ax.get_yticklabels()[i].set_color(colors[::-1][i]) for i in range(len(colors))]
+    ax.set_xlim(xmin, xmax)
+    # handle x-axis (time):
+    plt.minorticks_on()
+    ax.xaxis.set_minor_locator(mdates.YearLocator())
+    ax.xaxis.set_minor_formatter(mdates.DateFormatter("\n%Y"))
+    plt.setp(ax.xaxis.get_majorticklabels(), rotation=30, ha='center', fontweight='bold')
+    plt.setp(ax.xaxis.get_minorticklabels(), rotation=30, ha='center', fontweight='bold')
+    # grid lines:
+#    ax.grid(which='major', axis='x', linestyle='-', color='k')
+#    ax.grid(which='minor', axis='x', linestyle='-', color='k')
+    if title is not None:
+        plt.title(title, fontsize=14, fontweight='bold')
+    plt.tight_layout()
+    return
+
+
 def time_series_stack_with_window(ts_da, time_dim='time',
                                   window='1D'):
     """make it faster, much faster using isel and then cocant to dataset
     save also the datetimes"""
     import pandas as pd
     import xarray as xr
+    
     window_dt = pd.Timedelta(window)
     freq = pd.infer_freq(ts_da[time_dim].values)
     if not any(i.isdigit() for i in freq):
