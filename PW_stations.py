@@ -832,16 +832,34 @@ def fix_T_height(path, geo_df, lapse_rate=6.5):
     return ds
 
 
-def produce_geo_df(gis_path=gis_path):
+def produce_geo_df(gis_path=gis_path, plot=True):
+    import geopandas as gpd
+    import matplotlib.pyplot as plt
+    from ims_procedures import read_ims_metadata_from_files
     print('getting IMS temperature stations metadata...')
-    ims = produce_geo_ims(gis_path, filename='IMS_10mins_meta_data.xlsx',
-                          closed_stations=False, plot=False)
+    ims = read_ims_metadata_from_files(path=gis_path, freq='10mins')
+    isr_with_yosh = gpd.read_file(gis_path / 'Israel_demog_yosh.shp')
+    isr_with_yosh.crs = {'init': 'epsg:4326'}
+    geo_ims = gpd.GeoDataFrame(ims, geometry=gpd.points_from_xy(ims.lon,
+                                                                ims.lat),
+                               crs=isr_with_yosh.crs)
     print('getting GPS stations ZWD from garner...')
-    gps = produce_geo_gps_stations(gis_path, file='stations.txt', plot=False)
-    print('combining temperature and GPS stations into one dataframe...')
-    geo_df = get_minimum_distance(ims, gps, gis_path, plot=False)
+    gps = produce_geo_gps_stations(gis_path, plot=False)
+#    print('combining temperature and GPS stations into one dataframe...')
+#    geo_df = get_minimum_distance(ims, gps, gis_path, plot=False)
     print('Done!')
-    return geo_df
+    if plot:
+
+        ax = isr_with_yosh.plot(figsize=(10, 8))
+        geo_ims.plot(ax=ax, color='red', edgecolor='black', legend=True)
+        gps.plot(ax=ax, color='green', edgecolor='black', legend=True)
+        plt.legend(['IMS_stations', 'GNSS stations'])
+#        for x, y, label in zip(gps.lon, gps.lat,
+#                               gps.index):
+#            ax.annotate(label, xy=(x, y), xytext=(3, 3),
+#                        textcoords="offset points")
+        plt.tight_layout()
+    return ims, gps
 
 
 def save_GNSS_PW_israeli_stations(savepath=work_yuval, phys=phys_soundings):
