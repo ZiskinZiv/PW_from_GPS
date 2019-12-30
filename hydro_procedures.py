@@ -253,11 +253,12 @@ def get_n_days_pw_hydro_all(pw_da, hs_id, max_flow_thresh=None,
         return da
 
 
-def get_hydro_near_GNSS(radius=5.0, n=5, hydro_path=hydro_path,
+def get_hydro_near_GNSS(radius=5, n=5, hydro_path=hydro_path,
                         gis_path=gis_path, plot=True):
     import pandas as pd
     import geopandas as gpd
     from pathlib import Path
+    import matplotlib.pyplot as plt
     df = pd.read_csv(Path().cwd() / 'israeli_gnss_coords.txt',
                      delim_whitespace=True)
     df = df[['lon', 'lat']]
@@ -280,16 +281,20 @@ def get_hydro_near_GNSS(radius=5.0, n=5, hydro_path=hydro_path,
         isr.crs = {'init': 'epsg:4326'}
         gnss = gnss.to_crs({'init': 'epsg:4326'})
         sel_hydro = sel_hydro.to_crs({'init': 'epsg:4326'})
-        ax = isr.plot()
-        gnss.plot(ax=ax, color='green', edgecolor='black')
+        ax = isr.plot(figsize=(10, 16))
+        sel_hydro.plot(ax=ax, color='yellow', edgecolor='black')
+        gnss.plot(ax=ax, color='green', edgecolor='black', alpha=0.7)
         for x, y, label in zip(gnss.lon, gnss.lat, gnss.index):
             ax.annotate(label, xy=(x, y), xytext=(3, 3),
                         textcoords="offset points")
-        sel_hydro.plot(ax=ax, color='red', edgecolor='black')
-        for x, y, label in zip(sel_hydro.lon, sel_hydro.lat,
-                               sel_hydro.id):
-            ax.annotate(label, xy=(x, y), xytext=(3, 3),
-                        textcoords="offset points")
+        plt.legend(['hydro-tide stations', 'GNSS stations'], loc='upper left')
+        plt.suptitle('hydro-tide stations within {} km of a GNSS station'.format(radius), fontsize=14)
+        plt.tight_layout()
+        plt.subplots_adjust(top=0.95)
+#        for x, y, label in zip(sel_hydro.lon, sel_hydro.lat,
+#                               sel_hydro.id):
+#            ax.annotate(label, xy=(x, y), xytext=(3, 3),
+#                        textcoords="offset points")
     return sel_hydro
 
 
