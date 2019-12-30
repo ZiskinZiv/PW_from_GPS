@@ -733,10 +733,15 @@ def plot_stacked_time_series(stacked_da):
     plt.rc('ytick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
     plt.rc('legend', fontsize=SMALL_SIZE)    # legend fontsize
     plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
+    # plt.rc('font',**{'family':'sans-serif','sans-serif':['Helvetica']})
+    # plt.rc('text', usetex=True)
     grp1_mean = stacked_da.mean(stacked_da.dims[0])
     grp2_mean = stacked_da.mean(stacked_da.dims[1])
     fig = plt.figure(figsize=(16, 10), dpi=80)
-    grid = plt.GridSpec(2, 2, width_ratios=[1, 4], height_ratios=[5, 1], wspace=0, hspace=0)
+    grid = plt.GridSpec(
+        2, 2, width_ratios=[
+            1, 4], height_ratios=[
+            5, 1], wspace=0, hspace=0)
     # grid = plt.GridSpec(2, 2, hspace=0.5, wspace=0.2)
 #        ax_main = fig.add_subplot(grid[:-1, :-1])
 #        ax_left = fig.add_subplot(grid[:-1, 0], xticklabels=[], yticklabels=[])
@@ -746,29 +751,74 @@ def plot_stacked_time_series(stacked_da):
     ax_left.grid()
     ax_bottom = fig.add_subplot(grid[1, 1])
     ax_bottom.grid()
-    pcl = stacked_da.T.plot.pcolormesh(ax = ax_main, add_colorbar=False, cmap=plt.cm.get_cmap('viridis', 19), snap=True)
+    pcl = stacked_da.T.plot.pcolormesh(
+        ax=ax_main, add_colorbar=False, cmap=plt.cm.get_cmap(
+            'viridis', 19), snap=True)
     ax_main.xaxis.set_minor_locator(tck.AutoMinorLocator())
-    ax_main.tick_params(direction='out', top='on', bottom='off', left='off', right='on', labelleft='off', labelbottom='off', labeltop='on', labelright='on', which='major')
-    ax_main.tick_params(direction='out', top='on', bottom='off', left='off', right='on', which='minor')
-    ax_main.grid(True, which='major', axis='both', linestyle='-', color='k', alpha=0.2)
-    ax_main.grid(True, which='minor', axis='both', linestyle='--', color='k', alpha=0.2)
-    ax_main.tick_params(top='on', bottom='off', left='off', right='on', labelleft='off', labelbottom='off', labeltop='on', labelright='on')
+    ax_main.tick_params(
+        direction='out',
+        top='on',
+        bottom='off',
+        left='off',
+        right='on',
+        labelleft='off',
+        labelbottom='off',
+        labeltop='on',
+        labelright='on',
+        which='major')
+    ax_main.tick_params(
+        direction='out',
+        top='on',
+        bottom='off',
+        left='off',
+        right='on',
+        which='minor')
+    ax_main.grid(
+        True,
+        which='major',
+        axis='both',
+        linestyle='-',
+        color='k',
+        alpha=0.2)
+    ax_main.grid(
+        True,
+        which='minor',
+        axis='both',
+        linestyle='--',
+        color='k',
+        alpha=0.2)
+    ax_main.tick_params(
+        top='on',
+        bottom='off',
+        left='off',
+        right='on',
+        labelleft='off',
+        labelbottom='off',
+        labeltop='on',
+        labelright='on')
     bottom_limit = ax_main.get_xlim()
     left_limit = ax_main.get_ylim()
     grp1_mean.plot(ax=ax_left)
     grp2_mean.plot(ax=ax_bottom)
     ax_bottom.set_xlim(bottom_limit)
     ax_left = flip_xy_axes(ax_left, left_limit)
-    ax_bottom.set_ylabel(units)
-    ax_left.set_xlabel(units)
+    ax_bottom.set_ylabel(r'${}$'.format(units), fontsize=12)
+    ax_left.set_xlabel(r'${}$'.format(units), fontsize=12)
     fig.subplots_adjust(right=0.8)
     # divider = make_axes_locatable(ax_main)
     # cax1 = divider.append_axes("right", size="5%", pad=0.2)
     # [left, bottom, width, height] of figure:
     cbar_ax = fig.add_axes([0.85, 0.15, 0.02, 0.75])
     # fig.colorbar(pcl, orientation="vertical", pad=0.2, label=units)
-    pcl_ticks = np.linspace(stacked_da.min().item(), stacked_da.max().item(), 11)
-    cbar = fig.colorbar(pcl, cax=cbar_ax, label=units, ticks=pcl_ticks)
+    pcl_ticks = np.linspace(
+        stacked_da.min().item(),
+        stacked_da.max().item(),
+        11)
+    cbar = fig.colorbar(
+        pcl,
+        cax=cbar_ax,
+        label=r'${}$'.format(units),
+        ticks=pcl_ticks)
     cbar.set_ticklabels(['{:.1f}'.format(x) for x in pcl_ticks])
     title = ' '.join([name, station])
     fig.suptitle(title, fontweight='bold', fontsize=15)
