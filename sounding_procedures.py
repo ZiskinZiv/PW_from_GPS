@@ -8,6 +8,63 @@ Created on Thu May 16 14:24:40 2019
 # from pathlib import Path
 from PW_paths import work_yuval
 sound_path = work_yuval / 'sounding'
+era5_path = work_yuval / 'ERA5'
+
+
+def merge_concat_era5_field(path=era5_path, field='Q', savepath=None):
+    import xarray as xr
+    from aux_gps import path_glob
+    strato_files = path_glob(path, 'era5_{}_*_pl_1_to_150.nc'.format(field))
+    strato_list = [xr.open_dataset(x) for x in strato_files]
+    strato = xr.concat(strato_list, 'time')
+    tropo_files = path_glob(path, 'era5_{}_*_pl_175_to_1000.nc'.format(field))
+    tropo_list = [xr.open_dataset(x) for x in tropo_files]
+    tropo = xr.concat(tropo_list, 'time')
+    ds = xr.concat([tropo, strato], 'level')
+    ds = ds.sortby('level', ascending=False)
+    ds = ds.sortby('time')
+    ds = ds.rename({'latitude': 'lat', 'longitude': 'lon'})
+    if savepath is not None:
+        yr_min = ds.time.min().dt.year.item()
+        yr_max = ds.time.max().dt.year.item()
+        filename = 'era5_{}_israel_{}-{}.nc'.format(field, yr_min, yr_max)
+        print('saving {} to {}'.format(filename, savepath))
+        comp = dict(zlib=True, complevel=9)  # best compression
+        encoding = {var: comp for var in ds}
+        ds.to_netcdf(savepath / filename, 'w', encoding=encoding)
+    print('Done!')
+    return ds
+
+
+def calculate_PW_from_era5(path=era5_path, glob_str='era5_Q_israel*.nc',
+                           water_density=1000.0, savepath=None):
+    import xarray as xr
+    from aux_gps import path_glob
+    from aux_gps import calculate_g
+    file = path_glob(path, glob_str)
+    Q = xr.open_dataset(path / file)['q']
+    g = calculate_g(Q.lat)
+    g.name = 'g'
+    g = g.mean('lat')
+    plevel_in_pa = Q.level * 100.0
+    # P_{i+1} - P_i:
+    plevel_diff = plevel_in_pa.diff('level')
+    # Q_i + Q_{i+1}:
+    Q_sum = Q.shift(level=-1) + Q
+    pw_in_mm = ((Q_sum * plevel_diff) /
+                (2.0 * water_density * g)).sum('level') * 1000.0
+    pw_in_mm.name = 'PW'
+    pw_in_mm.attrs['units'] = 'mm'
+    if savepath is not None:
+        yr_min = pw_in_mm.time.min().dt.year.item()
+        yr_max = pw_in_mm.time.max().dt.year.item()
+        filename = 'era5_PW_israel_{}-{}.nc'.format(yr_min, yr_max)
+        print('saving {} to {}'.format(filename, savepath))
+        comp = dict(zlib=True, complevel=9)  # best compression
+        encoding = {var: comp for var in pw_in_mm.to_dataset(name='pw')}
+        pw_in_mm.to_netcdf(savepath / filename, 'w', encoding=encoding)
+    print('Done!')
+    return pw_in_mm
 
 
 def evaluate_sin_to_tmsearies(
@@ -276,7 +333,7 @@ def read_one_physical_radiosonde_report(path_file, lower_cutoff=None,
         ds['sound_time'] = sound_time
         return ds
 
-    def calculate_tpw(df, upper=None, lower=None):
+    def calculate_tpw(df, upper=None, lower=None, method='trapz'):
         if upper is not None:
             df = df[df['H-Msl'] <= upper]
         if lower is not None:
@@ -284,8 +341,14 @@ def read_one_physical_radiosonde_report(path_file, lower_cutoff=None,
         specific_humidity = (df['Mixratio'] / 1000.0) / \
             (1 + 0.001 * df['Mixratio'] / 1000.0)
         try:
-            tpw = np.trapz(specific_humidity * df['Rho'].values,
-                           df['H-Msl'])
+            if method == 'trapz':
+                tpw = np.trapz(specific_humidity * df['Rho'].values,
+                               df['H-Msl'])
+            elif method == 'sum':
+                rho = df['Rho_wv']
+                rho_sum = (rho.shift(-1) + rho).dropna()
+                h = np.abs(df['H-Msl'].diff(-1))
+                tpw = 0.5 * np.sum(rho_sum * h)
         except ValueError:
             return np.nan
         return tpw
@@ -358,19 +421,21 @@ def read_one_physical_radiosonde_report(path_file, lower_cutoff=None,
     df['WVpress'] = VaporPressure(df['Dewpt'], units='hPa', method='Buck')
     df['Mixratio'] = MixRatio(df['WVpress'], df['Press'])  # both in hPa
     # Calculate density of air (accounting for moisture)
-    df['Rho'] = DensHumid(df['Temp'], df['Press'], df['WVpress'])
+    df['Rho'] = DensHumid(df['Temp'], df['Press'], df['WVpress'], out='both')
+    df['Rho_wv'] = DensHumid(df['Temp'], df['Press'], df['WVpress'], out='wv_density')
     # print('rho: {}, mix: {}, h: {}'.format(rho.shape,mixrkg.shape, hghtm.shape))
     # Trapezoidal rule to approximate TPW (units kg/m^2==mm)
-    tpw = calculate_tpw(df, lower=lower_cutoff, upper=upper_cutoff)
+    tpw = calculate_tpw(df, lower=lower_cutoff, upper=upper_cutoff, method='trapz')
+    tpw1 = calculate_tpw(df, lower=lower_cutoff, upper=upper_cutoff, method='sum')
     # calculate the mean atmospheric temperature and get surface temp in K:
     tm = calculate_tm(df, lower=lower_cutoff, upper=upper_cutoff)
     ts = df['Temp'][0] + 273.15
-    units.update(Dewpt='deg_C', WVpress='hPa', Mixratio='gr/kg', Rho='kg/m^3')
-    extra = np.array([ts, tm, tpw, cloud_code, sonde_type]).reshape(1, -1)
-    df_extra = pd.DataFrame(data=extra, columns=['Ts', 'Tm', 'Tpw', 'Cloud_code', 'Sonde_type'])
-    for col in ['Ts', 'Tm', 'Tpw']:
+    units.update(Dewpt='deg_C', WVpress='hPa', Mixratio='gr/kg', Rho='kg/m^3', Rho_wv='kg/m^3')
+    extra = np.array([ts, tm, tpw, tpw1, cloud_code, sonde_type]).reshape(1, -1)
+    df_extra = pd.DataFrame(data=extra, columns=['Ts', 'Tm', 'Tpw', 'Tpw1', 'Cloud_code', 'Sonde_type'])
+    for col in ['Ts', 'Tm', 'Tpw', 'Tpw1']:
         df_extra[col] = pd.to_numeric(df_extra[col])
-    units_extra = {'Ts': 'K', 'Tm': 'K', 'Tpw': 'kg/m^2', 'Cloud_code': '', 'Sonde_type': ''}
+    units_extra = {'Ts': 'K', 'Tm': 'K', 'Tpw': 'kg/m^2', 'Cloud_code': '', 'Sonde_type': '', 'Tpw1': 'kg/m^2'}
     meta = {'units': units, 'units_extra': units_extra, 'station': station_num}
     if verbose:
         print('datetime: {}, TPW: {:.2f} '.format(df.index[0], tpw))
@@ -591,7 +656,7 @@ def precipitable_water(da):
     # mixrkg = MixRatio(vprespa, prespa)
 
     # Calculate density of air (accounting for moisture)
-    rho = DensHumid(tempk, prespa, vprespa)
+    rho = DensHumid(tempk, prespa, vprespa, out='both')
     # print('rho: {}, mix: {}, h: {}'.format(rho.shape,mixrkg.shape, hghtm.shape))
     # Trapezoidal rule to approximate TPW (units kg/m^2==mm)
     try:
@@ -616,7 +681,7 @@ def MixRatio(e, p):
     return 1000 * Epsilon * e / (p - e)
 
 
-def DensHumid(tempc, pres, e):
+def DensHumid(tempc, pres, e, out='dry_air'):
     """Density of moist air.
     This is a bit more explicit and less confusing than the method below.
     INPUTS:
@@ -635,7 +700,12 @@ def DensHumid(tempc, pres, e):
     pres_da = prespa - epa
     rho_da = pres_da / (Rs_da * tempk)
     rho_wv = epa/(Rs_v * tempk)
-    return rho_da + rho_wv
+    if out == 'dry_air':
+        return rho_da
+    elif out == 'wv_density':
+        return rho_wv
+    elif out == 'both':
+        return rho_da + rho_wv
 
 
 def VaporPressure(tempc, phase="liquid", units='hPa', method=None):
