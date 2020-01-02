@@ -535,6 +535,15 @@ def analyse_results_ds_one_station(dss, field='WetZ', verbose=None,
         da.plot.line(marker='.', linewidth=0., ax=ax, color='k')
         for i, ppp in enumerate(ds):
             ds['{}-{}'.format(field, i)].plot(ax=ax)
+        units = dss.attrs['{}>units'.format(field)]
+        sta = da.attrs['station']
+        desc = da.attrs['{}>desc'.format(field)]
+        ax.set_ylabel('{} [{}]'.format(field, units))
+        ax.set_xlabel('')
+        fig.suptitle('30 hours stitched {} for GNSS station {}'.format(desc, sta), fontweight='bold')
+        fig.tight_layout()
+        fig.subplots_adjust(top=0.95)
+        ax.grid()
 #    dfs = []
 #    for df in df_list:
 #        # check if there is an offset:
