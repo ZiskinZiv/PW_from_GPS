@@ -12,6 +12,15 @@ from PW_paths import work_yuval
 # TODO: if not, build func to replace datetimeindex to numbers and vise versa
 
 
+def calculate_g(lat):
+    """calculate the gravitational acceleration with lat in degrees"""
+    import numpy as np
+    g0 = 9.780325
+    nom = 1.0 + 0.00193185 * np.sin(np.deg2rad(lat)) ** 2.0
+    denom = 1.0 - 0.00669435 * np.sin(np.deg2rad(lat)) ** 2.0
+    g = g0 * (nom / denom)**0.5
+    return g
+
 def consecutive_runs(arr, num=False):
     import numpy as np
     import pandas as pd
