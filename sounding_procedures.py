@@ -67,6 +67,35 @@ def calculate_PW_from_era5(path=era5_path, glob_str='era5_Q_israel*.nc',
     return pw_in_mm
 
 
+def calculate_Tm_from_era5(path=era5_path, Tfile='era5_T_israel*.nc',
+                           RHfile='era5_RH_israel*.nc', savepath=None):
+    import xarray as xr
+    from aux_gps import path_glob
+    tfile = path_glob(path, Tfile)
+    rhfile = path_glob(path, RHfile)
+    T = xr.open_dataarray(tfile)
+    RH = xr.open_dataarray(rhfile)
+    Dewpt = dewpoint_rh(T, RH)
+    WVpress = VaporPressure(Dewpt, units='hPa', method='Buck')
+    nom = WVpress / T
+    nom = nom.integrate('level')
+    denom = WVpress / T ** 2.0
+    denom = denom.integrate('level')
+    Tm = nom / denom
+    Tm.name = 'Tm'
+    Tm.attrs['units'] = 'K'
+    if savepath is not None:
+        yr_min = Tm.time.min().dt.year.item()
+        yr_max = Tm.time.max().dt.year.item()
+        filename = 'era5_Tm_israel_{}-{}.nc'.format(yr_min, yr_max)
+        print('saving {} to {}'.format(filename, savepath))
+        comp = dict(zlib=True, complevel=9)  # best compression
+        encoding = {var: comp for var in Tm.to_dataset(name='Tm')}
+        Tm.to_netcdf(savepath / filename, 'w', encoding=encoding)
+    print('Done!')
+    return Tm
+
+
 def evaluate_sin_to_tmsearies(
         da,
         time_dim='time',
@@ -360,12 +389,12 @@ def read_one_physical_radiosonde_report(path_file, lower_cutoff=None,
             df = df[df['H-Msl'] >= lower]
         try:
             numerator = np.trapz(
-                df['Press'] /
+                df['WVpress'] /
                 (df['Temp'] +
                  273.15),
                 df['H-Msl'])
             denominator = np.trapz(
-                df['Press'] / (df['Temp'] + 273.15)**2.0, df['H-Msl'])
+                df['WVpress'] / (df['Temp'] + 273.15)**2.0, df['H-Msl'])
             tm = numerator / denominator
         except ValueError:
             return np.nan
