@@ -281,15 +281,17 @@ def fit_ts_tm_produce_ipw_and_compare_TELA(phys_sound_file=phys_soundings,
     models can be 'LR' or 'TSEN'. compare_kwargs is for
     compare_to_sounding2 i.e., times, season, hour, title"""
     import xarray as xr
+    print(compare_kwargs)
     if categories == 'bevis':
         results = None
+        compare_kwargs.update({'title': None})
     else:
         results = ml_models_T_from_sounding(sound_path, categories, model,
                                             physical_file=phys_sound_file,
                                             times=times)
     if categories is None:
         compare_kwargs.update({'title': 'whole'})
-    else:
+    elif categories is not None and categories != 'bevis':
         if isinstance(categories, str):
             compare_kwargs.update({'title': [categories][0]})
         elif isinstance(categories, list):
@@ -298,15 +300,17 @@ def fit_ts_tm_produce_ipw_and_compare_TELA(phys_sound_file=phys_soundings,
     if times is not None:
         zwd_and_tpw = zwd_and_tpw.sel(time=slice(*times))
     station = zwd_file.as_posix().split('/')[-1].split('_')[0]
-    wetz = zwd_and_tpw['{}_WetZ'.format(station)]
     tpw = zwd_and_tpw['Tpw']
-    wetz_error = zwd_and_tpw['{}_WetZ_error'.format(station)]
     # load the 10 mins temperature data from IMS:
     T = xr.open_dataset(IMS_file)
     T = T.to_array(name='t').squeeze(drop=True)
-    pw_gps = produce_single_station_IPW(wetz, T, mda=results, model_name=model)
-    compare_to_sounding2(pw_gps, tpw, station=station, **compare_kwargs)
-    return pw_gps
+    zwd_and_tpw = zwd_and_tpw.rename({'{}_WetZ'.format(
+            station): 'WetZ', '{}_WetZ_error'.format(station): 'WetZ_error'})
+    zwd = zwd_and_tpw[['WetZ', 'WetZ_error']]
+    zwd.attrs['station'] = station
+    pw_gps = produce_single_station_IPW(zwd, T, mda=results, model_name=model)
+    compare_to_sounding2(pw_gps['PW'], tpw, station=station, **compare_kwargs)
+    return pw_gps, tpw
 
 
 def get_ts_tm_from_physical(phys=phys_soundings, plot=True):
@@ -433,7 +437,7 @@ def read_log_files(path, savepath=None, fltr='updated_by_shlomi',
         if fltr not in filename:
             continue
         station = filename.split('_')[0]
-        print('reading station {} log file'.format(station))
+        print('reading station {} lLRog file'.format(station))
         with open(file) as f:
             content = f.readlines()
         content = [x.strip() for x in content]
@@ -610,7 +614,7 @@ def parameter_study_ts_tm_TELA_bet_dagan(tel_aviv_IMS_file, path=work_yuval,
 #    response = requests.get(url, auth=auth_values)
 #    soup = bs(response.text, "lxml")
 #    allLines = soup.text.split('\n')
-#    X = [x for x in allLines if 'X coordinate' in x][0].split()[-1]
+#    X = [x for x in allLines if 'XLR coordinate' in x][0].split()[-1]
 #    Y = [x for x in allLines if 'Y coordinate' in x][0].split()[-1]
 #    Z = [x for x in allLines if 'Z coordinate' in x][0].split()[-1]
 # 
@@ -989,6 +993,7 @@ def produce_single_station_IPW(zwd, Tds, mda=None, model_name='LR'):
     elif len(mda.dims) == 2 and hours is not None:
         print('Found hourly Ts-Tm relationship slice.')
         kappa_list = []
+        kappa_err_list = []
         h_key = [x for x in hours.keys()][0]
         for hr_num in [x for x in hours.values()][0]:
             print('working on hour {}'.format(hr_num))
@@ -996,11 +1001,13 @@ def produce_single_station_IPW(zwd, Tds, mda=None, model_name='LR'):
             m = mda.sel({'name': model_name, h_key: hr_num}).values.item()
             kappa_part, kappa_err = kappa_ml(sliced, model=m)
             kappa_list.append(kappa_part)
+            kappa_err_list.append(kappa_err)
         des_attrs = 'hourly data Tm formulation using {} model'.format(
             model_name)
     elif len(mda.dims) == 2 and seasons is not None:
         print('Found season Ts-Tm relationship slice.')
         kappa_list = []
+        kappa_err_list = []
         s_key = [x for x in seasons.keys()][0]
         for season in [x for x in seasons.values()][0]:
             print('working on season {}'.format(season))
@@ -1008,6 +1015,7 @@ def produce_single_station_IPW(zwd, Tds, mda=None, model_name='LR'):
             m = mda.sel({'name': model_name, s_key: season}).values.item()
             kappa_part, kappa_err = kappa_ml(sliced, model=m)
             kappa_list.append(kappa_part)
+            kappa_err_list.append(kappa_err)
         des_attrs = 'seasonly data Tm formulation using {} model'.format(
             model_name)
     elif len(mda.dims) == 2 and set(mda.dims) == set(['any_cld', 'name']):
@@ -1045,6 +1053,7 @@ def produce_single_station_IPW(zwd, Tds, mda=None, model_name='LR'):
     elif (len(mda.dims) == 3 and seasons is not None and hours is not None):
         print('Found hourly and seasonly Ts-Tm relationship slice.')
         kappa_list = []
+        kappa_err_list = []
         h_key = [x for x in hours.keys()][0]
         s_key = [x for x in seasons.keys()][0]
         for hr_num in [x for x in hours.values()][0]:
@@ -1055,12 +1064,14 @@ def produce_single_station_IPW(zwd, Tds, mda=None, model_name='LR'):
                     time_dim).where(Tds[h_key] == hr_num).dropna(time_dim)
                 m = mda.sel({'name': model_name, s_key: season,
                              h_key: hr_num}).values.item()
-                kappa_part, kappe_err = kappa_ml(sliced, model=m)
+                kappa_part, kappa_err = kappa_ml(sliced, model=m)
                 kappa_list.append(kappa_part)
+                kappa_err_list.append(kappa_err)
         des_attrs = 'hourly and seasonly data Tm formulation using {} model'.format(model_name)
     kappa_ds = xr.concat(kappa_list, time_dim)
+    kappa_err_ds = xr.concat(kappa_err_list, time_dim)
     ipw = kappa_ds * zwd
-    ipw_error = kappa_ds * zwd_error + zwd * kappa_err
+    ipw_error = kappa_ds * zwd_error + zwd * kappa_err_ds
     ipw_error.name = 'PW_error'
     ipw_error.attrs['long_name'] = 'Precipitable Water standard error'
     ipw_error.attrs['units'] = 'kg / m^2'
@@ -1069,7 +1080,7 @@ def produce_single_station_IPW(zwd, Tds, mda=None, model_name='LR'):
     ipw.attrs['units'] = 'kg / m^2'
     ipw = ipw.to_dataset(name='PW')
     ipw['PW_error'] = ipw_error
-    ipw.attrs['description'] = 'whole data Tm formulation using Bevis etal. 1992'
+    ipw.attrs['description'] = des_attrs
     print('Done!')
     ipw = ipw.reset_coords(drop=True)
     return ipw
@@ -1512,7 +1523,7 @@ def compare_to_sounding2(pw_from_gps, pw_from_sounding, station='TELA',
         g = sns.lmplot(
             data=df,
             x='sound',
-            y='TELA',
+            y=station,
             col='season',
             hue='season',
             row='hour',
@@ -1849,7 +1860,7 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
         bevis_tm = ds.ts.values * 0.72 + 70.0
         if plot:
             # plot bevis:
-            # axes[0].plot(ds.ts.values, bevis_tm, c='purple')
+            axes[0].plot(ds.ts.values, bevis_tm, c='purple')
             min_, max_ = axes[0].get_ylim()
             [axes[0].plot(X, newy, c=colors[i]) for i, newy in enumerate(predict)]
             [axes[0].text(0.01, pos[i],
@@ -1857,10 +1868,10 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
                                                            coefs[i], inters[i]),
                           transform=axes[0].transAxes, color=colors[i],
                           fontsize=12) for i in range(len(coefs))]
-            # axes[0].text(0.01, 0.8,
-            #              'Bevis 1992 et al. a: 0.72, b: 70.0',
-            #              transform=axes[0].transAxes, color='purple',
-            #              fontsize=12)
+            axes[0].text(0.01, 0.8,
+                         'Bevis 1992 et al. a: 0.72, b: 70.0',
+                         transform=axes[0].transAxes, color='purple',
+                         fontsize=12)
     #        axes[0].text(0.01, 0.9, 'a: {:.2f}, b: {:.2f}'.format(a, b),
     #                     transform=axes[0].transAxes, color='black', fontsize=12)
             axes[0].text(0.1, 0.85, 'n={}'.format(ds.ts.size),
