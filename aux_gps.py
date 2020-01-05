@@ -21,6 +21,7 @@ def calculate_g(lat):
     g = g0 * (nom / denom)**0.5
     return g
 
+
 def consecutive_runs(arr, num=False):
     import numpy as np
     import pandas as pd
@@ -108,7 +109,7 @@ def gantt_chart(ds, title='RINEX files availability for the Israeli GNSS station
     if title is not None:
         plt.title(title, fontsize=14, fontweight='bold')
     plt.tight_layout()
-    return
+    return ax
 
 
 def time_series_stack_with_window(ts_da, time_dim='time',
