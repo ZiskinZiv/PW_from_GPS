@@ -271,7 +271,7 @@ def produce_zwd_from_sounding_and_compare_to_gps(phys_sound_file=phys_soundings,
 
 def fit_ts_tm_produce_ipw_and_compare_TELA(phys_sound_file=phys_soundings,
                                            zwd_file=tela_zwd_aligned,
-                                           IMS_file=tela_ims,
+                                           IMS_file=None,
                                            sound_path=sound_path,
                                            categories=None, model='LR',
                                            times=['2005', '2019'],
@@ -301,9 +301,13 @@ def fit_ts_tm_produce_ipw_and_compare_TELA(phys_sound_file=phys_soundings,
         zwd_and_tpw = zwd_and_tpw.sel(time=slice(*times))
     station = zwd_file.as_posix().split('/')[-1].split('_')[0]
     tpw = zwd_and_tpw['Tpw']
-    # load the 10 mins temperature data from IMS:
-    T = xr.open_dataset(IMS_file)
-    T = T.to_array(name='t').squeeze(drop=True)
+    if IMS_file is None:
+        T = xr.open_dataset(ims_path / 'GNSS_5mins_TD_ALL_1996_2019.nc')
+        T = T['tela']
+    else:
+        # load the 10 mins temperature data from IMS:
+        T = xr.open_dataset(IMS_file)
+        T = T.to_array(name='t').squeeze(drop=True)
     zwd_and_tpw = zwd_and_tpw.rename({'{}_WetZ'.format(
             station): 'WetZ', '{}_WetZ_error'.format(station): 'WetZ_error'})
     zwd = zwd_and_tpw[['WetZ', 'WetZ_error']]
@@ -330,88 +334,158 @@ def get_ts_tm_from_physical(phys=phys_soundings, plot=True):
     return pds
 
 
-def align_physical_bet_dagan_soundings_pw_to_gps_station_zwd(
-        phys_sound_file, ims_path=ims_path, gps_station='tela',
-        savepath=work_yuval, model=None, plot=True):
-    """compare the IPW of the physical soundings of bet dagan station to
-    the any gps station - using IMS temperature of that gps station"""
+def mean_zwd_over_sound_time(
+        phys_sound_file=phys_soundings,
+        ims_path=ims_path,
+        gps_station='tela',
+        times=['2007', '2019']):
+    import xarray as xr
     from aux_gps import get_unique_index
     from aux_gps import keep_iqr
-    from aux_gps import dim_intersection
-    import xarray as xr
-    import numpy as np
-    filename = '{}_zwd_aligned_with_physical_bet_dagan.nc'.format(gps_station)
-    if not (savepath / filename).is_file():
-        print('saving {} to {}'.format(filename, savepath))
-        # first load physical bet_dagan Tpw, Ts, Tm and dt_range:
-        phys = xr.open_dataset(phys_sound_file)
-        # clean and merge:
-        p_list = [get_unique_index(phys[x], 'sound_time')
-                  for x in ['Ts', 'Tm', 'Tpw', 'dt_range']]
-        phys_ds = xr.merge(p_list)
-        phys_ds = keep_iqr(phys_ds, 'sound_time', k=2.0)
-        phys_ds = phys_ds.rename({'Ts': 'ts', 'Tm': 'tm'})
-        # load the zenith wet daley for GPS (e.g.,TELA) station:
-        zwd = load_gipsyx_results(station=gps_station, plot_fields=None)
-        # zwd = xr.open_dataset(zwd_file)
-        zwd = zwd[['WetZ', 'WetZ_error']]
-        # loop over dt_range and average the results on PW:
-        wz_list = []
-        wz_std = []
-        wz_error_list = []
-        for i in range(len(phys_ds['dt_range'].sound_time)):
-            min_time = phys_ds['dt_range'].isel(sound_time=i).sel(bnd='Min').values
-            max_time = phys_ds['dt_range'].isel(sound_time=i).sel(bnd='Max').values
-            wetz = zwd['WetZ'].sel(time=slice(min_time, max_time)).mean('time')
-            wetz_std = zwd['WetZ'].sel(time=slice(min_time, max_time)).std('time')
-            wetz_error = zwd['WetZ_error'].sel(time=slice(min_time, max_time)).mean('time')
-            wz_std.append(wetz_std)
-            wz_list.append(wetz)
-            wz_error_list.append(wetz_error)
-        wetz_gps = xr.DataArray(wz_list, dims='sound_time')
-        wetz_gps.name = '{}_WetZ'.format(gps_station)
-        wetz_gps_error = xr.DataArray(wz_error_list, dims='sound_time')
-        wetz_gps_error.name = '{}_WetZ_error'.format(gps_station)
-        wetz_gps_std = xr.DataArray(wz_list, dims='sound_time')
-        wetz_gps_std.name = '{}_WetZ_std'.format(gps_station)
-        wetz_gps['sound_time'] = phys_ds['sound_time']
-        wetz_gps_error['sound_time'] = phys_ds['sound_time']
-        new_time = dim_intersection([wetz_gps, phys_ds['Tpw']], 'sound_time')
-        wetz_gps = wetz_gps.sel(sound_time=new_time)
-        tpw_bet_dagan = phys_ds.Tpw.sel(sound_time=new_time)
-        zwd_and_tpw = xr.merge([wetz_gps, wetz_gps_error, wetz_gps_std,
-                                tpw_bet_dagan])
-        zwd_and_tpw = zwd_and_tpw.rename({'sound_time': 'time'})
-        comp = dict(zlib=True, complevel=9)  # best compression
-        encoding = {var: comp for var in zwd_and_tpw.data_vars}
-        zwd_and_tpw.to_netcdf(savepath / filename, 'w', encoding=encoding)
-        print('Done!')
-        return
-    else:
-        print('found file!')
-        zwd_and_tpw = xr.open_dataset(savepath / filename)
-        wetz = zwd_and_tpw['{}_WetZ'.format(gps_station)]
-        wetz_error = zwd_and_tpw['{}_WetZ_error'.format(gps_station)]
-        # load the 10 mins temperature data from IMS:
-        td = xr.open_dataset(ims_path/'GNSS_5mins_TD_ALL_1996_2019.nc')
-        td = td[gps_station]
-        td.name = 'Ts'
-        # tela_T = tela_T.resample(time='5min').ffill()
-        # compute the kappa function and multiply by ZWD to get PW(+error):
-        k, dk = kappa_ml(td, model=model, verbose=True)
-        kappa = k.to_dataset(name='{}_kappa'.format(gps_station))
-        kappa['{}_kappa_error'.format(gps_station)] = dk
-        PW = (
-            kappa['{}_kappa'.format(gps_station)] *
-            wetz).to_dataset(
-            name='{}_PW'.format(gps_station)).squeeze(
-                drop=True)
-        PW['{}_PW_error'.format(gps_station)] = np.sqrt(
-            wetz_error**2.0 +
-            kappa['{}_kappa_error'.format(gps_station)]**2.0)
-        PW['TPW_bet_dagan'] = zwd_and_tpw['Tpw']
-        PW = PW.dropna('time')
-    return PW
+    from aux_gps import multi_time_coord_slice
+    """mean the WetZ over the gps station soundings datetimes to get a more
+        accurate realistic measurement comparison to soundings"""
+    phys = xr.open_dataset(phys_sound_file)
+    # clean and merge:
+    p_list = [get_unique_index(phys[x], 'sound_time')
+              for x in ['Ts', 'Tm', 'Tpw', 'dt_range']]
+    phys_ds = xr.merge(p_list)
+    phys_ds = keep_iqr(phys_ds, 'sound_time', k=2.0)
+    phys_ds = phys_ds.rename({'Ts': 'ts', 'Tm': 'tm'})
+    # load the zenith wet daley for GPS (e.g.,TELA) station:
+    zwd = load_gipsyx_results(station=gps_station, plot_fields=None)
+    # zwd = xr.open_dataset(zwd_file)
+    zwd = zwd[['WetZ', 'WetZ_error']]
+    min_time = phys_ds['dt_range'].sel(bnd='Min').values
+    max_time = phys_ds['dt_range'].sel(bnd='Max').values
+    min_time = zwd.time.sel(time=min_time, method='nearest').values
+    max_time = zwd.time.sel(time=max_time, method='nearest').values
+    freq = pd.infer_freq(zwd.time.values)
+    da_group = multi_time_coord_slice(min_time, max_time, freq=freq,
+                                      time_dim='time', name='sound_time')
+    zwd[da_group.name] = da_group
+    ds = zwd.WetZ.groupby(zwd[da_group.name]).mean(
+        'time').to_dataset(name='{}_WetZ'.format(gps_station))
+    ds['{}_WetZ_std'.format(gps_station)] = zwd.WetZ.groupby(
+        zwd[da_group.name]).std('time')
+    ds['{}_WetZ_error'.format(gps_station)] = zwd.WetZ_error.groupby(
+        zwd[da_group.name]).mean('time')
+    ds['sound_time'] = phys_ds.sound_time
+    ds['tpw_bet_dagan'] = phys_ds['Tpw']
+    wetz = ds['{}_WetZ'.format(gps_station)]
+    wetz_error = ds['{}_WetZ_error'.format(gps_station)]
+    # do the same for surface temperature:
+    td = xr.open_dataset(ims_path / 'GNSS_5mins_TD_ALL_1996_2019.nc')
+    td = td[gps_station].to_dataset(name='ts')
+    min_time = phys_ds['dt_range'].sel(bnd='Min').values
+    max_time = phys_ds['dt_range'].sel(bnd='Max').values
+    min_time = td.time.sel(time=min_time, method='nearest').values
+    max_time = td.time.sel(time=max_time, method='nearest').values
+    freq = pd.infer_freq(td.time.values)
+    da_group = multi_time_coord_slice(min_time, max_time, freq=freq,
+                                      time_dim='time', name='sound_time')
+    td[da_group.name] = da_group
+    ts_sound = td.ts.groupby(td[da_group.name]).mean('time')
+    ts_sound['sound_time'] = phys_ds.sound_time
+    ds['{}_ts'.format(gps_station)] = ts_sound
+    # select a model:
+    mda = ml_models_T_from_sounding(categories=None, models=['LR'],
+                                    physical_file=phys_sound_file, plot=False,
+                                    times=times)
+    model = mda.sel(name='LR').values.item()
+    # compute the kappa function and multiply by ZWD to get PW(+error):
+    k, dk = kappa_ml(ts_sound, model=model, verbose=True)
+    ds['{}_pw'.format(gps_station)] = k * wetz
+    ds['{}_pw_error'.format(gps_station)] = np.sqrt(
+        wetz_error**2.0 + dk**2.0)
+    # divide by kappa calculated from bet_dagan ts to get bet_dagan zwd:
+    k = kappa(phys_ds['tm'], Tm_input=True)
+    ds['zwd_bet_dagan'] = ds['tpw_bet_dagan'] / k
+    return ds
+
+
+#def align_physical_bet_dagan_soundings_pw_to_gps_station_zwd(
+#        phys_sound_file, ims_path=ims_path, gps_station='tela',
+#        savepath=work_yuval, model=None):
+#    """compare the IPW of the physical soundings of bet dagan station to
+#    the any gps station - using IMS temperature of that gps station"""
+#    from aux_gps import get_unique_index
+#    from aux_gps import keep_iqr
+#    from aux_gps import dim_intersection
+#    import xarray as xr
+#    import numpy as np
+#    filename = '{}_zwd_aligned_with_physical_bet_dagan.nc'.format(gps_station)
+#    if not (savepath / filename).is_file():
+#        print('saving {} to {}'.format(filename, savepath))
+#        # first load physical bet_dagan Tpw, Ts, Tm and dt_range:
+#        phys = xr.open_dataset(phys_sound_file)
+#        # clean and merge:
+#        p_list = [get_unique_index(phys[x], 'sound_time')
+#                  for x in ['Ts', 'Tm', 'Tpw', 'dt_range']]
+#        phys_ds = xr.merge(p_list)
+#        phys_ds = keep_iqr(phys_ds, 'sound_time', k=2.0)
+#        phys_ds = phys_ds.rename({'Ts': 'ts', 'Tm': 'tm'})
+#        # load the zenith wet daley for GPS (e.g.,TELA) station:
+#        zwd = load_gipsyx_results(station=gps_station, plot_fields=None)
+#        # zwd = xr.open_dataset(zwd_file)
+#        zwd = zwd[['WetZ', 'WetZ_error']]
+#        # loop over dt_range and average the results on PW:
+#        wz_list = []
+#        wz_std = []
+#        wz_error_list = []
+#        for i in range(len(phys_ds['dt_range'].sound_time)):
+#            min_time = phys_ds['dt_range'].isel(sound_time=i).sel(bnd='Min').values
+#            max_time = phys_ds['dt_range'].isel(sound_time=i).sel(bnd='Max').values
+#            wetz = zwd['WetZ'].sel(time=slice(min_time, max_time)).mean('time')
+#            wetz_std = zwd['WetZ'].sel(time=slice(min_time, max_time)).std('time')
+#            wetz_error = zwd['WetZ_error'].sel(time=slice(min_time, max_time)).mean('time')
+#            wz_std.append(wetz_std)
+#            wz_list.append(wetz)
+#            wz_error_list.append(wetz_error)
+#        wetz_gps = xr.DataArray(wz_list, dims='sound_time')
+#        wetz_gps.name = '{}_WetZ'.format(gps_station)
+#        wetz_gps_error = xr.DataArray(wz_error_list, dims='sound_time')
+#        wetz_gps_error.name = '{}_WetZ_error'.format(gps_station)
+#        wetz_gps_std = xr.DataArray(wz_list, dims='sound_time')
+#        wetz_gps_std.name = '{}_WetZ_std'.format(gps_station)
+#        wetz_gps['sound_time'] = phys_ds['sound_time']
+#        wetz_gps_error['sound_time'] = phys_ds['sound_time']
+#        new_time = dim_intersection([wetz_gps, phys_ds['Tpw']], 'sound_time')
+#        wetz_gps = wetz_gps.sel(sound_time=new_time)
+#        tpw_bet_dagan = phys_ds.Tpw.sel(sound_time=new_time)
+#        zwd_and_tpw = xr.merge([wetz_gps, wetz_gps_error, wetz_gps_std,
+#                                tpw_bet_dagan])
+#        zwd_and_tpw = zwd_and_tpw.rename({'sound_time': 'time'})
+#        comp = dict(zlib=True, complevel=9)  # best compression
+#        encoding = {var: comp for var in zwd_and_tpw.data_vars}
+#        zwd_and_tpw.to_netcdf(savepath / filename, 'w', encoding=encoding)
+#        print('Done!')
+#        return
+#    else:
+#        print('found file!')
+#        zwd_and_tpw = xr.open_dataset(savepath / filename)
+#        wetz = zwd_and_tpw['{}_WetZ'.format(gps_station)]
+#        wetz_error = zwd_and_tpw['{}_WetZ_error'.format(gps_station)]
+#        # load the 10 mins temperature data from IMS:
+#        td = xr.open_dataset(ims_path/'GNSS_5mins_TD_ALL_1996_2019.nc')
+#        td = td[gps_station]
+#        td.name = 'Ts'
+#        # tela_T = tela_T.resample(time='5min').ffill()
+#        # compute the kappa function and multiply by ZWD to get PW(+error):
+#        k, dk = kappa_ml(td, model=model, verbose=True)
+#        kappa = k.to_dataset(name='{}_kappa'.format(gps_station))
+#        kappa['{}_kappa_error'.format(gps_station)] = dk
+#        PW = (
+#            kappa['{}_kappa'.format(gps_station)] *
+#            wetz).to_dataset(
+#            name='{}_PW'.format(gps_station)).squeeze(
+#                drop=True)
+#        PW['{}_PW_error'.format(gps_station)] = np.sqrt(
+#            wetz_error**2.0 +
+#            kappa['{}_kappa_error'.format(gps_station)]**2.0)
+#        PW['TPW_bet_dagan'] = zwd_and_tpw['Tpw']
+#        PW = PW.dropna('time')
+#    return PW
 
 
 def read_log_files(path, savepath=None, fltr='updated_by_shlomi',
@@ -1190,6 +1264,7 @@ def kappa_ml(T, model=None, k2=22.1, k3=3.776e5, dk3=0.004e5, dk2=2.2,
     """T in celsious, anton says k2=22.1 is better, """
     import numpy as np
     import xarray as xr
+    time_dim = list(set(T.dims))[0]
     # maybe implemment Tm= linear_fit(Ts_clim, Tm_clim) + linear_fit(Ts_anom, Tm_anom)
 #    from sklearn.utils.estimator_checks import check_estimator
     # original k2=17.0 bevis 1992 etal.
@@ -1215,8 +1290,8 @@ def kappa_ml(T, model=None, k2=22.1, k3=3.776e5, dk3=0.004e5, dk2=2.2,
         for i in range(coef.shape[0]):
             for j in range(intercept.shape[0]):
                 tm[:, i, j] = (273.15 + T.values) * coef[i] + intercept[j]
-        Tm = xr.DataArray(tm, dims=['time', 'coef', 'intercept'])
-        Tm['time'] = T.time
+        Tm = xr.DataArray(tm, dims=[time_dim, 'coef', 'intercept'])
+        Tm['time'] = T[time_dim]
         Tm['coef'] = coef
         Tm['intercept'] = intercept
     else:
@@ -1228,11 +1303,11 @@ def kappa_ml(T, model=None, k2=22.1, k3=3.776e5, dk3=0.004e5, dk2=2.2,
                                 model.coef_[0],
                                 model.intercept_))
         # Tm = T.copy(deep=False)
-        Tnp = T.dropna('time').values.reshape(-1, 1)
+        Tnp = T.dropna(time_dim).values.reshape(-1, 1)
         # T = T.values.reshape(-1, 1)
-        Tm = T.dropna('time').copy(deep=False,
+        Tm = T.dropna(time_dim).copy(deep=False,
                                    data=model.predict((273.15 + Tnp)))
-        Tm = Tm.reindex(time=T['time'])
+        Tm = Tm.reindex({time_dim: T[time_dim]})
         if slope_err is not None:
             dTm = model.coef_[0] * dT + slope_err * Tm
         else:
