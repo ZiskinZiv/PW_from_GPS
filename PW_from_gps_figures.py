@@ -243,7 +243,7 @@ def plot_figure_6(physical_file=phys_soundings, station='tela',
 
 
 def plot_israel_map(gis_path=gis_path):
-    """general nice map for israel, need that to plot stations, 
+    """general nice map for israel, need that to plot stations,
     and temperature field on top of it"""
     import geopandas as gpd
     import contextily as ctx
