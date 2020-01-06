@@ -12,6 +12,27 @@ from PW_paths import work_yuval
 # TODO: if not, build func to replace datetimeindex to numbers and vise versa
 
 
+def multi_time_coord_slice(min_time, max_time, freq='5T', time_dim='time',
+                           name='general_group'):
+    """returns a datetimeindex array of the multi-time-coords slice defined by
+        min_time, max_time vectors and freq."""
+    import pandas as pd
+    import numpy as np
+    assert len(min_time) == len(max_time)
+    dates = [
+            pd.date_range(
+                    start=min_time[i],
+                    end=max_time[i],
+                    freq='5T') for i in range(
+                            len(min_time))]
+    dates = [pd.Series(np.ones(dates[i].shape, dtype=int) * i, index=dates[i]) for i in range(len(dates))]
+    dates = pd.concat(dates)
+    da = dates.to_xarray()
+    da = da.rename({'index': time_dim})
+    da.name = name
+    return da
+
+
 def calculate_g(lat):
     """calculate the gravitational acceleration with lat in degrees"""
     import numpy as np
