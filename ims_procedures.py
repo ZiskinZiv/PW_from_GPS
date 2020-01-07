@@ -1040,23 +1040,23 @@ def read_ims_metadata_from_files(path=gis_path, freq='10mins'):
     return ims
 
 
-#def produce_geo_ims(path, filename='IMS_10mins_meta_data.xlsx',
-#                    closed_stations=False, plot=True):
-#    import geopandas as gpd
-#    import numpy as np
-#    isr = gpd.read_file(path / 'israel_demog2012.shp')
-#    isr.crs = {'init': 'epsg:4326'}
-#    ims = read_ims_metadata_from_files(path, filename)
-#    if closed_stations:
-#        ims = ims[np.isnat(ims.closing_date)]
-#    geo_ims = gpd.GeoDataFrame(ims, geometry=gpd.points_from_xy(ims.lon,
-#                                                                ims.lat),
-#                               crs=isr.crs)
-#    if plot:
-#        ax = isr.plot()
-#        geo_ims.plot(ax=ax, column='alt', cmap='Reds', edgecolor='black',
-#                     legend=True)
-#    return geo_ims
+def produce_geo_ims(path, freq='10mins',
+                    closed_stations=False, plot=True):
+    import geopandas as gpd
+    import numpy as np
+    isr = gpd.read_file(path / 'Israel_and_Yosh.shp')
+    isr.crs = {'init': 'epsg:4326'}
+    ims = read_ims_metadata_from_files(path=path, freq=freq)
+    if closed_stations:
+        ims = ims[np.isnat(ims.closing_date)]
+    geo_ims = gpd.GeoDataFrame(ims, geometry=gpd.points_from_xy(ims.lon,
+                                                                ims.lat),
+                               crs=isr.crs)
+    if plot:
+        ax = isr.plot()
+        geo_ims.plot(ax=ax, column='alt', cmap='Reds', edgecolor='black',
+                     legend=True)
+    return geo_ims
 
 
 def ims_api_get_meta(active_only=True, channel_name='TD'):
