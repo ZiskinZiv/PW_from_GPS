@@ -28,6 +28,7 @@ tela_ims = ims_path / '10mins/TEL-AVIV-COAST_178_TD_10mins_filled.nc'
 alon_ims = ims_path / '10mins/ASHQELON-PORT_208_TD_10mins_filled.nc'
 jslm_ims = ims_path / '10mins/JERUSALEM-CENTRE_23_TD_10mins_filled.nc'
 station_on_geo = geo_path / 'Work_Files/PW_yuval/GNSS_stations'
+era5_path = work_yuval / 'ERA5'
 PW_stations_path = work_yuval / '1minute'
 stations = pd.read_csv('All_gps_stations.txt', header=0, delim_whitespace=True,
                        index_col='name')
@@ -37,6 +38,35 @@ cwd = Path().cwd()
 # TODO: finish clouds formulation in ts-tm modeling
 # TODO: finish playing with ts-tm modeling, various machine learning algos.
 # TODO: redo the hour, season and cloud selection in formulate_plot
+
+
+def produce_gnss_pw_from_era5(era5_path=era5_path,
+                              glob_str='era5_PW_israel*.nc',
+                              pw_path=work_yuval, savepath=None):
+    from aux_gps import path_glob
+    import xarray as xr
+    filepath = path_glob(era5_path, glob_str)[0]
+    era5_pw = xr.open_dataarray(filepath)
+    gps = produce_geo_gps_stations(gis_path, plot=False)
+    era5_pw_list = []
+    for station in gps.index:
+        slat = gps.loc[station, 'lat']
+        slon = gps.loc[station, 'lon']
+        da = era5_pw.sel(lat=slat, lon=slon, method='nearest')
+        da.name = station
+        da.attrs['era5_lat'] = da.lat.values.item()
+        da.attrs['era5_lon'] = da.lon.values.item()
+        da = da.reset_coords(drop=True)
+        era5_pw_list.append(da)
+    ds = xr.merge(era5_pw_list)
+    if savepath is not None:
+        filename = 'GNSS_era5_hourly_PW.nc'
+        print('saving {} to {}'.format(filename, savepath))
+        comp = dict(zlib=True, complevel=9)  # best compression
+        encoding = {var: comp for var in ds}
+        ds.to_netcdf(savepath / filename, 'w', encoding=encoding)
+    print('Done!')
+    return ds
 
 
 def plug_in_approx_loc_gnss_stations(log_path=logs_path, file_path=cwd):
@@ -758,6 +788,31 @@ def filter_stations(path, group_name='israeli', save=False):
 #        intersection = set.intersection(*map(set, time_list))
 #        intr = sorted(list(intersection))
 #        return intr
+
+
+def produce_geo_gnss_solved_stations(path=gis_path,
+                                     file='israeli_gnss_coords.txt',
+                                     plot=True):
+    import geopandas as gpd
+    import pandas as pd
+    from pathlib import Path
+    cwd = Path().cwd()
+    df = pd.read_csv(cwd / file, delim_whitespace=True)
+    df = df[['lat', 'lon', 'alt']]
+    isr = gpd.read_file(path / 'Israel_and_Yosh.shp')
+    isr.crs = {'init': 'epsg:4326'}
+    stations = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.lon,
+                                                                df.lat),
+                                crs=isr.crs)
+    if plot:
+        ax = isr.plot()
+        stations.plot(ax=ax, column='alt', cmap='Greens',
+                      edgecolor='black', legend=True)
+        for x, y, label in zip(stations.lon, stations.lat,
+                               stations.index):
+            ax.annotate(label, xy=(x, y), xytext=(3, 3),
+                        textcoords="offset points")
+    return stations
 
 
 def produce_geo_gps_stations(path=gis_path, file='All_gps_stations.txt',
