@@ -41,19 +41,20 @@ def calculate_PW_from_era5(path=era5_path, glob_str='era5_Q_israel*.nc',
     import xarray as xr
     from aux_gps import path_glob
     from aux_gps import calculate_g
-    file = path_glob(path, glob_str)
-    Q = xr.open_dataset(path / file)['q']
+    import numpy as np
+    file = path_glob(path, glob_str)[0]
+    Q = xr.open_dataset(file)['q']
     g = calculate_g(Q.lat)
     g.name = 'g'
     g = g.mean('lat')
     plevel_in_pa = Q.level * 100.0
     # P_{i+1} - P_i:
-    plevel_diff = plevel_in_pa.diff('level')
+    plevel_diff = np.abs(plevel_in_pa.diff('level'))
     # Q_i + Q_{i+1}:
     Q_sum = Q.shift(level=-1) + Q
     pw_in_mm = ((Q_sum * plevel_diff) /
                 (2.0 * water_density * g)).sum('level') * 1000.0
-    pw_in_mm.name = 'PW'
+    pw_in_mm.name = 'pw'
     pw_in_mm.attrs['units'] = 'mm'
     if savepath is not None:
         yr_min = pw_in_mm.time.min().dt.year.item()
