@@ -45,7 +45,8 @@ def plot_figure_2(path=tela_results_path, plot='WetZ'):
     ax.fill_between(df.index, df[plot] - df[error_plot],
                     df[plot] + df[error_plot], alpha=0.5)
     ax.grid()
-    ax.set_title('{} from station TELA'.format(desc))
+    ax.set_title('{} from station TELA in {}'.format(
+            desc, df.index[100].strftime('%Y-%m-%d')))
     ax.set_ylabel(unit)
     ax.set_xlabel('')
     ax.grid('on')
@@ -220,13 +221,26 @@ def plot_figure_6(physical_file=phys_soundings, station='tela',
     ds = ds.sel(time=slice(*times))
     df = ds[['zwd_bet_dagan', 'tela_WetZ']].to_dataframe()
     fig, axes = plt.subplots(2, 1, sharex=True, figsize=(12, 8))
-    [x.set_xlim([pd.to_datetime(times[0]), pd.to_datetime(times[1])]) for x in axes]
+    [x.set_xlim([pd.to_datetime(times[0]), pd.to_datetime(times[1])])
+     for x in axes]
     df.columns = ['Bet_Dagan soundings', 'TELA GPS station']
-    sns.scatterplot(data=df, s=20, ax=axes[0], style='x', linewidth=0, alpha=0.8)
+    sns.scatterplot(
+        data=df,
+        s=20,
+        ax=axes[0],
+        style='x',
+        linewidth=0,
+        alpha=0.8)
     # axes[0].legend(['Bet_Dagan soundings', 'TELA GPS station'])
     df_r = df.iloc[:, 0] - df.iloc[:, 1]
     df_r.columns = ['Residual distribution']
-    sns.scatterplot(data=df_r, color = 'k', s=20, ax=axes[1], linewidth=0, alpha=0.5)
+    sns.scatterplot(
+        data=df_r,
+        color='k',
+        s=20,
+        ax=axes[1],
+        linewidth=0,
+        alpha=0.5)
     axes[0].grid(b=True, which='major')
     axes[1].grid(b=True, which='major')
     axes[0].set_ylabel('Zenith Wet Delay [cm]')
@@ -234,8 +248,18 @@ def plot_figure_6(physical_file=phys_soundings, station='tela',
     # axes[0].set_title('Zenith wet delay from Bet-Dagan radiosonde station and TELA GNSS satation')
     sonde_change_x = pd.to_datetime('2013-08-20')
     axes[1].axvline(sonde_change_x, color='red')
-    axes[1].annotate('changed sonde type from VIZ MK-II to PTU GPS', (mdates.date2num(sonde_change_x), 10), xytext=(15, 15), 
-        textcoords='offset points', arrowprops=dict(arrowstyle='fancy', color='red'), color='red')
+    axes[1].annotate(
+        'changed sonde type from VIZ MK-II to PTU GPS',
+        (mdates.date2num(sonde_change_x),
+         10),
+        xytext=(
+            15,
+            15),
+        textcoords='offset points',
+        arrowprops=dict(
+            arrowstyle='fancy',
+            color='red'),
+        color='red')
     # axes[1].set_aspect(3)
     plt.tight_layout()
     plt.subplots_adjust(wspace=0, hspace=0.01)
@@ -247,7 +271,6 @@ def plot_israel_map(gis_path=gis_path):
     and temperature field on top of it"""
     import geopandas as gpd
     import contextily as ctx
-    import matplotlib.pyplot as plt
     import seaborn as sns
     sns.set_style("ticks")
     isr_with_yosh = gpd.read_file(gis_path / 'Israel_and_Yosh.shp')
@@ -259,4 +282,38 @@ def plot_israel_map(gis_path=gis_path):
             url=ctx.sources.ST_TERRAIN_BACKGROUND,
             crs={
                     'init': 'epsg:4326'})
+    return ax
+
+
+def plot_figure_7(gis_path=gis_path):
+    from PW_stations import produce_geo_gnss_solved_stations
+    from aux_gps import geo_annotate
+    from ims_procedures import produce_geo_ims
+    import matplotlib.pyplot as plt
+    ax = plot_israel_map(gis_path)
+    print('getting IMS temperature stations metadata...')
+    ims = produce_geo_ims(path=gis_path, freq='10mins', plot=False)
+    ims.plot(ax=ax, color='red', edgecolor='black', legend=True, alpha=0.6)
+    # ims, gps = produce_geo_df(gis_path=gis_path, plot=False)
+    print('getting solved GNSS israeli stations metadata...')
+    gps = produce_geo_gnss_solved_stations(path=gis_path, plot=False)
+    gps.plot(ax=ax, color='green', edgecolor='black', legend=True)
+    gps_stations = [x for x in gps.index]
+    to_plot_offset = ['mrav', 'klhv']
+    [gps_stations.remove(x) for x in to_plot_offset]
+    gps_normal_anno = gps.loc[gps_stations, :]
+    gps_offset_anno = gps.loc[to_plot_offset, :]
+    geo_annotate(ax, gps_normal_anno.lon, gps_normal_anno.lat,
+                 gps_normal_anno.index, xytext=(3, 3), fmt=None,
+                 c='k', fw='bold', fs=None, colorupdown=False)
+    geo_annotate(ax, gps_offset_anno.lon, gps_offset_anno.lat,
+                 gps_offset_anno.index, xytext=(4, -6), fmt=None,
+                 c='k', fw='bold', fs=None, colorupdown=False)
+#    plt.legend(['IMS stations', 'GNSS stations'],
+#           prop={'size': 10}, bbox_to_anchor=(-0.15, 1.0),
+#           title='Stations')
+    plt.legend(['IMS stations', 'GNSS stations'],
+               prop={'size': 10}, loc='upper left')
+    plt.tight_layout()
+    plt.subplots_adjust(bottom=0.05)
     return ax
