@@ -88,8 +88,8 @@ def plot_figure_3(path=tela_solutions, year=2004, field='WetZ',
         axes[j].set_xlim(start, end)
         axes[j].set_ylim(daa.min() - 0.5, daa.max() + 0.5)
         try:
-            axes[j - 1].axvline(x=start, color='r', alpha=0.7, linestyle='--')
-            axes[j - 1].axvline(x=end, color='r', alpha=0.7, linestyle='--')
+            axes[j - 1].axvline(x=start, color='r', alpha=0.85, linestyle='--', linewidth=2.0)
+            axes[j - 1].axvline(x=end, color='r', alpha=0.85, linestyle='--', linewidth=2.0)
         except IndexError:
             pass
         units = ds.attrs['{}>units'.format(field)]
