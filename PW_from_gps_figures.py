@@ -6,12 +6,22 @@ Created on Fri Jan  3 17:28:04 2020
 @author: shlomi
 """
 from PW_paths import work_yuval
+from matplotlib import rcParams
+import seaborn as sns
 tela_results_path = work_yuval / 'GNSS_stations/tela/rinex/30hr/results'
 tela_solutions = work_yuval / 'GNSS_stations/tela/gipsyx_solutions'
 sound_path = work_yuval / 'sounding'
 phys_soundings = sound_path / 'bet_dagan_phys_sounding_2007-2019.nc'
 ims_path = work_yuval / 'IMS_T'
 gis_path = work_yuval / 'gis'
+hydro_path = work_yuval / 'hydro'
+rc = {
+    'font.family': 'serif',
+    'xtick.labelsize': 'medium',
+    'ytick.labelsize': 'medium'}
+for key, val in rc.items():
+    rcParams[key] = val
+sns.set(rc=rc, style='white')
 
 
 def plot_figure_1(path=work_yuval):
@@ -21,7 +31,7 @@ def plot_figure_1(path=work_yuval):
     just_pw = [x for x in ds if 'error' not in x]
     ds = ds[just_pw]
     title = 'RINEX files availability for the Israeli GNSS stations'
-    ax = gantt_chart(ds, title)
+    ax = gantt_chart(ds, fw='normal', title=title)
     return ax
 
 
@@ -41,13 +51,13 @@ def plot_figure_2(path=tela_results_path, plot='WetZ'):
     fig, ax = plt.subplots(1, 1, figsize=(8, 6))
     desc = meta['desc'][plot]
     unit = meta['units'][plot]
-    df[plot].plot(ax=ax, legend=True, color='k')
+    df[plot].plot(ax=ax, legend=False, color='k')
     ax.fill_between(df.index, df[plot] - df[error_plot],
                     df[plot] + df[error_plot], alpha=0.5)
     ax.grid()
     ax.set_title('{} from station TELA in {}'.format(
             desc, df.index[100].strftime('%Y-%m-%d')))
-    ax.set_ylabel(unit)
+    ax.set_ylabel('WetZ [{}]'.format(unit))
     ax.set_xlabel('')
     ax.grid('on')
     fig.tight_layout()
@@ -88,11 +98,11 @@ def plot_figure_3(path=tela_solutions, year=2004, field='WetZ',
         ax.set_ylabel('{} [{}]'.format(field, units))
         ax.set_xlabel('')
         ax.grid()
-    fig.suptitle(
-        '30 hours stitched {} for GNSS station {}'.format(
-            desc, sta), fontweight='bold')
+    # fig.suptitle(
+    #     '30 hours stitched {} for GNSS station {}'.format(
+    #         desc, sta), fontweight='bold')
     fig.tight_layout()
-    fig.subplots_adjust(top=0.95)
+    # fig.subplots_adjust(top=0.95)
     return axes
 
 
@@ -105,7 +115,7 @@ def plot_figure_4(physical_file=phys_soundings, model='LR',
     from sklearn.metrics import mean_squared_error
     from aux_gps import get_unique_index
     import numpy as np
-    sns.set_style('whitegrid')
+    # sns.set_style('whitegrid')
     pds = xr.open_dataset(phys_soundings)
     pds = pds[['Tm', 'Ts']]
     pds = get_unique_index(pds, 'sound_time')
@@ -119,6 +129,7 @@ def plot_figure_4(physical_file=phys_soundings, model='LR',
         linewidth=0,
         alpha=0.5,
         ax=axes[0])
+    axes[0].grid()
     ml = ML_Switcher()
     fit_model = ml.pick_model(model)
     X = pds.Ts.values.reshape(-1, 1)
@@ -135,19 +146,19 @@ def plot_figure_4(physical_file=phys_soundings, model='LR',
     axes[0].set_xlabel('Surface Temperature [K]')
     axes[0].set_ylabel('Water Vapor Mean Atmospheric Temperature [K]')
     resid = predict - y
-    sns.distplot(resid, bins=50, color='c', label='residuals', ax=axes[1],
+    sns.distplot(resid, bins=50, color='k', label='residuals', ax=axes[1],
                  kde=False,
-                 hist_kws={"linewidth": 1, "alpha": 0.5, "color": "b"})
+                 hist_kws={"linewidth": 1, "alpha": 0.5, "color": "k"})
     rmean = np.mean(resid)
     rmse = np.sqrt(mean_squared_error(predict, y))
     axes[1].axvline(rmean, color='r', linestyle='dashed', linewidth=1)
     axes[1].set_xlabel('Residual distribution[K]')
     axes[1].text(0.1, 0.85, 'n={}'.format(pds.Ts.size),
                  verticalalignment='top', horizontalalignment='center',
-                 transform=axes[1].transAxes, color='b', fontsize=12)
+                 transform=axes[1].transAxes, color='k', fontsize=12)
     axes[1].text(0.15, 0.8, 'RMSE: {:.2f} K'.format(rmse),
                  verticalalignment='top', horizontalalignment='center',
-                 transform=axes[1].transAxes, color='b', fontsize=12)
+                 transform=axes[1].transAxes, color='k', fontsize=12)
     axes[1].set_xlim(-20, 20)
     fig.tight_layout()
     return
@@ -160,7 +171,7 @@ def plot_figure_5(physical_file=phys_soundings, station='tela',
     import matplotlib.pyplot as plt
     import seaborn as sns
     import numpy as np
-    sns.set_style('whitegrid')
+    # sns.set_style('white')
     ds = mean_zwd_over_sound_time(
         physical_file, ims_path=ims_path, gps_station='tela',
         times=times)
@@ -181,26 +192,27 @@ def plot_figure_5(physical_file=phys_soundings, station='tela',
     axes[0].legend(['y = x'])
     axes[0].set_xlabel('Total Precipitable Water from Bet-Dagan [mm]')
     axes[0].set_ylabel('Total Precipitable Water from TELA GPS station [mm]')
+    axes[0].grid()
     resid = ds.tela_pw.values - ds[tpw].values
-    sns.distplot(resid, bins=50, color='c', label='residuals', ax=axes[1],
+    sns.distplot(resid, bins=50, color='k', label='residuals', ax=axes[1],
                  kde=False,
-                 hist_kws={"linewidth": 1, "alpha": 0.5, "color": "b"})
+                 hist_kws={"linewidth": 1, "alpha": 0.5, "color": "k"})
     rmean = np.mean(resid)
     rmse = np.sqrt(mean_squared_error(ds.tela_pw.values, ds[tpw].values))
     axes[1].axvline(rmean, color='r', linestyle='dashed', linewidth=1)
     axes[1].set_xlabel('Residual distribution[mm]')
     axes[1].text(0.1, 0.85, 'n={}'.format(ds[tpw].size),
                  verticalalignment='top', horizontalalignment='center',
-                 transform=axes[1].transAxes, color='b', fontsize=12)
-    axes[1].text(0.16, 0.80, 'mean: {:.2f} mm'.format(rmean),
+                 transform=axes[1].transAxes, color='k', fontsize=12)
+    axes[1].text(0.16, 0.80, 'bias: {:.2f} mm'.format(rmean),
                  verticalalignment='top', horizontalalignment='center',
-                 transform=axes[1].transAxes, color='b', fontsize=12)
-    axes[1].text(0.16, 0.75, 'RMSE: {:.2f} mm'.format(rmse),
+                 transform=axes[1].transAxes, color='k', fontsize=12)
+    axes[1].text(0.18, 0.75, 'RMSE: {:.2f} mm'.format(rmse),
                  verticalalignment='top', horizontalalignment='center',
-                 transform=axes[1].transAxes, color='b', fontsize=12)
-    fig.suptitle('Precipitable Water comparison for the years {} to {}'.format(*times))
+                 transform=axes[1].transAxes, color='k', fontsize=12)
+    # fig.suptitle('Precipitable Water comparison for the years {} to {}'.format(*times))
     fig.tight_layout()
-    fig.subplots_adjust(top=0.95)
+    # fig.subplots_adjust(top=0.95)
     return ds
 
 
@@ -211,7 +223,7 @@ def plot_figure_6(physical_file=phys_soundings, station='tela',
     import seaborn as sns
     import pandas as pd
     import matplotlib.dates as mdates
-    sns.set_style('whitegrid')
+    # sns.set_style('whitegrid')
     ds = mean_zwd_over_sound_time(
         physical_file, ims_path=ims_path, gps_station='tela',
         times=times)
@@ -266,13 +278,13 @@ def plot_figure_6(physical_file=phys_soundings, station='tela',
     return df
 
 
-def plot_israel_map(gis_path=gis_path):
+def plot_israel_map(gis_path=gis_path, rc=rc):
     """general nice map for israel, need that to plot stations,
     and temperature field on top of it"""
     import geopandas as gpd
     import contextily as ctx
     import seaborn as sns
-    sns.set_style("ticks")
+    sns.set_style("ticks", rc=rc)
     isr_with_yosh = gpd.read_file(gis_path / 'Israel_and_Yosh.shp')
     isr_with_yosh.crs = {'init': 'epsg:4326'}
     # isr_with_yosh = isr_with_yosh.to_crs(epsg=3857)
@@ -293,11 +305,11 @@ def plot_figure_7(gis_path=gis_path):
     ax = plot_israel_map(gis_path)
     print('getting IMS temperature stations metadata...')
     ims = produce_geo_ims(path=gis_path, freq='10mins', plot=False)
-    ims.plot(ax=ax, color='red', edgecolor='black', legend=True, alpha=0.6)
+    ims.plot(ax=ax, color='red', edgecolor='black', alpha=0.5)
     # ims, gps = produce_geo_df(gis_path=gis_path, plot=False)
     print('getting solved GNSS israeli stations metadata...')
     gps = produce_geo_gnss_solved_stations(path=gis_path, plot=False)
-    gps.plot(ax=ax, color='green', edgecolor='black', legend=True)
+    gps.plot(ax=ax, color='green', edgecolor='black')
     gps_stations = [x for x in gps.index]
     to_plot_offset = ['mrav', 'klhv']
     [gps_stations.remove(x) for x in to_plot_offset]
@@ -312,8 +324,113 @@ def plot_figure_7(gis_path=gis_path):
 #    plt.legend(['IMS stations', 'GNSS stations'],
 #           prop={'size': 10}, bbox_to_anchor=(-0.15, 1.0),
 #           title='Stations')
-    plt.legend(['IMS stations', 'GNSS stations'],
-               prop={'size': 10}, loc='upper left')
+#    plt.legend(['IMS stations', 'GNSS stations'],
+#               prop={'size': 10}, loc='upper left')
+    plt.legend(['IMS stations', 'GNSS stations'], loc='upper left')
     plt.tight_layout()
     plt.subplots_adjust(bottom=0.05)
     return ax
+
+
+def plot_figure_8(ims_path=ims_path, dt='2013-10-19T22:00:00'):
+    from aux_gps import path_glob
+    import xarray as xr
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import pandas as pd
+    # from matplotlib import rc
+
+    def choose_dt_and_lapse_rate(tdf, dt, T_alts, lapse_rate):
+        ts = tdf.loc[dt, :]
+        # dt_col = dt.strftime('%Y-%m-%d %H:%M')
+        # ts.name = dt_col
+        # Tloc_df = Tloc_df.join(ts, how='right')
+        # Tloc_df = Tloc_df.dropna(axis=0)
+        ts_vs_alt = pd.Series(ts.values, index=T_alts)
+        ts_vs_alt_for_fit = ts_vs_alt.dropna()
+        [a, b] = np.polyfit(ts_vs_alt_for_fit.index.values,
+                            ts_vs_alt_for_fit.values, 1)
+        if lapse_rate == 'auto':
+            lapse_rate = np.abs(a) * 1000
+            if lapse_rate < 5.0:
+                lapse_rate = 5.0
+            elif lapse_rate > 10.0:
+                lapse_rate = 10.0
+        return ts_vs_alt, lapse_rate
+
+    # rc('text', usetex=False)
+    # rc('text',latex.unicode=False)
+    glob_str = 'IMS_TD_israeli_10mins*.nc'
+    file = path_glob(ims_path, glob_str=glob_str)[0]
+    ds = xr.open_dataset(file)
+    time_dim = list(set(ds.dims))[0]
+    # slice to a starting year(1996?):
+    ds = ds.sel({time_dim: slice('1996', None)})
+    # years = sorted(list(set(ds[time_dim].dt.year.values)))
+    # get coords and alts of IMS stations:
+    T_alts = np.array([ds[x].attrs['station_alt'] for x in ds])
+#    T_lats = np.array([ds[x].attrs['station_lat'] for x in ds])
+#    T_lons = np.array([ds[x].attrs['station_lon'] for x in ds])
+    print('loading IMS_TD of israeli stations 10mins freq..')
+    # transform to dataframe and add coords data to df:
+    tdf = ds.to_dataframe()
+    # dt_col = dt.strftime('%Y-%m-%d %H:%M')
+    dt = pd.to_datetime(dt)
+    # prepare the ims coords and temp df(Tloc_df) and the lapse rate:
+    ts_vs_alt, lapse_rate = choose_dt_and_lapse_rate(tdf, dt, T_alts, 'auto')
+    fig, ax_lapse = plt.subplots(figsize=(10, 6))
+    sns.regplot(x=ts_vs_alt.index, y=ts_vs_alt.values, color='r',
+                scatter_kws={'color': 'k'}, ax=ax_lapse)
+    # suptitle = dt.strftime('%Y-%m-%d %H:%M')
+    ax_lapse.set_xlabel('Altitude [m]')
+    ax_lapse.set_ylabel(r'Temperature [$\degree$C]')
+    ax_lapse.text(0.5, 0.95, r'Lapse rate: {:.2f} $\degree$C/km'.format(lapse_rate),
+                  horizontalalignment='center', verticalalignment='center',
+                  transform=ax_lapse.transAxes, color='k')
+    ax_lapse.grid()
+    # ax_lapse.set_title(suptitle, fontsize=14, fontweight='bold')
+    fig.tight_layout()
+    return ax_lapse
+
+
+def plot_figure_9(hydro_path=hydro_path, gis_path=gis_path):
+    from hydro_procedures import get_hydro_near_GNSS
+    from hydro_procedures import loop_over_gnss_hydro_and_aggregate
+    import matplotlib.pyplot as plt
+    df = get_hydro_near_GNSS(
+        radius=5,
+        hydro_path=hydro_path,
+        gis_path=gis_path,
+        plot=False)
+    ds = loop_over_gnss_hydro_and_aggregate(df, pw_anom=False,
+                                            max_flow_thresh=None,
+                                            hydro_path=hydro_path,
+                                            work_yuval=work_yuval, ndays=3,
+                                            plot=False, plot_all=False)
+    names = [x for x in ds.data_vars]
+    fig, ax = plt.subplots(figsize=(10, 6))
+    for name in names:
+        ds.mean('station').mean('tide_start')[name].plot.line(
+            marker='.', linewidth=0., ax=ax)
+    ax.set_xlabel('Days before tide event')
+    ax.set_ylabel('PW [mm]')
+    ax.grid()
+    hstations = [ds[x].attrs['hydro_stations'] for x in ds.data_vars]
+    events = [ds[x].attrs['total_events'] for x in ds.data_vars]
+    fmt = list(zip(names, hstations, events))
+    ax.legend(['{} with {} stations ({} total events)'.format(x, y, z)
+               for x, y, z in fmt])
+    fig.canvas.draw()
+    labels = [item.get_text() for item in ax.get_xticklabels()]
+    xlabels = [x.replace('−', '') for x in labels]
+    ax.set_xticklabels(xlabels)
+    fig.tight_layout()
+#    if pw_anom:
+#        title = 'Mean PW anomalies for tide stations near all GNSS stations'
+#    else:
+#        title = 'Mean PW for tide stations near all GNSS stations'
+#    if max_flow_thresh is not None:
+#        title += ' (max_flow > {} m^3/sec)'.format(max_flow_thresh)
+#    ax.set_title(title)
+    return ax
+
