@@ -24,34 +24,39 @@ def loop_over_gnss_hydro_and_aggregate(sel_hydro, pw_anom=False,
                                        plot=True, plot_all=False):
     import xarray as xr
     import matplotlib.pyplot as plt
-    if pw_anom:
-        gnss_pw = xr.open_dataset(work_yuval / 'GNSS_PW_hourly_anom_hour_dayofyear.nc')
+    if (hydro_path / 'aggregate_ds.nc').is_file():
+        print('loading aggregate_ds.nc...')
+        ds = xr.open_dataset(hydro_path / 'aggregate_ds.nc')
     else:
-        gnss_pw = xr.open_dataset(work_yuval / 'GNSS_PW.nc')
-    just_pw = [x for x in gnss_pw.data_vars if '_error' not in x]
-    gnss_pw = gnss_pw[just_pw]
-    da_list = []
-    for gnss_sta in just_pw:
-        print('proccessing station {}'.format(gnss_sta))
-        sliced = sel_hydro[~sel_hydro[gnss_sta].isnull()]
-        hydro_ids = [x for x in sliced.id.values]
-        if not hydro_ids:
-            print(
-                'skipping {} station since no close hydro stations...'.format(gnss_sta))
-            continue
+        if pw_anom:
+            gnss_pw = xr.open_dataset(work_yuval / 'GNSS_PW_hourly_anom_hour_dayofyear.nc')
         else:
-            try:
-                dass = aggregate_get_ndays_pw_hydro(
-                    gnss_pw[gnss_sta],
-                    hydro_ids,
-                    max_flow_thresh=max_flow_thresh,
-                    ndays=ndays,
-                    plot=plot_all)
-                da_list.append(dass)
-            except ValueError as e:
-                print('skipping {} because {}'.format(gnss_sta, e))
+            gnss_pw = xr.open_dataset(work_yuval / 'GNSS_PW.nc')
+        just_pw = [x for x in gnss_pw.data_vars if '_error' not in x]
+        gnss_pw = gnss_pw[just_pw]
+        da_list = []
+        for gnss_sta in just_pw:
+            print('proccessing station {}'.format(gnss_sta))
+            sliced = sel_hydro[~sel_hydro[gnss_sta].isnull()]
+            hydro_ids = [x for x in sliced.id.values]
+            if not hydro_ids:
+                print(
+                    'skipping {} station since no close hydro stations...'.format(gnss_sta))
                 continue
-    ds = xr.merge(da_list)
+            else:
+                try:
+                    dass = aggregate_get_ndays_pw_hydro(
+                        gnss_pw[gnss_sta],
+                        hydro_ids,
+                        max_flow_thresh=max_flow_thresh,
+                        ndays=ndays,
+                        plot=plot_all)
+                    da_list.append(dass)
+                except ValueError as e:
+                    print('skipping {} because {}'.format(gnss_sta, e))
+                    continue
+        ds = xr.merge(da_list)
+        ds.to_netcdf(hydro_path / 'aggregate_ds.nc', 'w')
     if plot:
         names = [x for x in ds.data_vars]
         fig, ax = plt.subplots()
