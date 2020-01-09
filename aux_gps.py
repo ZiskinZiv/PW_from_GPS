@@ -77,7 +77,8 @@ def consecutive_runs(arr, num=False):
     return A
 
 
-def gantt_chart(ds, title='RINEX files availability for the Israeli GNSS stations'):
+def gantt_chart(ds, fw='bold',
+                title='RINEX files availability for the Israeli GNSS stations'):
     import pandas as pd
     import matplotlib.pyplot as plt
     import numpy as np
@@ -115,20 +116,22 @@ def gantt_chart(ds, title='RINEX files availability for the Israeli GNSS station
         # ds[da] = ds[da].fillna(0)
     # yticks and their labels:
     ax.set_yticks(vals)
-    ax.set_yticklabels(names[::-1], fontweight='bold', fontsize=12)
+    ax.set_yticklabels(names[::-1], fontweight=fw, fontsize=12)
     [ax.get_yticklabels()[i].set_color(colors[::-1][i]) for i in range(len(colors))]
     ax.set_xlim(xmin, xmax)
     # handle x-axis (time):
     plt.minorticks_on()
     ax.xaxis.set_minor_locator(mdates.YearLocator())
     ax.xaxis.set_minor_formatter(mdates.DateFormatter("\n%Y"))
-    plt.setp(ax.xaxis.get_majorticklabels(), rotation=30, ha='center', fontweight='bold')
-    plt.setp(ax.xaxis.get_minorticklabels(), rotation=30, ha='center', fontweight='bold')
+    plt.setp(ax.xaxis.get_majorticklabels(), rotation=30, ha='center',
+             fontweight=fw)
+    plt.setp(ax.xaxis.get_minorticklabels(), rotation=30, ha='center',
+             fontweight=fw)
     # grid lines:
 #    ax.grid(which='major', axis='x', linestyle='-', color='k')
 #    ax.grid(which='minor', axis='x', linestyle='-', color='k')
     if title is not None:
-        plt.title(title, fontsize=14, fontweight='bold')
+        plt.title(title, fontsize=14, fontweight=fw)
     plt.tight_layout()
     return ax
 
