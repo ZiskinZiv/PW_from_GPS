@@ -268,7 +268,7 @@ def produce_zwd_from_sounding_and_compare_to_gps(phys_sound_file=phys_soundings,
     gps = zwd_and_tpw['{}_WetZ'.format(station)]
     gps.name = ['WetZ_from_TELA']
     if plot:
-        sns.set_style("whitegrid")
+        # sns.set_style("whitegrid")
         df = radio.to_dataframe()
         df[gps.name] = gps.to_dataframe()
         fig, axes = plt.subplots(2, 1, sharex=True, figsize=(12, 8))
@@ -1582,7 +1582,7 @@ def compare_to_sounding2(pw_from_gps, pw_from_sounding, station='TELA',
     from sklearn.metrics import mean_squared_error
     time_dim_gps = list(set(pw_from_gps.dims))[0]
     time_dim_sound = list(set(pw_from_sounding.dims))[0]
-    sns.set_style('darkgrid')
+    # sns.set_style('darkgrid')
     pw = pw_from_gps.to_dataset(name=station).reset_coords(drop=True)
     pw = pw.dropna(time_dim_gps)
     pw = get_unique_index(pw, time_dim_gps)
@@ -1700,7 +1700,7 @@ def compare_to_sounding(sound_path=sound_path, gps=garner_path, station='TELA',
     import seaborn as sns
     from sklearn.metrics import mean_squared_error
     from pathlib import Path
-    sns.set_style('darkgrid')
+    # sns.set_style('darkgrid')
     if isinstance(gps, Path):
         pw_gps = xr.open_dataset(gps / 'IPW_israeli_from_gps.nc')
     else:
@@ -1935,7 +1935,7 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
     from aux_gps import standard_error_slope
     time_dim = list(set(ds.dims))[0]
     print('time dim is: {}'.format(time_dim))
-    sns.set_style('darkgrid')
+    # sns.set_style('darkgrid')
     colors = ['red', 'green', 'magenta', 'cyan', 'orange', 'teal',
               'gray', 'purple']
     pos = np.linspace(0.95, 0.6, 8)
