@@ -115,12 +115,13 @@ def plot_figure_4(physical_file=phys_soundings, model='LR',
     from sklearn.metrics import mean_squared_error
     from aux_gps import get_unique_index
     import numpy as np
+    from mpl_toolkits.axes_grid1.inset_locator import inset_axes
     # sns.set_style('whitegrid')
     pds = xr.open_dataset(phys_soundings)
     pds = pds[['Tm', 'Ts']]
     pds = get_unique_index(pds, 'sound_time')
     pds = pds.sel(sound_time=slice(*times))
-    fig, axes = plt.subplots(1, 2, figsize=(10, 7))
+    fig, ax = plt.subplots(1, 1, figsize=(7, 7))
     pds.plot.scatter(
         x='Ts',
         y='Tm',
@@ -128,8 +129,8 @@ def plot_figure_4(physical_file=phys_soundings, model='LR',
         s=100.,
         linewidth=0,
         alpha=0.5,
-        ax=axes[0])
-    axes[0].grid()
+        ax=ax)
+    ax.grid()
     ml = ML_Switcher()
     fit_model = ml.pick_model(model)
     X = pds.Ts.values.reshape(-1, 1)
@@ -138,28 +139,36 @@ def plot_figure_4(physical_file=phys_soundings, model='LR',
     predict = fit_model.predict(X)
     coef = fit_model.coef_[0]
     inter = fit_model.intercept_
-    axes[0].plot(X, predict, c='r')
+    ax.plot(X, predict, c='r')
     bevis_tm = pds.Ts.values * 0.72 + 70.0
-    axes[0].plot(pds.Ts.values, bevis_tm, c='purple')
-    axes[0].legend(['OLS ({:.2f}, {:.2f})'.format(
-            coef, inter), 'Bevis 1992 et al. (0.72, 70.0)'])
-    axes[0].set_xlabel('Surface Temperature [K]')
-    axes[0].set_ylabel('Water Vapor Mean Atmospheric Temperature [K]')
+    ax.plot(pds.Ts.values, bevis_tm, c='purple')
+    ax.legend(['OLS ({:.2f}, {:.2f})'.format(
+        coef, inter), 'Bevis 1992 et al. (0.72, 70.0)'])
+    ax.set_xlabel('Surface Temperature [K]')
+    ax.set_ylabel('Water Vapor Mean Atmospheric Temperature [K]')
+    ax.set_ylim(265, 320)
+    axin1 = inset_axes(ax, width="40%", height="40%", loc=2)
     resid = predict - y
-    sns.distplot(resid, bins=50, color='k', label='residuals', ax=axes[1],
+    sns.distplot(resid, bins=50, color='k', label='residuals', ax=axin1,
                  kde=False,
                  hist_kws={"linewidth": 1, "alpha": 0.5, "color": "k"})
+    axin1.yaxis.tick_right()
     rmean = np.mean(resid)
     rmse = np.sqrt(mean_squared_error(predict, y))
-    axes[1].axvline(rmean, color='r', linestyle='dashed', linewidth=1)
-    axes[1].set_xlabel('Residual distribution[K]')
-    axes[1].text(0.1, 0.85, 'n={}'.format(pds.Ts.size),
-                 verticalalignment='top', horizontalalignment='center',
-                 transform=axes[1].transAxes, color='k', fontsize=12)
-    axes[1].text(0.15, 0.8, 'RMSE: {:.2f} K'.format(rmse),
-                 verticalalignment='top', horizontalalignment='center',
-                 transform=axes[1].transAxes, color='k', fontsize=12)
-    axes[1].set_xlim(-20, 20)
+    axin1.axvline(rmean, color='r', linestyle='dashed', linewidth=1)
+    # axin1.set_xlabel('Residual distribution[K]')
+    textstr = '\n'.join(['n={}'.format(pds.Ts.size),
+                         'RMSE: ', '{:.2f} K'.format(rmse)])
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+    axin1.text(0.05, 0.95, textstr, transform=axin1.transAxes, fontsize=10,
+               verticalalignment='top', bbox=props)
+#    axin1.text(0.2, 0.9, 'n={}'.format(pds.Ts.size),
+#               verticalalignment='top', horizontalalignment='center',
+#               transform=axin1.transAxes, color='k', fontsize=10)
+#    axin1.text(0.78, 0.9, 'RMSE: {:.2f} K'.format(rmse),
+#               verticalalignment='top', horizontalalignment='center',
+#               transform=axin1.transAxes, color='k', fontsize=10)
+    axin1.set_xlim(-15, 15)
     fig.tight_layout()
     return
 
@@ -171,6 +180,7 @@ def plot_figure_5(physical_file=phys_soundings, station='tela',
     import matplotlib.pyplot as plt
     import seaborn as sns
     import numpy as np
+    from mpl_toolkits.axes_grid1.inset_locator import inset_axes
     # sns.set_style('white')
     ds = mean_zwd_over_sound_time(
         physical_file, ims_path=ims_path, gps_station='tela',
@@ -180,36 +190,45 @@ def plot_figure_5(physical_file=phys_soundings, station='tela',
     ds = ds.dropna('time')
     ds = ds.sel(time=slice(*times))
     tpw = 'tpw_bet_dagan'
-    fig, axes = plt.subplots(1, 2, figsize=(10, 7))
+    fig, ax = plt.subplots(1, 1, figsize=(7, 7))
     ds.plot.scatter(x=tpw,
                     y='tela_pw',
                     marker='.',
                     s=100.,
                     linewidth=0,
                     alpha=0.5,
-                    ax=axes[0])
-    axes[0].plot(ds[tpw], ds[tpw], c='r')
-    axes[0].legend(['y = x'])
-    axes[0].set_xlabel('Total Precipitable Water from Bet-Dagan [mm]')
-    axes[0].set_ylabel('Total Precipitable Water from TELA GPS station [mm]')
-    axes[0].grid()
+                    ax=ax)
+    ax.plot(ds[tpw], ds[tpw], c='r')
+    ax.legend(['y = x'], loc='upper right')
+    ax.set_xlabel('Total Precipitable Water from Bet-Dagan [mm]')
+    ax.set_ylabel('Total Precipitable Water from TELA GPS station [mm]')
+    ax.grid()
+    axin1 = inset_axes(ax, width="40%", height="40%", loc=2)
     resid = ds.tela_pw.values - ds[tpw].values
-    sns.distplot(resid, bins=50, color='k', label='residuals', ax=axes[1],
+    sns.distplot(resid, bins=50, color='k', label='residuals', ax=axin1,
                  kde=False,
                  hist_kws={"linewidth": 1, "alpha": 0.5, "color": "k"})
+    axin1.yaxis.tick_right()
     rmean = np.mean(resid)
     rmse = np.sqrt(mean_squared_error(ds.tela_pw.values, ds[tpw].values))
-    axes[1].axvline(rmean, color='r', linestyle='dashed', linewidth=1)
-    axes[1].set_xlabel('Residual distribution[mm]')
-    axes[1].text(0.1, 0.85, 'n={}'.format(ds[tpw].size),
-                 verticalalignment='top', horizontalalignment='center',
-                 transform=axes[1].transAxes, color='k', fontsize=12)
-    axes[1].text(0.16, 0.80, 'bias: {:.2f} mm'.format(rmean),
-                 verticalalignment='top', horizontalalignment='center',
-                 transform=axes[1].transAxes, color='k', fontsize=12)
-    axes[1].text(0.18, 0.75, 'RMSE: {:.2f} mm'.format(rmse),
-                 verticalalignment='top', horizontalalignment='center',
-                 transform=axes[1].transAxes, color='k', fontsize=12)
+    axin1.axvline(rmean, color='r', linestyle='dashed', linewidth=1)
+    # axin1.set_xlabel('Residual distribution[mm]')
+    textstr = '\n'.join(['n={}'.format(ds[tpw].size),
+                         'bias: {:.2f} mm'.format(rmean),
+                         'RMSE: {:.2f} mm'.format(rmse)])
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+    axin1.text(0.05, 0.95, textstr, transform=axin1.transAxes, fontsize=10,
+               verticalalignment='top', bbox=props)
+#
+#    axin1.text(0.2, 0.95, 'n={}'.format(ds[tpw].size),
+#               verticalalignment='top', horizontalalignment='center',
+#               transform=axin1.transAxes, color='k', fontsize=10)
+#    axin1.text(0.3, 0.85, 'bias: {:.2f} mm'.format(rmean),
+#               verticalalignment='top', horizontalalignment='center',
+#               transform=axin1.transAxes, color='k', fontsize=10)
+#    axin1.text(0.35, 0.75, 'RMSE: {:.2f} mm'.format(rmse),
+#               verticalalignment='top', horizontalalignment='center',
+#               transform=axin1.transAxes, color='k', fontsize=10)
     # fig.suptitle('Precipitable Water comparison for the years {} to {}'.format(*times))
     fig.tight_layout()
     # fig.subplots_adjust(top=0.95)
