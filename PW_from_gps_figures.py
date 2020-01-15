@@ -106,13 +106,38 @@ def plot_figure_3(path=tela_solutions, year=2004, field='WetZ',
     return axes
 
 
+def plot_figure_3_1(path=work_yuval, data='zwd'):
+    import xarray as xr
+    from aux_gps import plot_tmseries_xarray
+    from PW_stations import load_gipsyx_results
+    if data == 'zwd':
+        tela = load_gipsyx_results('tela', sample_rate='1H', plot_fields=None)
+        label = 'ZWD [cm]'
+        title = 'Zenith wet delay derived from GPS station TELA'
+        ax = plot_tmseries_xarray(tela, 'WetZ')
+    elif data == 'pw':
+        ds = xr.open_dataset(path / 'GNSS_hourly_PW.nc')
+        tela = ds['tela']
+        label = 'PW [mm]'
+        title = 'Precipitable water derived from GPS station TELA'
+        ax = plot_tmseries_xarray(tela)
+    ax.set_ylabel(label)
+    ax.set_xlim('1996-02', '2019-07')
+    ax.set_title(title)
+    ax.set_xlabel('')
+    ax.figure.tight_layout()
+    return ax
+
+
 def plot_figure_4(physical_file=phys_soundings, model='LR',
                   times=['2007', '2019']):
+    """plot ts-tm relashonship"""
     import xarray as xr
     import matplotlib.pyplot as plt
     import seaborn as sns
     from PW_stations import ML_Switcher
     from sklearn.metrics import mean_squared_error
+    from sklearn.metrics import r2_score
     from aux_gps import get_unique_index
     import numpy as np
     from mpl_toolkits.axes_grid1.inset_locator import inset_axes
@@ -144,8 +169,10 @@ def plot_figure_4(physical_file=phys_soundings, model='LR',
     ax.plot(pds.Ts.values, bevis_tm, c='purple')
     ax.legend(['OLS ({:.2f}, {:.2f})'.format(
         coef, inter), 'Bevis 1992 et al. (0.72, 70.0)'])
-    ax.set_xlabel('Surface Temperature [K]')
-    ax.set_ylabel('Water Vapor Mean Atmospheric Temperature [K]')
+#    ax.set_xlabel('Surface Temperature [K]')
+#    ax.set_ylabel('Water Vapor Mean Atmospheric Temperature [K]')
+    ax.set_xlabel('Ts [K]')
+    ax.set_ylabel('Tm [K]')
     ax.set_ylim(265, 320)
     axin1 = inset_axes(ax, width="40%", height="40%", loc=2)
     resid = predict - y
@@ -154,11 +181,13 @@ def plot_figure_4(physical_file=phys_soundings, model='LR',
                  hist_kws={"linewidth": 1, "alpha": 0.5, "color": "k"})
     axin1.yaxis.tick_right()
     rmean = np.mean(resid)
-    rmse = np.sqrt(mean_squared_error(predict, y))
+    rmse = np.sqrt(mean_squared_error(y, predict))
+    r2 = r2_score(y, predict)
     axin1.axvline(rmean, color='r', linestyle='dashed', linewidth=1)
     # axin1.set_xlabel('Residual distribution[K]')
     textstr = '\n'.join(['n={}'.format(pds.Ts.size),
-                         'RMSE: ', '{:.2f} K'.format(rmse)])
+                         'RMSE: ', '{:.2f} K'.format(rmse),
+                         r'R$^2$: {:.2f}'.format(r2)])
     props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
     axin1.text(0.05, 0.95, textstr, transform=axin1.transAxes, fontsize=10,
                verticalalignment='top', bbox=props)
@@ -174,9 +203,11 @@ def plot_figure_4(physical_file=phys_soundings, model='LR',
 
 
 def plot_figure_5(physical_file=phys_soundings, station='tela',
-                  times=['2007', '2019']):
+                  times=['2007', '2019'], wv_name='pw'):
+    """plot the PW of Bet-dagan vs. PW of gps station"""
     from PW_stations import mean_zwd_over_sound_time
     from sklearn.metrics import mean_squared_error
+    from sklearn.metrics import r2_score
     import matplotlib.pyplot as plt
     import seaborn as sns
     import numpy as np
@@ -200,8 +231,12 @@ def plot_figure_5(physical_file=phys_soundings, station='tela',
                     ax=ax)
     ax.plot(ds[tpw], ds[tpw], c='r')
     ax.legend(['y = x'], loc='upper right')
-    ax.set_xlabel('Total Precipitable Water from Bet-Dagan [mm]')
-    ax.set_ylabel('Total Precipitable Water from TELA GPS station [mm]')
+    if wv_name == 'pw':
+        ax.set_xlabel('PW from Bet-Dagan [mm]')
+        ax.set_ylabel('PW from TELA GPS station [mm]')
+    elif wv_name == 'iwv':
+        ax.set_xlabel(r'IWV from Bet-dagan station [kg$\cdot$m$^{-2}$]')
+        ax.set_ylabel(r'IWV from TELA GPS station [kg$\cdot$m$^{-2}$]')
     ax.grid()
     axin1 = inset_axes(ax, width="40%", height="40%", loc=2)
     resid = ds.tela_pw.values - ds[tpw].values
@@ -210,12 +245,20 @@ def plot_figure_5(physical_file=phys_soundings, station='tela',
                  hist_kws={"linewidth": 1, "alpha": 0.5, "color": "k"})
     axin1.yaxis.tick_right()
     rmean = np.mean(resid)
-    rmse = np.sqrt(mean_squared_error(ds.tela_pw.values, ds[tpw].values))
+    rmse = np.sqrt(mean_squared_error(ds[tpw].values, ds.tela_pw.values))
+    r2 = r2_score(ds[tpw].values, ds.tela_pw.values)
     axin1.axvline(rmean, color='r', linestyle='dashed', linewidth=1)
     # axin1.set_xlabel('Residual distribution[mm]')
-    textstr = '\n'.join(['n={}'.format(ds[tpw].size),
-                         'bias: {:.2f} mm'.format(rmean),
-                         'RMSE: {:.2f} mm'.format(rmse)])
+    if wv_name == 'pw':
+        textstr = '\n'.join(['n={}'.format(ds[tpw].size),
+                             'bias: {:.2f} mm'.format(rmean),
+                             'RMSE: {:.2f} mm'.format(rmse),
+                             r'R$^2$: {:.2f}'.format(r2)])
+    elif wv_name == 'iwv':
+        textstr = '\n'.join(['n={}'.format(ds[tpw].size),
+                             r'bias: {:.2f} kg$\cdot$m$^{{-2}}$'.format(rmean),
+                             r'RMSE: {:.2f} kg$\cdot$m$^{{-2}}$'.format(rmse),
+                             r'R$^2$: {:.2f}'.format(r2)])
     props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
     axin1.text(0.05, 0.95, textstr, transform=axin1.transAxes, fontsize=10,
                verticalalignment='top', bbox=props)
@@ -412,7 +455,8 @@ def plot_figure_8(ims_path=ims_path, dt='2013-10-19T22:00:00'):
     return ax_lapse
 
 
-def plot_figure_9(hydro_path=hydro_path, gis_path=gis_path):
+def plot_figure_9(hydro_path=hydro_path, gis_path=gis_path, pw_anom=False,
+                  max_flow_thresh=None, wv_name='pw'):
     from hydro_procedures import get_hydro_near_GNSS
     from hydro_procedures import loop_over_gnss_hydro_and_aggregate
     import matplotlib.pyplot as plt
@@ -421,8 +465,8 @@ def plot_figure_9(hydro_path=hydro_path, gis_path=gis_path):
         hydro_path=hydro_path,
         gis_path=gis_path,
         plot=False)
-    ds = loop_over_gnss_hydro_and_aggregate(df, pw_anom=False,
-                                            max_flow_thresh=None,
+    ds = loop_over_gnss_hydro_and_aggregate(df, pw_anom=pw_anom,
+                                            max_flow_thresh=max_flow_thresh,
                                             hydro_path=hydro_path,
                                             work_yuval=work_yuval, ndays=3,
                                             plot=False, plot_all=False)
@@ -432,7 +476,6 @@ def plot_figure_9(hydro_path=hydro_path, gis_path=gis_path):
         ds.mean('station').mean('tide_start')[name].plot.line(
             marker='.', linewidth=0., ax=ax)
     ax.set_xlabel('Days before tide event')
-    ax.set_ylabel('PW [mm]')
     ax.grid()
     hstations = [ds[x].attrs['hydro_stations'] for x in ds.data_vars]
     events = [ds[x].attrs['total_events'] for x in ds.data_vars]
@@ -443,6 +486,17 @@ def plot_figure_9(hydro_path=hydro_path, gis_path=gis_path):
     labels = [item.get_text() for item in ax.get_xticklabels()]
     xlabels = [x.replace('−', '') for x in labels]
     ax.set_xticklabels(xlabels)
+    fig.canvas.draw()
+    if wv_name == 'pw':
+        if pw_anom:
+            ax.set_ylabel('PW anomalies [mm]')
+        else:
+            ax.set_ylabel('PW [mm]')
+    elif wv_name == 'iwv':
+        if pw_anom:
+            ax.set_ylabel(r'IWV anomalies [kg$\cdot$m$^{-2}$]')
+        else:
+            ax.set_ylabel(r'IWV [kg$\cdot$m$^{-2}$]')
     fig.tight_layout()
 #    if pw_anom:
 #        title = 'Mean PW anomalies for tide stations near all GNSS stations'
