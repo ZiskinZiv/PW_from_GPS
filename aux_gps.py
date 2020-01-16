@@ -23,7 +23,7 @@ def multi_time_coord_slice(min_time, max_time, freq='5T', time_dim='time',
             pd.date_range(
                     start=min_time[i],
                     end=max_time[i],
-                    freq='5T') for i in range(
+                    freq=freq) for i in range(
                             len(min_time))]
     dates = [pd.Series(np.ones(dates[i].shape, dtype=int) * i, index=dates[i]) for i in range(len(dates))]
     dates = pd.concat(dates)
