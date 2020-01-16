@@ -97,6 +97,20 @@ def calculate_Tm_from_era5(path=era5_path, Tfile='era5_T_israel*.nc',
     return Tm
 
 
+def calculate_pw_from_physical_with_params(temp, rh, press, height, **params):
+    """calculate the pw from radiosonde temp, rh, press, height, params are
+    kwargs that hold the parameters for scaling the temp, rh, press, etc.."""
+    import numpy as np
+    dewpt = dewpoint_rh(temp, rh)
+    wvpress = VaporPressure(dewpt, units='hPa', method='Buck')
+    mixratio = MixRatio(wvpress, press)  # both in hPa
+    # Calculate density of air (accounting for moisture)
+    rho = DensHumid(temp, press, wvpress, out='both')
+    specific_humidity = (mixratio / 1000.0) / (1 + 0.001 * mixratio / 1000.0)
+    pw = np.trapz(specific_humidity * rho, height)
+    return pw
+
+
 def evaluate_sin_to_tmsearies(
         da,
         time_dim='time',
@@ -270,12 +284,7 @@ def read_all_physical_radiosonde(path, savepath=None, lower_cutoff=None,
     from aux_gps import path_glob
     import xarray as xr
     ds_list = []
-    ds_extra_list = []
-#    sound_list = []
-#    tpw_list = []
-#    cloud_list = []
-#    dt_range_list = []
-#    tm_list = []
+    # ds_extra_list = []
     if lower_cutoff is not None:
         print('applying lower cutoff at {} meters for PW and Tm calculations.'.format(int(lower_cutoff)))
     if upper_cutoff is not None:
@@ -291,28 +300,16 @@ def read_all_physical_radiosonde(path, savepath=None, lower_cutoff=None,
             date = ds['sound_time'].dt.strftime('%Y-%m-%d %H:%M').values
             if verbose:
                 print('reading {} physical radiosonde report'.format(date))
-            ds_with_time_dim = [x for x in ds.data_vars if 'time' in ds[x].dims]
-            ds_list.append(ds[ds_with_time_dim])
-            ds_extra = [x for x in ds.data_vars if 'time' not in ds[x].dims]
-            ds_extra_list.append(ds[ds_extra])
-#            sound_list.append(ds['sound_time'])
-#            tpw_list.append(ds['tpw'])
-#            cloud_list.append(ds['cloud_code'])
-#            dt_range_list.append(ds['dt_range'])
-#            tm_list.append(ds['tm'])
-#            ds_list.append(ds.drop(['tpw', 'cloud_code', 'sound_time',
-#                                    'dt_range', 'tm']))
-    dss = xr.concat(ds_list, 'time')
-    dss_extra = xr.concat(ds_extra_list, 'sound_time')
-#    cloud = xr.concat(cloud_list, 'sound_time')
-#    tm = xr.concat(tm_list, 'sound_time')
-#    dt_range = xr.DataArray(dt_range_list, dims=['bnd', 'sound_time'])
-    dss = dss.merge(dss_extra)
-#    dss['tpw'] = tpw
-#    dss['tm'] = tm
-#    dss['cloud_code'] = cloud
-#    dss['sound_time'] = sound_list
-#    dss['dt_range'] = dt_range
+            # ds_with_time_dim = [x for x in ds.data_vars if 'time' in ds[x].dims]
+            # ds_list.append(ds[ds_with_time_dim])
+            ds_list.append(ds)
+            # ds_extra = [x for x in ds.data_vars if 'time' not in ds[x].dims]
+            # ds_extra_list.append(ds[ds_extra])
+
+    # dss = xr.concat(ds_list, 'time')
+    dss = xr.concat(ds_list, 'sound_time')
+    # dss_extra = xr.concat(ds_extra_list, 'sound_time')
+    # dss = dss.merge(dss_extra)
     if lower_cutoff is not None:
         dss['Tpw'].attrs['lower_cutoff'] = lower_cutoff
         dss['Tm'].attrs['lower_cutoff'] = lower_cutoff
