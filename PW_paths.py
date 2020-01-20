@@ -17,6 +17,7 @@ if platform.system() == 'Linux':
         geo_path = Path('/home/ziskin/geo_ariel_home/')
         adams_path = Path('/home/ziskin/adams_home/')
         data11_path = Path('/home/ziskin/data11/')
+        savefig_path = Path('/home/ziskin/Pictures')
     elif platform.node() == 'shlomipc':
         work_path = Path('/mnt/DATA/Work_Files/')
         work_yuval = work_path / 'PW_yuval'
@@ -25,6 +26,7 @@ if platform.system() == 'Linux':
         geo_path = Path('/home/shlomi/geo_ariel_home/')
         adams_path = Path('/home/shlomi/adams_home/')
         data11_path = Path('/home/shlomi/data11/')
+        savefig_path = Path('/home/shlomi/Pictures')
     elif platform.node() == 'geophysics1.yosh.ac.il':
         work_path = Path('/home/ziskin/Work_Files/')
         work_yuval = work_path / 'PW_yuval'
@@ -48,3 +50,4 @@ elif platform.system() == 'Darwin':
         geo_path = Path('/Users/shlomi/geo_ariel_home/')
         adams_path = Path('/Users/shlomi/adams_home/')
         data11_path = Path('/Users/shlomi/data11/')
+        savefig_path = Path('/Users/shlomi/Pictures')
