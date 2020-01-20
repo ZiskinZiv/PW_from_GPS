@@ -44,7 +44,7 @@ def plot_figure_1(path=work_yuval, save=True):
     title = 'RINEX files availability for the Israeli GNSS stations'
     ax = gantt_chart(ds, fw='normal', title='')
     filename = 'rinex_israeli_gnss.png'
-    caption('RINEX files availability for the Israeli GNSS station network')
+    caption('RINEX files availability for the Israeli GNSS station network at the SOPAC/GARNER website')
     if save:
         plt.savefig(savefig_path / filename, bbox_inches='tight')
     return ax
@@ -77,7 +77,7 @@ def plot_figure_2(path=tela_results_path, plot='WetZ', save=True):
     ax.grid('on')
     fig.tight_layout()
     filename = 'wetz_tela_daily.png'
-    caption('{} from station TELA in {}'.format(
+    caption('{} from station TELA in {}. Note the error estimation from the GipsyX software(filled)'.format(
             desc, df.index[100].strftime('%Y-%m-%d')))
     if save:
         plt.savefig(savefig_path / filename, bbox_inches='tight')
