@@ -8,6 +8,9 @@ Created on Fri Jan  3 17:28:04 2020
 from PW_paths import work_yuval
 from matplotlib import rcParams
 import seaborn as sns
+from pathlib import Path
+import matplotlib.pyplot as plt
+from PW_paths import savefig_path
 tela_results_path = work_yuval / 'GNSS_stations/tela/rinex/30hr/results'
 tela_solutions = work_yuval / 'GNSS_stations/tela/gipsyx_solutions'
 sound_path = work_yuval / 'sounding'
@@ -15,6 +18,7 @@ phys_soundings = sound_path / 'bet_dagan_phys_sounding_2007-2019.nc'
 ims_path = work_yuval / 'IMS_T'
 gis_path = work_yuval / 'gis'
 hydro_path = work_yuval / 'hydro'
+
 rc = {
     'font.family': 'serif',
     'xtick.labelsize': 'medium',
@@ -24,18 +28,29 @@ for key, val in rc.items():
 sns.set(rc=rc, style='white')
 
 
-def plot_figure_1(path=work_yuval):
+def caption(text, color='blue', **kwargs):
+    from termcolor import colored
+    print(colored('Caption:', color, attrs=['bold'], **kwargs))
+    print(colored(text, color, attrs=['bold'], **kwargs))
+    return
+
+
+def plot_figure_1(path=work_yuval, save=True):
     from aux_gps import gantt_chart
     import xarray as xr
     ds = xr.open_dataset(path / 'GNSS_PW.nc')
     just_pw = [x for x in ds if 'error' not in x]
     ds = ds[just_pw]
     title = 'RINEX files availability for the Israeli GNSS stations'
-    ax = gantt_chart(ds, fw='normal', title=title)
+    ax = gantt_chart(ds, fw='normal', title='')
+    filename = 'rinex_israeli_gnss.png'
+    caption('RINEX files availability for the Israeli GNSS station network')
+    if save:
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
     return ax
 
 
-def plot_figure_2(path=tela_results_path, plot='WetZ'):
+def plot_figure_2(path=tela_results_path, plot='WetZ', save=True):
     from aux_gps import path_glob
     import matplotlib.pyplot as plt
     from gipsyx_post_proc import process_one_day_gipsyx_output
@@ -55,17 +70,22 @@ def plot_figure_2(path=tela_results_path, plot='WetZ'):
     ax.fill_between(df.index, df[plot] - df[error_plot],
                     df[plot] + df[error_plot], alpha=0.5)
     ax.grid()
-    ax.set_title('{} from station TELA in {}'.format(
-            desc, df.index[100].strftime('%Y-%m-%d')))
+#    ax.set_title('{} from station TELA in {}'.format(
+#            desc, df.index[100].strftime('%Y-%m-%d')))
     ax.set_ylabel('WetZ [{}]'.format(unit))
     ax.set_xlabel('')
     ax.grid('on')
     fig.tight_layout()
+    filename = 'wetz_tela_daily.png'
+    caption('{} from station TELA in {}'.format(
+            desc, df.index[100].strftime('%Y-%m-%d')))
+    if save:
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
     return ax
 
 
 def plot_figure_3(path=tela_solutions, year=2004, field='WetZ',
-                  middle_date='11-25', zooms=[10, 3, 0.5]):
+                  middle_date='11-25', zooms=[10, 3, 0.5], save=True):
     from gipsyx_post_proc import analyse_results_ds_one_station
     import xarray as xr
     import matplotlib.pyplot as plt
@@ -102,6 +122,10 @@ def plot_figure_3(path=tela_solutions, year=2004, field='WetZ',
     #     '30 hours stitched {} for GNSS station {}'.format(
     #         desc, sta), fontweight='bold')
     fig.tight_layout()
+    caption('20, 6 and 1 days of zenith wet delay in 2004 from the TELA GNSS station for the top, middle and bottom figures respectively. The colored segments represent daily solutions while the black dots represent smoothed mean solutions.')
+    filename = 'zwd_tela_discon_panel.png'
+    if save:
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
     # fig.subplots_adjust(top=0.95)
     return axes
 
@@ -130,7 +154,7 @@ def plot_figure_3_1(path=work_yuval, data='zwd'):
 
 
 def plot_figure_4(physical_file=phys_soundings, model='LR',
-                  times=['2007', '2019']):
+                  times=['2007', '2019'], save=True):
     """plot ts-tm relashonship"""
     import xarray as xr
     import matplotlib.pyplot as plt
@@ -199,11 +223,15 @@ def plot_figure_4(physical_file=phys_soundings, model='LR',
 #               transform=axin1.transAxes, color='k', fontsize=10)
     axin1.set_xlim(-15, 15)
     fig.tight_layout()
+    filename = 'Bet_dagan_ts_tm_fit.png'
+    caption('Water vapor mean temperature (Tm) vs. surface temperature (Ts) of the Bet-dagan radiosonde station. Ordinary least squares linear fit(red) yields the residual distribution with RMSE of 4 K. Bevis(1992) model is plotted(purple) for comparison.')
+    if save:
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
     return
 
 
 def plot_figure_5(physical_file=phys_soundings, station='tela',
-                  times=['2007', '2019'], wv_name='pw'):
+                  times=['2007', '2019'], wv_name='pw', r2=False, save=True):
     """plot the PW of Bet-dagan vs. PW of gps station"""
     from PW_stations import mean_zwd_over_sound_time
     from sklearn.metrics import mean_squared_error
@@ -246,19 +274,29 @@ def plot_figure_5(physical_file=phys_soundings, station='tela',
     axin1.yaxis.tick_right()
     rmean = np.mean(resid)
     rmse = np.sqrt(mean_squared_error(ds[tpw].values, ds.tela_pw.values))
-    r2 = r2_score(ds[tpw].values, ds.tela_pw.values)
+    r2s = r2_score(ds[tpw].values, ds.tela_pw.values)
     axin1.axvline(rmean, color='r', linestyle='dashed', linewidth=1)
     # axin1.set_xlabel('Residual distribution[mm]')
     if wv_name == 'pw':
-        textstr = '\n'.join(['n={}'.format(ds[tpw].size),
-                             'bias: {:.2f} mm'.format(rmean),
-                             'RMSE: {:.2f} mm'.format(rmse),
-                             r'R$^2$: {:.2f}'.format(r2)])
+        if r2:
+            textstr = '\n'.join(['n={}'.format(ds[tpw].size),
+                                 'bias: {:.2f} mm'.format(rmean),
+                                 'RMSE: {:.2f} mm'.format(rmse),
+                                 r'R$^2$: {:.2f}'.format(r2s)])
+        else:
+            textstr = '\n'.join(['n={}'.format(ds[tpw].size),
+                                 'bias: {:.2f} mm'.format(rmean),
+                                 'RMSE: {:.2f} mm'.format(rmse)])
     elif wv_name == 'iwv':
-        textstr = '\n'.join(['n={}'.format(ds[tpw].size),
-                             r'bias: {:.2f} kg$\cdot$m$^{{-2}}$'.format(rmean),
-                             r'RMSE: {:.2f} kg$\cdot$m$^{{-2}}$'.format(rmse),
-                             r'R$^2$: {:.2f}'.format(r2)])
+        if r2:
+            textstr = '\n'.join(['n={}'.format(ds[tpw].size),
+                                 r'bias: {:.2f} kg$\cdot$m$^{{-2}}$'.format(rmean),
+                                 r'RMSE: {:.2f} kg$\cdot$m$^{{-2}}$'.format(rmse),
+                                 r'R$^2$: {:.2f}'.format(r2s)])
+        else:
+            textstr = '\n'.join(['n={}'.format(ds[tpw].size),
+                                 r'bias: {:.2f} kg$\cdot$m$^{{-2}}$'.format(rmean),
+                                 r'RMSE: {:.2f} kg$\cdot$m$^{{-2}}$'.format(rmse)])
     props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
     axin1.text(0.05, 0.95, textstr, transform=axin1.transAxes, fontsize=10,
                verticalalignment='top', bbox=props)
@@ -274,12 +312,16 @@ def plot_figure_5(physical_file=phys_soundings, station='tela',
 #               transform=axin1.transAxes, color='k', fontsize=10)
     # fig.suptitle('Precipitable Water comparison for the years {} to {}'.format(*times))
     fig.tight_layout()
+    caption('PW from TELA GNSS station vs. PW from Bet-dagan radiosonde station in {}-{}. A 45 degree line is plotted(red) for comparison. Note the skew in the residual distribution with an RMSE of 4.37 mm.'.format(times[0], times[1]))
     # fig.subplots_adjust(top=0.95)
+    filename = 'Bet_dagan_tela_pw_compare_{}-{}.png'.format(times[0], times[1])
+    if save:
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
     return ds
 
 
 def plot_figure_6(physical_file=phys_soundings, station='tela',
-                  times=['2007', '2019']):
+                  times=['2007', '2019'], save=True):
     from PW_stations import mean_zwd_over_sound_time
     import matplotlib.pyplot as plt
     import seaborn as sns
@@ -337,6 +379,10 @@ def plot_figure_6(physical_file=phys_soundings, station='tela',
     # axes[1].set_aspect(3)
     plt.tight_layout()
     plt.subplots_adjust(wspace=0, hspace=0.01)
+    filename = 'Bet_dagan_tela_zwd_compare.png'
+    caption('Top: zenith wet delay from Bet-dagan radiosonde station(blue circles) and from TELA GNSS station(orange x) in 2007-2019. Bottom: residuals. Note the residuals become constrained from 08-2013 probebly due to an equipment change.')
+    if save:
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
     return df
 
 
@@ -359,7 +405,7 @@ def plot_israel_map(gis_path=gis_path, rc=rc):
     return ax
 
 
-def plot_figure_7(gis_path=gis_path):
+def plot_figure_7(gis_path=gis_path, save=True):
     from PW_stations import produce_geo_gnss_solved_stations
     from aux_gps import geo_annotate
     from ims_procedures import produce_geo_ims
@@ -391,10 +437,14 @@ def plot_figure_7(gis_path=gis_path):
     plt.legend(['IMS stations', 'GNSS stations'], loc='upper left')
     plt.tight_layout()
     plt.subplots_adjust(bottom=0.05)
+    caption('24 GNSS stations from the israeli network(green) and 88 IMS 10 mins automated stations(red).')
+    filename = 'gnss_ims_stations_map.png'
+    if save:
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
     return ax
 
 
-def plot_figure_8(ims_path=ims_path, dt='2013-10-19T22:00:00'):
+def plot_figure_8(ims_path=ims_path, dt='2013-10-19T22:00:00', save=True):
     from aux_gps import path_glob
     import xarray as xr
     import matplotlib.pyplot as plt
@@ -452,11 +502,15 @@ def plot_figure_8(ims_path=ims_path, dt='2013-10-19T22:00:00'):
     ax_lapse.grid()
     # ax_lapse.set_title(suptitle, fontsize=14, fontweight='bold')
     fig.tight_layout()
+    filename = 'ims_lapse_rate_example.png'
+    caption('Temperature vs. altitude for 10 PM in 2013-10-19 for all automated 10 mins IMS stations. The lapse rate is calculated using ordinary least squares linear fit.')
+    if save:
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
     return ax_lapse
 
 
 def plot_figure_9(hydro_path=hydro_path, gis_path=gis_path, pw_anom=False,
-                  max_flow_thresh=None, wv_name='pw'):
+                  max_flow_thresh=None, wv_name='pw', save=True):
     from hydro_procedures import get_hydro_near_GNSS
     from hydro_procedures import loop_over_gnss_hydro_and_aggregate
     import matplotlib.pyplot as plt
@@ -505,5 +559,15 @@ def plot_figure_9(hydro_path=hydro_path, gis_path=gis_path, pw_anom=False,
 #    if max_flow_thresh is not None:
 #        title += ' (max_flow > {} m^3/sec)'.format(max_flow_thresh)
 #    ax.set_title(title)
+    if pw_anom:
+        filename = 'hydro_tide_lag_pw_anom.png'
+        if max_flow_thresh:
+            filename = 'hydro_tide_lag_pw_anom_max{}.png'.format(max_flow_thresh)
+    else:
+        filename = 'hydro_tide_lag_pw.png'
+        if max_flow_thresh:
+            filename = 'hydro_tide_lag_pw_anom_max{}.png'.format(max_flow_thresh)
+    if save:
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
     return ax
 
