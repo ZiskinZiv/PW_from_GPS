@@ -10,7 +10,8 @@ def read_ionex_file(file):
     import pandas as pd
     df_sat = pd.read_csv(file, skiprows=48, nrows=32,
                          header=None, delim_whitespace=True)
-    df_stations = pd.read_fwf(file, skiprows=80, nrows=50, header=None, widths=[20, 10, 10, 10])
+    df_stations = pd.read_fwf(file, skiprows=80, nrows=50, header=None,
+                              widths=[20, 10, 10, 10])
     return df_sat, df_stations
 
 def read_one_sinex(file):
