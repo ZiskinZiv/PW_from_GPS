@@ -33,6 +33,7 @@ def _read_ionex_header(filep):
     """
 
     filep.seek(0)
+    dcb_list = []
     for line in filep:
         if "END OF HEADER" in line:
             break
@@ -57,7 +58,8 @@ def _read_ionex_header(filep):
                 (float(i) for i in stripped.split()[:3])
         if stripped.endswith("OF MAPS IN FILE"):
             ntimes = int(stripped.split()[0])
-
+        if stripped.endswith("PRN / BIAS / RMS"):
+            dcb_list.append(stripped.split()[0: 3])
     lonarray = np.arange(start_lon, end_lon + step_lon, step_lon)
     latarray = np.arange(start_lat, end_lat + step_lat, step_lat)
     dtime = endtime - starttime
@@ -78,7 +80,7 @@ def _read_ionex_header(filep):
         + starttime.minute/60.\
         + starttime.second/3600.
 
-    return exponent, lonarray, latarray, timearray
+    return exponent, lonarray, latarray, timearray, dcb_list
 
 
 def read_tec(filename, _use_filter=None):
@@ -97,7 +99,7 @@ def read_tec(filename, _use_filter=None):
             longitude, latitude and time array
     """
     ionex_file = open(filename, "r")
-    exponent, lonarray, latarray, timearray = _read_ionex_header(ionex_file)
+    exponent, lonarray, latarray, timearray, dcb_list = _read_ionex_header(ionex_file)
     logging.info("reading data with shapes %d  x %d x %d",
                  timearray.shape[0],
                  latarray.shape[0],
@@ -146,7 +148,7 @@ def read_tec(filename, _use_filter=None):
     if not _use_filter is None:
         tecarray = myfilter.gaussian_filter(
             tecarray, _use_filter, mode='nearest')
-    return tecarray, rmsarray, lonarray, latarray, timearray
+    return tecarray, rmsarray, lonarray, latarray, timearray, dcb_list
 
 
 def readTEC(filename, use_filter=None):
