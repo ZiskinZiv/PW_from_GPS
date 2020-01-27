@@ -76,7 +76,7 @@ def compute_via_p(p1, p2, f1, f2, dcb_sat=None, dcb_station=None):
     if dcb_station is None and dcb_sat is None:
         tec = tec_factor(f1, f2) * (p2 - p1)
     else:
-        tec = tec_factor(f1, f2) * (p2 - p1)
+        tec = tec_factor(f1, f2) * (p2 - p1 + dcb_sat + dcb_station)
 
     return tec
 
