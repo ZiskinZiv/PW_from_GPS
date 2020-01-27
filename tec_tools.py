@@ -5,6 +5,141 @@ Created on Thu Jan 23 14:04:48 2020
 
 @author: ziskin
 """
+from PW_paths import work_yuval
+# frequencies, Hz for GPS sat system:
+F1 = 1575.42 * 1e6
+F2 = 1227.60 * 1e6
+F5 = 1176.45 * 1e6
+speed_of_light = 299792458  # m/s
+
+
+def compute_stec(rinex_ds, sat='GPS', station='bshm'):
+    import xarray as xr
+    sat_dict = dict(rinex_ds.attrs['satellite system identifier'])
+    sat_id = sat_dict.get(sat)
+    sat_grp = [x for x in rinex_ds.sv.values if sat_id in x]
+    rinex = rinex_ds.sel(sv=sat_grp)
+    ionex = read_ionex_xr(plot=None)
+    # dcb station in meters:
+    dcb_st = ionex.station_bias.sel(station=station) * 1e-9 * speed_of_light
+    # dcb sat in meters:
+    dcb_sat = ionex.bias * 1e-9 * speed_of_light
+    tec_list = []
+    for sat in sat_grp:
+        tec = compute_via_p(
+            rinex.P1.sel(
+                sv=sat), rinex.P2.sel(
+                    sv=sat), F1, F2, dcb_sat.sel(
+                        sv=sat), dcb_st)
+        tec_list.append(tec)
+    rinex['tec_p1p2'] = xr.concat(tec_list, 'sv')
+    # rinex['tec_p1p2'] = compute_via_p(rinex.P1, rinex.P2, F1, F2)
+    rinex['tec_p1p2'].attrs['name'] = 'tec from P1 and P2'
+    rinex['tec_p1p2'].attrs['unit'] = 'TECU'
+    rinex['tec_l1l2'] = compute_via_l(rinex.L1, rinex.L2, F1, F2, speed_of_light)
+    rinex['tec_l1l2'].attrs['name'] = 'tec from L1 and L2'
+    rinex['tec_l1l2'].attrs['unit'] = 'TECU'
+    rinex['tec_l1c1'] = compute_via_l1_c1(rinex.L1, rinex.C1, F1, speed_of_light)
+    rinex['tec_l1c1'].attrs['name'] = 'tec from L1 and C1'
+    rinex['tec_l1c1'].attrs['unit'] = 'TECU'
+    return rinex
+
+
+def tec_factor(f1, f2):
+    """tec_factor(f1, f2) -> the factor
+    TEC factor to calculate TEC, TECU.
+    Parameters
+    ----------
+    f1 : float
+    f2 : float
+    Returns
+    -------
+    factor : float
+    """
+    return (1 / 40.308) * (f1 ** 2 * f2 ** 2) / (f1 ** 2 - f2 ** 2) * 1.0e-16
+
+
+def compute_via_p(p1, p2, f1, f2, dcb_sat=None, dcb_station=None):
+    """compute_via_p(p1, p2, f1, f2) -> tec
+    calculate a TEC value using pseudorange data.
+    Parameters
+    ----------
+    p1 : float
+        f1 pseudorange value, meters
+    p2 : float
+        f2 pseudorange value, meters
+    f1 : float
+        f1 frequency, Hz
+    f2 : float
+        f2 frequency, Hz
+    """
+    if dcb_station is None and dcb_sat is None:
+        tec = tec_factor(f1, f2) * (p2 - p1)
+    else:
+        tec = tec_factor(f1, f2) * (p2 - p1)
+
+    return tec
+
+
+def compute_via_l(l1, l2, f1, f2, C, l0=0):
+    """compute_via_l(l1, l2, l0, f1, f2) -> tec
+    reconstruct a TEC value using phase data.
+    Parameters
+    ----------
+    l1 : float
+        f1 phase value, whole cycles
+    l2 : float
+        f2 phase value, whole cycles
+    f1 : float
+        f1 frequency, Hz
+    f2 : float
+        f2 frequency, Hz
+    l0 : float
+        initial phase, Hz; default = 0
+    """
+
+    # c/f = λ
+    tec = tec_factor(f1, f2) * (C / f1 * l1 - C / f2 * l2) - l0
+
+    return tec
+
+
+def compute_via_l1_c1(l1, c1, f1, C):
+    """compute_via_l1_c1(l1, c1, f1) -> tec:
+    reconstruct a TEC value using pseudorange and phase data (f1).
+    Parameters
+    ----------
+    l1 : float
+        f1 phase, whole cycles
+    c1 : float
+        f1 pseudorange (C/A-code), meters
+    f1 : float
+        f1 frequency value, Hz
+    """
+
+    tec = 0.5 * f1 ** 2 / 40.308 * (c1 - l1 * C / f1) * 1.0e-16
+
+    return tec
+
+
+def get_rinex_obs_with_attrs(filepath=work_yuval/'bshm0210.20o'):
+    import georinex as gr
+    from aux_gps import get_timedate_and_station_code_from_rinex
+    ds = gr.load(filepath)
+    dt, station = get_timedate_and_station_code_from_rinex(ds.attrs['filename'])
+    ds.attrs['starting datetime'] = dt
+    ds.attrs['station'] = station
+    ssi = {'GPS': 'G', 'GLONASS': 'R', 'SBAS_payload': 'S', 'Galileo': 'E',
+           'Compass': 'C'}
+    ssi_list = list(ssi.items())
+    ds.attrs['satellite system identifier'] = ssi_list
+    names = {'P': 'pseudorange value', 'C': 'pseudorange value',
+             'L': 'carrier phase value', 'S': 'raw signal strength value'}
+    units = {'P': 'm', 'C': 'm', 'L': 'full cycles', 'S': 'dbHz'}
+    for da in ds.data_vars.keys():
+        ds[da].attrs['name'] = names.get(da[0])
+        ds[da].attrs['unit'] = units.get(da[0])
+    return ds
 
 
 def add_horizontal_colorbar(fg_obj, rect=[0.1, 0.1, 0.8, 0.025], cbar_kwargs_dict=None):
@@ -30,19 +165,26 @@ def get_dt_from_single_ionex(ionex_str):
     return dt, code
 
 
-def read_ionex_xr(file, plot='every_hour', extent=None):
+def read_ionex_xr(filepath=work_yuval/'uqrg0210.20i', plot='every_hour',
+                  extent=None):
     from getIONEX import read_tec
     import cartopy.crs as ccrs
     import xarray as xr
     import pandas as pd
-    dt, code = get_dt_from_single_ionex(file.as_posix().split('/')[-1])
-    tecarray, rmsarray, lonarray, latarray, timearray, dcb_list = read_tec(file)
-    bias = xr.DataArray([float(x[1]) for x in dcb_list], dims=['prn'])
-    bias_rms = xr.DataArray([float(x[2]) for x in dcb_list], dims=['prn'])
-    prn = [x[0] for x in dcb_list]
+    dt, code = get_dt_from_single_ionex(filepath.as_posix().split('/')[-1])
+    tecarray, rmsarray, lonarray, latarray, timearray, dcb_list, sta_list = read_tec(
+            filepath)
+    station = [x[0] for x in sta_list]
+    st_bias = xr.DataArray([float(x[1]) for x in sta_list], dims=['station'])
+    st_rms = xr.DataArray([float(x[2]) for x in sta_list], dims=['station'])
+    bias = xr.DataArray([float(x[1]) for x in dcb_list], dims=['sv'])
+    bias_rms = xr.DataArray([float(x[2]) for x in dcb_list], dims=['sv'])
+    sv = ['G{}'.format(x[0]) for x in dcb_list]
     tec = xr.DataArray(tecarray, dims=['time', 'lat', 'lon'])
-    tec_ds = tec.to_dataset(name='tec')
-    tec_ds['tec_rms'] = xr.DataArray(rmsarray, dims=['time', 'lat', 'lon'])
+    tec_ds = tec.to_dataset(name='tec') * 10.0
+    tec_ds['tec_rms'] = xr.DataArray(rmsarray, dims=['time', 'lat', 'lon']) * 10.0
+    tec_ds['tec'].attrs['unit'] = 'TECU'
+    tec_ds['tec_rms'].attrs['unit'] = 'TECU'
     tec_ds['lat'] = latarray
     tec_ds['lon'] = lonarray
     time = [pd.Timedelta(x, unit='H') for x in timearray]
@@ -50,8 +192,15 @@ def read_ionex_xr(file, plot='every_hour', extent=None):
     tec_ds['time'] = time
     tec_ds = tec_ds.sortby('lat')
     tec_ds['bias'] = bias
+    tec_ds['bias'].attrs['unit'] = 'ns'
     tec_ds['bias_rms'] = bias_rms
-    tec_ds['prn'] = prn
+    tec_ds['bias_rms'].attrs['unit'] = 'ns'
+    tec_ds['sv'] = sv
+    tec_ds['station_bias'] = st_bias
+    tec_ds['station_bias'].attrs['unit'] = 'ns'
+    tec_ds['station_bias_rms'] = st_rms
+    tec_ds['station_bias_rms'].attrs['unit'] = 'ns'
+    tec_ds['station'] = station
     if plot is not None:
         if plot == 'every_hour':
             times = tec_ds['time'].values[::4][:-1]
