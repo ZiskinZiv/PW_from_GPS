@@ -36,16 +36,22 @@ def read_ionex_xr(file, plot='every_hour', extent=None):
     import xarray as xr
     import pandas as pd
     dt, code = get_dt_from_single_ionex(file.as_posix().split('/')[-1])
-    tecarray, rmsarray, lonarray, latarray, timearray = read_tec(file)
+    tecarray, rmsarray, lonarray, latarray, timearray, dcb_list = read_tec(file)
+    bias = xr.DataArray([float(x[1]) for x in dcb_list], dims=['prn'])
+    bias_rms = xr.DataArray([float(x[2]) for x in dcb_list], dims=['prn'])
+    prn = [x[0] for x in dcb_list]
     tec = xr.DataArray(tecarray, dims=['time', 'lat', 'lon'])
     tec_ds = tec.to_dataset(name='tec')
-    tec_ds['tec_error'] = xr.DataArray(rmsarray, dims=['time', 'lat', 'lon'])
+    tec_ds['tec_rms'] = xr.DataArray(rmsarray, dims=['time', 'lat', 'lon'])
     tec_ds['lat'] = latarray
     tec_ds['lon'] = lonarray
     time = [pd.Timedelta(x, unit='H') for x in timearray]
     time = [dt + x for x in time]
     tec_ds['time'] = time
     tec_ds = tec_ds.sortby('lat')
+    tec_ds['bias'] = bias
+    tec_ds['bias_rms'] = bias_rms
+    tec_ds['prn'] = prn
     if plot is not None:
         if plot == 'every_hour':
             times = tec_ds['time'].values[::4][:-1]
