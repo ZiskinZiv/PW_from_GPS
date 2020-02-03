@@ -74,10 +74,10 @@ def plug_in_approx_loc_gnss_stations(log_path=logs_path, file_path=cwd):
     import pandas as pd
 
     def plug_loc_to_log_file(logfile, loc):
-    
+
         def replace_field(content_list, string, replacment):
             pos = [(i, x) for i, x in enumerate(content_list)
-                 if string in x][0][0]
+                   if string in x][0][0]
             con = content_list[pos].split(':')
             con[-1] = ' {}'.format(replacment)
             con = ':'.join(con)
