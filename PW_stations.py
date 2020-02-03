@@ -72,7 +72,6 @@ def produce_gnss_pw_from_era5(era5_path=era5_path,
 def plug_in_approx_loc_gnss_stations(log_path=logs_path, file_path=cwd):
     from aux_gps import path_glob
     import pandas as pd
-
     def plug_loc_to_log_file(logfile, loc):
 
         def replace_field(content_list, string, replacment):
