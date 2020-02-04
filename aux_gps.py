@@ -12,6 +12,32 @@ from PW_paths import work_yuval
 # TODO: if not, build func to replace datetimeindex to numbers and vise versa
 
 
+def compute_consecutive_events_datetimes(da_ts, time_dim='time',
+                                         minimum_epochs=10):
+    import pandas as pd
+    import xarray as xr
+    df = da_ts.notnull().to_dataframe()
+    A = consecutive_runs(df, num=False)
+    # filter out minimum consecutive epochs:
+    if minimum_epochs is not None:
+        A = A[A['total_True'] > minimum_epochs]
+    dt_min = df.iloc[A['{}_True_start'.format(da_ts.name)]].index
+    try:
+        dt_max = df.iloc[A['{}_True_end'.format(da_ts.name)]].index
+    except IndexError:
+        dt_max = df.iloc[A['{}_True_end'.format(da_ts.name)][:-1]]
+        end = pd.DataFrame(index=[df.index[-1]], data=[False],
+                           columns=[da_ts.name])
+        dt_max = dt_max.append(end)
+        dt_max = dt_max.index
+    events = []
+    for i_min, i_max in zip(dt_min, dt_max):
+        events.append(da_ts.sel({time_dim: slice(i_min, i_max)}))
+    events_da = xr.concat(events, 'event')
+    events_da['event'] = range(len(events))
+    return events_da
+
+
 def multi_time_coord_slice(min_time, max_time, freq='5T', time_dim='time',
                            name='general_group'):
     """returns a datetimeindex array of the multi-time-coords slice defined by
