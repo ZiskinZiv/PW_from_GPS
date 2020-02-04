@@ -14,11 +14,84 @@ F5 = 1176.45 * 1e6
 speed_of_light = 299792458  # m/s
 
 
+def assemble_epochs_arcs_stec(stec):
+    # input is stec['tec_p4'].sel(sv='G01')
+    from aux_gps import compute_consecutive_events_datetimes
+    import pandas as pd
+    stec_events = compute_consecutive_events_datetimes(stec.reset_coords(drop=True))
+    stec_no_time = stec_events.to_dataset('event').drop('time')
+    series_list = [pd.Series(stec_no_time[x].dropna('time').values) for x in
+                   stec_no_time.data_vars]
+    da = pd.DataFrame(series_list).T.to_xarray().to_array('arc')
+    da = da.rename({'index': 'epoch'})
+    da.attrs = stec_events.attrs
+    return da
+
+
+def smooth_p4_one_sat(p4, l4):
+    import numpy as np
+    import xarray as xr
+    # from aux_gps import xr_reindex_with_date_range
+    p4_arcs = []
+    for arc in p4.event.values:
+        time = p4.sel(event=arc).dropna('time')['time']
+        p4_arc = p4.sel(event=arc).dropna('time').values
+        l4_arc = l4.sel(event=arc).dropna('time').values
+        epochs = len(p4_arc)
+        if epochs > 0:
+            # w = np.ones(p4_arc.shape) / np.arange(1, epochs+1)
+            p_sm = np.empty(p4_arc.shape)
+            p_sm[0] = p4_arc[0]
+            for t in np.arange(1, epochs):
+                p4_prd = p_sm[t-1] + l4_arc[t] - l4_arc[t-1]
+                w = 1.0 / (t + 1)
+                p_sm[t] = w*p4_arc[t] + (1 - w)*p4_prd
+            p_sm = xr.DataArray(p_sm, dims=['time'])
+            p_sm['time'] = time
+            p4_arcs.append(p_sm)
+    p4_smoothed_sat = xr.concat(p4_arcs, 'time')
+    # p4_smoothed_sat = xr_reindex_with_date_range(p4_smoothed_sat, freq='30S')
+    return p4_smoothed_sat
+
+
+def smooth_all_p4_in_long_term_rinex(rinex_ds, sat='GPS'):
+    from aux_gps import compute_consecutive_events_datetimes
+    import xarray as xr
+    print('smoothing all P4 in rinex dataset...')
+    sat_dict = dict(rinex_ds.attrs['satellite system identifier'])
+    sat_id = sat_dict.get(sat)
+    sat_grp = [x for x in rinex_ds.sv.values if sat_id in x]
+    rinex = rinex_ds.sel(sv=sat_grp)
+    P4 = rinex['P4'].to_dataset('sv')
+    L4 = rinex['L4'].to_dataset('sv')
+    p4_list = []
+    l4_list = []
+    for sat_num in rinex.sv.values:
+        p4_list.append(compute_consecutive_events_datetimes(P4[sat_num],
+                                                            minimum_epochs=30))
+        l4_list.append(compute_consecutive_events_datetimes(L4[sat_num],
+                                                            minimum_epochs=30))
+    P4 = xr.merge(p4_list)
+    P4.attrs['name'] = 'P4'
+    L4 = xr.merge(l4_list)
+    L4.attrs['name'] = 'L4'
+    p4_list = []
+    for p4, l4 in zip(P4.data_vars.values(), L4.data_vars.values()):
+        p4_smoothed = smooth_p4_one_sat(p4, l4)
+        p4_list.append(p4_smoothed)
+    P4_smoothed = xr.concat(p4_list, 'sv')
+    P4_smoothed['sv'] = rinex.sv
+    P4_smoothed.name = 'P4_smoothed'
+    P4_smoothed = P4_smoothed.reset_coords(drop=True).sortby('sv')
+    print('Done!')
+    return P4_smoothed
+
+
 def read_all_rinex_files_in_path(path=ionex_path):
     import xarray as xr
     from aux_gps import path_glob
     files = path_glob(path, '*.*o')
-    rnxs = [get_rinex_obs_with_attrs(x) for x in files]
+    rnxs = [read_rinex_obs_with_attrs(x) for x in files]
     rinex_ds = xr.concat(rnxs, 'time')
     rinex_ds = rinex_ds.sortby('time')
     return rinex_ds
@@ -45,23 +118,25 @@ def read_all_dcb_files_in_path(path=ionex_path, source='cddis'):
     return dcb_ds
 
 
-def compute_long_term_stec(rinex_ds, dcb_ds, sat='GPS', station='bshm'):
-    import xarray as xr
-    import pandas as pd
-    daily_stec = []
-    for day in dcb_ds.time.values:
-        day = pd.to_datetime(day).strftime('%Y-%m-%d')
-        rinex_daily = rinex_ds.sel(time=day)
-        dcb_daily = dcb_ds.sel(time=day).reset_coords(drop=True)
-        daily_stec.append(compute_daily_stec(rinex_daily, dcb_daily, sat=sat,
-                                             station=station))
-    stec_ds = xr.concat(daily_stec, 'time')
-    return stec_ds
+
+# def compute_long_term_stec(rinex_ds, dcb_ds, sat='GPS', station='bshm'):
+#     import xarray as xr
+#     import pandas as pd
+#     daily_stec = []
+#     for day in dcb_ds.time.values:
+#         day = pd.to_datetime(day).strftime('%Y-%m-%d')
+#         rinex_daily = rinex_ds.sel(time=day)
+#         dcb_daily = dcb_ds.sel(time=day).reset_coords(drop=True)
+#         daily_stec.append(compute_daily_stec(rinex_daily, dcb_daily, sat=sat,
+#                                              station=station))
+#     stec_ds = xr.concat(daily_stec, 'time')
+#     return stec_ds
 
 
-def compute_daily_stec(rinex_daily, dcb_daily, sat='GPS', station='bshm'):
+def compute_stec(rinex_ds, dcb_ds, sat='GPS', station='bshm'):
     """
-    compute slant tec for each sat group and gps station
+    Compute slant tec for each sat group and gps station.
+
     Parameters
     ----------
     rinex_ds : rinex dataset
@@ -82,45 +157,47 @@ def compute_daily_stec(rinex_daily, dcb_daily, sat='GPS', station='bshm'):
 
     """
     import xarray as xr
-    sat_dict = dict(rinex_daily.attrs['satellite system identifier'])
+    # select sat group
+    sat_dict = dict(rinex_ds.attrs['satellite system identifier'])
     sat_id = sat_dict.get(sat)
-    sat_grp = [x for x in rinex_daily.sv.values if sat_id in x]
-    rinex = rinex_daily.sel(sv=sat_grp)
+    sat_grp = [x for x in rinex_ds.sv.values if sat_id in x]
+    # rinex = rinex_ds.sel(sv=sat_grp)
+    # smooth P4:
+    P4_smoothed = smooth_all_p4_in_long_term_rinex(rinex_ds, sat='GPS')
     # dcb station in meters:
-    dcb_st = dcb_daily.station_bias.sel(station=station) * 1e-9 * speed_of_light
+    dcb_st = dcb_ds.station_bias.sel(station=station) * 1e-9 * speed_of_light
     # dcb sat in meters:
-    dcb_sat = dcb_daily.bias * 1e-9 * speed_of_light
+    dcb_sat = dcb_ds.bias * 1e-9 * speed_of_light
     tec_list = []
     for sat in sat_grp:
         try:
             tec = compute_via_p(
-                rinex.P1.sel(
-                    sv=sat), rinex.P2.sel(
-                        sv=sat), F1, F2, dcb_sat.sel(
-                            sv=sat), dcb_st)
+                P4_smoothed.sel(sv=sat), F1, F2, dcb_sat.sel(sv=sat), dcb_st)
             tec_list.append(tec)
         except KeyError:
             pass
     stec = xr.Dataset()
-    stec['tec_p1p2'] = xr.concat(tec_list, 'sv').sel(prn=sat_id)
+    stec['tec_p4'] = xr.concat(tec_list, 'sv')
     # rinex['tec_p1p2'] = compute_via_p(rinex.P1, rinex.P2, F1, F2)
-    stec['tec_p1p2'].attrs['name'] = 'tec from P1 and P2'
-    stec['tec_p1p2'].attrs['unit'] = 'TECU'
-    stec['tec_l1l2'] = compute_via_l(rinex.L1, rinex.L2, F1, F2, speed_of_light)
-    stec['tec_l1l2'].attrs['name'] = 'tec from L1 and L2'
-    stec['tec_l1l2'].attrs['unit'] = 'TECU'
-    stec['tec_l1c1'] = compute_via_l1_c1(rinex.L1, rinex.C1, F1, speed_of_light)
-    stec['tec_l1c1'].attrs['name'] = 'tec from L1 and C1'
-    stec['tec_l1c1'].attrs['unit'] = 'TECU'
-    stec.attrs['dcb source'] = dcb_daily.attrs['data source']
-    stec.attrs['position'] = rinex_daily.attrs['position']
-    stec.attrs['satellite system identifier'] = rinex_daily.attrs['satellite system identifier']
+    stec['tec_p4'].attrs['name'] = 'tec from P1 and P2'
+    stec['tec_p4'].attrs['unit'] = 'TECU'
+    # stec['tec_l1l2'] = compute_via_l(rinex.L1, rinex.L2, F1, F2, speed_of_light)
+    # stec['tec_l1l2'].attrs['name'] = 'tec from L1 and L2'
+    # stec['tec_l1l2'].attrs['unit'] = 'TECU'
+    # stec['tec_l1c1'] = compute_via_l1_c1(rinex.L1, rinex.C1, F1, speed_of_light)
+    # stec['tec_l1c1'].attrs['name'] = 'tec from L1 and C1'
+    # stec['tec_l1c1'].attrs['unit'] = 'TECU'
+    stec.attrs['dcb source'] = dcb_ds.attrs['data source']
+    stec.attrs['position'] = rinex_ds.attrs['position']
+    stec.attrs['satellite system identifier'] = rinex_ds.attrs['satellite system identifier']
     return stec
 
 
 def tec_factor(f1, f2):
-    """tec_factor(f1, f2) -> the factor
+    """Tec_factor(f1, f2) -> the factor.
+
     TEC factor to calculate TEC, TECU.
+
     Parameters
     ----------
     f1 : float
@@ -132,25 +209,30 @@ def tec_factor(f1, f2):
     return (1 / 40.308) * (f1 ** 2 * f2 ** 2) / (f1 ** 2 - f2 ** 2) * 1.0e-16
 
 
-def compute_via_p(p1, p2, f1, f2, dcb_sat=None, dcb_station=None):
-    """compute_via_p(p1, p2, f1, f2) -> tec
+def compute_via_p(p4, f1, f2, dcb_sat=None, dcb_station=None):
+    import xarray as xr
+    """compute_via_p(p4, f1, f2) -> tec.
+
     calculate a TEC value using pseudorange data.
+
     Parameters
     ----------
-    p1 : float
-        f1 pseudorange value, meters
-    p2 : float
-        f2 pseudorange value, meters
+    p4 : float
+        f1 pseudorange value - f2 pseudorange value, meters
     f1 : float
         f1 frequency, Hz
     f2 : float
         f2 frequency, Hz
     """
     if dcb_station is None and dcb_sat is None:
-        tec = tec_factor(f1, f2) * (p2 - p1)
+        tec = -tec_factor(f1, f2) * (p4)
     else:
-        tec = tec_factor(f1, f2) * (p2 - p1 + dcb_sat + dcb_station)
-
+        tecs = []
+        for time in dcb_sat.time.values:
+            dcb_sat_daily = dcb_sat.sel(time=time).values.item()
+            dcb_station_daily = dcb_station.sel(time=time).values.item()
+            tecs.append(tec_factor(f1, f2) * (p4.sel(time=str(time)[0:10]) + dcb_sat_daily + dcb_station_daily))
+        tec = xr.concat(tecs, 'time')
     return tec
 
 
@@ -195,7 +277,7 @@ def compute_via_l1_c1(l1, c1, f1, C):
     return tec
 
 
-def get_rinex_obs_with_attrs(filepath=ionex_path/'bshm0210.20o'):
+def read_rinex_obs_with_attrs(filepath=ionex_path/'bshm0210.20o'):
     import georinex as gr
     import pandas as pd
     from aux_gps import get_timedate_and_station_code_from_rinex
@@ -215,6 +297,10 @@ def get_rinex_obs_with_attrs(filepath=ionex_path/'bshm0210.20o'):
     for da in ds.data_vars.keys():
         ds[da].attrs['name'] = names.get(da[0])
         ds[da].attrs['unit'] = units.get(da[0])
+    if 'P1' in ds.data_vars and 'P2' in ds.data_vars:
+        ds['P4'] = ds['P2'] - ds['P1']
+    if 'L1' in ds.data_vars and 'L2' in ds.data_vars:
+        ds['L4'] = ds['L1']*(speed_of_light/F1) - ds['L2']*(speed_of_light/F2)
     return ds
 
 
