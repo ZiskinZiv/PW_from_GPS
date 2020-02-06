@@ -14,6 +14,19 @@ F5 = 1176.45 * 1e6
 speed_of_light = 299792458  # m/s
 
 
+def stec_to_arcs_epochs_all_sats(stec_ds):
+    import xarray as xr
+    print('assembeling all sats to arcs and epochs.')
+    stec_p4 = stec_ds['tec_p4']
+    da_list = []
+    for sat_id in stec_p4.sv:
+        da_list.append(assemble_epochs_arcs_stec(stec_p4.sel(sv=sat_id)))
+    stec = xr.concat(da_list, 'sv')
+    stec['sv'] = stec_p4['sv']
+    print('Done!')
+    return stec
+
+
 def assemble_epochs_arcs_stec(stec):
     # input is stec['tec_p4'].sel(sv='G01')
     from aux_gps import compute_consecutive_events_datetimes
