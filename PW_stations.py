@@ -35,6 +35,7 @@ stations = pd.read_csv('All_gps_stations.txt', header=0, delim_whitespace=True,
 logs_path = geo_path / 'Python_Projects/PW_from_GPS/log_files'
 GNSS = work_yuval / 'GNSS_stations'
 cwd = Path().cwd()
+gnss_sound_stations_dict = {'acor': '08001', 'mall': '08302'}
 # TODO: finish clouds formulation in ts-tm modeling
 # TODO: finish playing with ts-tm modeling, various machine learning algos.
 # TODO: redo the hour, season and cloud selection in formulate_plot
@@ -241,6 +242,88 @@ def gipsyx_runs_error_analysis(path, glob_str='*.tdp'):
                            reverse=True)
     return errors_sorted, df
 
+
+def compare_gipsyx_soundings(sound_path=sound_path, gps_station='acor',
+                             times=['1996', '2019'], var='pw'):
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    import pandas as pd
+    import matplotlib.dates as mdates
+    import xarray as xr
+    from aux_gps import path_glob
+    # sns.set_style('whitegrid')
+    # ds = mean_zwd_over_sound_time(
+    #     physical_file, ims_path=ims_path, gps_station='tela',
+    #     times=times)
+    sound_station = gnss_sound_stations_dict.get(gps_station)
+    gnss = load_gipsyx_results(plot_fields=None, station=gps_station)
+    sound_file = path_glob(sound_path, 'station_{}_soundings_ts_tm_tpw*.nc'.format(sound_station))[0]
+    sds = xr.open_dataset(sound_file)
+    time_dim = list(set(sds.dims))[0]
+    sds = sds.rename({time_dim: 'time'})
+    sds[gps_station] = gnss.WetZ
+    if var == 'zwd':
+        k = kappa(sds['Tm'], Tm_input=True)
+        sds['sound'] = sds.Tpw / k
+        sds[gps_station] = gnss.WetZ
+    elif var == 'pw':
+        linear_model = ml_models_T_from_sounding(times=times,
+                                                 station=sound_station,
+                                                 plot=False, models=['LR'])
+        linear_model = linear_model.sel(name='LR').values.item()
+        k = kappa_ml(sds['Ts'] - 273.15, model=linear_model, no_error=True)
+        sds[gps_station] = sds[gps_station] * k
+        sds['sound'] = sds.Tpw
+    sds = sds.dropna('time')
+    sds = sds.sel(time=slice(*times))
+    df = sds[['sound', gps_station]].to_dataframe()
+    fig, axes = plt.subplots(2, 1, sharex=True, figsize=(12, 8))
+    [x.set_xlim([pd.to_datetime(times[0]), pd.to_datetime(times[1])])
+     for x in axes]
+    df.columns = ['{} soundings'.format(sound_station), '{} GNSS station'.format(gps_station)]
+    sns.scatterplot(
+        data=df,
+        s=20,
+        ax=axes[0],
+        style='x',
+        linewidth=0,
+        alpha=0.8)
+    # axes[0].legend(['Bet_Dagan soundings', 'TELA GPS station'])
+    df_r = df.iloc[:, 0] - df.iloc[:, 1]
+    df_r.columns = ['Residual distribution']
+    sns.scatterplot(
+        data=df_r,
+        color='k',
+        s=20,
+        ax=axes[1],
+        linewidth=0,
+        alpha=0.5)
+    axes[0].grid(b=True, which='major')
+    axes[1].grid(b=True, which='major')
+    if var == 'zwd':
+        axes[0].set_ylabel('Zenith Wet Delay [cm]')
+        axes[1].set_ylabel('Residuals [cm]')
+    elif var == 'pw':
+        axes[0].set_ylabel('Precipitable Water [mm]')
+        axes[1].set_ylabel('Residuals [mm]')
+    # sonde_change_x = pd.to_datetime('2013-08-20')
+    # axes[1].axvline(sonde_change_x, color='red')
+    # axes[1].annotate(
+    #     'changed sonde type from VIZ MK-II to PTU GPS',
+    #     (mdates.date2num(sonde_change_x),
+    #      10),
+    #     xytext=(
+    #         15,
+    #         15),
+    #     textcoords='offset points',
+    #     arrowprops=dict(
+    #         arrowstyle='fancy',
+    #         color='red'),
+    #     color='red')
+    plt.tight_layout()
+    plt.subplots_adjust(wspace=0, hspace=0.01)
+
+    return sds
 
 def produce_zwd_from_sounding_and_compare_to_gps(phys_sound_file=phys_soundings,
                                                  zwd_file=tela_zwd_aligned,
@@ -1374,7 +1457,7 @@ def kappa_ml(T, model=None, k2=22.1, k3=3.776e5, dk3=0.004e5, dk2=2.2,
     # dk = (1e6 / Rv ) * (k3 / Tm + k2)**-2 * (dk3 / Tm + dTm * k3 / Tm**2.0 + dk2)
     # dk = k * np.sqrt(dk3Tm**2.0 + dk2**2.0)
     if no_error:
-        return k, _
+        return k
     else:
         dk = k * (k3 / Tm + k2)**-1 * np.sqrt((dk3 / Tm) **
                                               2.0 + (dTm * k3 / Tm**2.0)**2.0 + dk2**2.0)
@@ -1830,17 +1913,21 @@ def compare_to_sounding(sound_path=sound_path, gps=garner_path, station='TELA',
 
 def ml_models_T_from_sounding(sound_path=sound_path, categories=None,
                               models=['LR', 'TSEN'], physical_file=None,
-                              times=['2005', '2019'], plot=True):
+                              times=['2005', '2019'], station=None, plot=True):
     """calls formulate_plot to analyse and model the ts-tm connection from
     radiosonde(bet-dagan). options for categories:season, hour, clouds
     you can choose some ,all or none categories"""
     import xarray as xr
     from aux_gps import get_unique_index
     from aux_gps import keep_iqr
+    from aux_gps import path_glob
     if isinstance(models, str):
         models = [models]
-    if physical_file is not None:
+    if physical_file is not None or station is not None:
         print('Overwriting ds input...')
+        if station is not None:
+            physical_file = path_glob(sound_path, 'station_{}_soundings_ts_tm_tpw*.nc'.format(station))[0]
+            print('station {} selected and loaded.'.format(station))
         pds = xr.open_dataset(physical_file)
         pds = pds[['Tm', 'Ts']]
         pds = pds.rename({'Ts': 'ts', 'Tm': 'tm'})
