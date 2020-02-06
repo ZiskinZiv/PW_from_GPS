@@ -811,9 +811,9 @@ def plot_stacked_time_series(stacked_da):
     ax_left.grid()
     ax_bottom = fig.add_subplot(grid[1, 1])
     ax_bottom.grid()
-    pcl = stacked_da.T.plot.pcolormesh(
+    pcl = stacked_da.T.plot.contourf(
         ax=ax_main, add_colorbar=False, cmap=plt.cm.get_cmap(
-            'viridis', 19), snap=True)
+            'viridis', 41), levels=41)
     ax_main.xaxis.set_minor_locator(tck.AutoMinorLocator())
     ax_main.tick_params(
         direction='out',
