@@ -29,7 +29,7 @@ def loop_over_gnss_hydro_and_aggregate(sel_hydro, pw_anom=False,
         ds = xr.open_dataset(hydro_path / 'aggregate_ds.nc')
     else:
         if pw_anom:
-            gnss_pw = xr.open_dataset(work_yuval / 'GNSS_PW_anom_hour_dayofyear.nc')
+            gnss_pw = xr.open_dataset(work_yuval / 'GNSS_PW_hourly_anom_hour_dayofyear.nc')
         else:
             gnss_pw = xr.open_dataset(work_yuval / 'GNSS_PW.nc')
         just_pw = [x for x in gnss_pw.data_vars if '_error' not in x]
