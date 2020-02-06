@@ -634,63 +634,138 @@ def plot_skew(sound_path=sound_path, date='2018-01-16T12:00', two=False):
 #    # es in hPa
 #    return es
 
+def run_pyigra_save_xarray(station, path=sound_path):
+    import subprocess
+    filepath = path / 'igra_{}_raw.txt'.format(station)
+    command = '/home/ziskin/miniconda3/bin/PyIGRA --id {} -o {}'.format(station,filepath)
+    subprocess.call([command], shell=True)
+    # pyigra_to_xarray(station + '_pt.txt', path=path)
+    return
 
-def Tm(da, from_raw_sounding=True):
-    """ calculate the atmospheric mean temperature with pp as water
-    vapor partial pressure and T deg in C. eq is Tm=int(pp/T)dz/int(pp/T^2)dz
-    h is the heights vactor"""
+
+def pyigra_to_xarray(station, path=sound_path):
+    import pandas as pd
+    import xarray as xr
+    # import numpy as np
+    filepath = path / 'igra_{}_raw.txt'.format(station)
+    df = pd.read_csv(filepath, delim_whitespace=True, na_values=[-9999.0, 9999])
+    dates = df['NOMINAL'].unique().tolist()
+    print('splicing dataframe and converting to xarray dataset...')
+    ds_list = []
+    for date in dates:
+        dff = df.loc[df.NOMINAL == date]
+        # release = dff.iloc[0, 1]
+        dff = dff.drop(['NOMINAL', 'RELEASE'], axis=1)
+        dss = dff.to_xarray()
+        dss = dss.drop('index')
+        dss = dss.rename({'index': 'point'})
+        dss['point'] = range(dss.point.size)
+        # dss.attrs['release'] = release
+        ds_list.append(dss)
+    print('concatenating to time-series dataset')
+    datetimes = pd.to_datetime(dates, format='%Y%m%d%H')
+    # max_ind = np.max([ds.index.size for ds in ds_list])
+    # T = np.nan * np.ones((len(dates), max_ind))
+    # P = np.nan * np.ones((len(dates), max_ind))
+    # for i, ds in enumerate(ds_list):
+    #     tsize = ds['TEMPERATURE'].size
+    #     T[i, 0:tsize] = ds['TEMPERATURE'].values
+    #     P[i, 0:tsize] = ds['PRESSURE'].values
+    # Tda = xr.DataArray(T, dims=['time', 'point'])
+    # Tda.name = 'Temperature'
+    # Tda.attrs['units'] = 'deg C'
+    # Tda['time'] = datetimes
+    # Pda = xr.DataArray(P, dims=['time', 'point'])
+    # Pda.name = 'Pressure'
+    # Pda.attrs['units'] = 'hPa'
+    # Pda['time'] = datetimes
+    # ds = Tda.to_dataset(name='Temperature')
+    # ds['Pressure'] = Pda
+    units = {'PRESSURE': 'hPa', 'TEMPERATURE': 'deg_C', 'RELHUMIDITY': '%',
+             'DEWPOINT': 'deg_C', 'WINDSPEED': 'm/sec',
+             'WINDDIRECTION': 'azimuth'}
+    ds = xr.concat(ds_list, 'time')
+    ds['time'] = datetimes
+    for da, unit in units.items():
+        ds[da].attrs['unit'] = unit
+    ds.attrs['name'] = 'radiosonde soundings from IGRA'
+    ds.attrs['station'] = station
+    filename = 'igra_{}.nc'.format(station)
+    comp = dict(zlib=True, complevel=9)  # best compression
+    encoding = {var: comp for var in ds.data_vars}
+    ds.to_netcdf(path / filename, 'w', encoding=encoding)
+    print('saved {} to {}.'.format(filename, path))
+    return ds
+
+
+def process_mpoint_da_with_station_num(path=sound_path, station='08001', k_iqr=1):
+    from aux_gps import path_glob
+    import xarray as xr
+    from aux_gps import keep_iqr
+    file = path_glob(sound_path, 'ALL*{}*.nc'.format(station))
+    da = xr.open_dataarray(file[0])
+    ts, tm, tpw = calculate_ts_tm_tpw_from_mpoint_da(da)
+    ds = xr.Dataset()
+    ds['Tm'] = xr.DataArray(tm, dims=['time'], name='Tm')
+    ds['Tm'].attrs['unit'] = 'K'
+    ds['Tm'].attrs['name'] = 'Water vapor mean atmospheric temperature'
+    ds['Ts'] = xr.DataArray(ts, dims=['time'], name='Ts')
+    ds['Ts'].attrs['unit'] = 'K'
+    ds['Ts'].attrs['name'] = 'Surface temperature'
+    ds['Tpw'] = xr.DataArray(tpw, dims=['time'], name='Tpw')
+    ds['Tpw'].attrs['unit'] = 'mm'
+    ds['Tpw'].attrs['name'] = 'precipitable_water'
+    ds['time'] = da.time
+    ds = keep_iqr(ds, k=k_iqr, dim='time')
+    yr_min = ds.time.min().dt.year.item()
+    yr_max = ds.time.max().dt.year.item()
+    ds = ds.rename({'time': 'sound_time'})
+    filename = 'station_{}_soundings_ts_tm_tpw_{}-{}.nc'.format(station, yr_min, yr_max)
+    print('saving {} to {}'.format(filename, path))
+    comp = dict(zlib=True, complevel=9)  # best compression
+    encoding = {var: comp for var in ds}
+    ds.to_netcdf(path / filename, 'w', encoding=encoding)
+    print('Done!')
+    return ds
+
+
+def calculate_ts_tm_tpw_from_mpoint_da(da):
+    """ calculate the atmospheric mean temperature and precipitable_water"""
     import numpy as np
-    if from_raw_sounding:
-        tempc = da.sel(var='TEMP').dropna('mpoint').reset_coords(drop=True)
-        h = da.sel(var='HGHT').dropna('mpoint').reset_coords(drop=True)
-        vp = VaporPressure(tempc, units='hPa')
+    times_tm = []
+    times_tpw = []
+    times_ts = []
+    station_num = [x for x in da.attrs['description'].split(' ') if x.isdigit()]
+    print('calculating ts, tm and tpw from station {}'.format(station_num))
+    ds = da.to_dataset('var')
+    for itime in range(ds.time.size):
+        tempc = ds['TEMP'].isel(time=itime).dropna('mpoint').reset_coords(drop=True)
+        # dwptc = ds['DWPT'].isel(time=itime).dropna('mpoint').reset_coords(drop=True)
+        hghtm = ds['HGHT'].isel(time=itime).dropna('mpoint').reset_coords(drop=True)
+        preshpa = ds['PRES'].isel(time=itime).dropna('mpoint').reset_coords(drop=True)   # in hPa
+        WVpress = VaporPressure(tempc, units='hPa', method='Buck')
+        Mixratio = MixRatio(WVpress, preshpa)  # both in hPa
         tempk = tempc + 273.15
+        Rho = DensHumid(tempc, preshpa, WVpress, out='both')
+        specific_humidity = (Mixratio / 1000.0) / \
+             (1 + 0.001 * Mixratio / 1000.0)
         try:
-            Tm = np.trapz(vp / tempk, h) / np.trapz(vp / tempk**2, h)
+            numerator = np.trapz(WVpress / tempk, hghtm)
+            denominator = np.trapz(WVpress / tempk**2.0, hghtm)
+            tm = numerator / denominator
         except ValueError:
-            return np.nan
-    else:
-        tempc = da
-        h = da['height']
-        vp = VaporPressure(tempc, units='hPa')
-        tempk = tempc + 273.15
-        Tm = np.trapz(vp / tempk, h) / np.trapz(vp / tempk**2, h)
-    return Tm
-
-
-def precipitable_water(da):
-    """Calculate Total Precipitable Water (TPW) for sounding.
-    TPW is defined as the total column-integrated water vapour. I
-    calculate it from the dew point temperature because this is the
-    fundamental moisture variable in this module (even though it is RH
-    that is usually measured directly)
-    """
-    import numpy as np
-    tempk = da.sel(var='TEMP').dropna('mpoint').reset_coords(drop=True) + 273.15  # in K
-    prespa = da.sel(var='PRES').dropna('mpoint').reset_coords(drop=True) * 100   # in Pa
-    mixrkg = da.sel(var='MIXR').dropna('mpoint').reset_coords(drop=True) / 1000.0  # kg/kg
-    dwptc = da.sel(var='DWPT').dropna('mpoint').reset_coords(drop=True)
-    hghtm = da.sel(var='HGHT').dropna('mpoint').reset_coords(drop=True)
-    min_size = min([tempk.size, prespa.size, mixrkg.size, dwptc.size, hghtm.size])
-    tempk = tempk.sel(mpoint=slice(0, min_size - 1))
-    prespa = prespa.sel(mpoint=slice(0, min_size - 1))
-    mixrkg = mixrkg.sel(mpoint=slice(0, min_size - 1))
-    dwptc = dwptc.sel(mpoint=slice(0, min_size - 1))
-    hghtm = hghtm.sel(mpoint=slice(0, min_size - 1))
-    # Get Water Vapour Mixing Ratio, by calculation
-    # from dew point temperature
-    vprespa = VaporPressure(dwptc)
-    # mixrkg = MixRatio(vprespa, prespa)
-
-    # Calculate density of air (accounting for moisture)
-    rho = DensHumid(tempk, prespa, vprespa, out='both')
-    # print('rho: {}, mix: {}, h: {}'.format(rho.shape,mixrkg.shape, hghtm.shape))
-    # Trapezoidal rule to approximate TPW (units kg/m^2==mm)
-    try:
-        tpw = np.trapz(mixrkg * rho, hghtm)
-    except ValueError:
-        return np.nan
-    return tpw
+            tm = np.nan
+        try:
+            tpw = np.trapz(specific_humidity * Rho, hghtm)
+        except ValueError:
+            tpw = np.nan
+        times_tm.append(tm)
+        times_tpw.append(tpw)
+        times_ts.append(tempk[0].values.item())
+    Tm = np.array(times_tm)
+    Ts = np.array(times_ts)
+    Tpw = np.array(times_tpw)
+    return Ts, Tm, Tpw
 
 
 def MixRatio(e, p):
