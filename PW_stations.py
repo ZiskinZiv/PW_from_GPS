@@ -41,6 +41,16 @@ gnss_sound_stations_dict = {'acor': '08001', 'mall': '08302'}
 # TODO: redo the hour, season and cloud selection in formulate_plot
 
 
+def PW_trend_analysis(path=work_yuval, anom=False, station='tela'):
+    import xarray as xr
+    pw = xr.open_dataset(path / 'GNSS_daily_PW.nc')[station]
+    if anom:
+        pw = pw.groupby('time.month') - pw.groupby('time.month').mean('time')
+    pw_lr = ML_fit_model_to_tmseries(pw, modelname='LR', plot=False, verbose=True)
+    pw_tsen = ML_fit_model_to_tmseries(pw, modelname='TSEN', plot=False, verbose=True)
+    return pw_tsen
+
+
 def produce_gnss_pw_from_era5(era5_path=era5_path,
                               glob_str='era5_PW_israel*.nc',
                               pw_path=work_yuval, savepath=None):
@@ -2886,6 +2896,7 @@ def ML_fit_model_to_tmseries(tms_da, modelname='LR', plot=True, verbose=False):
         new_da.attrs['intercept'] = model.intercept_
         if verbose:
             print('intercept: {}'.format(model.intercept_))
+    new_da.attrs['model'] = modelname
     if plot:
         tms_da.plot.line(marker='.', linewidth=0., color='b')
         new_da.plot(color='r')
