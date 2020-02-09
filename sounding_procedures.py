@@ -11,6 +11,207 @@ sound_path = work_yuval / 'sounding'
 era5_path = work_yuval / 'ERA5'
 
 
+def transform_model_levels_to_pressure(path, field_da, plevel=85.0, mm=True):
+    """takes a field_da (like t, u) that uses era5 L137 model levels and
+    interpolates it using pf(only monthly means) to desired plevel"""
+    # TODO: do scipy.interpolate instead of np.interp (linear)
+    # TODO: add multiple plevel support
+    import xarray as xr
+    from aux_functions_strat import dim_intersection
+    import numpy as np
+    if mm:
+        pf = xr.open_dataset(path / 'era5_full_pressure_mm_1979-2018.nc')
+    pf = pf.pf
+    levels = dim_intersection([pf, field_da], dropna=False, dim='level')
+    pf = pf.sel(level=levels)
+    field_da = field_da.sel(level=levels)
+    field_da = field_da.transpose('time', 'latitude', 'longitude', 'level')
+    field = field_da.values
+    da = np.zeros((pf.time.size, pf.latitude.size, pf.longitude.size, 1),
+                  'float32')
+    pf = pf.values
+    for t in range(pf.shape[0]):
+        print(t)
+        for lat in range(pf.shape[1]):
+            for lon in range(pf.shape[2]):
+                pressures = pf[t, lat, lon, :]
+                vals = field[t, lat, lon, :]
+                da[t, lat, lon, 0] = np.interp(plevel, pressures, vals)
+    da = xr.DataArray(da, dims=['time', 'lat', 'lon', 'level'])
+    da['level'] = [plevel]
+    da['time'] = field_da['time']
+    da['level'].attrs['long_name'] = 'pressure_level'
+    da['level'].attrs['units'] = 'hPa'
+    da['lat'] = field_da['latitude'].values
+    da['lat'].attrs = field_da['latitude'].attrs
+    da['lon'] = field_da['longitude'].values
+    da['lon'].attrs = field_da['longitude'].attrs
+    da.name = field_da.name
+    da.attrs = field_da.attrs
+    da = da.sortby('lat')
+    comp = dict(zlib=True, complevel=9)  # best compression
+    encoding = {var: comp for var in da.to_dataset(name=da.name).data_vars}
+    filename = 'era5_' + da.name + '_' + str(int(plevel)) + 'hPa.nc'
+    da.to_netcdf(path / filename, encoding=encoding)
+    return da
+
+
+def create_model_levels_map_from_surface_pressure(work_path):
+    import numpy as np
+    import xarray as xr
+    """takes ~24 mins for monthly mean with 1.25x1.25 degree for full 137
+    levels,~=2.9GB file. Don't try with higher sample rate"""
+    ds = read_L137_to_ds(work_path)
+    a = ds.a.values
+    b = ds.b.values
+    n = ds.n.values
+    sp = xr.open_dataset(work_path / 'era5_SP_mm_1979-2018.nc')
+    sp = sp.sp / 100.0
+    pf = np.zeros((sp.time.size, sp.latitude.size, sp.longitude.size, len(a)),
+                  'float32')
+    sp_np = sp.values
+    for t in range(sp.time.size):
+        print(t)
+        for lat in range(sp.latitude.size):
+            for lon in range(sp.longitude.size):
+                ps = sp_np[t, lat, lon]
+                pf[t, lat, lon, :] = pressure_from_ab(ps, a, b, n)
+    pf_da = xr.DataArray(pf, dims=['time', 'latitude', 'longitude', 'level'])
+    pf_da.attrs['units'] = 'hPa'
+    pf_da.attrs['long_name'] = 'full_pressure_level'
+    pf_ds = pf_da.to_dataset(name='pf')
+    pf_ds['level'] = n
+    pf_ds['level'].attrs['long_name'] = 'model_level_number'
+    pf_ds['latitude'] = sp.latitude
+    pf_ds['latitude'].attrs = sp.latitude.attrs
+    pf_ds['longitude'] = sp.longitude
+    pf_ds['longitude'].attrs = sp.longitude.attrs
+    pf_ds['time'] = sp.time
+    comp = dict(zlib=True, complevel=9)  # best compression
+    encoding = {var: comp for var in pf_ds.data_vars}
+    pf_ds.to_netcdf(work_path / 'era5_full_pressure_mm_1979-2018.nc',
+                    encoding=encoding)
+    return pf_ds
+
+
+def calculate_era5_tm(q_ml, t_ml, pf_ml, g=9.79):
+    """given pressure in model levels(ps_ml) and specific humidity(q_ml)
+    in era5 model levels and temperature, compute the tm for each lat/lon grid point."""
+    assert t_ml.attrs['units'] == 'K'
+    assert q_ml.attrs['units'] == 'kg kg**-1'
+    assert pf_ml.attrs['units'] == 'Pa'
+    factor = g * 2   # g in mks
+    WVpress = VaporPressure(t_ml - 273.15, method='Buck', units='Pa')
+    wvpress = WVpress + WVpress.shift(level=1)
+    t = t_ml + t_ml.shift(level=1)
+    t2 = t_ml**2.0 + t_ml.shift(level=1)**2.0
+    Rho = DensHumid(t_ml - 273.15, pf_ml / 100.0, WVpress / 100.0, out='both')
+    rho = Rho + Rho.shift(level=1)
+    nume = ((wvpress * pf_ml.diff('level')) / (t * rho * factor)).sum('level')
+    denom = ((wvpress * pf_ml.diff('level')) / (t2 * rho * factor)).sum('level')
+    tm = nume / denom
+    tm.name = 'Tm'
+    tm.attrs['units'] = 'K'
+    return tm
+
+
+def calculate_era5_pw(q_ml, pf_ml, g=9.79):
+    """given pressure in model levels(ps_ml) and specific humidity(q_ml)
+    in era5 model levels, compute the IWV for each lat/lon grid point."""
+    assert q_ml.attrs['units'] == 'kg kg**-1'
+    assert pf_ml.attrs['units'] == 'Pa'
+    factor = g * 2 * 1000  # density of water in mks, g in mks
+    pw = (((q_ml + q_ml.shift(level=1)) * pf_ml.diff('level')) / factor).sum('level')
+    pw = pw * 1000.0
+    pw.name = 'PW'
+    pw.attrs['units'] = 'mm'
+    return pw
+
+
+def pressure_from_ab(ps_da, ds_l137):
+    """takes the surface pressure(hPa) and  a, b coeffs from L137(n) era5
+    table and produces the pressure level point in hPa"""
+    try:
+        unit = ps_da.attrs['units']
+    except AttributeError:
+        # assume Pascals in ps
+        unit = 'Pa'
+    a = ds_l137.a
+    b = ds_l137.b
+    if unit == 'Pa':
+        ph = a + b * ps_da
+    pf_da = 0.5 * (ph + ph.shift(n=1))
+    pf_da.name = 'pressure'
+    pf_da.attrs['units'] = unit
+    pf_da = pf_da.dropna('n')
+    pf_da = pf_da.rename({'n': 'level'})
+    return pf_da
+
+
+def read_L137_to_ds(path):
+    import pandas as pd
+    l137_df = pd.read_csv(path / 'L137_model_levels_1976_climate.txt',
+                          header=None, delim_whitespace=True, na_values='-')
+    l137_df.columns = ['n', 'a', 'b', 'ph', 'pf', 'Geopotential Altitude',
+                       'Geometric Altitude', 'Temperature', 'Density']
+    l137_df.set_index('n')
+    l137_df.drop('n', axis=1, inplace=True)
+    l137_df.index.name = 'n'
+    ds = l137_df.to_xarray()
+    ds.attrs['long_name'] = 'L137 model levels and 1976 ICAO standard atmosphere 1976'
+    ds.attrs['surface_pressure'] = 1013.250
+    ds.attrs['pressure_units'] = 'hPa'
+    ds.attrs['half_pressure_formula'] = 'ph(k+1/2) = a(k+1/2) + ps*b(k+1/2)'
+    ds.attrs['full_pressure_formula'] = 'pf(k) = 1/2*(ph(k-1/2) + ph(k+1/2))'
+    ds['n'].attrs['long_name'] = 'model_level_number'
+    ds['a'].attrs['long_name'] = 'a_coefficient'
+    ds['a'].attrs['units'] = 'Pa'
+    ds['b'].attrs['long_name'] = 'b_coefficient'
+    ds['ph'].attrs['long_name'] = 'half_pressure_level'
+    ds['ph'].attrs['units'] = 'hPa'
+    ds['pf'].attrs['long_name'] = 'full_pressure_level'
+    ds['pf'].attrs['units'] = 'hPa'
+    ds['Geopotential Altitude'].attrs['units'] = 'm'
+    ds['Geometric Altitude'].attrs['units'] = 'm'
+    ds['Temperature'].attrs['units'] = 'K'
+    ds['Density'].attrs['units'] = 'kg/m^3'
+    return ds
+
+
+def merge_era5_fields_and_save(path=era5_path, field='SP'):
+    from aux_gps import path_glob
+    import xarray as xr
+    files = path_glob(path, 'era5_{}*.nc'.format(field))
+    ds = xr.open_mfdataset(files)
+    ds = concat_era5T(ds)
+    ds = ds.rename({'latitude': 'lat', 'longitude': 'lon'})
+    ds = ds.sortby('lat')
+    yr_min = ds.time.min().dt.year.item()
+    yr_max = ds.time.max().dt.year.item()
+    filename = 'era5_{}_israel_{}-{}.nc'.format(field, yr_min, yr_max)
+    print('saving {} to {}'.format(filename, path))
+    ds.to_netcdf(path / filename, 'w')
+    print('Done!')
+    return ds
+
+
+def concat_era5T(ds):
+    import xarray as xr
+    field_0001 = [x for x in ds.data_vars if '0001' in x]
+    field_0005 = [x for x in ds.data_vars if '0005' in x]
+    field = [x for x in ds.data_vars if '0001' not in x and '0005' not in x]
+    if field_0001 and field_0005:
+        da = xr.concat([ds[field_0001[0]].dropna('time'),
+                        ds[field_0005[0]].dropna('time')], 'time')
+        da.name = field_0001[0].split('_')[0]
+    elif not field_0001 and not field_0005:
+        return ds
+    if field:
+        da = xr.concat([ds[field[0]].dropna('time'), da], 'time')
+    dss = da.to_dataset(name=field[0])
+    return dss
+
+
 def merge_concat_era5_field(path=era5_path, field='Q', savepath=None):
     import xarray as xr
     from aux_gps import path_glob
