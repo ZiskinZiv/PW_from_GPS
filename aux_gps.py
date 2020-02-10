@@ -12,6 +12,21 @@ from PW_paths import work_yuval
 # TODO: if not, build func to replace datetimeindex to numbers and vise versa
 
 
+def plot_box_xr(da_ts, x='month', ax=None):
+    import seaborn as sns
+    df = da_ts.to_dataframe()
+    if x == 'month':
+        df[x] = df.index.month
+    y = df.columns[0]
+    if ax is not None:
+        sns.boxplot(data=df, x=x, y=y, ax=ax)
+    else:
+        kwargs = dict(markerfacecolor='r', marker='o')
+        ax = sns.boxplot(data=df, x=x, y=y, color='blue', fliersize=4,
+                         whis=1.5,flierprops=kwargs)
+    return ax
+
+
 def compute_consecutive_events_datetimes(da_ts, time_dim='time',
                                          minimum_epochs=10):
     import pandas as pd

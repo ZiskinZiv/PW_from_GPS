@@ -12,6 +12,8 @@ from PW_paths import work_yuval
 from PW_paths import work_path
 from PW_paths import geo_path
 from pathlib import Path
+from sklearn.linear_model import LinearRegression
+from scipy import stats
 hydro_path = work_yuval / 'hydro'
 garner_path = work_yuval / 'garner'
 ims_path = work_yuval / 'IMS_T'
@@ -39,6 +41,71 @@ gnss_sound_stations_dict = {'acor': '08001', 'mall': '08302'}
 # TODO: finish clouds formulation in ts-tm modeling
 # TODO: finish playing with ts-tm modeling, various machine learning algos.
 # TODO: redo the hour, season and cloud selection in formulate_plot
+class LinearRegression_with_stats(LinearRegression):
+    """
+    LinearRegression class after sklearn's, but calculate t-statistics
+    and p-values for model coefficients (betas).
+    Additional attributes available after .fit()
+    are `t` and `p` which are of the shape (y.shape[1], X.shape[1])
+    which is (n_features, n_coefs)
+    This class sets the intercept to 0 by default, since usually we include it
+    in X.
+    """
+
+    def __init__(self, *args, **kwargs):
+        # if not "fit_intercept" in kwargs:
+        #     kwargs['fit_intercept'] = False
+        super().__init__(*args,**kwargs)
+
+    def fit(self, X, y=None, verbose=True, **fit_params):
+        from scipy import linalg
+        """ A wrapper around the fitting function.
+        Improved: adds the X_ and y_ and results_ attrs to class.
+        Parameters
+        ----------
+        X : xarray DataArray, Dataset other other array-like
+            The training input samples.
+
+        y : xarray DataArray, Dataset other other array-like
+            The target values.
+
+        Returns
+        -------
+        Returns self.
+        """
+        self = super().fit(X, y, **fit_params)
+        n, k = X.shape
+        yHat = np.matrix(self.predict(X)).T
+
+        # Change X and Y into numpy matricies. x also has a column of ones added to it.
+        x = np.hstack((np.ones((n,1)),np.matrix(X)))
+        y = np.matrix(y).T
+
+        # Degrees of freedom.
+        df = float(n-k-1)
+
+        # Sample variance.     
+        sse = np.sum(np.square(yHat - y),axis=0)
+        self.sampleVariance = sse/df
+
+        # Sample variance for x.
+        self.sampleVarianceX = x.T*x
+
+        # Covariance Matrix = [(s^2)(X'X)^-1]^0.5. (sqrtm = matrix square root.  ugly)
+        self.covarianceMatrix = linalg.sqrtm(self.sampleVariance[0,0]*self.sampleVarianceX.I)
+
+        # Standard erros for the difference coefficients: the diagonal elements of the covariance matrix.
+        self.se = self.covarianceMatrix.diagonal()[1:]
+
+        # T statistic for each beta.
+        self.betasTStat = np.zeros(len(self.se))
+        for i in range(len(self.se)):
+            self.betasTStat[i] = self.coef_[i]/self.se[i]
+
+        # P-value for each beta. This is a two sided t-test, since the betas can be 
+        # positive or negative.
+        self.betasPValue = 1 - stats.t.cdf(abs(self.betasTStat),df)
+        return self
 
 
 def PW_trend_analysis(path=work_yuval, anom=False, station='tela'):
@@ -2854,17 +2921,22 @@ def get_long_trends_from_gnss_station(station='tela', modelname='LR',
     return rds
 
 
-def ML_fit_model_to_tmseries(tms_da, modelname='LR', plot=True, verbose=False):
+def ML_fit_model_to_tmseries(tms_da, modelname='LR', plot=True,
+                             verbose=False, ml_params=None):
     """fit a single time-series data-array with ML models specified in
     ML_Switcher"""
     import numpy as np
     import xarray as xr
     import pandas as pd
+    import seaborn as sns
+    import matplotlib.pyplot as plt
     # find the time dim:
     time_dim = list(set(tms_da.dims))[0]
     # pick a model:
     ml = ML_Switcher()
     model = ml.pick_model(modelname)
+    if ml_params is not None:
+        model.set_params(**ml_params)
     # dropna for time-series:
     tms_da_no_nan = tms_da.dropna(time_dim)
     # df = tms_da_no_nan.to_dataframe()
@@ -2881,14 +2953,21 @@ def ML_fit_model_to_tmseries(tms_da, modelname='LR', plot=True, verbose=False):
     new_y = model.predict(jul_with_nan).squeeze()
     new_da = xr.DataArray(new_y, dims=[time_dim])
     new_da[time_dim] = tms_da[time_dim]
+    resid = tms_da.values - new_da.dropna('time').values
     if hasattr(model, 'coef_'):
         new_da.attrs['slope_per_day'] = model.coef_[0]
         days = pd.to_timedelta(tms_da.time.max(
                 ).values - tms_da.time.min().values, unit='D')
         years = days / np.timedelta64(1, 'Y')
-        slope_per_year = model.coef_[0] * days.days / years
+        per_year = days.days / years
+        slope_per_year = model.coef_[0] * per_year
         new_da.attrs['slope_per_year'] = slope_per_year
         new_da.attrs['total_years'] = years
+        if modelname == 'LR':
+            se = calculate_linear_standard_error(jul_with_nan, resid)
+            ci_95_per_year = [slope_per_year - 1.96 * se * per_year,
+                              slope_per_year + 1.96 * se * per_year]
+            new_da.attrs['ci_95_per_year'] = ci_95_per_year
         if verbose:
             print('slope_per_day: {}'.format(model.coef_[0]))
             print('slope_per_year: {}'.format(slope_per_year))
@@ -2897,12 +2976,42 @@ def ML_fit_model_to_tmseries(tms_da, modelname='LR', plot=True, verbose=False):
         if verbose:
             print('intercept: {}'.format(model.intercept_))
     new_da.attrs['model'] = modelname
+    if verbose:
+        print('model name: ', modelname)
+        for atr, val in vars(model).items():
+            print(atr, ': ', val)
     if plot:
-        tms_da.plot.line(marker='.', linewidth=0., color='b')
-        new_da.plot(color='r')
-    return new_da
+        fig, ax = plt.subplots(1, 2, figsize=(20, 4),
+                               gridspec_kw={'width_ratios': [3, 1]})
+        tms_da.plot.line(ax=ax[0], marker='.', linewidth=0., color='b')
+        new_da.plot(ax=ax[0], color='r')
+        sns.distplot(
+            resid,
+            bins=25,
+            color='c',
+            label='residuals',
+            ax=ax[1])
+        ax[1].set_title('mean: {:.2f}'.format(np.mean(resid)))
+        fig.suptitle('slope per decade: {:.2f}'.format(new_da.attrs['slope_per_year']*10))
+    return model
 
 
+def calculate_linear_standard_error(x, resid):
+    import numpy as np
+    n = len(resid)
+    assert n == len(x)
+    nume = np.nansum(resid**2.0) * 1.0/(n-2)
+    denom = np.nansum((x-np.nanmean(x))**2.0)
+    return np.sqrt(nume/denom)
+
+
+def get_p_values(X, y):
+    """produce p_values"""
+    import numpy as np
+    from sklearn.feature_selection import f_regression
+    pval = np.empty((X.shape))
+    f, pval[:] = f_regression(X, y)
+    return pval
 #def analyze_sounding_and_formulate(sound_path=sound_path,
 #                                   model_names = ['TSEN', 'LR'],
 #                                   res_save='LR'):
@@ -3150,6 +3259,10 @@ class ML_Switcher(object):
     def LR(self):
         from sklearn.linear_model import LinearRegression
         return LinearRegression(n_jobs=-1, copy_X=True)
+    
+    def LRS(self):
+        lr = LinearRegression(n_jobs=-1, copy_X=True)
+        return LinearRegression_with_stats(lr)
 
     def GPSR(self):
         from gplearn.genetic import SymbolicRegressor
