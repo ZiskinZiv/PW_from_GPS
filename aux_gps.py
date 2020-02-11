@@ -12,18 +12,86 @@ from PW_paths import work_yuval
 # TODO: if not, build func to replace datetimeindex to numbers and vise versa
 
 
-def plot_box_xr(da_ts, x='month', ax=None):
+def filter_month_year_data_heatmap_plot(da_ts, freq='5T', thresh=50.0,
+                                        plot=True):
     import seaborn as sns
-    df = da_ts.to_dataframe()
+    import pandas as pd
+    import xarray as xr
+    import matplotlib.pyplot as plt
+    name = da_ts.name
+    try:
+        freq = da_ts.attrs['freq']
+    except KeyError:
+        pass
+    if freq == '5T':
+        points = 24 * 12
+    elif freq == '1H':
+        points = 24
+    elif freq == '3H':
+        points == 8
+    elif freq == '1D' or freq == 'D':
+        points = 1
+    df = da_ts.dropna('time').to_dataframe()
+    df['month']=df.index.month
+    df['year']=df.index.year
+    df['max_points']=df.index.days_in_month * points
+    cnt = df.groupby(['month','year']).count()[name].to_frame()
+    pivot=pd.pivot_table(cnt,index='year',columns='month')
+    pivot_m=pd.pivot_table(df[['month', 'year','max_points']],index='year',columns='month')
+    percent = 100 * pivot.values / pivot_m.values
+    per_df=pd.DataFrame(percent,index=df.year.unique(), columns=sorted(df.month.unique()))
+    stacked = per_df.stack().dropna().to_frame(name)
+    index = stacked[stacked<thresh].dropna().index
+    print('#months that are bigger then {:.0f} %:'.format(thresh))
+    for month in per_df.columns:
+        months = per_df[per_df>=thresh][month].dropna().count()
+        print('#{} months of months {}'.format(months, month))
+    dts = []
+    for year, month in index.values:
+        dts.append('{}-{}'.format(year, month))
+    if plot:
+        sns.heatmap(per_df, annot=True,fmt='.0f')
+        plt.figure()
+        per_df.stack().hist(bins=25)
+    return dts
+
+
+def plot_multi_box_xr(pw, kind='violin',
+                      stations=['tela', 'nrif', 'kabr', 'slom', 'jslm']):
+    import xarray as xr
+    pw = pw.to_array('station')
+    fg = xr.plot.FacetGrid(pw, col='station', col_wrap=4, sharex=False, sharey=False)
+    for sta, ax in zip(stations, fg.axes.flatten()):
+        df = pw.sel(station=sta).reset_coords(drop=True).to_dataframe(sta)
+        plot_box_df(df, ax=ax, title=sta, ylabel='', kind=kind)
+    return
+
+
+def plot_box_df(df, x='month', title='TELA',
+                ylabel=r'IWV [kg$\cdot$m$^{-2}$]', ax=None, kind='violin'):
+    import seaborn as sns
+    from matplotlib.ticker import MultipleLocator
+    import matplotlib.pyplot as plt
+    # df = da_ts.to_dataframe()
     if x == 'month':
         df[x] = df.index.month
+        pal = sns.color_palette("Paired", 12)
     y = df.columns[0]
-    if ax is not None:
-        sns.boxplot(data=df, x=x, y=y, ax=ax)
-    else:
+    if ax is None:
+        fig, ax = plt.subplots()
+    if kind == 'violin':
+        sns.violinplot(ax=ax, data=df, x=x, y=y, palette=pal, fliersize=4,
+                       gridsize=1000, inner='quartile', scale='area')
+    elif kind == 'box':
         kwargs = dict(markerfacecolor='r', marker='o')
-        ax = sns.boxplot(data=df, x=x, y=y, color='blue', fliersize=4,
-                         whis=1.5,flierprops=kwargs)
+        sns.boxplot(ax=ax, data=df, x=x, y=y, palette=pal, fliersize=4,
+                       whis=1.5, flierprops=kwargs)
+    ax.yaxis.set_minor_locator(MultipleLocator(5))
+    ax.yaxis.grid(True, which='minor', linestyle='--', linewidth=1, alpha=0.7)
+    ax.yaxis.grid(True, linestyle='--', linewidth=1, alpha=0.7)
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
+    ax.set_ylim(0, 45)
     return ax
 
 
@@ -340,6 +408,8 @@ def lmfit_params(model_name, k=None):
     intercept = ['line_intercept', 58.6, True, None, None, None, None]
     line_params.add(*slope)
     line_params.add(*intercept)
+    constant = Parameters()
+    constant.add(*['constant', 40.0, True,None, None, None, None])
     if k is not None:
         sum_sin_params = Parameters()
         for mode in range(k):
@@ -353,6 +423,8 @@ def lmfit_params(model_name, k=None):
         return line_params + sin_params
     elif model_name == 'sin':
         return sin_params
+    elif model_name == 'sin_constant':
+        return sin_params + constant
     elif model_name == 'line':
         return line_params
     elif model_name == 'sum_sin' and k is not None:
@@ -363,7 +435,7 @@ def lmfit_params(model_name, k=None):
 
 def fit_da_to_model(da, params, model_dict={'model_name': 'sin'},
                     method='leastsq', times=None, plot=True, verbose=True):
-    """options for modelname:'sin', 'sin_line', 'line', 'sin_constant', and
+    """options for modelname:'sin', 'sin_linear', 'line', 'sin_constant', and
     'sum_sin'"""
     # for sum_sin or sum_sin_linear use model_dict={'model_name': 'sum_sin', k:3}
     import matplotlib.pyplot as plt

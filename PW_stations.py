@@ -1203,6 +1203,10 @@ def produce_GNSS_station_PW(station='tela', sample_rate=None, model=None,
               'MS': 'monthly'}
     zwd = load_gipsyx_results(station, sample_rate, plot_fields=None)
     Ts = load_GNSS_TD(station, sample_rate, False)
+    # use of damped Ts: ?
+    Ts_daily = Ts.resample(time='1D').mean()
+    upsampled_daily = Ts_daily.resample(time='1D').ffill()
+    damped = Ts*0.25 + 0.75*upsampled_daily
     if model is None:
         mda = ml_models_T_from_sounding(categories=None, models=['LR'],
                                         physical_file=phys, plot=False)
@@ -2780,6 +2784,27 @@ def load_GNSS_TD(station='tela', sample_rate=None, plot=True):
     return da
 
 
+def load_PW(station='tela', sample_rate=None, thresh=50.0):
+    import xarray as xr
+    import numpy as np
+    from aux_gps import filter_month_year_data_heatmap_plot
+    sample = {'1H': 'hourly', '3H': '3hourly', 'D': 'Daily', 'W': 'weekly',
+      'MS': 'monthly'}
+    if sample_rate is None:
+        freq = '5T'
+        pw = xr.load_dataset(work_yuval / 'GNSS_PW.nc')[station]
+    else:
+        freq = sample_rate
+        pw = xr.load_dataset(work_yuval / 'GNSS_{}_PW.nc'.format(sample.get(sample_rate)))[station]
+    if thresh is not None:
+        dts = filter_month_year_data_heatmap_plot(pw, freq=freq, thresh=thresh,
+                                                  plot=False)
+        for dt in dts:
+            print('dropping {}'.format(dt))
+            pw.loc[{'time': dt}] = np.nan
+    return pw
+
+
 def load_gipsyx_results(station='tela', sample_rate=None,
                         plot_fields=['WetZ'], field_all=None):
     """load and plot gipsyx solutions for station, to choose sample rate
@@ -2922,7 +2947,7 @@ def get_long_trends_from_gnss_station(station='tela', modelname='LR',
 
 
 def ML_fit_model_to_tmseries(tms_da, modelname='LR', plot=True,
-                             verbose=False, ml_params=None):
+                             verbose=False, ml_params=None, gridsearch=False):
     """fit a single time-series data-array with ML models specified in
     ML_Switcher"""
     import numpy as np
@@ -2930,6 +2955,7 @@ def ML_fit_model_to_tmseries(tms_da, modelname='LR', plot=True,
     import pandas as pd
     import seaborn as sns
     import matplotlib.pyplot as plt
+    from sklearn.model_selection import GridSearchCV
     # find the time dim:
     time_dim = list(set(tms_da.dims))[0]
     # pick a model:
@@ -2949,6 +2975,9 @@ def ML_fit_model_to_tmseries(tms_da, modelname='LR', plot=True,
     jul_no_nan -= jul_no_nan[0]
     jul_with_nan = np.array(jul_with_nan).reshape(-1, 1)
     jul_no_nan = np.array(jul_no_nan).reshape(-1, 1)
+    if gridsearch:
+        print('Grid Searching...')
+        model = GridSearchCV(model, ml.param_grid, refit=True, n_jobs=-1)
     model.fit(jul_no_nan, tms_da_no_nan.values)
     new_y = model.predict(jul_with_nan).squeeze()
     new_da = xr.DataArray(new_y, dims=[time_dim])
@@ -2992,7 +3021,10 @@ def ML_fit_model_to_tmseries(tms_da, modelname='LR', plot=True,
             label='residuals',
             ax=ax[1])
         ax[1].set_title('mean: {:.2f}'.format(np.mean(resid)))
-        fig.suptitle('slope per decade: {:.2f}'.format(new_da.attrs['slope_per_year']*10))
+        try:
+            fig.suptitle('slope per decade: {:.2f}'.format(new_da.attrs['slope_per_year']*10))
+        except KeyError:
+            pass
     return model
 
 
@@ -3270,7 +3302,7 @@ class ML_Switcher(object):
 
     def TSEN(self):
         from sklearn.linear_model import TheilSenRegressor
-        return TheilSenRegressor(random_state=42)
+        return TheilSenRegressor(random_state=42, n_jobs=-1)
 
     def MTLASSOCV(self):
         from sklearn.linear_model import MultiTaskLassoCV
@@ -3284,11 +3316,19 @@ class ML_Switcher(object):
 
     def KRR(self):
         from sklearn.kernel_ridge import KernelRidge
-        return KernelRidge(kernel='poly', degree=2)
+        from sklearn.gaussian_process.kernels import WhiteKernel, ExpSineSquared
+        self.param_grid = {"alpha": [1e0, 1e-1, 1e-2, 1e-3],
+                           "kernel": [ExpSineSquared(l, p)
+                                      for l in np.arange(10, 70, 10)
+                                      for p in np.arange(360, 370)]}
+        return KernelRidge(kernel=ExpSineSquared(40.0, 365.0), alpha=0.001)
 
     def GPR(self):
+        from sklearn.gaussian_process.kernels import WhiteKernel, ExpSineSquared
         from sklearn.gaussian_process import GaussianProcessRegressor
-        return GaussianProcessRegressor(random_state=42)
+        gp_kernel = ExpSineSquared(40.0, 365.0, periodicity_bounds=(340, 380)) \
+            + WhiteKernel(10.0)
+        return GaussianProcessRegressor(kernel=gp_kernel, random_state=42)
 
     def MTENETCV(self):
         import numpy as np
