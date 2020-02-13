@@ -43,8 +43,10 @@ def filter_month_year_data_heatmap_plot(da_ts, freq='5T', thresh=50.0,
     stacked = per_df.stack().dropna().to_frame(name)
     index = stacked[stacked<thresh].dropna().index
     print('#months that are bigger then {:.0f} %:'.format(thresh))
+    month_dict = {}
     for month in per_df.columns:
         months = per_df[per_df>=thresh][month].dropna().count()
+        month_dict[month] = months
         print('#{} months of months {}'.format(months, month))
     dts = []
     for year, month in index.values:
@@ -53,45 +55,64 @@ def filter_month_year_data_heatmap_plot(da_ts, freq='5T', thresh=50.0,
         sns.heatmap(per_df, annot=True,fmt='.0f')
         plt.figure()
         per_df.stack().hist(bins=25)
-    return dts
+    return dts, month_dict
 
 
-def plot_multi_box_xr(pw, kind='violin',
-                      stations=['tela', 'nrif', 'kabr', 'slom', 'jslm']):
+def plot_multi_box_xr(pw, kind='violin', x='month',
+                      stations=['tela', 'nrif', 'kabr', 'slom', 'jslm'],
+                      rolling=1440):
     import xarray as xr
     pw = pw.to_array('station')
-    fg = xr.plot.FacetGrid(pw, col='station', col_wrap=4, sharex=False, sharey=False)
+    pw = pw.sel(station=stations)
+    fg = xr.plot.FacetGrid(pw, col='station', col_wrap=4, sharex=False,
+                           sharey=False)
     for sta, ax in zip(stations, fg.axes.flatten()):
-        df = pw.sel(station=sta).reset_coords(drop=True).to_dataframe(sta)
-        plot_box_df(df, ax=ax, title=sta, ylabel='', kind=kind)
+        pw_sta = pw.sel(station=sta).reset_coords(drop=True)
+        # if x == 'hour':
+        #     # remove seasonal signal:
+        #     pw_sta = pw_sta.groupby('time.dayofyear') - pw_sta.groupby('time.dayofyear').mean('time')
+        # elif x == 'month':
+        #     # remove daily signal:
+        #     pw_sta = pw_sta.groupby('time.hour') - pw_sta.groupby('time.hour').mean('time')            
+        df = pw_sta.to_dataframe(sta)
+        plot_box_df(df, ax=ax, x=x, title=sta, ylabel='', kind=kind,
+                    rolling=rolling)
     return
 
 
-def plot_box_df(df, x='month', title='TELA',
+def plot_box_df(df, x='month', title='TELA', rolling=None,
                 ylabel=r'IWV [kg$\cdot$m$^{-2}$]', ax=None, kind='violin'):
+    # x=hour is experimental
     import seaborn as sns
     from matplotlib.ticker import MultipleLocator
     import matplotlib.pyplot as plt
     # df = da_ts.to_dataframe()
+    if rolling is not None:
+        df = df.rolling(rolling, center=True).mean()
     if x == 'month':
         df[x] = df.index.month
         pal = sns.color_palette("Paired", 12)
+        ylimits = (0, 45)
+    elif x == 'hour':
+        df[x] = df.index.hour
+        pal = sns.color_palette("Paired", 12)
+        ylimits = (-4, 4)
     y = df.columns[0]
     if ax is None:
         fig, ax = plt.subplots()
     if kind == 'violin':
         sns.violinplot(ax=ax, data=df, x=x, y=y, palette=pal, fliersize=4,
-                       gridsize=1000, inner='quartile', scale='area')
+                       gridsize=100, inner='quartile', scale='area')
     elif kind == 'box':
         kwargs = dict(markerfacecolor='r', marker='o')
         sns.boxplot(ax=ax, data=df, x=x, y=y, palette=pal, fliersize=4,
-                       whis=1.5, flierprops=kwargs)
+                    whis=1.5, flierprops=kwargs)
     ax.yaxis.set_minor_locator(MultipleLocator(5))
     ax.yaxis.grid(True, which='minor', linestyle='--', linewidth=1, alpha=0.7)
     ax.yaxis.grid(True, linestyle='--', linewidth=1, alpha=0.7)
     ax.set_ylabel(ylabel)
     ax.set_title(title)
-    ax.set_ylim(0, 45)
+    ax.set_ylim(*ylimits)
     return ax
 
 

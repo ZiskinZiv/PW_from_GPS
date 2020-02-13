@@ -1192,6 +1192,88 @@ def save_GNSS_PW_israeli_stations(savepath=work_yuval, phys=phys_soundings):
     return
 
 
+def plot_grp_anomlay_heatmap(load_path=work_yuval, gis_path=gis_path,
+                             thresh=None, grp='hour', clustering=4):
+    # use clustering=4 for grp hour
+    # use clustering=2 for grp month
+    # TODO: fix colors between tab10 and map
+    # TODO: add subplot below heatmap , summing all the groups
+    # TODO: add weighted stations (number of years data) to either kmeans or weighted sum
+    import xarray as xr
+    import seaborn as sns
+    from sklearn.cluster import KMeans
+    from sklearn.cluster import DBSCAN
+    from sklearn.cluster import OPTICS
+    from aux_gps import geo_annotate
+    import matplotlib.pyplot as plt
+    from PW_from_gps_figures import plot_israel_map
+    import pandas as pd
+    import matplotlib.pyplot as plt
+    pw = xr.load_dataset(load_path / 'GNSS_PW_{:.0f}.nc'.format(thresh))
+    pw_mean = pw.groupby('time.{}'.format(grp)).mean('time')
+    pw_anom = pw_mean - pw_mean.mean('{}'.format(grp))
+    df = pw_anom.to_dataframe()
+    if clustering is not None:
+        clustering = KMeans(n_clusters=clustering, random_state=0).fit(df.T)
+        # clustering = DBSCAN(eps=3, min_samples=2).fit(df)
+        # clustering = OPTICS(min_samples=2).fit(df)
+        labels = dict(zip(df.columns, clustering.labels_))
+        labels_sorted = {
+            k: v for k,
+            v in sorted(
+                labels.items(),
+                key=lambda item: item[1])}
+        order = [x for x in labels_sorted.keys()]
+        df = df[order]
+        df.columns = [(key + '_{}'.format(val))
+                      for key, val in labels_sorted.items()]
+    # create figure and subplots:
+    fig, axes = plt.subplots(1, 2, sharex=False, sharey=False, figsize=(15, 10))
+    # get the camp and zip it to groups and produce dictionary:
+    cmap = plt.get_cmap("tab10")
+    cmaplist = [cmap(i) for i in range(cmap.N)]
+    cmap_dict = dict(zip(set(labels_sorted.values()), cmaplist))
+    label_cmap_dict = dict(zip(df.columns, [cmap_dict[int(x.split('_')[1])] for x in df.columns]))
+    # plot heatmap:
+    sns.heatmap(df.T, center=0.0, cmap='bwr', yticklabels=True, ax=axes[0])
+    boxes = [dict(facecolor=x, pad=0.05, alpha=0.4)
+             for x in label_cmap_dict.values()]
+    ylabels = [x for x in axes[0].yaxis.get_ticklabels()]
+    for label, box in zip(ylabels, boxes):
+        label.set_bbox(box)
+    # rotate xtick_labels:
+    axes[0].set_xticklabels(axes[0].get_xticklabels(), rotation = 0,
+        fontsize = 10)
+    plot_israel_map(gis_path, ax=axes[1])
+    print('getting solved GNSS israeli stations metadata...')
+    gps = produce_geo_gnss_solved_stations(path=gis_path, plot=False)
+    gps['group'] = pd.Series(labels_sorted)
+    # gps[gps['group'] == 0].plot(ax=ax, markersize=50, color='m', edgecolor='k', marker='o', label='1')
+    gps.plot(ax=axes[1], column='group', categorical=True, edgecolor='black',
+             cmap='tab10', s=250, legend=True,
+             legend_kwds={'prop': {'size': 10}, 'fontsize': 14,
+                          'loc': 'upper left'})
+    axes[1].set_title('Groupings of {}ly anomalies'.format(grp))
+    gps_stations = [x for x in gps.index]
+    to_plot_offset = ['mrav', 'klhv']
+    [gps_stations.remove(x) for x in to_plot_offset]
+    gps_normal_anno = gps.loc[gps_stations, :]
+    gps_offset_anno = gps.loc[to_plot_offset, :]
+    geo_annotate(axes[1], gps_normal_anno.lon, gps_normal_anno.lat,
+                 gps_normal_anno.index, xytext=(6, 6), fmt=None,
+                 c='k', fw='bold', fs=None, colorupdown=False)
+    geo_annotate(axes[1], gps_offset_anno.lon, gps_offset_anno.lat,
+                 gps_offset_anno.index, xytext=(7, -9), fmt=None,
+                 c='k', fw='bold', fs=None, colorupdown=False)
+#    plt.legend(['IMS stations', 'GNSS stations'],
+#           prop={'size': 10}, bbox_to_anchor=(-0.15, 1.0),
+#           title='Stations')
+#    plt.legend(prop={'size': 10}, loc='upper left')
+    plt.tight_layout()
+    # plt.subplots_adjust(bottom=0.05, top=0.974)
+    return df
+
+
 def produce_GNSS_station_PW(station='tela', sample_rate=None, model=None,
                             phys=None, plot=True):
     from aux_gps import plot_tmseries_xarray
@@ -2674,25 +2756,37 @@ def GNSS_pw_to_X_using_window(gnss_path=work_yuval, hydro_path=hydro_path,
     return X, y
 
 
-def produce_all_GNSS_PW_anomalies(load_path=work_yuval, sample='hourly',
+def drop_GNSS_PW_thresh_and_save_all(path=work_yuval, thresh=None):
+    import xarray as xr
+    GNSS_pw = xr.open_dataset(path / 'GNSS_PW.nc')
+    thresh_list = []
+    stations_only = [x for x in GNSS_pw.data_vars if '_error' not in x]
+    for station in stations_only:
+        pw = load_PW_with_drop_thresh(station=station, thresh=thresh)
+        thresh_list.append(pw)
+    GNSS_pw_thresh = xr.merge(thresh_list)
+    filename = 'GNSS_PW_{:.0f}.nc'.format(thresh)
+    comp = dict(zlib=True, complevel=9)  # best compression
+    encoding = {var: comp for var in GNSS_pw_thresh.data_vars}
+    GNSS_pw_thresh.to_netcdf(path / filename, 'w', encoding=encoding)
+    print('Done!')
+    return GNSS_pw_thresh
+
+
+def produce_all_GNSS_PW_anomalies(load_path=work_yuval, thresh=None,
                                   grp1='hour', grp2='dayofyear',
                                   savepath=work_yuval):
     import xarray as xr
-    if sample is None:
-        GNSS_pw = xr.open_dataset(load_path / 'GNSS_PW.nc')
-    else:
-        GNSS_pw = xr.open_dataset(load_path / 'GNSS_{}_PW.nc'.format(sample))
+    GNSS_pw = xr.open_dataset(load_path / 'GNSS_PW_{:.0f}.nc'.format(thresh))
     anom_list = []
     stations_only = [x for x in GNSS_pw.data_vars if '_error' not in x]
     for station in stations_only:
-        pw_anom = produce_PW_anomalies(GNSS_pw[station], grp1, grp2, False)
+        pw = GNSS_pw[station]
+        pw_anom = produce_PW_anomalies(pw, grp1, grp2, False)
         anom_list.append(pw_anom)
     GNSS_pw_anom = xr.merge(anom_list)
     if savepath is not None:
-        if sample is not None:
-            filename = 'GNSS_PW_{}_anom_{}_{}.nc'.format(sample, grp1, grp2)
-        else:
-            filename = 'GNSS_PW_anom_{}_{}.nc'.format(grp1, grp2)
+        filename = 'GNSS_PW_anom_{:.0f}_{}_{}.nc'.format(thresh, grp1, grp2)
         comp = dict(zlib=True, complevel=9)  # best compression
         encoding = {var: comp for var in GNSS_pw_anom.data_vars}
         GNSS_pw_anom.to_netcdf(savepath / filename, 'w', encoding=encoding)
@@ -2711,7 +2805,7 @@ def produce_PW_anomalies(pw_da, grp1='hour', grp2='dayofyear', plot=True):
     fname = pw_da.name
     print('computing anomalies for {}'.format(fname))
     stacked_pw = time_series_stack(pw_da, time_dim=time_dim, grp1=grp1,
-                                   grp2=grp2)
+                                   grp2=grp2, plot=False)
     pw_anom = stacked_pw.copy(deep=True)
     attrs = pw_anom.attrs
     rest_dim = [x for x in stacked_pw.dims if x != grp1 and x != grp2][0]
@@ -2784,24 +2878,23 @@ def load_GNSS_TD(station='tela', sample_rate=None, plot=True):
     return da
 
 
-def load_PW(station='tela', sample_rate=None, thresh=50.0):
+def load_PW_with_drop_thresh(station='tela', thresh=50.0):
     import xarray as xr
     import numpy as np
     from aux_gps import filter_month_year_data_heatmap_plot
-    sample = {'1H': 'hourly', '3H': '3hourly', 'D': 'Daily', 'W': 'weekly',
-      'MS': 'monthly'}
-    if sample_rate is None:
-        freq = '5T'
-        pw = xr.load_dataset(work_yuval / 'GNSS_PW.nc')[station]
-    else:
-        freq = sample_rate
-        pw = xr.load_dataset(work_yuval / 'GNSS_{}_PW.nc'.format(sample.get(sample_rate)))[station]
+    pw = xr.load_dataset(work_yuval / 'GNSS_PW.nc')[station]
+    print('loading 5 mins GNSS PW {} station with threshold={}%.'.format(station, thresh))
     if thresh is not None:
-        dts = filter_month_year_data_heatmap_plot(pw, freq=freq, thresh=thresh,
-                                                  plot=False)
+        dts, m_dict = filter_month_year_data_heatmap_plot(pw, freq='5T', thresh=thresh,
+                                                          plot=False)
         for dt in dts:
             print('dropping {}'.format(dt))
             pw.loc[{'time': dt}] = np.nan
+        pw.attrs['threshold'] = '{:.0f}'.format(thresh)
+        for month, value in m_dict.items():
+            pw.attrs['months_{}'.format(month)] = value
+        myears = np.mean(np.array([x for x in m_dict.values()]))
+        pw.attrs['mean_years'] = myears
     return pw
 
 

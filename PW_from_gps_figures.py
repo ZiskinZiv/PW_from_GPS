@@ -386,7 +386,7 @@ def plot_figure_6(physical_file=phys_soundings, station='tela',
     return df
 
 
-def plot_israel_map(gis_path=gis_path, rc=rc):
+def plot_israel_map(gis_path=gis_path, rc=rc, ax=None):
     """general nice map for israel, need that to plot stations,
     and temperature field on top of it"""
     import geopandas as gpd
@@ -396,7 +396,10 @@ def plot_israel_map(gis_path=gis_path, rc=rc):
     isr_with_yosh = gpd.read_file(gis_path / 'Israel_and_Yosh.shp')
     isr_with_yosh.crs = {'init': 'epsg:4326'}
     # isr_with_yosh = isr_with_yosh.to_crs(epsg=3857)
-    ax = isr_with_yosh.plot(alpha=0.0, figsize=(6, 15))
+    if ax is None:
+        ax = isr_with_yosh.plot(alpha=0.0, figsize=(6, 15))
+    else:
+        isr_with_yosh.plot(alpha=0.0, ax=ax)
     ctx.add_basemap(
             ax,
             url=ctx.sources.ST_TERRAIN_BACKGROUND,
