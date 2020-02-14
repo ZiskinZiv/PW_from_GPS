@@ -1196,9 +1196,9 @@ def plot_grp_anomlay_heatmap(load_path=work_yuval, gis_path=gis_path,
                              thresh=None, grp='hour', clustering=4):
     # use clustering=4 for grp hour
     # use clustering=2 for grp month
-    # TODO: fix colors between tab10 and map
     # TODO: add subplot below heatmap , summing all the groups
-    # TODO: add weighted stations (number of years data) to either kmeans or weighted sum
+    # TODO: add weighted stations (number of years data) to either kmeans or
+    # weighted sum
     import xarray as xr
     import seaborn as sns
     from sklearn.cluster import KMeans
@@ -1209,12 +1209,38 @@ def plot_grp_anomlay_heatmap(load_path=work_yuval, gis_path=gis_path,
     from PW_from_gps_figures import plot_israel_map
     import pandas as pd
     import matplotlib.pyplot as plt
+    from matplotlib.colors import ListedColormap
+    from palettable.scientific import diverging as divsci
+    from matplotlib import rcParams
+    from matplotlib.colors import LinearSegmentedColormap
+    div_cmap = divsci.Vik_20.mpl_colormap
+
+    def weighted_average(grp, weights_col='weights'):
+        return grp._get_numeric_data().multiply(
+            grp[weights_col], axis=0).sum() / grp[weights_col].sum()
+    # some plotting properties:
+    rc = {
+        'font.family': 'serif',
+        'xtick.labelsize': 'medium',
+        'ytick.labelsize': 'medium'}
+    for key, val in rc.items():
+        rcParams[key] = val
+    sns.set(rc=rc, style='ticks')
+    # load data:
     pw = xr.load_dataset(load_path / 'GNSS_PW_{:.0f}.nc'.format(thresh))
+    # extract weights from attrs:
+    weights = [x.attrs['mean_years'] for x in pw.data_vars.values()]
+    weights = weights / max(weights)
+    # groupby and create means:
     pw_mean = pw.groupby('time.{}'.format(grp)).mean('time')
     pw_anom = pw_mean - pw_mean.mean('{}'.format(grp))
+    # to dataframe:
     df = pw_anom.to_dataframe()
+    weights = pd.Series(weights, index=[x for x in pw.data_vars])
     if clustering is not None:
-        clustering = KMeans(n_clusters=clustering, random_state=0).fit(df.T)
+        # cluster the anomalies:
+        clustering = KMeans(n_clusters=clustering, random_state=0).fit(df.T,
+                                                                       sample_weight=weights)
         # clustering = DBSCAN(eps=3, min_samples=2).fit(df)
         # clustering = OPTICS(min_samples=2).fit(df)
         labels = dict(zip(df.columns, clustering.labels_))
@@ -1225,52 +1251,103 @@ def plot_grp_anomlay_heatmap(load_path=work_yuval, gis_path=gis_path,
                 key=lambda item: item[1])}
         order = [x for x in labels_sorted.keys()]
         df = df[order]
-        df.columns = [(key + '_{}'.format(val))
-                      for key, val in labels_sorted.items()]
-    # create figure and subplots:
-    fig, axes = plt.subplots(1, 2, sharex=False, sharey=False, figsize=(15, 10))
+    # create figure and subplots axes:
+    fig = plt.figure(figsize=(15, 10))
+    fig.suptitle('Precipitable water {}ly anomalies analysis'.format(grp))
+    grid = plt.GridSpec(
+        2, 2, width_ratios=[
+            2, 2], height_ratios=[
+            4, 1], wspace=0.1, hspace=0)
+    ax_heat = fig.add_subplot(grid[0, 0])  # plt.subplot(221)
+    ax_group = fig.add_subplot(grid[1, 0])  # plt.subplot(223)
+    ax_map = fig.add_subplot(grid[0:, 1])  # plt.subplot(122)
     # get the camp and zip it to groups and produce dictionary:
-    cmap = plt.get_cmap("tab10")
-    cmaplist = [cmap(i) for i in range(cmap.N)]
-    cmap_dict = dict(zip(set(labels_sorted.values()), cmaplist))
-    label_cmap_dict = dict(zip(df.columns, [cmap_dict[int(x.split('_')[1])] for x in df.columns]))
-    # plot heatmap:
-    sns.heatmap(df.T, center=0.0, cmap='bwr', yticklabels=True, ax=axes[0])
-    boxes = [dict(facecolor=x, pad=0.05, alpha=0.4)
+    cmap = plt.get_cmap("tab10_r")
+    # cmap = plt.get_cmap("Set2_r")
+    # cmap = ListedColormap(cmap.colors[::-1])
+    groups = list(set(labels_sorted.values()))
+    palette = dict(zip(groups, [cmap(x) for x in range(len(groups))]))
+    label_cmap_dict = dict(zip(labels_sorted.keys(),
+                               [palette[x] for x in labels_sorted.values()]))
+    cm = ListedColormap([x for x in palette.values()])
+    # plot heatmap and colorbar:
+    cbar_ax = fig.add_axes([0.50, 0.24, 0.01, 0.69])  #[left, bottom, width, height]
+    sns.heatmap(df.T, center=0.0, cmap=div_cmap, yticklabels=True,
+                cbar_ax=cbar_ax, ax=ax_heat, cbar_kws={'label': '[mm]'})
+    # activate top ticks and tickslabales:
+    ax_heat.xaxis.set_tick_params(top='on', labeltop='on')
+    # emphasize the yticklabels (stations):
+    ax_heat.set_yticklabels(ax_heat.get_ymajorticklabels(),
+        fontweight = 'bold', fontsize=14)
+    # paint ytick labels with categorical cmap:
+    boxes = [dict(facecolor=x, pad=0.05, alpha=0.6)
              for x in label_cmap_dict.values()]
-    ylabels = [x for x in axes[0].yaxis.get_ticklabels()]
+    ylabels = [x for x in ax_heat.yaxis.get_ticklabels()]
     for label, box in zip(ylabels, boxes):
         label.set_bbox(box)
     # rotate xtick_labels:
-    axes[0].set_xticklabels(axes[0].get_xticklabels(), rotation = 0,
-        fontsize = 10)
-    plot_israel_map(gis_path, ax=axes[1])
+#    ax_heat.set_xticklabels(ax_heat.get_xticklabels(), rotation=0,
+#                            fontsize=10)
+    # plot summed groups (with weights):
+    df_groups = df.T
+    df_groups['groups'] = pd.Series(labels_sorted)
+    df_groups['weights'] = weights
+    df_groups = df_groups.groupby('groups').apply(weighted_average)
+    df_groups.drop(['groups', 'weights'], axis=1, inplace=True)
+    df_groups.T.plot(ax=ax_group, legend=False, cmap=cm)
+    ax_group.grid()
+    group_limit = ax_heat.get_xlim()
+    ax_group.set_xlim(group_limit)
+    ax_group.set_ylabel('[mm]')
+    # set ticks and align with heatmap axis (move by 0.5):
+    ax_group.set_xticks(df.index.values)
+    offset = 1
+    ax_group.xaxis.set(ticks=np.arange(offset /
+                                       2., max(df.index.values) +
+                                       1 - min(df.index.values), offset), ticklabels=df.index.values)
+    # move the lines also by 0.5 to align with heatmap:
+    lines = ax_group.lines  # get the lines
+    [x.set_xdata(x.get_xdata() - min(df.index.values) + 0.5) for x in lines]
+    # plot israel map:
+    plot_israel_map(gis_path, ax=ax_map)
     print('getting solved GNSS israeli stations metadata...')
     gps = produce_geo_gnss_solved_stations(path=gis_path, plot=False)
     gps['group'] = pd.Series(labels_sorted)
-    # gps[gps['group'] == 0].plot(ax=ax, markersize=50, color='m', edgecolor='k', marker='o', label='1')
-    gps.plot(ax=axes[1], column='group', categorical=True, edgecolor='black',
-             cmap='tab10', s=250, legend=True,
+    gps.plot(ax=ax_map, column='group', categorical=True, edgecolor='black',
+             cmap=cm, s=150, legend=True, alpha=0.6,
              legend_kwds={'prop': {'size': 10}, 'fontsize': 14,
-                          'loc': 'upper left'})
-    axes[1].set_title('Groupings of {}ly anomalies'.format(grp))
+                          'loc': 'upper left','title': 'Groups'})
+    # ax_map.set_title('Groupings of {}ly anomalies'.format(grp))
     gps_stations = [x for x in gps.index]
+    # annotate station names in map:
     to_plot_offset = ['mrav', 'klhv']
     [gps_stations.remove(x) for x in to_plot_offset]
     gps_normal_anno = gps.loc[gps_stations, :]
     gps_offset_anno = gps.loc[to_plot_offset, :]
-    geo_annotate(axes[1], gps_normal_anno.lon, gps_normal_anno.lat,
+    geo_annotate(ax_map, gps_normal_anno.lon, gps_normal_anno.lat,
                  gps_normal_anno.index, xytext=(6, 6), fmt=None,
                  c='k', fw='bold', fs=None, colorupdown=False)
-    geo_annotate(axes[1], gps_offset_anno.lon, gps_offset_anno.lat,
+    geo_annotate(ax_map, gps_offset_anno.lon, gps_offset_anno.lat,
                  gps_offset_anno.index, xytext=(7, -9), fmt=None,
                  c='k', fw='bold', fs=None, colorupdown=False)
+    # annotate height
+    geo_annotate(ax_map, gps_normal_anno.lon, gps_normal_anno.lat,
+                 gps_normal_anno.alt, xytext=(-22, -10), fmt='{:.0f}',
+                 c='k', fw='normal', fs=10, colorupdown=False)
+    geo_annotate(ax_map, gps_offset_anno.lon, gps_offset_anno.lat,
+                 gps_offset_anno.alt, xytext=(-13, 9), fmt='{:.0f}',
+                 c='k', fw='normal', fs=10, colorupdown=False)
 #    plt.legend(['IMS stations', 'GNSS stations'],
 #           prop={'size': 10}, bbox_to_anchor=(-0.15, 1.0),
 #           title='Stations')
 #    plt.legend(prop={'size': 10}, loc='upper left')
-    plt.tight_layout()
-    # plt.subplots_adjust(bottom=0.05, top=0.974)
+    # plt.tight_layout()
+    plt.subplots_adjust(top=0.92,
+                        bottom=0.065,
+                        left=0.065,
+                        right=0.915,
+                        hspace=0.19,
+                        wspace=0.215)
     return df
 
 
