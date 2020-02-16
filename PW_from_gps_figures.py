@@ -11,12 +11,14 @@ import seaborn as sns
 from pathlib import Path
 import matplotlib.pyplot as plt
 from PW_paths import savefig_path
+import matplotlib.ticker as ticker
 tela_results_path = work_yuval / 'GNSS_stations/tela/rinex/30hr/results'
 tela_solutions = work_yuval / 'GNSS_stations/tela/gipsyx_solutions'
 sound_path = work_yuval / 'sounding'
 phys_soundings = sound_path / 'bet_dagan_phys_sounding_2007-2019.nc'
 ims_path = work_yuval / 'IMS_T'
 gis_path = work_yuval / 'gis'
+dem_path = work_yuval / 'AW3D30'
 hydro_path = work_yuval / 'hydro'
 
 rc = {
@@ -28,6 +30,26 @@ for key, val in rc.items():
 sns.set(rc=rc, style='white')
 
 
+@ticker.FuncFormatter
+def lon_formatter(x, pos):
+    if x < 0:
+        return r'{0:.1f}$\degree$W'.format(abs(x))
+    elif x > 0:
+        return r'{0:.1f}$\degree$E'.format(abs(x))
+    elif x == 0:
+        return r'0$\degree$'
+
+
+@ticker.FuncFormatter
+def lat_formatter(x, pos):
+    if x < 0:
+        return r'{0:.1f}$\degree$S'.format(abs(x))
+    elif x > 0:
+        return r'{0:.1f}$\degree$N'.format(abs(x))
+    elif x == 0:
+        return r'0$\degree$'
+
+
 def caption(text, color='blue', **kwargs):
     from termcolor import colored
     print(colored('Caption:', color, attrs=['bold'], **kwargs))
@@ -35,19 +57,91 @@ def caption(text, color='blue', **kwargs):
     return
 
 
-def plot_figure_1(path=work_yuval, save=True):
+def plot_figure_1(path=work_yuval, gis_path=gis_path, dem_path=dem_path,
+                  save=True):
     from aux_gps import gantt_chart
     import xarray as xr
+    import pandas as pd
+    import geopandas as gpd
+    from PW_stations import produce_geo_gnss_solved_stations
+    from aux_gps import geo_annotate
+    from ims_procedures import produce_geo_ims
+    from matplotlib.colors import ListedColormap
+    fig = plt.figure(figsize=(20, 10))
+    grid = plt.GridSpec(1, 2, width_ratios=[
+        4, 2], wspace=0.1)
+    ax_gantt = fig.add_subplot(grid[0, 0])  # plt.subplot(221)
+    ax_map = fig.add_subplot(grid[0, 1])  # plt.subplot(122)
+#    fig, ax = plt.subplots(1, 2, sharex=False, sharey=False, figsize=(20, 6))
+    # RINEX gantt chart:
     ds = xr.open_dataset(path / 'GNSS_PW.nc')
     just_pw = [x for x in ds if 'error' not in x]
     ds = ds[just_pw]
+    da = ds.to_array('station')
+    da['station'] = [x.upper() for x in da.station.values]
+    ds = da.to_dataset('station')
     title = 'RINEX files availability for the Israeli GNSS stations'
-    ax = gantt_chart(ds, fw='normal', title='')
-    filename = 'rinex_israeli_gnss.png'
+    ax_gantt = gantt_chart(ds, ax=ax_gantt, fw='normal', title='')
+    # Israel gps ims map:
+    ax_map = plot_israel_map(gis_path=gis_path, ax=ax_map)
+    # overlay with dem data:
+    cmap = plt.get_cmap('terrain', 41)
+    dem = xr.open_dataarray(dem_path / 'israel_dem_250_500.nc')
+    # dem = xr.open_dataarray(dem_path / 'israel_dem_500_1000.nc')
+    fg = dem.plot.imshow(ax=ax_map, alpha=0.5, cmap=cmap,
+                    vmin=dem.min(), vmax=dem.max(), add_colorbar=False)
+    cbar_kwargs={'fraction':0.1, 'aspect': 50, 'pad': 0.03}
+    cb = plt.colorbar(fg, **cbar_kwargs)
+    cb.set_label(label='meters above sea level',size=8,weight='normal')
+    cb.ax.tick_params(labelsize=8)
+    ax_map.set_xlabel('')
+    ax_map.set_ylabel('')
+    
+#    print('getting IMS temperature stations metadata...')
+#    ims = produce_geo_ims(path=gis_path, freq='10mins', plot=False)
+#    ims.plot(ax=ax_map, color='red', edgecolor='black', alpha=0.5)
+    # ims, gps = produce_geo_df(gis_path=gis_path, plot=False)
+    print('getting solved GNSS israeli stations metadata...')
+    gps = produce_geo_gnss_solved_stations(path=gis_path, plot=False)
+    gps.plot(ax=ax_map, color='black', edgecolor='black', marker='s',
+             alpha=0.7, markersize=25)
+    gps_stations = [x for x in gps.index]
+    to_plot_offset = ['mrav', 'klhv', 'nzrt', 'katz', 'elro']
+    [gps_stations.remove(x) for x in to_plot_offset]
+    gps_normal_anno = gps.loc[gps_stations, :]
+    gps_offset_anno = gps.loc[to_plot_offset, :]
+    geo_annotate(ax_map, gps_normal_anno.lon, gps_normal_anno.lat,
+                 gps_normal_anno.index.str.upper(), xytext=(3, 3), fmt=None,
+                 c='k', fw='normal', fs=10, colorupdown=False)
+    geo_annotate(ax_map, gps_offset_anno.lon, gps_offset_anno.lat,
+                 gps_offset_anno.index.str.upper(), xytext=(4, -6), fmt=None,
+                 c='k', fw='normal', fs=10, colorupdown=False)
+    # plot bet-dagan:
+    df = pd.Series([32.00, 34.81]).to_frame().T
+    df.index = ['Beit Dagan']
+    df.columns = ['lat', 'lon']
+    bet_dagan = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.lon,
+                                                                 df.lat),
+                                 crs=gps.crs)
+    bet_dagan.plot(ax=ax_map, color='black', edgecolor='black',
+                   marker='+')
+    geo_annotate(ax_map, bet_dagan.lon, bet_dagan.lat,
+                 bet_dagan.index, xytext=(4, -6), fmt=None,
+                 c='k', fw='normal', fs=10, colorupdown=False)
+    plt.legend(['GNSS sites', 'radiosonde'], loc='upper left')
+    fig.subplots_adjust(top=0.95,
+                        bottom=0.11,
+                        left=0.05,
+                        right=0.95,
+                        hspace=0.2,
+                        wspace=0.2)
+    # plt.legend(['IMS stations', 'GNSS stations'], loc='upper left')
+
+    filename = 'rinex_israeli_gnss_map.png'
     caption('RINEX files availability for the Israeli GNSS station network at the SOPAC/GARNER website')
     if save:
         plt.savefig(savefig_path / filename, bbox_inches='tight')
-    return ax
+    return fig
 
 
 def plot_figure_2(path=tela_results_path, plot='WetZ', save=True):
@@ -405,6 +499,11 @@ def plot_israel_map(gis_path=gis_path, rc=rc, ax=None):
             url=ctx.sources.ST_TERRAIN_BACKGROUND,
             crs={
                     'init': 'epsg:4326'})
+    ax.xaxis.set_major_locator(ticker.MaxNLocator(5))
+    ax.yaxis.set_major_formatter(lat_formatter)
+    ax.xaxis.set_major_formatter(lon_formatter)
+    ax.tick_params(top=True, bottom=True, left=True, right=True,
+                   direction='out', labelsize=10)
     return ax
 
 
