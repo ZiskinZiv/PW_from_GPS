@@ -207,15 +207,18 @@ def consecutive_runs(arr, num=False):
     return A
 
 
-def gantt_chart(ds, fw='bold',
+def gantt_chart(ds, fw='bold', ax=None,
                 title='RINEX files availability for the Israeli GNSS stations'):
     import pandas as pd
     import matplotlib.pyplot as plt
     import numpy as np
     import seaborn as sns
     import matplotlib.dates as mdates
+    from matplotlib.ticker import AutoMinorLocator
+    # TODO: fix the ticks/ticks labels
     sns.set_palette(sns.color_palette("tab10", len(ds)))
-    fig, ax = plt.subplots(figsize=(20, 6))
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(20, 6))
     names = [x for x in ds]
     vals = range(1, len(ds) + 1)
     xmin = pd.to_datetime(ds.time.min().values) - pd.Timedelta(1, unit='W')
@@ -240,7 +243,7 @@ def gantt_chart(ds, fw='bold',
 #        dt_min_list.append(dt_min)
 #        dt_max_list.append(dt_max)
         # v = int(calc(i, max = len(ds)))
-        plt.hlines(y, dt_min, dt_max, linewidth=10, color=colors[i])
+        ax.hlines(y, dt_min, dt_max, linewidth=10, color=colors[i])
         #plt.show()
         # ds[da][~ds[da].isnull()] = i + 1
         # ds[da] = ds[da].fillna(0)
@@ -250,9 +253,22 @@ def gantt_chart(ds, fw='bold',
     [ax.get_yticklabels()[i].set_color(colors[::-1][i]) for i in range(len(colors))]
     ax.set_xlim(xmin, xmax)
     # handle x-axis (time):
-    plt.minorticks_on()
-    ax.xaxis.set_minor_locator(mdates.YearLocator())
-    ax.xaxis.set_minor_formatter(mdates.DateFormatter("\n%Y"))
+    ax.xaxis.set_minor_locator(AutoMinorLocator())
+    ax.tick_params(which='major',
+        direction='out',
+        labeltop=False,
+        labelbottom=True,
+        top=False,
+        bottom=True, left=True)
+    ax.minorticks_on()
+    ax.tick_params(which='minor',
+        direction='out',
+        labeltop=False,
+        labelbottom=True,
+        top=False,
+        bottom=True, left=False)
+#     ax.xaxis.set_minor_locator(mdates.YearLocator())
+#    ax.xaxis.set_minor_formatter(mdates.DateFormatter("\n%Y"))
     plt.setp(ax.xaxis.get_majorticklabels(), rotation=30, ha='center',
              fontweight=fw)
     plt.setp(ax.xaxis.get_minorticklabels(), rotation=30, ha='center',
@@ -261,8 +277,8 @@ def gantt_chart(ds, fw='bold',
 #    ax.grid(which='major', axis='x', linestyle='-', color='k')
 #    ax.grid(which='minor', axis='x', linestyle='-', color='k')
     if title is not None:
-        plt.title(title, fontsize=14, fontweight=fw)
-    plt.tight_layout()
+        ax.set_title(title, fontsize=14, fontweight=fw)
+    # fig.tight_layout()
     return ax
 
 
