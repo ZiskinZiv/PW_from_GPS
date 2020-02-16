@@ -22,7 +22,7 @@ cwd = Path().cwd()
 
 def clip_raster(fp=awd_path/'Israel_Area.tif',
                 out_tif=awd_path/'israel_dem.tif',
-                minx=34.0, miny=29.4, maxx=36.0, maxy=33.4):
+                minx=34.0, miny=29.0, maxx=36.5, maxy=34.0):
     def getFeatures(gdf):
         """Function to parse features from GeoDataFrame in such a manner that
         rasterio wants them"""
