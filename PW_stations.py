@@ -204,6 +204,7 @@ def build_df_lat_lon_alt_gnss_stations(gnss_path=GNSS, savepath=None):
     from aux_gps import path_glob
     import pandas as pd
     import pyproj
+    from pathlib import Path
     stations_in_gnss = [x.as_posix().split('/')[-1]
                         for x in path_glob(GNSS, '*')]
     dss = [
@@ -230,6 +231,14 @@ def build_df_lat_lon_alt_gnss_stations(gnss_path=GNSS, savepath=None):
     df['X'] = X
     df['Y'] = Y
     df['Z'] = Z
+    # read station names from log files:
+    stations_approx = pd.read_fwf(Path().cwd()/'stations_approx_loc.txt',
+                              delim_whitespace=False, skiprows=1, header=None)
+    stations_approx.columns=['index','X','Y','Z','name', 'extra']
+    stations_approx['name'] = stations_approx['name'].fillna('') +' ' + stations_approx['extra'].fillna('')
+    stations_approx.drop('extra', axis=1, inplace=True)
+    stations_approx = stations_approx.set_index('index')
+    df['name'] = stations_approx['name']
     df.sort_index(inplace=True)
     if savepath is not None:
         filename = 'israeli_gnss_coords.txt'
@@ -711,8 +720,12 @@ def read_log_files(path, savepath=None, fltr='updated_by_shlomi',
                 x for x in content if '{} coordinate (m)'.format(pos) in x][0]
             xyz = float(text.split(':')[-1])
             pos_list.append(xyz)
+        text = [x for x in content if 'Site Name' in x][0]
+        name = text.split(':')[-1]
         record[station] = pos_list
+        pos_list.append(name)
     df = pd.DataFrame.from_dict(record, orient='index')
+    posnames.append('name')
     df.columns = posnames
     if savepath is not None:
         savefilename = 'stations_approx_loc.txt'
@@ -949,6 +962,41 @@ def filter_stations(path, group_name='israeli', save=False):
 #        return intr
 
 
+def produce_pw_statistics(path=work_yuval, thresh=None):
+    import xarray as xr
+    from scipy.stats import kurtosis
+    from scipy.stats import skew
+    import pandas as pd
+    pw = xr.load_dataset(path / 'GNSS_PW_{:.0f}.nc'.format(thresh))
+    pd.options.display.float_format = '{:.1f}'.format
+    mean = pw.mean('time').reset_coords().to_array(
+        'index').to_dataframe('Mean')
+    std = pw.std('time').reset_coords().to_array('index').to_dataframe('SD')
+    median = pw.median('time').reset_coords().to_array(
+        'index').to_dataframe('Median')
+    q5 = pw.quantile(0.05, 'time').reset_coords(drop=True).to_array(
+        'index').to_dataframe('5th')
+    q95 = pw.quantile(0.95, 'time').reset_coords(drop=True).to_array(
+        'index').to_dataframe('95th')
+    maximum = pw.max('time').reset_coords().to_array(
+        'index').to_dataframe('Maximum')
+    minimum = pw.min('time').reset_coords().to_array(
+        'index').to_dataframe('Minimum')
+    sk = pw.map(skew, nan_policy='omit').to_array(
+        'index').to_dataframe('Skewness')
+    kurt = pw.map(kurtosis, nan_policy='omit').to_array(
+        'index').to_dataframe('Kurtosis')
+    df = pd.concat([mean, std, median, q5, q95,
+                    maximum, minimum, sk, kurt], axis=1)
+    cols=[]
+    cols.append('Site ID')
+    cols += [x for x in df.columns]
+    df['Site ID'] = df.index.str.upper()
+    df = df[cols]
+    df.index.name = ''
+    return df
+
+
 def produce_geo_gnss_solved_stations(path=gis_path,
                                      file='israeli_gnss_coords.txt',
                                      plot=True):
@@ -957,7 +1005,7 @@ def produce_geo_gnss_solved_stations(path=gis_path,
     from pathlib import Path
     cwd = Path().cwd()
     df = pd.read_csv(cwd / file, delim_whitespace=True)
-    df = df[['lat', 'lon', 'alt']]
+    df = df[['lat', 'lon', 'alt', 'name']]
     isr = gpd.read_file(path / 'Israel_and_Yosh.shp')
     isr.crs = {'init': 'epsg:4326'}
     stations = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.lon,
@@ -1192,43 +1240,42 @@ def save_GNSS_PW_israeli_stations(savepath=work_yuval, phys=phys_soundings):
     return
 
 
-def plot_grp_anomlay_heatmap(load_path=work_yuval, gis_path=gis_path,
-                             thresh=None, grp='hour', season=None,
-                             clustering=4):
-    # use clustering=4 for grp hour
-    # use clustering=2 for grp month
-    # TODO: add subplot below heatmap , summing all the groups
-    # TODO: add weighted stations (number of years data) to either kmeans or
-    # weighted sum
+def group_pw_and_T_and_save(load_path=work_yuval, ims_path=ims_path,
+                            thresh=None, grp='month', savepath=None):
     import xarray as xr
-    import seaborn as sns
-    from sklearn.cluster import KMeans
-    from sklearn.cluster import DBSCAN
-    from sklearn.cluster import OPTICS
-    from aux_gps import geo_annotate
-    import matplotlib.pyplot as plt
-    from PW_from_gps_figures import plot_israel_map
-    import pandas as pd
-    import matplotlib.pyplot as plt
-    from matplotlib.colors import ListedColormap
-    from palettable.scientific import diverging as divsci
-    from matplotlib import rcParams
-    from matplotlib.colors import LinearSegmentedColormap
-    div_cmap = divsci.Vik_20.mpl_colormap
-
-    def weighted_average(grp, weights_col='weights'):
-        return grp._get_numeric_data().multiply(
-            grp[weights_col], axis=0).sum() / grp[weights_col].sum()
-    # some plotting properties:
-    rc = {
-        'font.family': 'serif',
-        'xtick.labelsize': 'medium',
-        'ytick.labelsize': 'medium'}
-    for key, val in rc.items():
-        rcParams[key] = val
-    sns.set(rc=rc, style='ticks')
-    # load data:
     pw = xr.load_dataset(load_path / 'GNSS_PW_{:.0f}.nc'.format(thresh))
+    attrs = {da: val.attrs for (da, val) in pw.data_vars.items()}
+    # use upper() on names:
+    da = pw.to_array('station')
+    da['station'] = da['station'].str.upper()
+    pw = da.to_dataset('station')
+    for da in pw.data_vars.values():
+        da.attrs = attrs.get(da.name.lower())
+    T = xr.load_dataset(ims_path / 'GNSS_5mins_TD_ALL_1996_2019.nc')
+    # align T and pw:
+    for da in pw.data_vars:
+        pw['{}_T'.format(da)] = T[da.lower()]
+    pw_grp = pw.groupby('time.{}'.format(grp)).mean('time')
+    if savepath is not None:
+        filename = 'PW_T_{}ly_means_thresh_{:.0f}.nc'.format(grp, thresh)
+        pw_grp.to_netcdf(savepath / filename , 'w')
+        print('saved {} to {}.'.format(filename, savepath))
+    return pw
+
+
+def group_anoms_and_cluster(load_path=work_yuval, thresh=None, grp='hour',
+                            season=None, n_clusters=4):
+    import xarray as xr
+    from sklearn.cluster import KMeans
+    # load data and save attrs in dict:
+    pw = xr.load_dataset(load_path / 'GNSS_PW_{:.0f}.nc'.format(thresh))
+    attrs = {da: val.attrs for (da, val) in pw.data_vars.items()}
+    # use upper() on names:
+    da = pw.to_array('station')
+    da['station'] = da['station'].str.upper()
+    pw = da.to_dataset('station')
+    for da in pw.data_vars.values():
+        da.attrs = attrs.get(da.name.lower())
     # for now, drop hrmn and nizn station from analysis:
 #    if to_drop is not None:
 #        for sta in to_drop:
@@ -1245,13 +1292,12 @@ def plot_grp_anomlay_heatmap(load_path=work_yuval, gis_path=gis_path,
     # to dataframe:
     df = pw_anom.to_dataframe()
     weights = pd.Series(weights, index=[x for x in pw.data_vars])
-    if clustering is not None:
+    if n_clusters is not None:
         # cluster the anomalies:
-        clustering = KMeans(n_clusters=clustering, random_state=0).fit(df.T,
-                                                                       sample_weight=weights)
+        clr = KMeans(n_clusters=n_clusters, random_state=0).fit(df.T, sample_weight=weights)
         # clustering = DBSCAN(eps=3, min_samples=2).fit(df)
         # clustering = OPTICS(min_samples=2).fit(df)
-        labels = dict(zip(df.columns, clustering.labels_))
+        labels = dict(zip(df.columns, clr.labels_))
         labels_sorted = {
             k: v for k,
             v in sorted(
@@ -1259,97 +1305,7 @@ def plot_grp_anomlay_heatmap(load_path=work_yuval, gis_path=gis_path,
                 key=lambda item: item[1])}
         order = [x for x in labels_sorted.keys()]
         df = df[order]
-    # create figure and subplots axes:
-    fig = plt.figure(figsize=(15, 10))
-    if season is not None:
-        fig.suptitle('Precipitable water {}ly anomalies analysis for {} season'.format(grp, season))
-    else:
-        fig.suptitle('Precipitable water {}ly anomalies analysis'.format(grp))
-    grid = plt.GridSpec(
-        2, 2, width_ratios=[
-            2, 2], height_ratios=[
-            4, 1], wspace=0.1, hspace=0)
-    ax_heat = fig.add_subplot(grid[0, 0])  # plt.subplot(221)
-    ax_group = fig.add_subplot(grid[1, 0])  # plt.subplot(223)
-    ax_map = fig.add_subplot(grid[0:, 1])  # plt.subplot(122)
-    # get the camp and zip it to groups and produce dictionary:
-    cmap = plt.get_cmap("tab10_r")
-    # cmap = plt.get_cmap("Set2_r")
-    # cmap = ListedColormap(cmap.colors[::-1])
-    groups = list(set(labels_sorted.values()))
-    palette = dict(zip(groups, [cmap(x+1) for x in range(len(groups))]))
-    label_cmap_dict = dict(zip(labels_sorted.keys(),
-                               [palette[x] for x in labels_sorted.values()]))
-    cm = ListedColormap([x for x in palette.values()])
-    # plot heatmap and colorbar:
-    cbar_ax = fig.add_axes([0.50, 0.24, 0.01, 0.69])  #[left, bottom, width, height]
-    sns.heatmap(df.T, center=0.0, cmap=div_cmap, yticklabels=True,
-                cbar_ax=cbar_ax, ax=ax_heat, cbar_kws={'label': '[mm]'})
-    # activate top ticks and tickslabales:
-    ax_heat.xaxis.set_tick_params(top='on', labeltop='on')
-    # emphasize the yticklabels (stations):
-    ax_heat.set_yticklabels(ax_heat.get_ymajorticklabels(),
-        fontweight = 'bold', fontsize=14)
-    # paint ytick labels with categorical cmap:
-    boxes = [dict(facecolor=x, pad=0.05, alpha=0.6)
-             for x in label_cmap_dict.values()]
-    ylabels = [x for x in ax_heat.yaxis.get_ticklabels()]
-    for label, box in zip(ylabels, boxes):
-        label.set_bbox(box)
-    # rotate xtick_labels:
-#    ax_heat.set_xticklabels(ax_heat.get_xticklabels(), rotation=0,
-#                            fontsize=10)
-    # plot summed groups (with weights):
-    df_groups = df.T
-    df_groups['groups'] = pd.Series(labels_sorted)
-    df_groups['weights'] = weights
-    df_groups = df_groups.groupby('groups').apply(weighted_average)
-    df_groups.drop(['groups', 'weights'], axis=1, inplace=True)
-    df_groups.T.plot(ax=ax_group, legend=False, cmap=cm)
-    ax_group.grid()
-    group_limit = ax_heat.get_xlim()
-    ax_group.set_xlim(group_limit)
-    ax_group.set_ylabel('[mm]')
-    # set ticks and align with heatmap axis (move by 0.5):
-    ax_group.set_xticks(df.index.values)
-    offset = 1
-    ax_group.xaxis.set(ticks=np.arange(offset /
-                                       2., max(df.index.values) +
-                                       1 - min(df.index.values), offset), ticklabels=df.index.values)
-    # move the lines also by 0.5 to align with heatmap:
-    lines = ax_group.lines  # get the lines
-    [x.set_xdata(x.get_xdata() - min(df.index.values) + 0.5) for x in lines]
-    # plot israel map:
-    plot_israel_map(gis_path, ax=ax_map)
-    print('getting solved GNSS israeli stations metadata...')
-    gps = produce_geo_gnss_solved_stations(path=gis_path, plot=False)
-    gps = gps.loc[pw.data_vars, :]
-    gps['group'] = pd.Series(labels_sorted)
-    gps.plot(ax=ax_map, column='group', categorical=True, edgecolor='black',
-             cmap=cm, s=150, legend=True, alpha=0.6,
-             legend_kwds={'prop': {'size': 10}, 'fontsize': 14,
-                          'loc': 'upper left','title': 'Groups'})
-    # ax_map.set_title('Groupings of {}ly anomalies'.format(grp))
-    # annotate station names in map:
-    geo_annotate(ax_map, gps.lon, gps.lat,
-                 gps.index, xytext=(6, 6), fmt=None,
-                 c='k', fw='bold', fs=None, colorupdown=False)
-    # annotate height
-    geo_annotate(ax_map, gps.lon, gps.lat,
-                 gps.alt, xytext=(-22, -10), fmt='{:.0f}',
-                 c='k', fw='normal', fs=10, colorupdown=False)
-#    plt.legend(['IMS stations', 'GNSS stations'],
-#           prop={'size': 10}, bbox_to_anchor=(-0.15, 1.0),
-#           title='Stations')
-#    plt.legend(prop={'size': 10}, loc='upper left')
-    # plt.tight_layout()
-    plt.subplots_adjust(top=0.92,
-                        bottom=0.065,
-                        left=0.065,
-                        right=0.915,
-                        hspace=0.19,
-                        wspace=0.215)
-    return df
+    return df, labels_sorted, weights
 
 
 def produce_GNSS_station_PW(station='tela', sample_rate=None, model=None,
