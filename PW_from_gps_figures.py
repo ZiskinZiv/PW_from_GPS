@@ -57,8 +57,8 @@ def caption(text, color='blue', **kwargs):
     return
 
 
-def plot_figure_1(path=work_yuval, gis_path=gis_path, dem_path=dem_path,
-                  save=True):
+def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
+                               dem_path=dem_path, save=True):
     from aux_gps import gantt_chart
     import xarray as xr
     import pandas as pd
@@ -69,7 +69,7 @@ def plot_figure_1(path=work_yuval, gis_path=gis_path, dem_path=dem_path,
     from matplotlib.colors import ListedColormap
     fig = plt.figure(figsize=(20, 10))
     grid = plt.GridSpec(1, 2, width_ratios=[
-        4, 2], wspace=0.1)
+        5, 2], wspace=0.1)
     ax_gantt = fig.add_subplot(grid[0, 0])  # plt.subplot(221)
     ax_map = fig.add_subplot(grid[0, 1])  # plt.subplot(122)
 #    fig, ax = plt.subplots(1, 2, sharex=False, sharey=False, figsize=(20, 6))
@@ -89,14 +89,13 @@ def plot_figure_1(path=work_yuval, gis_path=gis_path, dem_path=dem_path,
     dem = xr.open_dataarray(dem_path / 'israel_dem_250_500.nc')
     # dem = xr.open_dataarray(dem_path / 'israel_dem_500_1000.nc')
     fg = dem.plot.imshow(ax=ax_map, alpha=0.5, cmap=cmap,
-                    vmin=dem.min(), vmax=dem.max(), add_colorbar=False)
-    cbar_kwargs={'fraction':0.1, 'aspect': 50, 'pad': 0.03}
+                         vmin=dem.min(), vmax=dem.max(), add_colorbar=False)
+    cbar_kwargs = {'fraction': 0.1, 'aspect': 50, 'pad': 0.03}
     cb = plt.colorbar(fg, **cbar_kwargs)
-    cb.set_label(label='meters above sea level',size=8,weight='normal')
+    cb.set_label(label='meters above sea level', size=8, weight='normal')
     cb.ax.tick_params(labelsize=8)
     ax_map.set_xlabel('')
     ax_map.set_ylabel('')
-    
 #    print('getting IMS temperature stations metadata...')
 #    ims = produce_geo_ims(path=gis_path, freq='10mins', plot=False)
 #    ims.plot(ax=ax_map, color='red', edgecolor='black', alpha=0.5)
@@ -142,6 +141,42 @@ def plot_figure_1(path=work_yuval, gis_path=gis_path, dem_path=dem_path,
     if save:
         plt.savefig(savefig_path / filename, bbox_inches='tight')
     return fig
+
+
+def plot_monthly_pw_and_T(load_path=work_yuval, thresh=50):
+    import xarray as xr
+    import numpy as np
+    pw_and_T = xr.load_dataset(
+        load_path /
+        'PW_T_monthly_means_thresh_{:.0f}.nc'.format(thresh))
+    pw_only = [x for x in pw_and_T if '_T' not in x]
+    T_only = [x for x in pw_and_T if '_T' in x]
+    pw = pw_and_T[pw_only]
+    T = pw_and_T[T_only]
+    cwrap = 5
+    fg = pw.to_array('station').plot(col='station', col_wrap=cwrap,
+                                     color='b', marker='o', alpha=0.7)
+    fg.fig.subplots_adjust(wspace=0.0, hspace=0.0, right=0.974)
+    col_arr = np.arange(0, len(pw))
+    right_side = col_arr[cwrap-1::cwrap]
+    for i, ax in enumerate(fg.axes.flatten()):
+        title = ax.get_title().split('=')[-1].strip(' ')
+        ax.set_title('')
+        ax.text(.2, .9, title,
+                horizontalalignment='center',
+                transform=ax.transAxes)
+        ax_t = ax.twinx()
+        T['{}_T'.format(title)].plot(color='r', marker='o', alpha=0.7, ax=ax_t)
+        ax_t.set_ylim(0, 30)
+        fg.fig.canvas.draw()
+        labels = [item.get_text() for item in ax_t.get_yticklabels()]
+        ax_t.yaxis.set_ticklabels([])
+        ax_t.tick_params(axis='y', color='r')
+        if i in right_side:
+            ax_t.yaxis.set_ticklabels(labels)
+            ax_t.tick_params(axis='y', labelcolor='r', color='r')
+        ax_t.set_ylabel('')
+    return fg
 
 
 def plot_figure_2(path=tela_results_path, plot='WetZ', save=True):
@@ -672,4 +707,167 @@ def plot_figure_9(hydro_path=hydro_path, gis_path=gis_path, pw_anom=False,
     if save:
         plt.savefig(savefig_path / filename, bbox_inches='tight')
     return ax
+
+
+def produce_table_1():
+    from PW_stations import produce_geo_gnss_solved_stations
+    import pandas as pd
+    df_gnss = produce_geo_gnss_solved_stations(plot=False)
+    df_gnss['ID'] = df_gnss.index.str.upper()
+    pd.options.display.float_format = '{:.2f}'.format
+    df = df_gnss[['name', 'ID', 'lat', 'lon', 'alt']]
+    df['alt'] = df['alt'].astype(int)
+    cols = ['GNSS Sites', 'Site ID', 'Latitude [N]',
+            'Longitude [W]', 'Altitude [m a.s.l]']
+    df.columns = cols
+    df.loc['spir', 'GNSS Sites'] = 'Sapir'
+    print(df.to_latex(index=False))
+    return df
+
+
+def produce_table_2(thresh=50):
+    from PW_stations import produce_pw_statistics
+    df = produce_pw_statistics(thresh=thresh)
+    print(df.to_latex(index=False))
+    return df
+
+
+def plot_grp_anomlay_heatmap(load_path=work_yuval, gis_path=gis_path,
+                             thresh=None, grp='hour', season=None,
+                             n_clusters=4, save=True, title=False):
+    import xarray as xr
+    import seaborn as sns
+    import numpy as np
+    from PW_stations import group_anoms_and_cluster
+    from aux_gps import geo_annotate
+    import matplotlib.pyplot as plt
+    import pandas as pd
+    from matplotlib.colors import ListedColormap
+    from palettable.scientific import diverging as divsci
+    from PW_stations import produce_geo_gnss_solved_stations
+    div_cmap = divsci.Vik_20.mpl_colormap
+    dem_path = load_path / 'AW3D30'
+
+    def weighted_average(grp_df, weights_col='weights'):
+        return grp_df._get_numeric_data().multiply(
+            grp_df[weights_col], axis=0).sum() / grp_df[weights_col].sum()
+
+    df, labels_sorted, weights = group_anoms_and_cluster(
+            load_path=load_path, thresh=thresh, grp=grp, season=season,
+            n_clusters=n_clusters)
+    # create figure and subplots axes:
+    fig = plt.figure(figsize=(15, 10))
+    if title:
+        if season is not None:
+            fig.suptitle('Precipitable water {}ly anomalies analysis for {} season'.format(grp, season))
+        else:
+            fig.suptitle('Precipitable water {}ly anomalies analysis'.format(grp))
+    grid = plt.GridSpec(
+        2, 2, width_ratios=[
+            3, 2], height_ratios=[
+            4, 1], wspace=0.1, hspace=0)
+    ax_heat = fig.add_subplot(grid[0, 0])  # plt.subplot(221)
+    ax_group = fig.add_subplot(grid[1, 0])  # plt.subplot(223)
+    ax_map = fig.add_subplot(grid[0:, 1])  # plt.subplot(122)
+    # get the camp and zip it to groups and produce dictionary:
+    cmap = plt.get_cmap("Accent")
+    # cmap = plt.get_cmap("Set2_r")
+    # cmap = ListedColormap(cmap.colors[::-1])
+    groups = list(set(labels_sorted.values()))
+    palette = dict(zip(groups, [cmap(x) for x in range(len(groups))]))
+    label_cmap_dict = dict(zip(labels_sorted.keys(),
+                               [palette[x] for x in labels_sorted.values()]))
+    cm = ListedColormap([x for x in palette.values()])
+    # plot heatmap and colorbar:
+    cbar_ax = fig.add_axes([0.57, 0.24, 0.01, 0.69])  #[left, bottom, width,
+    # height]
+    ax_heat = sns.heatmap(
+            df.T,
+            center=0.0,
+            cmap=div_cmap,
+            yticklabels=True,
+            ax=ax_heat,
+            cbar_ax=cbar_ax,
+            cbar_kws={'label': '[mm]'})
+    # activate top ticks and tickslabales:
+    ax_heat.xaxis.set_tick_params(top='on', labeltop='on')
+    # emphasize the yticklabels (stations):
+    ax_heat.yaxis.set_tick_params(left='on')
+    ax_heat.set_yticklabels(ax_heat.get_ymajorticklabels(),
+        fontweight = 'bold', fontsize=10)
+    # paint ytick labels with categorical cmap:
+    boxes = [dict(facecolor=x, pad=0.05, alpha=0.6)
+             for x in label_cmap_dict.values()]
+    ylabels = [x for x in ax_heat.yaxis.get_ticklabels()]
+    for label, box in zip(ylabels, boxes):
+        label.set_bbox(box)
+    # rotate xtick_labels:
+#    ax_heat.set_xticklabels(ax_heat.get_xticklabels(), rotation=0,
+#                            fontsize=10)
+    # plot summed groups (with weights):
+    df_groups = df.T
+    df_groups['groups'] = pd.Series(labels_sorted)
+    df_groups['weights'] = weights
+    df_groups = df_groups.groupby('groups').apply(weighted_average)
+    df_groups.drop(['groups', 'weights'], axis=1, inplace=True)
+    df_groups.T.plot(ax=ax_group, legend=False, cmap=cm)
+    ax_group.grid()
+    group_limit = ax_heat.get_xlim()
+    ax_group.set_xlim(group_limit)
+    ax_group.set_ylabel('[mm]')
+    # set ticks and align with heatmap axis (move by 0.5):
+    ax_group.set_xticks(df.index.values)
+    offset = 1
+    ax_group.xaxis.set(ticks=np.arange(offset / 2.,
+                                       max(df.index.values) + 1 - min(df.index.values),
+                                       offset),
+                       ticklabels=df.index.values)
+    # move the lines also by 0.5 to align with heatmap:
+    lines = ax_group.lines  # get the lines
+    [x.set_xdata(x.get_xdata() - min(df.index.values) + 0.5) for x in lines]
+    # plot israel map:
+    ax_map = plot_israel_map(gis_path=gis_path, ax=ax_map)
+    # overlay with dem data:
+    cmap = plt.get_cmap('terrain', 41)
+    dem = xr.open_dataarray(dem_path / 'israel_dem_250_500.nc')
+    # dem = xr.open_dataarray(dem_path / 'israel_dem_500_1000.nc')
+    im = dem.plot.imshow(ax=ax_map, alpha=0.5, cmap=cmap,
+                         vmin=dem.min(), vmax=dem.max(), add_colorbar=False)
+    cbar_kwargs = {'fraction': 0.1, 'aspect': 50, 'pad': 0.03}
+    cb = fig.colorbar(im, ax=ax_map, **cbar_kwargs)
+    # cb = plt.colorbar(fg, **cbar_kwargs)
+    cb.set_label(label='meters above sea level', size=8, weight='normal')
+    cb.ax.tick_params(labelsize=8)
+    ax_map.set_xlabel('')
+    ax_map.set_ylabel('')
+    print('getting solved GNSS israeli stations metadata...')
+    gps = produce_geo_gnss_solved_stations(path=gis_path, plot=False)
+    gps.index = gps.index.str.upper()
+    gps = gps.loc[[x for x in df.columns], :]
+    gps['group'] = pd.Series(labels_sorted)
+    gps.plot(ax=ax_map, column='group', categorical=True, marker='o',
+             edgecolor='black', cmap=cm, s=45, legend=True, alpha=1.0,
+             legend_kwds={'prop': {'size': 10}, 'fontsize': 14,
+                          'loc': 'upper left', 'title': 'Groups'})
+    # ax_map.set_title('Groupings of {}ly anomalies'.format(grp))
+    # annotate station names in map:
+    geo_annotate(ax_map, gps.lon, gps.lat,
+                 gps.index, xytext=(6, 6), fmt=None,
+                 c='k', fw='bold', fs=10, colorupdown=False)
+#    plt.legend(['IMS stations', 'GNSS stations'],
+#           prop={'size': 10}, bbox_to_anchor=(-0.15, 1.0),
+#           title='Stations')
+#    plt.legend(prop={'size': 10}, loc='upper left')
+    # plt.tight_layout()
+    plt.subplots_adjust(top=0.92,
+                        bottom=0.065,
+                        left=0.065,
+                        right=0.915,
+                        hspace=0.19,
+                        wspace=0.215)
+    filename = 'pw_{}ly_anoms_{}_clusters_with_map.png'.format(grp, n_clusters)
+    if save:
+#        plt.savefig(savefig_path / filename, bbox_inches='tight')
+        plt.savefig(savefig_path / filename, orientation='landscape')
+    return df
 
