@@ -50,6 +50,21 @@ def lat_formatter(x, pos):
         return r'0$\degree$'
 
 
+def qualitative_cmap(n=2):
+    import matplotlib.colors as mcolors
+    if n == 2:
+        colorsList = [mcolors.BASE_COLORS['r'], mcolors.BASE_COLORS['g']]
+        cmap = mcolors.ListedColormap(colorsList)
+    elif n == 4:
+        colorsList = [
+                mcolors.BASE_COLORS['r'],
+                mcolors.BASE_COLORS['g'],
+                mcolors.BASE_COLORS['c'],
+                mcolors.BASE_COLORS['m']]
+        cmap = mcolors.ListedColormap(colorsList)
+    return cmap
+
+
 def caption(text, color='blue', **kwargs):
     from termcolor import colored
     print(colored('Caption:', color, attrs=['bold'], **kwargs))
@@ -733,7 +748,7 @@ def produce_table_2(thresh=50):
 
 
 def plot_grp_anomlay_heatmap(load_path=work_yuval, gis_path=gis_path,
-                             thresh=None, grp='hour', season=None,
+                             thresh=None, grp='hour', remove_grp=None, season=None,
                              n_clusters=4, save=True, title=False):
     import xarray as xr
     import seaborn as sns
@@ -754,14 +769,14 @@ def plot_grp_anomlay_heatmap(load_path=work_yuval, gis_path=gis_path,
 
     df, labels_sorted, weights = group_anoms_and_cluster(
             load_path=load_path, thresh=thresh, grp=grp, season=season,
-            n_clusters=n_clusters)
+            n_clusters=n_clusters, remove_grp=remove_grp)
     # create figure and subplots axes:
     fig = plt.figure(figsize=(15, 10))
     if title:
         if season is not None:
             fig.suptitle('Precipitable water {}ly anomalies analysis for {} season'.format(grp, season))
         else:
-            fig.suptitle('Precipitable water {}ly anomalies analysis'.format(grp))
+            fig.suptitle('Precipitable water {}ly anomalies analysis (Weighted KMeans {} clusters)'.format(grp, n_clusters))
     grid = plt.GridSpec(
         2, 2, width_ratios=[
             3, 2], height_ratios=[
@@ -771,6 +786,7 @@ def plot_grp_anomlay_heatmap(load_path=work_yuval, gis_path=gis_path,
     ax_map = fig.add_subplot(grid[0:, 1])  # plt.subplot(122)
     # get the camp and zip it to groups and produce dictionary:
     cmap = plt.get_cmap("Accent")
+    cmap = qualitative_cmap(n_clusters)
     # cmap = plt.get_cmap("Set2_r")
     # cmap = ListedColormap(cmap.colors[::-1])
     groups = list(set(labels_sorted.values()))
@@ -794,9 +810,9 @@ def plot_grp_anomlay_heatmap(load_path=work_yuval, gis_path=gis_path,
     # emphasize the yticklabels (stations):
     ax_heat.yaxis.set_tick_params(left='on')
     ax_heat.set_yticklabels(ax_heat.get_ymajorticklabels(),
-        fontweight = 'bold', fontsize=10)
+                            fontweight = 'bold', fontsize=10)
     # paint ytick labels with categorical cmap:
-    boxes = [dict(facecolor=x, pad=0.05, alpha=0.6)
+    boxes = [dict(facecolor=x, boxstyle="square,pad=0.7", alpha=0.6)
              for x in label_cmap_dict.values()]
     ylabels = [x for x in ax_heat.yaxis.get_ticklabels()]
     for label, box in zip(ylabels, boxes):
@@ -810,7 +826,9 @@ def plot_grp_anomlay_heatmap(load_path=work_yuval, gis_path=gis_path,
     df_groups['weights'] = weights
     df_groups = df_groups.groupby('groups').apply(weighted_average)
     df_groups.drop(['groups', 'weights'], axis=1, inplace=True)
-    df_groups.T.plot(ax=ax_group, legend=False, cmap=cm)
+    df_groups.T.plot(ax=ax_group, linewidth=2.0, legend=False, cmap=cm)
+    if grp == 'hour':
+        ax_group.set_xlabel('hour (UTC)')
     ax_group.grid()
     group_limit = ax_heat.get_xlim()
     ax_group.set_xlim(group_limit)
@@ -846,9 +864,9 @@ def plot_grp_anomlay_heatmap(load_path=work_yuval, gis_path=gis_path,
     gps = gps.loc[[x for x in df.columns], :]
     gps['group'] = pd.Series(labels_sorted)
     gps.plot(ax=ax_map, column='group', categorical=True, marker='o',
-             edgecolor='black', cmap=cm, s=45, legend=True, alpha=1.0,
+             edgecolor='black', cmap=cm, s=100, legend=True, alpha=1.0,
              legend_kwds={'prop': {'size': 10}, 'fontsize': 14,
-                          'loc': 'upper left', 'title': 'Groups'})
+                          'loc': 'upper left', 'title': 'clusters'})
     # ax_map.set_title('Groupings of {}ly anomalies'.format(grp))
     # annotate station names in map:
     geo_annotate(ax_map, gps.lon, gps.lat,

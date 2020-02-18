@@ -1263,11 +1263,12 @@ def group_pw_and_T_and_save(load_path=work_yuval, ims_path=ims_path,
     return pw
 
 
-def group_anoms_and_cluster(load_path=work_yuval, thresh=None, grp='hour',
+def group_anoms_and_cluster(load_path=work_yuval, remove_grp='month', thresh=None, grp='hour',
                             season=None, n_clusters=4):
     import xarray as xr
     from sklearn.cluster import KMeans
     # load data and save attrs in dict:
+#    pw = xr.load_dataset(work_yuval/'GNSS_PW_anom_{:.0f}_hour_dayofyear.nc'.format(thresh))
     pw = xr.load_dataset(load_path / 'GNSS_PW_{:.0f}.nc'.format(thresh))
     attrs = {da: val.attrs for (da, val) in pw.data_vars.items()}
     # use upper() on names:
@@ -1287,6 +1288,9 @@ def group_anoms_and_cluster(load_path=work_yuval, thresh=None, grp='hour',
     if season is not None and grp == 'hour':
         pw = pw.sel(time=pw['time.season'] == season)
     # groupby and create means:
+    if remove_grp is not None:
+        print('removing long term {}ly means first'.format(remove_grp))
+        pw = pw.groupby('time.{}'.format(remove_grp)) - pw.groupby('time.{}'.format(remove_grp)).mean('time')
     pw_mean = pw.groupby('time.{}'.format(grp)).mean('time')
     pw_anom = pw_mean - pw_mean.mean('{}'.format(grp))
     # to dataframe:
@@ -1295,6 +1299,8 @@ def group_anoms_and_cluster(load_path=work_yuval, thresh=None, grp='hour',
     if n_clusters is not None:
         # cluster the anomalies:
         clr = KMeans(n_clusters=n_clusters, random_state=0).fit(df.T, sample_weight=weights)
+        # get the labels start with 1:
+        clr.labels_ += 1
         # clustering = DBSCAN(eps=3, min_samples=2).fit(df)
         # clustering = OPTICS(min_samples=2).fit(df)
         labels = dict(zip(df.columns, clr.labels_))
