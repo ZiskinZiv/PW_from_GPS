@@ -12,6 +12,20 @@ from PW_paths import work_yuval
 # TODO: if not, build func to replace datetimeindex to numbers and vise versa
 
 
+def create_monthly_index(dt_da, period=6, unit='month'):
+    import numpy as np
+    pdict = {6: 'H', 4: 'T', 3: 'Q'}
+    dt = dt_da.to_dataframe()
+    if unit == 'month':
+        dt[unit] = getattr(dt.index, unit)
+        months = np.arange(1, 13)
+        month_groups = np.array_split(months, len(months) / period)
+        for i, month_grp in enumerate(month_groups):
+            dt.loc[(dt['month'] >=month_grp[0]) & (dt['month'] <=month_grp[-1]), 'grp_months'] = '{}{}'.format(pdict.get(period), i+1)
+    da = dt['grp_months'].to_xarray()
+    return da
+    
+    
 def filter_month_year_data_heatmap_plot(da_ts, freq='5T', thresh=50.0,
                                         plot=True):
     import seaborn as sns
