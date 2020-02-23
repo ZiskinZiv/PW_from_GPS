@@ -76,6 +76,7 @@ def plot_multi_box_xr(pw, kind='violin', x='month',
                       stations=['tela', 'nrif', 'kabr', 'slom', 'jslm'],
                       rolling=1440):
     import xarray as xr
+    # TODO: move to plot_figures and FacetGrid
     pw = pw.to_array('station')
     pw = pw.sel(station=stations)
     fg = xr.plot.FacetGrid(pw, col='station', col_wrap=4, sharex=False,
@@ -97,6 +98,7 @@ def plot_multi_box_xr(pw, kind='violin', x='month',
 def plot_box_df(df, x='month', title='TELA', rolling=None,
                 ylabel=r'IWV [kg$\cdot$m$^{-2}$]', ax=None, kind='violin'):
     # x=hour is experimental
+    # TODO: move to plot_figures and FacetGrid, use with monthly means
     import seaborn as sns
     from matplotlib.ticker import MultipleLocator
     import matplotlib.pyplot as plt
@@ -106,7 +108,7 @@ def plot_box_df(df, x='month', title='TELA', rolling=None,
     if x == 'month':
         df[x] = df.index.month
         pal = sns.color_palette("Paired", 12)
-        ylimits = (0, 45)
+        ylimits = (10, 35)
     elif x == 'hour':
         df[x] = df.index.hour
         pal = sns.color_palette("Paired", 12)
