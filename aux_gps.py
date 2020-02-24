@@ -12,6 +12,43 @@ from PW_paths import work_yuval
 # TODO: if not, build func to replace datetimeindex to numbers and vise versa
 
 
+def weighted_long_term_monthly_means_da(da_ts, plot=True):
+    """create a long term monthly means(climatology) from a dataarray time
+    series with weights of items(mins,days etc..) per each month"""
+    import pandas as pd
+    name = da_ts.name
+    # first save attrs:
+    attrs = da_ts.attrs
+    df = da_ts.to_dataframe()
+    df = df.dropna()
+    df['month'] = df.index.month
+    df['year'] = df.index.year
+    cnt = df.groupby(['month', 'year']).count()[name].to_frame()
+    cnt /= cnt.max()
+    weights = pd.pivot_table(cnt, index='year', columns='month')
+    dfmm = df.groupby(['month', 'year']).mean()[name].to_frame()
+    dfmm = pd.pivot_table(dfmm, index='year', columns='month')
+    # wrong:
+#     weighted_monthly_means = dfmm * weights 
+    weighted_clim = ((dfmm).sum(axis=0) /
+                   weights.sum(axis=0)).unstack().squeeze()
+    return weighted_clim
+    # convert back to time-series:
+#    df_ts = weighted_monthly_means.stack().reset_index()
+#    df_ts['dt'] = df_ts.year.astype(str) + '-' + df_ts.month.astype(str)
+#    df_ts['dt'] = pd.to_datetime(df_ts['dt'])
+#    df_ts = df_ts.set_index('dt')
+#    df_ts = df_ts.drop(['year', 'month'], axis=1)
+#    df_ts.index.name = 'time'
+#    da = df_ts[name].to_xarray()
+    da = weighted_clim.to_xarray()
+    da.attrs = attrs
+#    da = xr_reindex_with_date_range(da, drop=True, freq='MS')
+    if plot:
+        da.plot()
+    return da
+
+
 def create_monthly_index(dt_da, period=6, unit='month'):
     import numpy as np
     pdict = {6: 'H', 4: 'T', 3: 'Q'}
@@ -24,112 +61,6 @@ def create_monthly_index(dt_da, period=6, unit='month'):
             dt.loc[(dt['month'] >=month_grp[0]) & (dt['month'] <=month_grp[-1]), 'grp_months'] = '{}{}'.format(pdict.get(period), i+1)
     da = dt['grp_months'].to_xarray()
     return da
-    
-    
-def filter_month_year_data_heatmap_plot(da_ts, freq='5T', thresh=50.0,
-                                        plot=True):
-    import seaborn as sns
-    import pandas as pd
-    import xarray as xr
-    import matplotlib.pyplot as plt
-    name = da_ts.name
-    try:
-        freq = da_ts.attrs['freq']
-    except KeyError:
-        pass
-    if freq == '5T':
-        points = 24 * 12
-    elif freq == '1H':
-        points = 24
-    elif freq == '3H':
-        points == 8
-    elif freq == '1D' or freq == 'D':
-        points = 1
-    df = da_ts.dropna('time').to_dataframe()
-    df['month']=df.index.month
-    df['year']=df.index.year
-    df['max_points']=df.index.days_in_month * points
-    cnt = df.groupby(['month','year']).count()[name].to_frame()
-    pivot=pd.pivot_table(cnt,index='year',columns='month')
-    pivot_m=pd.pivot_table(df[['month', 'year','max_points']],index='year',columns='month')
-    percent = 100 * pivot.values / pivot_m.values
-    per_df=pd.DataFrame(percent,index=df.year.unique(), columns=sorted(df.month.unique()))
-    stacked = per_df.stack().dropna().to_frame(name)
-    index = stacked[stacked<thresh].dropna().index
-    print('#months that are bigger then {:.0f} %:'.format(thresh))
-    month_dict = {}
-    for month in per_df.columns:
-        months = per_df[per_df>=thresh][month].dropna().count()
-        month_dict[month] = months
-        print('#{} months of months {}'.format(months, month))
-    dts = []
-    for year, month in index.values:
-        dts.append('{}-{}'.format(year, month))
-    if plot:
-        sns.heatmap(per_df, annot=True,fmt='.0f')
-        plt.figure()
-        per_df.stack().hist(bins=25)
-    return dts, month_dict
-
-
-def plot_multi_box_xr(pw, kind='violin', x='month',
-                      stations=['tela', 'nrif', 'kabr', 'slom', 'jslm'],
-                      rolling=1440):
-    import xarray as xr
-    # TODO: move to plot_figures and FacetGrid
-    pw = pw.to_array('station')
-    pw = pw.sel(station=stations)
-    fg = xr.plot.FacetGrid(pw, col='station', col_wrap=4, sharex=False,
-                           sharey=False)
-    for sta, ax in zip(stations, fg.axes.flatten()):
-        pw_sta = pw.sel(station=sta).reset_coords(drop=True)
-        # if x == 'hour':
-        #     # remove seasonal signal:
-        #     pw_sta = pw_sta.groupby('time.dayofyear') - pw_sta.groupby('time.dayofyear').mean('time')
-        # elif x == 'month':
-        #     # remove daily signal:
-        #     pw_sta = pw_sta.groupby('time.hour') - pw_sta.groupby('time.hour').mean('time')            
-        df = pw_sta.to_dataframe(sta)
-        plot_box_df(df, ax=ax, x=x, title=sta, ylabel='', kind=kind,
-                    rolling=rolling)
-    return
-
-
-def plot_box_df(df, x='month', title='TELA', rolling=None,
-                ylabel=r'IWV [kg$\cdot$m$^{-2}$]', ax=None, kind='violin'):
-    # x=hour is experimental
-    # TODO: move to plot_figures and FacetGrid, use with monthly means
-    import seaborn as sns
-    from matplotlib.ticker import MultipleLocator
-    import matplotlib.pyplot as plt
-    # df = da_ts.to_dataframe()
-    if rolling is not None:
-        df = df.rolling(rolling, center=True).mean()
-    if x == 'month':
-        df[x] = df.index.month
-        pal = sns.color_palette("Paired", 12)
-        ylimits = (10, 35)
-    elif x == 'hour':
-        df[x] = df.index.hour
-        pal = sns.color_palette("Paired", 12)
-        ylimits = (-4, 4)
-    y = df.columns[0]
-    if ax is None:
-        fig, ax = plt.subplots()
-    if kind == 'violin':
-        sns.violinplot(ax=ax, data=df, x=x, y=y, palette=pal, fliersize=4,
-                       gridsize=100, inner='quartile', scale='area')
-    elif kind == 'box':
-        kwargs = dict(markerfacecolor='r', marker='o')
-        sns.boxplot(ax=ax, data=df, x=x, y=y, palette=pal, fliersize=4,
-                    whis=1.5, flierprops=kwargs)
-    ax.yaxis.set_minor_locator(MultipleLocator(5))
-    ax.yaxis.grid(True, which='minor', linestyle='--', linewidth=1, alpha=0.7)
-    ax.yaxis.grid(True, linestyle='--', linewidth=1, alpha=0.7)
-    ax.set_ylabel(ylabel)
-    ax.set_title(title)
-    ax.set_ylim(*ylimits)
-    return ax
 
 
 def compute_consecutive_events_datetimes(da_ts, time_dim='time',
