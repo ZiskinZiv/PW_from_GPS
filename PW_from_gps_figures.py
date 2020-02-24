@@ -158,39 +158,156 @@ def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
     return fig
 
 
-def plot_monthly_pw_and_T(load_path=work_yuval, thresh=50):
+def plot_monthly_means_box_plots(path=work_yuval, thresh=50, kind='box',
+                                 x='month', save=True):
+    import xarray as xr
+    pw = xr.load_dataset(
+                work_yuval /
+                'GNSS_PW_thresh_{:.0f}.nc'.format(thresh))
+    attrs = [x.attrs for x in pw.data_vars.values()]
+    pw = pw.resample(time='MS').mean('time')
+    for i, da in enumerate(pw.data_vars):
+        pw[da].attrs = attrs[i]
+    fg = plot_multi_box_xr(pw, kind=kind, x=x)
+    for i, ax in enumerate(fg.axes.flatten()):
+        title = ax.get_title().split('=')[-1].strip(' ')
+        mean_years = float(attrs[i]['mean_years'])
+        ax.set_title('')
+        ax.text(.2, .9, title,
+                horizontalalignment='center', fontweight='bold',
+                transform=ax.transAxes)
+        ax.text(.2, .8, '{:.1f} years'.format(mean_years),
+                horizontalalignment='center',
+                transform=ax.transAxes)
+        ax.yaxis.tick_left()
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["bottom"].set_visible(False)
+    [fg.axes[x, 0].set_ylabel('PW [mm]') for x in range(len(fg.axes[:, 0]))]
+#    [fg.axes[-1, x].set_xlabel('month') for x in range(len(fg.axes[-1, :]))]
+    fg.fig.subplots_adjust(top=0.98,
+                           bottom=0.04,
+                           left=0.035,
+                           right=0.985,
+                           hspace=0.145,
+                           wspace=0.145)
+    filename = 'pw_monthly_means_box.png'
+    if save:
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
+    return fg
+
+
+def plot_multi_box_xr(pw, kind='violin', x='month'):
+    import xarray as xr
+    pw = pw.to_array('station')
+    cwrap = 5
+    fg = xr.plot.FacetGrid(pw, col='station', col_wrap=cwrap, sharex=True,
+                           sharey=True)
+    for sta, ax in zip(pw['station'].values, fg.axes.flatten()):
+        pw_sta = pw.sel(station=sta).reset_coords(drop=True)
+        # if x == 'hour':
+        #     # remove seasonal signal:
+        #     pw_sta = pw_sta.groupby('time.dayofyear') - pw_sta.groupby('time.dayofyear').mean('time')
+        # elif x == 'month':
+        #     # remove daily signal:
+        #     pw_sta = pw_sta.groupby('time.hour') - pw_sta.groupby('time.hour').mean('time')            
+        df = pw_sta.to_dataframe(sta)
+        plot_box_df(df, ax=ax, x=x, title=sta, ylabel='', kind=kind)
+    return fg
+
+
+def plot_box_df(df, x='month', title='TELA',
+                ylabel=r'IWV [kg$\cdot$m$^{-2}$]', ax=None, kind='violin'):
+    # x=hour is experimental
+    import seaborn as sns
+    from matplotlib.ticker import MultipleLocator
+    import matplotlib.pyplot as plt
+    # df = da_ts.to_dataframe()
+    if x == 'month':
+        df[x] = df.index.month
+        pal = sns.color_palette("Paired", 12)
+        ylimits = (5, 40)
+    elif x == 'hour':
+        df[x] = df.index.hour
+        pal = sns.color_palette("Paired", 12)
+        ylimits = (-4, 4)
+    y = df.columns[0]
+    if ax is None:
+        fig, ax = plt.subplots()
+    if kind == 'violin':
+        sns.violinplot(ax=ax, data=df, x=x, y=y, palette=pal, fliersize=4,
+                       gridsize=100, inner='quartile', scale='area')
+    elif kind == 'box':
+        kwargs = dict(markerfacecolor='r', marker='o')
+        sns.boxplot(ax=ax, data=df, x=x, y=y, palette=pal, fliersize=4,
+                    whis=1.5, flierprops=kwargs)
+    ax.yaxis.set_minor_locator(MultipleLocator(5))
+    ax.yaxis.grid(True, which='minor', linestyle='--', linewidth=1, alpha=0.7)
+    ax.yaxis.grid(True, linestyle='--', linewidth=1, alpha=0.7)
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
+    ax.set_xlabel('')
+    ax.set_ylim(*ylimits)
+    return ax
+
+
+def plot_monthly_pw_and_T(load_path=work_yuval, thresh=50, save=True):
     import xarray as xr
     import numpy as np
+    # monthly means file is created from this function:
+    # (in PW_stations:) align_group_pw_and_T_to_monthly_means_and_save
     pw_and_T = xr.load_dataset(
         load_path /
-        'PW_T_monthly_means_thresh_{:.0f}.nc'.format(thresh))
+        'PW_T_monthly_means_clim_thresh_{:.0f}.nc'.format(thresh))
+    # seperate the fields:
     pw_only = [x for x in pw_and_T if '_T' not in x]
     T_only = [x for x in pw_and_T if '_T' in x]
-    pw = pw_and_T[pw_only]
-    T = pw_and_T[T_only]
+    pw_clim = pw_and_T[pw_only]
+    attrs = [x.attrs for x in pw_clim.data_vars.values()]
+    T_clim = pw_and_T[T_only]
     cwrap = 5
-    fg = pw.to_array('station').plot(col='station', col_wrap=cwrap,
-                                     color='b', marker='o', alpha=0.7)
+    fg = pw_clim.to_array('station').plot(col='station', col_wrap=cwrap,
+                                          color='b', marker='o', alpha=0.7)
     fg.fig.subplots_adjust(wspace=0.0, hspace=0.0, right=0.974)
-    col_arr = np.arange(0, len(pw))
+    col_arr = np.arange(0, len(pw_clim))
     right_side = col_arr[cwrap-1::cwrap]
     for i, ax in enumerate(fg.axes.flatten()):
         title = ax.get_title().split('=')[-1].strip(' ')
+        mean_years = float(attrs[i]['mean_years'])
         ax.set_title('')
         ax.text(.2, .9, title,
+                horizontalalignment='center', fontweight='bold',
+                transform=ax.transAxes)
+        ax.text(.2, .8, '{:.1f} years'.format(mean_years),
                 horizontalalignment='center',
                 transform=ax.transAxes)
         ax_t = ax.twinx()
-        T['{}_T'.format(title)].plot(color='r', marker='o', alpha=0.7, ax=ax_t)
+        T_clim['{}_T'.format(title)].plot(
+                    color='r', linestyle='dashed', marker='s', alpha=0.7,
+                    ax=ax_t)
         ax_t.set_ylim(0, 30)
         fg.fig.canvas.draw()
         labels = [item.get_text() for item in ax_t.get_yticklabels()]
         ax_t.yaxis.set_ticklabels([])
         ax_t.tick_params(axis='y', color='r')
+        ax_t.set_ylabel('')
         if i in right_side:
+            ax_t.set_ylabel(r'Surface temperature [$\degree$C]', fontsize=10)
             ax_t.yaxis.set_ticklabels(labels)
             ax_t.tick_params(axis='y', labelcolor='r', color='r')
-        ax_t.set_ylabel('')
+        # show months ticks and grid lines for pw:
+        ax.xaxis.tick_bottom()
+        ax.yaxis.grid()
+        ax.legend([ax.lines[0], ax_t.lines[0]], ['PW', 'T'],
+                  loc='upper right', fontsize=10, prop={'size': 8})
+    # change bottom xticks to 1-12 and show them:
+    fg.axes[-1, 0].xaxis.set_ticks(np.arange(1, 13))
+    [fg.axes[x, 0].set_ylabel('PW [mm]') for x in range(len(fg.axes[:, 0]))]
+    # adjust subplots:
+    fg.fig.subplots_adjust(hspace=0.08, right=0.959)
+    filename = 'PW_T_climatology.png'
+    if save:
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
     return fg
 
 
