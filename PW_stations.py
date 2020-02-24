@@ -1240,10 +1240,16 @@ def save_GNSS_PW_israeli_stations(savepath=work_yuval, phys=phys_soundings):
     return
 
 
-def group_pw_and_T_and_save(load_path=work_yuval, ims_path=ims_path,
-                            thresh=None, grp='month', savepath=None):
+def align_group_pw_and_T_to_long_term_monthly_means_and_save(
+        load_path=work_yuval,
+        ims_path=ims_path,
+        thresh=50,
+        grp='month',
+        savepath=work_yuval):
     import xarray as xr
-    pw = xr.load_dataset(load_path / 'GNSS_PW_{:.0f}.nc'.format(thresh))
+    from aux_gps import weighted_long_term_monthly_means_da
+    pw = xr.load_dataset(load_path / 'GNSS_PW_thresh_{:.0f}.nc'.format(thresh))
+    pw_attrs = pw.attrs
     attrs = {da: val.attrs for (da, val) in pw.data_vars.items()}
     # use upper() on names:
     da = pw.to_array('station')
@@ -1255,12 +1261,22 @@ def group_pw_and_T_and_save(load_path=work_yuval, ims_path=ims_path,
     # align T and pw:
     for da in pw.data_vars:
         pw['{}_T'.format(da)] = T[da.lower()]
+    # pw_grp = pw.map(, plot=False)
     pw_grp = pw.groupby('time.{}'.format(grp)).mean('time')
+    pw_grp.attrs = pw_attrs
+    # now do climatology also:
+    pw_clim = pw.map(weighted_long_term_monthly_means_da, plot=False)
+#    for sta in pw_clim.data_vars.keys():
+#        pw_clim = pw_clim.rename({sta: sta + '_clim'})
+    pw_clim.attrs = pw_attrs
+    just_pw = [x for x in pw_clim if '_T' not in x]
+    for da in just_pw:
+        pw_clim[da].attrs = attrs.get(da.lower())
     if savepath is not None:
-        filename = 'PW_T_{}ly_means_thresh_{:.0f}.nc'.format(grp, thresh)
-        pw_grp.to_netcdf(savepath / filename , 'w')
+        filename = 'PW_T_{}ly_means_clim_thresh_{:.0f}.nc'.format(grp, thresh)
+        pw_clim.to_netcdf(savepath / filename, 'w')
         print('saved {} to {}.'.format(filename, savepath))
-    return pw
+    return pw_clim
 
 
 def group_anoms_and_cluster(load_path=work_yuval, remove_grp='month', thresh=None, grp='hour',
@@ -2796,71 +2812,6 @@ def GNSS_pw_to_X_using_window(gnss_path=work_yuval, hydro_path=hydro_path,
     return X, y
 
 
-def combine_PW_stations(pw, name, stations, thresh=None):
-    import xarray as xr
-    import numpy as np
-    from aux_gps import get_unique_index
-    time_dim = list(set(pw.dims))[0]
-    slist = [pw[x] for x in stations]
-    combined_station = xr.concat(slist, time_dim)
-    # take care of months and attrs:
-    if thresh is not None:
-        months_add = np.zeros((12), dtype=int)
-        for sta in stations:
-            months = [(x, y) for x, y in pw[sta].attrs.items() if 'months' in x]
-            months_add += np.array([x for x in dict(months).values()])
-        months = dict(zip(dict(months).keys(), months_add))
-        for month, val in months.items():
-            combined_station.attrs[month] = val
-        combined_station.attrs['mean_years'] = np.mean(
-            [x for x in months.values()])
-    # add attr of combined station:
-    combined_station.attrs['combined_from'] = ', '.join(stations)
-    combined_station.name = name
-    # get unique times:
-    combined_station = get_unique_index(combined_station)
-    return combined_station
-
-
-def drop_GNSS_PW_thresh_and_combine_save_all(path=work_yuval, thresh=None, to_drop=['nizn', 'hrmn'],
-                                             combine_dict={'klhv': ['klhv', 'lhav'], 'mrav': ['gilb', 'mrav']}):
-    import xarray as xr
-    GNSS_pw = xr.open_dataset(path / 'GNSS_PW.nc')
-    thresh_list = []
-    stations_only = [x for x in GNSS_pw.data_vars if '_error' not in x]
-    for station in stations_only:
-        pw = load_PW_with_drop_thresh(station=station, thresh=thresh)
-        thresh_list.append(pw)
-    GNSS_pw_thresh = xr.merge(thresh_list)
-    if combine_dict is not None:
-        # combine stations:
-        combined = []
-        for new_sta, sta_to_merge in combine_dict.items():
-            print('merging {} to {}'.format(sta_to_merge, new_sta))
-            combined.append(combine_PW_stations(GNSS_pw_thresh, new_sta,
-                                                sta_to_merge, thresh))
-        # drop old stations:
-        sta_to_drop = [item for sublist in combine_dict.values()
-                       for item in sublist]
-        for sta in sta_to_drop:
-            GNSS_pw_thresh = GNSS_pw_thresh[[
-                x for x in GNSS_pw_thresh.data_vars if sta not in x]]
-        # plug them in GNSS dataset:
-        for sta in combined:
-            GNSS_pw_thresh[sta.name] = sta
-    if to_drop is not None:
-        for sta in to_drop:
-            print('dropping {} station.'.format(sta))
-            GNSS_pw_thresh = GNSS_pw_thresh[[
-                x for x in GNSS_pw_thresh.data_vars if sta not in x]]
-    filename = 'GNSS_PW_{:.0f}.nc'.format(thresh)
-    comp = dict(zlib=True, complevel=9)  # best compression
-    encoding = {var: comp for var in GNSS_pw_thresh.data_vars}
-    GNSS_pw_thresh.to_netcdf(path / filename, 'w', encoding=encoding)
-    print('Done!')
-    return GNSS_pw_thresh
-
-
 def produce_all_GNSS_PW_anomalies(load_path=work_yuval, thresh=None,
                                   grp1='hour', grp2='dayofyear',
                                   savepath=work_yuval):
@@ -2966,26 +2917,226 @@ def load_GNSS_TD(station='tela', sample_rate=None, plot=True):
     return da
 
 
+#def align_monthly_means_PW_and_T(path=work_yuval, ims_path=ims_path,
+#                                 thresh=50.0):
+#    """align monthly means PW and T for plots"""
+#    import xarray as xr
+#    pw = xr.load_dataset(path / 'GNSS_PW_thresh_{:.0f}.nc'.format(thresh))
+#    # get attrs dict:
+#    attrs = {}
+#    for station in pw.data_vars:
+#        attrs[station] = pw[station].attrs
+#    stations = [x for x in pw.data_vars]
+#    # resample to monthly means:
+#    pw = pw.resample(time='MS').mean('time')
+#    # copy attrs to each station:
+#    for station in pw.data_vars:
+#        pw[station].attrs = attrs[station]
+#    T = xr.load_dataset(ims_path / 'GNSS_monthly_TD_ALL_1996_2019.nc')
+#    T = T[stations]
+#    # rename T stations to T:
+#    for sta in T.data_vars.keys():
+#        T = T.rename({sta: sta + '_T'})
+#    combined = xr.merge([pw, T])
+#    filename = 'PW_T_monthly_means_thresh_{:.0f}.nc'.format(thresh)
+#    combined.to_netcdf(path / filename, 'w')
+#    print('saved {} to {}'.format(filename, path))
+#    return combined
+
+
+def filter_month_year_data_heatmap_plot(da_ts, freq='5T', thresh=50.0,
+                                        verbose=True, plot=True):
+    """accepts dataarray time series(with freq <1D) and removes the daily data
+    with less than thresh percent and then removes months with data less than
+    thresh percent. data is saved to dataarray with some metadata"""
+    import seaborn as sns
+    import pandas as pd
+    import numpy as np
+    import matplotlib.pyplot as plt
+    name = da_ts.name
+    try:
+        freq = da_ts.attrs['freq']
+    except KeyError:
+        pass
+    # data points per day:
+    if freq == '5T':
+        points = 24 * 12
+    elif freq == '1H':
+        points = 24
+    elif freq == '3H':
+        points == 8
+    elif freq == '1D' or freq == 'D':
+        points = 1
+    if verbose:
+        print(
+            'analysing {} station with {} data points per day:'.format(
+                name, points))
+    # dropna:
+    df = da_ts.dropna('time').to_dataframe()
+    # calculate daily data to drop (if points less than threshold):
+    df['date'] = df.index.date
+    points_in_day = df.groupby(['date']).count()[name].to_frame()
+    # calculate daily data percentage (from maximum available):
+    points_in_day['percent'] = (points_in_day[name] / points) * 100.0
+    # get the number of days to drop and the dates themselves:
+    number_of_days_to_drop = points_in_day[name][points_in_day['percent'] <= thresh].count()
+    percent_of_days_to_drop = 100.0 * \
+        number_of_days_to_drop / len(points_in_day)
+    days_to_drop = points_in_day.index[points_in_day['percent'] <= thresh]
+    if verbose:
+        print('found {} ({:.2f} %) bad days with {:.0f} % drop thresh.'.format(
+                number_of_days_to_drop, percent_of_days_to_drop, thresh))
+    # now drop the days:
+    for day_to_drop in days_to_drop:
+        df = df[df['date'] != day_to_drop]
+    # now calculate the number of months missing days with threshold:
+    df['month'] = df.index.month
+    df['year'] = df.index.year
+    df['max_points'] = df.index.days_in_month * points
+    cnt = df.groupby(['month', 'year']).count()[name].to_frame()
+    pivot = pd.pivot_table(cnt, index='year', columns='month')
+    pivot_m = pd.pivot_table(
+        df[['month', 'year', 'max_points']], index='year', columns='month')
+    percent = 100 * pivot.values / pivot_m.values
+    per_df = pd.DataFrame(
+        percent,
+        index=df.year.unique(),
+        columns=sorted(
+            df.month.unique()))
+    stacked = per_df.stack().dropna().to_frame(name)
+    months_and_years_to_drop = stacked[stacked < thresh].dropna()
+    index = months_and_years_to_drop.index
+    number_of_months_to_drop = index.size
+    percent_of_months_to_drop = 100.0 * index.size / cnt.size
+    if verbose:
+        print('found {} ({:.2f} % ) bad months with {:.0f} % drop thresh'.format(
+                number_of_months_to_drop, percent_of_months_to_drop, thresh))
+        print('#months that are bigger then {:.0f} %:'.format(thresh))
+    # now get the months to drop:
+    dts = []
+    for year, month in index.values:
+        dts.append('{}-{}'.format(year, month))
+    df['months'] = df['year'].astype(str) + '-' + df['month'].astype(str)
+    for month_to_drop in dts:
+        df = df[df['months'] != month_to_drop]
+    # create some metadate to put in dataarray:
+    month_dict = {}
+    for month in per_df.columns:
+        months = per_df[per_df >= thresh][month].dropna().count()
+        month_dict[month] = months
+        print('#{} months of months {}'.format(months, month))
+    # transform to dataarray:
+    da = df[name].to_xarray()
+    da.attrs['threshold'] = '{:.0f}'.format(thresh)
+    for month, value in month_dict.items():
+        da.attrs['months_{}'.format(month)] = value
+    # calculate the mean years of data:
+    myears = np.mean(np.array([x for x in month_dict.values()]))
+    da.attrs['mean_years'] = '{:.2f}'.format(myears)
+    # add some more metadata:
+    da.attrs['days_dropped'] = number_of_days_to_drop
+    da.attrs['days_dropped_percent'] = '{:.1f}'.format(percent_of_days_to_drop)
+    da.attrs['months_dropped'] = number_of_months_to_drop
+    da.attrs['months_dropped_percent'] = '{:.1f}'.format(percent_of_months_to_drop)
+    if plot:
+        sns.heatmap(per_df, annot=True, fmt='.0f')
+        plt.figure()
+        per_df.stack().hist(bins=25)
+    return da
+
+
 def load_PW_with_drop_thresh(station='tela', thresh=50.0):
     import xarray as xr
-    import numpy as np
-    from aux_gps import filter_month_year_data_heatmap_plot
     pw = xr.load_dataset(work_yuval / 'GNSS_PW.nc')[station]
     if thresh is not None:
         print('loading 5 mins GNSS PW {} station with threshold={}%.'.format(station, thresh))
-        dts, m_dict = filter_month_year_data_heatmap_plot(pw, freq='5T', thresh=thresh,
-                                                          plot=False)
-        for dt in dts:
-            print('dropping {}'.format(dt))
-            pw.loc[{'time': dt}] = np.nan
-        pw.attrs['threshold'] = '{:.0f}'.format(thresh)
-        for month, value in m_dict.items():
-            pw.attrs['months_{}'.format(month)] = value
-        myears = np.mean(np.array([x for x in m_dict.values()]))
-        pw.attrs['mean_years'] = myears
+        da = filter_month_year_data_heatmap_plot(pw, freq='5T', thresh=thresh,
+                                                 plot=False, verbose=True)
     else:
         print('loading 5 mins GNSS PW {} station without threshold.'.format(station))
-    return pw
+    return da
+
+
+def drop_GNSS_PW_thresh_and_combine_save_all(
+    path=work_yuval, thresh=None, to_drop=[
+        'nizn', 'hrmn'], combine_dict={
+            'klhv': [
+                'klhv', 'lhav'], 'mrav': [
+                    'gilb', 'mrav']}):
+    import xarray as xr
+    import numpy as np
+    GNSS_pw = xr.open_dataset(path / 'GNSS_PW.nc')
+    thresh_list = []
+    stations_only = [x for x in GNSS_pw.data_vars if '_error' not in x]
+    for station in stations_only:
+        pw = load_PW_with_drop_thresh(station=station, thresh=thresh)
+        thresh_list.append(pw)
+    GNSS_pw_thresh = xr.merge(thresh_list)
+    if combine_dict is not None:
+        # combine stations:
+        combined = []
+        for new_sta, sta_to_merge in combine_dict.items():
+            print('merging {} to {}'.format(sta_to_merge, new_sta))
+            combined.append(combine_PW_stations(GNSS_pw_thresh, new_sta,
+                                                sta_to_merge, thresh))
+        # drop old stations:
+        sta_to_drop = [item for sublist in combine_dict.values()
+                       for item in sublist]
+        for sta in sta_to_drop:
+            GNSS_pw_thresh = GNSS_pw_thresh[[
+                x for x in GNSS_pw_thresh.data_vars if sta not in x]]
+        # plug them in GNSS dataset:
+        for sta in combined:
+            GNSS_pw_thresh[sta.name] = sta
+    if to_drop is not None:
+        for sta in to_drop:
+            print('dropping {} station.'.format(sta))
+            GNSS_pw_thresh = GNSS_pw_thresh[[
+                x for x in GNSS_pw_thresh.data_vars if sta not in x]]
+    mean_days_dropped_percent = np.mean(np.array([float(
+        GNSS_pw_thresh[x].attrs['days_dropped_percent']) for x in
+        GNSS_pw_thresh.data_vars]))
+    mean_months_dropped_percent = np.mean(np.array([float(
+        GNSS_pw_thresh[x].attrs['months_dropped_percent']) for x in GNSS_pw_thresh.data_vars]))
+    GNSS_pw_thresh.attrs['thresh'] = '{:.0f}'.format(thresh)
+    GNSS_pw_thresh.attrs['mean_days_dropped_percent'] = '{:.2f}'.format(mean_days_dropped_percent)
+    GNSS_pw_thresh.attrs['mean_months_dropped_percent'] = '{:.2f}'.format(mean_months_dropped_percent)
+    filename = 'GNSS_PW_thresh_{:.0f}.nc'.format(thresh)
+    comp = dict(zlib=True, complevel=9)  # best compression
+    encoding = {var: comp for var in GNSS_pw_thresh.data_vars}
+    GNSS_pw_thresh.to_netcdf(path / filename, 'w', encoding=encoding)
+    print('Done!')
+    return GNSS_pw_thresh
+
+
+def combine_PW_stations(pw, name, stations, thresh=None):
+    import xarray as xr
+    import numpy as np
+    from aux_gps import get_unique_index
+    time_dim = list(set(pw.dims))[0]
+    slist = [pw[x] for x in stations]
+    combined_station = xr.concat(slist, time_dim)
+    # take care of months and attrs:
+    if thresh is not None:
+        months_add = np.zeros((12), dtype=int)
+        for sta in stations:
+            # extract month_dict from pw attrs:
+            keys = ['months_{}'.format(x) for x in np.arange(1, 13)]
+            vals = [pw[sta].attrs[x] for x in keys]
+            month_dict = dict(zip(keys, vals))
+            months = [(x, y) for x, y in month_dict.items()]
+            months_add += np.array([x for x in dict(months).values()])
+        months = dict(zip(dict(months).keys(), months_add))
+        for month, val in months.items():
+            combined_station.attrs[month] = val
+        combined_station.attrs['mean_years'] = np.mean(
+            [x for x in months.values()])
+    # add attr of combined station:
+    combined_station.attrs['combined_from'] = ', '.join(stations)
+    combined_station.name = name
+    # get unique times:
+    combined_station = get_unique_index(combined_station)
+    return combined_station
 
 
 def load_gipsyx_results(station='tela', sample_rate=None,
