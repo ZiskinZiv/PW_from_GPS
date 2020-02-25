@@ -32,7 +32,6 @@ def weighted_long_term_monthly_means_da(da_ts, plot=True):
 #     weighted_monthly_means = dfmm * weights 
     weighted_clim = ((dfmm).sum(axis=0) /
                    weights.sum(axis=0)).unstack().squeeze()
-    return weighted_clim
     # convert back to time-series:
 #    df_ts = weighted_monthly_means.stack().reset_index()
 #    df_ts['dt'] = df_ts.year.astype(str) + '-' + df_ts.month.astype(str)
