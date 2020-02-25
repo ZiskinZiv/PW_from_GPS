@@ -1280,12 +1280,12 @@ def align_group_pw_and_T_to_long_term_monthly_means_and_save(
 
 
 def group_anoms_and_cluster(load_path=work_yuval, remove_grp='month', thresh=None, grp='hour',
-                            season=None, n_clusters=4):
+                            season=None, n_clusters=4, load_mm=False):
     import xarray as xr
     from sklearn.cluster import KMeans
     # load data and save attrs in dict:
 #    pw = xr.load_dataset(work_yuval/'GNSS_PW_anom_{:.0f}_hour_dayofyear.nc'.format(thresh))
-    pw = xr.load_dataset(load_path / 'GNSS_PW_{:.0f}.nc'.format(thresh))
+    pw = xr.load_dataset(load_path / 'GNSS_PW_thresh_{:.0f}.nc'.format(thresh))
     attrs = {da: val.attrs for (da, val) in pw.data_vars.items()}
     # use upper() on names:
     da = pw.to_array('station')
@@ -1298,17 +1298,24 @@ def group_anoms_and_cluster(load_path=work_yuval, remove_grp='month', thresh=Non
 #        for sta in to_drop:
 #            pw = pw[[x for x in pw.data_vars if sta not in x]]
     # extract weights from attrs:
-    weights = [x.attrs['mean_years'] for x in pw.data_vars.values()]
-    weights = weights / max(weights)
+    weights = [float(x.attrs['mean_years']) for x in pw.data_vars.values()]
+    weights = np.array(weights) / np.max(np.array(weights))
     # select season:
     if season is not None and grp == 'hour':
         pw = pw.sel(time=pw['time.season'] == season)
     # groupby and create means:
-    if remove_grp is not None:
-        print('removing long term {}ly means first'.format(remove_grp))
-        pw = pw.groupby('time.{}'.format(remove_grp)) - pw.groupby('time.{}'.format(remove_grp)).mean('time')
-    pw_mean = pw.groupby('time.{}'.format(grp)).mean('time')
-    pw_anom = pw_mean - pw_mean.mean('{}'.format(grp))
+    if not load_mm:
+        if remove_grp is not None:
+            print('removing long term {}ly means first'.format(remove_grp))
+            pw = pw.groupby('time.{}'.format(remove_grp)) - pw.groupby('time.{}'.format(remove_grp)).mean('time')
+            pw_anom = pw
+        else:
+            # pw_anom = pw_mean - pw_mean.mean('{}'.format(grp))
+            pw_anom = pw.groupby('time.{}'.format('month')).mean('time')
+    else:
+        pw_mean = xr.load_dataset(load_path / 'PW_T_monthly_means_clim_thresh_{:.0f}.nc'.format(thresh))
+        just_pw = [x for x in pw_mean.data_vars if '_T' not in x]                   
+        pw_anom = pw_mean[just_pw]
     # to dataframe:
     df = pw_anom.to_dataframe()
     weights = pd.Series(weights, index=[x for x in pw.data_vars])
