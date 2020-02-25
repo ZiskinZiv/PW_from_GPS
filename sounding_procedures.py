@@ -485,6 +485,7 @@ def read_all_physical_radiosonde(path, savepath=None, lower_cutoff=None,
     from aux_gps import path_glob
     import xarray as xr
     ds_list = []
+    dsh_list = []
     # ds_extra_list = []
     if lower_cutoff is not None:
         print('applying lower cutoff at {} meters for PW and Tm calculations.'.format(int(lower_cutoff)))
@@ -492,9 +493,12 @@ def read_all_physical_radiosonde(path, savepath=None, lower_cutoff=None,
         print('applying upper cutoff at {} meters for PW and Tm calculations.'.format(int(upper_cutoff)))
     for path_file in sorted(path_glob(path, '*/')):
         if path_file.is_file():
-            ds = read_one_physical_radiosonde_report(path_file,
-                                                     lower_cutoff=lower_cutoff,
-                                                     upper_cutoff=upper_cutoff)
+            try:
+                ds, dsh = read_one_physical_radiosonde_report(path_file,
+                                                         lower_cutoff=lower_cutoff,
+                                                         upper_cutoff=upper_cutoff)
+            except TypeError:
+                continue
             if ds is None:
                 print('{} is corrupted...'.format(path_file.as_posix().split('/')[-1]))
                 continue
@@ -504,11 +508,13 @@ def read_all_physical_radiosonde(path, savepath=None, lower_cutoff=None,
             # ds_with_time_dim = [x for x in ds.data_vars if 'time' in ds[x].dims]
             # ds_list.append(ds[ds_with_time_dim])
             ds_list.append(ds)
+            dsh_list.append(dsh)
             # ds_extra = [x for x in ds.data_vars if 'time' not in ds[x].dims]
             # ds_extra_list.append(ds[ds_extra])
 
     # dss = xr.concat(ds_list, 'time')
     dss = xr.concat(ds_list, 'sound_time')
+    dshs = xr.concat(dsh_list, 'sound_time')
     # dss_extra = xr.concat(ds_extra_list, 'sound_time')
     # dss = dss.merge(dss_extra)
     if lower_cutoff is not None:
@@ -521,10 +527,12 @@ def read_all_physical_radiosonde(path, savepath=None, lower_cutoff=None,
         yr_min = dss.time.min().dt.year.item()
         yr_max = dss.time.max().dt.year.item()
         filename = 'bet_dagan_phys_sounding_{}-{}.nc'.format(yr_min, yr_max)
+        filename2 = 'bet_dagan_phys_sounding_hmsl_{}-{}.nc'.format(yr_min, yr_max)
         print('saving {} to {}'.format(filename, savepath))
         comp = dict(zlib=True, complevel=9)  # best compression
         encoding = {var: comp for var in dss}
         dss.to_netcdf(savepath / filename, 'w', encoding=encoding)
+        dshs.to_netcdf(savepath / filename2, 'w', encoding=encoding)
     print('Done!')
     return dss
 
@@ -609,6 +617,8 @@ def read_one_physical_radiosonde_report(path_file, lower_cutoff=None,
          delim_whitespace=True,
          skip_blank_lines=True,
          na_values=['/////'])
+    time_str = path_file.as_posix().split('/')[-1].split('_')[-1]
+    dt = pd.to_datetime(time_str, format='%Y%m%d%H')
     if not df[df.iloc[:, 0].str.contains('PILOT')].empty:
         return None
     # drop last two cols:
@@ -665,10 +675,12 @@ def read_one_physical_radiosonde_report(path_file, lower_cutoff=None,
         df_extra[col] = pd.to_numeric(df_extra[col])
     units_extra = {'Ts': 'K', 'Tm': 'K', 'Tpw': 'kg/m^2', 'Cloud_code': '', 'Sonde_type': '', 'Tpw1': 'kg/m^2'}
     meta = {'units': units, 'units_extra': units_extra, 'station': station_num}
+    ds_h = df.set_index('H-Msl').to_xarray()
+    ds_h.attrs['datetime'] = dt
     if verbose:
         print('datetime: {}, TPW: {:.2f} '.format(df.index[0], tpw))
     ds = df_to_ds(df, df_extra, meta)
-    return ds
+    return ds, ds_h
 
 
 def classify_clouds_from_sounding(sound_path=sound_path):
