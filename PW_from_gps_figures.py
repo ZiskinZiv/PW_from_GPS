@@ -866,7 +866,7 @@ def produce_table_2(thresh=50):
 
 def plot_grp_anomlay_heatmap(load_path=work_yuval, gis_path=gis_path,
                              thresh=None, grp='hour', remove_grp=None, season=None,
-                             n_clusters=4, save=True, title=False):
+                             n_clusters=4, load_mm=False, save=True, title=False):
     import xarray as xr
     import seaborn as sns
     import numpy as np
@@ -886,7 +886,7 @@ def plot_grp_anomlay_heatmap(load_path=work_yuval, gis_path=gis_path,
 
     df, labels_sorted, weights = group_anoms_and_cluster(
             load_path=load_path, thresh=thresh, grp=grp, season=season,
-            n_clusters=n_clusters, remove_grp=remove_grp)
+            n_clusters=n_clusters, remove_grp=remove_grp, load_mm=load_mm)
     # create figure and subplots axes:
     fig = plt.figure(figsize=(15, 10))
     if title:
