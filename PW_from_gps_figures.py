@@ -674,40 +674,78 @@ def plot_israel_map(gis_path=gis_path, rc=rc, ax=None):
     return ax
 
 
-def plot_figure_7(gis_path=gis_path, save=True):
+def plot_israel_with_stations(gis_path=gis_path, dem_path=dem_path, ims=True,
+                              gps=True, radio=True, terrain=True, save=True):
     from PW_stations import produce_geo_gnss_solved_stations
     from aux_gps import geo_annotate
     from ims_procedures import produce_geo_ims
     import matplotlib.pyplot as plt
+    import xarray as xr
+    import pandas as pd
+    import geopandas as gpd
     ax = plot_israel_map(gis_path)
-    print('getting IMS temperature stations metadata...')
-    ims = produce_geo_ims(path=gis_path, freq='10mins', plot=False)
-    ims.plot(ax=ax, color='red', edgecolor='black', alpha=0.5)
+    station_names = []
+    legend = []
+    if ims:
+        print('getting IMS temperature stations metadata...')
+        ims_t = produce_geo_ims(path=gis_path, freq='10mins', plot=False)
+        ims_t.plot(ax=ax, color='red', edgecolor='black', alpha=0.5)
+        station_names.append('ims')
+        legend.append('IMS stations')
     # ims, gps = produce_geo_df(gis_path=gis_path, plot=False)
-    print('getting solved GNSS israeli stations metadata...')
-    gps = produce_geo_gnss_solved_stations(path=gis_path, plot=False)
-    gps.plot(ax=ax, color='green', edgecolor='black')
-    gps_stations = [x for x in gps.index]
-    to_plot_offset = ['mrav', 'klhv']
-    [gps_stations.remove(x) for x in to_plot_offset]
-    gps_normal_anno = gps.loc[gps_stations, :]
-    gps_offset_anno = gps.loc[to_plot_offset, :]
-    geo_annotate(ax, gps_normal_anno.lon, gps_normal_anno.lat,
-                 gps_normal_anno.index, xytext=(3, 3), fmt=None,
-                 c='k', fw='bold', fs=None, colorupdown=False)
-    geo_annotate(ax, gps_offset_anno.lon, gps_offset_anno.lat,
-                 gps_offset_anno.index, xytext=(4, -6), fmt=None,
-                 c='k', fw='bold', fs=None, colorupdown=False)
-#    plt.legend(['IMS stations', 'GNSS stations'],
-#           prop={'size': 10}, bbox_to_anchor=(-0.15, 1.0),
-#           title='Stations')
-#    plt.legend(['IMS stations', 'GNSS stations'],
-#               prop={'size': 10}, loc='upper left')
-    plt.legend(['IMS stations', 'GNSS stations'], loc='upper left')
+    if gps:
+        print('getting solved GNSS israeli stations metadata...')
+        gps = produce_geo_gnss_solved_stations(path=gis_path, plot=False)
+        gps.plot(ax=ax, color='k', edgecolor='black', marker='s')
+        gps_stations = [x for x in gps.index]
+        to_plot_offset = ['mrav', 'klhv']
+        [gps_stations.remove(x) for x in to_plot_offset]
+        gps_normal_anno = gps.loc[gps_stations, :]
+        gps_offset_anno = gps.loc[to_plot_offset, :]
+        geo_annotate(ax, gps_normal_anno.lon, gps_normal_anno.lat,
+                     gps_normal_anno.index.str.upper(), xytext=(3, 3), fmt=None,
+                     c='k', fw='bold', fs=10, colorupdown=False)
+        geo_annotate(ax, gps_offset_anno.lon, gps_offset_anno.lat,
+                     gps_offset_anno.index.str.upper(), xytext=(4, -6), fmt=None,
+                     c='k', fw='bold', fs=10, colorupdown=False)
+        station_names.append('gps')
+        legend.append('GNSS stations')
+    if terrain:
+        # overlay with dem data:
+        cmap = plt.get_cmap('terrain', 41)
+        dem = xr.open_dataarray(dem_path / 'israel_dem_250_500.nc')
+        # dem = xr.open_dataarray(dem_path / 'israel_dem_500_1000.nc')
+        fg = dem.plot.imshow(ax=ax, alpha=0.5, cmap=cmap,
+                             vmin=dem.min(), vmax=dem.max(), add_colorbar=False)
+        cbar_kwargs = {'fraction': 0.1, 'aspect': 50, 'pad': 0.03}
+        cb = plt.colorbar(fg, **cbar_kwargs)
+        cb.set_label(label='meters above sea level', size=8, weight='normal')
+        cb.ax.tick_params(labelsize=8)
+        ax.set_xlabel('')
+        ax.set_ylabel('')
+    if radio:   # plot bet-dagan:
+        df = pd.Series([32.00, 34.81]).to_frame().T
+        df.index = ['Beit Dagan']
+        df.columns = ['lat', 'lon']
+        bet_dagan = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.lon,
+                                                                     df.lat),
+                                     crs=gps.crs)
+        bet_dagan.plot(ax=ax, color='black', edgecolor='black',
+                       marker='+')
+        geo_annotate(ax, bet_dagan.lon, bet_dagan.lat,
+                     bet_dagan.index, xytext=(4, -6), fmt=None,
+                     c='k', fw='bold', fs=10, colorupdown=False)
+        station_names.append('radio')
+        legend.append('radiosonde')
+    if legend:
+        plt.legend(legend, loc='upper left')
     plt.tight_layout()
     plt.subplots_adjust(bottom=0.05)
-    caption('24 GNSS stations from the israeli network(green) and 88 IMS 10 mins automated stations(red).')
-    filename = 'gnss_ims_stations_map.png'
+    if station_names:
+        station_names = '_'.join(station_names)
+    else:
+        station_names = 'no_stations'
+    filename = 'israel_map_{}.png'.format(station_names)
     if save:
         plt.savefig(savefig_path / filename, bbox_inches='tight')
     return ax
@@ -1005,4 +1043,37 @@ def plot_grp_anomlay_heatmap(load_path=work_yuval, gis_path=gis_path,
 #        plt.savefig(savefig_path / filename, bbox_inches='tight')
         plt.savefig(savefig_path / filename, orientation='landscape')
     return df
+
+
+def plot_vertical_climatology_months(path=sound_path, field='Rho_wv',
+                                     center_month=7):
+    from aux_gps import path_glob
+    import xarray as xr
+    ds = xr.open_dataset(
+        path /
+        'bet_dagan_phys_sounding_height_2007-2019.nc')[field]
+    fig, ax = plt.subplots(1,2, figsize=(10, 5))
+    day = ds.sel(sound_time=ds['sound_time.hour']==12).groupby('sound_time.month').mean('sound_time')
+    night = ds.sel(sound_time=ds['sound_time.hour']==00).groupby('sound_time.month').mean('sound_time')
+    next_month = center_month + 1
+    last_month = center_month - 1
+    day = day.sel(month=[last_month, center_month, next_month])
+    night = night.sel(month=[last_month, center_month, next_month])
+    for month in day.month:
+        h=day.sel(month=month)['H-Msl'].values
+        rh = day.sel(month=month).values
+        ax[0].semilogy(rh, h)
+    ax[0].set_title('noon')
+    ax[0].set_ylabel('height [m]')
+    ax[0].set_xlabel('{}, [{}]'.format(field, day.attrs['units']))
+    plt.legend([x for x in ax.lines],[x for x in day.month.values])
+    for month in night.month:
+        h=night.sel(month=month)['H-Msl'].values
+        rh = night.sel(month=month).values
+        ax[1].semilogy(rh, h)
+    ax[1].set_title('midnight')
+    ax[1].set_ylabel('height [m]')
+    ax[1].set_xlabel('{}, [{}]'.format(field, night.attrs['units']))
+    plt.legend([x for x in ax.lines],[x for x in night.month.values])
+    return day, night
 
