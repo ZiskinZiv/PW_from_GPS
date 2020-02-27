@@ -12,6 +12,19 @@ from PW_paths import work_yuval
 # TODO: if not, build func to replace datetimeindex to numbers and vise versa
 
 
+def save_ncfile(xarray, savepath, filename='temp.nc'):
+    import xarray as xr
+    print('saving {} to {}'.format(filename, savepath))
+    comp = dict(zlib=True, complevel=9)  # best compression
+    if isinstance(xarray, xr.Dataset):
+        encoding = {var: comp for var in xarray}
+    elif isinstance(xarray, xr.DataArray):
+        encoding = {var: comp for var in xarray.to_dataset()}
+    xarray.to_netcdf(savepath / filename, 'w', encoding=encoding)
+    print('File saved!')
+    return
+    
+
 def weighted_long_term_monthly_means_da(da_ts, plot=True):
     """create a long term monthly means(climatology) from a dataarray time
     series with weights of items(mins,days etc..) per each month"""
