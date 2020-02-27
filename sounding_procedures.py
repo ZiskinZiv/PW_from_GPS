@@ -480,27 +480,43 @@ def move_bet_dagan_physical_to_main_path(bet_dagan_path):
     return year_dirs
 
 
-def read_all_physical_radiosonde(path, savepath=None, lower_cutoff=None,
-                                 upper_cutoff=None, verbose=True, plot=True):
+def read_all_physical_radiosonde(path, savepath=None, coord='time',
+                                 lower_cutoff=None, upper_cutoff=None,
+                                 concat_epoch_num=300, verbose=True, plot=True):
     from aux_gps import path_glob
+    from aux_gps import get_unique_index
     import xarray as xr
+    from aux_gps import save_ncfile
+    import gc
     ds_list = []
-    dsh_list = []
     # ds_extra_list = []
     if lower_cutoff is not None:
-        print('applying lower cutoff at {} meters for PW and Tm calculations.'.format(int(lower_cutoff)))
+        print(
+            'applying lower cutoff at {} meters for PW and Tm calculations.'.format(
+                int(lower_cutoff)))
     if upper_cutoff is not None:
-        print('applying upper cutoff at {} meters for PW and Tm calculations.'.format(int(upper_cutoff)))
+        print(
+            'applying upper cutoff at {} meters for PW and Tm calculations.'.format(
+                int(upper_cutoff)))
+    cnt = 0
+    cnt_save = 0
     for path_file in sorted(path_glob(path, '*/')):
+        cnt += 1
         if path_file.is_file():
             try:
-                ds, dsh = read_one_physical_radiosonde_report(path_file,
-                                                         lower_cutoff=lower_cutoff,
-                                                         upper_cutoff=upper_cutoff)
+                if coord == 'time':
+                    ds, _ = read_one_physical_radiosonde_report(
+                        path_file, lower_cutoff=lower_cutoff, upper_cutoff=upper_cutoff)
+                    ds = get_unique_index(ds, dim='time')
+                    ds = get_unique_index(ds, dim='sound_time')
+                elif coord == 'height':
+                    _, ds = read_one_physical_radiosonde_report(
+                        path_file, lower_cutoff=lower_cutoff, upper_cutoff=upper_cutoff)
             except TypeError:
                 continue
             if ds is None:
-                print('{} is corrupted...'.format(path_file.as_posix().split('/')[-1]))
+                print('{} is corrupted...'.format(
+                    path_file.as_posix().split('/')[-1]))
                 continue
             date = ds['sound_time'].dt.strftime('%Y-%m-%d %H:%M').values
             if verbose:
@@ -508,13 +524,30 @@ def read_all_physical_radiosonde(path, savepath=None, lower_cutoff=None,
             # ds_with_time_dim = [x for x in ds.data_vars if 'time' in ds[x].dims]
             # ds_list.append(ds[ds_with_time_dim])
             ds_list.append(ds)
-            dsh_list.append(dsh)
             # ds_extra = [x for x in ds.data_vars if 'time' not in ds[x].dims]
             # ds_extra_list.append(ds[ds_extra])
-
+            # every 600 iters, concat:
+            if cnt % concat_epoch_num == 0:
+                cnt_save += 1
+                print('concatating and saving every {} points'.format(concat_epoch_num))
+                temp = xr.concat(ds_list, 'sound_time')
+                save_ncfile(temp, savepath, filename='bet_dagan_temp_{}.nc'.format(cnt_save))
+                del temp
+                ds_list = []
+                print("Collecting...")
+                n = gc.collect()
+                print("Number of unreachable objects collected by GC:", n)
+                print("Uncollectable garbage:", gc.garbage)
+            if cnt == len(path_glob(path, '*/')):
+                temp = xr.concat(ds_list, 'sound_time')
+                save_ncfile(temp, savepath, filename='bet_dagan_temp_{}.nc'.format(cnt_save))
+                ds_list = []
     # dss = xr.concat(ds_list, 'time')
-    dss = xr.concat(ds_list, 'sound_time')
-    dshs = xr.concat(dsh_list, 'sound_time')
+    print('loading temp files and concatenating...')
+    tempfiles = path_glob(savepath, 'bet_dagan_temp*.nc')
+    temp_list = [xr.open_dataset(x) for x in tempfiles]
+    dss = xr.concat(temp_list, 'sound_time')
+    dss = dss.sortby('sound_time')
     # dss_extra = xr.concat(ds_extra_list, 'sound_time')
     # dss = dss.merge(dss_extra)
     if lower_cutoff is not None:
@@ -524,15 +557,15 @@ def read_all_physical_radiosonde(path, savepath=None, lower_cutoff=None,
         dss['Tpw'].attrs['upper_cutoff'] = upper_cutoff
         dss['Tm'].attrs['upper_cutoff'] = upper_cutoff
     if savepath is not None:
-        yr_min = dss.time.min().dt.year.item()
-        yr_max = dss.time.max().dt.year.item()
-        filename = 'bet_dagan_phys_sounding_{}-{}.nc'.format(yr_min, yr_max)
-        filename2 = 'bet_dagan_phys_sounding_hmsl_{}-{}.nc'.format(yr_min, yr_max)
+        yr_min = dss.sound_time.min().dt.year.item()
+        yr_max = dss.sound_time.max().dt.year.item()
+        filename = 'bet_dagan_phys_sounding_{}_{}-{}.nc'.format(coord, yr_min, yr_max)
         print('saving {} to {}'.format(filename, savepath))
         comp = dict(zlib=True, complevel=9)  # best compression
         encoding = {var: comp for var in dss}
         dss.to_netcdf(savepath / filename, 'w', encoding=encoding)
-        dshs.to_netcdf(savepath / filename2, 'w', encoding=encoding)
+        print('clearing temp files...')
+        [x.unlink() for x in tempfiles]
     print('Done!')
     return dss
 
@@ -542,8 +575,12 @@ def read_one_physical_radiosonde_report(path_file, lower_cutoff=None,
     """read one(12 or 00) physical bet dagan radiosonde reports and return a df
     containing time series, PW for the whole sounding and time span of the
     sounding"""
-    def df_to_ds(df, df_extra, meta):
-        import xarray as xr
+    import numpy as np
+    from aux_gps import get_unique_index
+    import pandas as pd
+    import xarray as xr
+
+    def check_sound_time(df):
         if not df.between_time('22:00', '02:00').empty:
             sound_time = pd.to_datetime(
                 df.index[0].strftime('%Y-%m-%d')).replace(hour=0, minute=0)
@@ -555,6 +592,11 @@ def read_one_physical_radiosonde_report(path_file, lower_cutoff=None,
             raise ValueError(
                 '{} time is not midnight nor noon'.format(
                     df.index[0]))
+        return sound_time
+
+    def df_to_ds(df, df_extra, meta):
+        import xarray as xr
+        sound_time = check_sound_time(df)
         ds = df.to_xarray()
         for name in ds.data_vars:
             ds[name].attrs['units'] = meta['units'][name]
@@ -607,8 +649,6 @@ def read_one_physical_radiosonde_report(path_file, lower_cutoff=None,
             return np.nan
         return tm
 
-    import pandas as pd
-    import numpy as np
     # TODO: recheck units, add to df and to units_dict
     df = pd.read_csv(
          path_file,
@@ -676,7 +716,26 @@ def read_one_physical_radiosonde_report(path_file, lower_cutoff=None,
     units_extra = {'Ts': 'K', 'Tm': 'K', 'Tpw': 'kg/m^2', 'Cloud_code': '', 'Sonde_type': '', 'Tpw1': 'kg/m^2'}
     meta = {'units': units, 'units_extra': units_extra, 'station': station_num}
     ds_h = df.set_index('H-Msl').to_xarray()
-    ds_h.attrs['datetime'] = dt
+    # do cubic interpolation:
+    h = np.linspace(35, 25000, 500)
+    ds_h = ds_h.sortby('H-Msl')
+    ds_h = get_unique_index(ds_h, dim='H-Msl')
+    ds_hlist = []
+    for da in ds_h.data_vars.values():
+        da.attrs['units'] = meta['units'][da.name]
+        # dropna in all vars:
+        dropped = da.dropna('H-Msl')
+        # if some data remain, interpolate:
+        if dropped.size > 0:
+            ds_hlist.append(dropped.interp({'H-Msl': h}, method='cubic'))
+        # if nothing left, create new ones with nans:
+        else:
+            nan_da = np.nan * ds_h['H-Msl']
+            nan_da.name = dropped.name
+            ds_hlist.append(dropped)
+    ds_h = xr.merge(ds_hlist)
+    ds_h['sound_time'] = check_sound_time(df)
+    ds_h.attrs['station_number'] = meta['station']
     if verbose:
         print('datetime: {}, TPW: {:.2f} '.format(df.index[0], tpw))
     ds = df_to_ds(df, df_extra, meta)
