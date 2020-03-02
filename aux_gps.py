@@ -12,6 +12,12 @@ from PW_paths import work_yuval
 # TODO: if not, build func to replace datetimeindex to numbers and vise versa
 
 
+def remove_duplicate_spaces_in_string(line):
+    import re
+    line_removed = " ".join(re.split("\s+", line, flags=re.UNICODE))
+    return line_removed
+
+
 def save_ncfile(xarray, savepath, filename='temp.nc'):
     import xarray as xr
     print('saving {} to {}'.format(filename, savepath))
