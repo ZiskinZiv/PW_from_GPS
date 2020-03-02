@@ -9,6 +9,365 @@ Created on Thu May 16 14:24:40 2019
 from PW_paths import work_yuval
 sound_path = work_yuval / 'sounding'
 era5_path = work_yuval / 'ERA5'
+edt_path = sound_path / 'edt'
+
+
+class Constants:
+    def __init__(self):
+        import astropy.units as u
+        # Specific gas const for water vapour, J kg^{-1} K^{-1}:
+        self.Rs_v = 461.52 * u.joule / (u.kilogram * u.Kelvin)
+        # Specific gas const for dry air, J kg^{-1} K^{-1}:
+        self.Rs_da = 287.05 * u.joule / (u.kilogram * u.Kelvin)
+        self.MW_dry_air = 28.9647  * u.gram / u.mol  # gr/mol
+        self.MW_water = 18.015 * u.gram / u.mol  # gr/mol
+        self.Water_Density = 1000.0 * u.kilogram / u.m**3
+        self.Epsilon = self.MW_water / self.MW_dry_air  # Epsilon=Rs_da/Rs_v;
+
+    def show(self):
+        from termcolor import colored
+        for attr, value in vars(self).items():
+            print(colored('{} : '.format(attr), color='blue', attrs=['bold']), end='')
+            print(colored('{:.2f}'.format(value), color='white', attrs=['bold']))
+
+
+class WaterVaporVar:
+    def __init__(self, name, value, unit):
+        try:
+            setattr(self, name, value.values)
+        except AttributeError:
+            setattr(self, name, value)
+        if value is not None:
+            value = getattr(self, name)
+            setattr(self, name, value * unit)
+
+class WaterVapor:
+    def __init__(self,
+                 Z=None,
+                 P=None,
+                 T=None,
+                 DWPT=None,
+                 MR=None,
+                 Q=None,
+                 RH=None,
+                 PPMV=None,
+                 MD=None,
+                 KMOL=None,
+                 ND=None,
+                 PP=None,
+                 verbose=True):
+        import astropy.units as u
+        self.verbose = verbose
+        self.Z = WaterVaporVar('Z', Z, u.meter).Z  # height in meters
+        self.P = WaterVaporVar('P', P, u.hPa).P  # pressure in hPa
+        self.T = WaterVaporVar('T', T, u.deg_C).T  # temperature in deg_C
+        self.DWPT = WaterVaporVar('DWPT', DWPT, u.deg_C).DWPT  # dew_point in deg_C
+        self.MR = WaterVaporVar('MR', MR, u.gram / u.kilogram).MR  # mass_mixing_ratio in gr/kg
+        self.Q = WaterVaporVar('Q', Q, u.gram / u.kilogram).Q  # specific humidity in gr/kg
+        self.RH = WaterVaporVar('RH', RH, u.percent).RH  # relative humidity in %
+        self.PPMV = WaterVaporVar('PPMV', PPMV, u.cds.ppm).PPMV  # volume_mixing_ratio in ppm
+        self.MD = WaterVaporVar('MD', MD, u.gram / u.meter**3).MD  # water vapor density in gr/m^3
+        self.KMOL = WaterVaporVar('KMOL', KMOL, u.kilomole / u.cm**2).KMOL  # water vapor column density in kmol/cm^2
+        self.ND = WaterVaporVar('ND', ND, u.dimensionless_unscaled / u.m**3).ND  # number density in molecules / m^3
+        self.PP = WaterVaporVar('PP', PP, u.hPa).PP  # water vapor partial pressure in hPa
+    # update attrs from dict containing keys as attrs and vals as attrs vals
+    # to be updated
+
+    def from_dict(self, d):
+        self.__dict__.update(d)
+        return self
+
+    def show(self, name='all'):
+        from termcolor import colored
+        if name == 'all':
+            for attr, value in vars(self).items():
+                print(colored('{} : '.format(attr), color='blue', attrs=['bold']), end='')
+                print(colored(value, color='white', attrs=['bold']))
+        elif hasattr(self, name):
+            print(colored('{} : '.format(name), color='blue', attrs=['bold']), end='')
+            print(colored(self.name, color='white', attrs=['bold']))
+
+    def convert(self, from_to='PP_to_MR'):
+        import astropy.units as u
+        C = Constants()
+        from_name = from_to.split('_')[0]
+        to_name = from_to.split('_')[-1]
+        from_ = getattr(self, from_name)
+        to_ = getattr(self, to_name)
+        print('converting {} to {}:'.format(from_name, to_name))
+        if to_ is not None:
+            if self.verbose:
+                print('{} already exists, overwriting...'.format(to_name))
+        if from_ is not None:
+            if from_name == 'PP' and to_name == 'MR':
+                # convert wv partial pressure to mass mixing ratio:
+                if self.P is None:
+                    raise Exception('total pressure is needed for this conversion')
+                self.MR = C.Epsilon * self.PP / (self.P - self.PP) / self.MR.unit.decompose()
+                return self.MR
+            elif from_name == 'MR' and to_name == 'PP':
+                # convert mass mixing ratio to wv partial pressure:
+                if self.P is None:
+                    raise Exception('total pressure is needed for this conversion')
+                e_tag = self.MR * self.MR.unit.decompose() / (C.Epsilon)
+                self.PP = self.P * e_tag / (1. * e_tag.unit + e_tag)
+                return self.PP
+        else:
+            raise Exception('{} is needed to perform conversion'.format(from_))
+        return self
+
+def check_sound_time(df):
+    import pandas as pd
+    # check for validity of radiosonde air time, needs to be
+    # in noon or midnight:
+    if not df.between_time('22:00', '02:00').empty:
+        sound_time = pd.to_datetime(
+            df.index[0].strftime('%Y-%m-%d')).replace(hour=0, minute=0)
+    elif not df.between_time('10:00', '14:00').empty:
+        sound_time = pd.to_datetime(
+            df.index[0].strftime('%Y-%m-%d')).replace(hour=12, minute=0)
+    elif (df.between_time('22:00', '02:00').empty and
+          df.between_time('10:00', '14:00').empty):
+        raise ValueError(
+            '{} time is not midnight nor noon'.format(
+                df.index[0]))
+    return sound_time
+
+
+def calculate_tm_edt(wvpress, tempc, height, mixratio,
+                     press, method='mr_trapz'):
+    def calculate_tm_with_method(method='mr_trapz'):
+        import numpy as np
+        import pandas as pd
+        nonlocal wvpress, tempc, height, mixratio, press
+        # conver Mixing ratio to WV-PP(e):
+        MW_dry_air = 28.9647  # gr/mol
+        MW_water = 18.015  # gr/mol
+        Epsilon = MW_water / MW_dry_air  # Epsilon=Rs_da/Rs_v;
+        mr = pd.Series(mixratio)
+        p = pd.Series(press)
+        eps_tag = mr / (1000.0 * Epsilon)
+        e = p * eps_tag / (1.0 + eps_tag)
+        try:
+            # directly use WV-PP with trapz:
+            if method == 'wv_trapz':
+                numerator = np.trapz(
+                    wvpress /
+                    (tempc +
+                     273.15),
+                    height)
+                denominator = np.trapz(
+                    wvpress / (tempc + 273.15)**2.0, height)
+                tm = numerator / denominator
+            # use WV-PP from mixing ratio with trapz:
+            elif method == 'mr_trapz':
+                numerator = np.trapz(
+                    e /
+                    (tempc +
+                     273.15),
+                    height)
+                denominator = np.trapz(
+                    e / (tempc + 273.15)**2.0, height)
+                tm = numerator / denominator
+            # use WV-PP from mixing ratio with sum:
+            elif method == 'mr_sum':
+                e_ser = pd.Series(e)
+                height = pd.Series(height)
+                e_sum = (e_ser.shift(-1) + e_ser).dropna()
+                h = height.diff(-1).abs()
+                numerator = 0.5 * (e_sum * h / (pd.Series(tempc) + 273.15)).sum()
+                denominator = 0.5 * \
+                    (e_sum * h / (pd.Series(tempc) + 273.15)**2.0).sum()
+                tm = numerator / denominator
+        except ValueError:
+            return np.nan
+        return tm
+    if method is None:
+        tm_wv_trapz = calculate_tm_with_method('wv_trapz')
+        tm_mr_trapz = calculate_tm_with_method('mr_trapz')
+        tm_sum = calculate_tm_with_method('sum')
+    else:
+        tm = calculate_tm_with_method(method)
+        chosen_method = method
+    return tm, chosen_method
+
+
+def calculate_tpw_edt(mixratio, rho, rho_wv, height, press, g, method='trapz'):
+    def calculate_tpw_with_method(method='trapz'):
+        nonlocal mixratio, rho, rho_wv, height, press, g
+        import numpy as np
+        import pandas as pd
+        # calculate specific humidity q:
+        q = (mixratio / 1000.0) / \
+            (1 + 0.001 * mixratio / 1000.0)
+        try:
+            if method == 'trapz':
+                tpw = np.trapz(q * rho,
+                               height)
+            elif method == 'sum':
+                rho_wv = pd.Series(rho_wv)
+                height = pd.Series(height)
+                rho_sum = (rho_wv.shift(-1) + rho_wv).dropna()
+                h = height.diff(-1).abs()
+                tpw = 0.5 * (rho_sum * h).sum()
+            elif method == 'psum':
+                q = pd.Series(q)
+                q_sum = q.shift(-1) + q
+                p = pd.Series(press) * 100.0  # to Pa
+                dp = p.diff(-1).abs()
+                tpw = (q_sum * dp / (2.0 * 1000 * g)).sum() * 1000.0
+        except ValueError:
+            return np.nan
+        return tpw
+    if method is None:
+        # calculate all the methods and choose trapz if all agree:
+        tpw_trapz = calculate_tpw_with_method(method='trapz')
+        tpw_sum = calculate_tpw_with_method(method='sum')
+        tpw_psum = calculate_tpw_with_method(method='psum')
+    else:
+        tpw = calculate_tpw_with_method(method=method)
+        chosen_method = method
+    return tpw, chosen_method
+
+
+def read_one_EDT_record(filepath):
+    import pandas as pd
+    import numpy as np
+    import xarray as xr
+    from aux_gps import get_unique_index
+    from aux_gps import calculate_g
+    from aux_gps import remove_duplicate_spaces_in_string
+    from metpy.calc import precipitable_water
+    from metpy.units import units
+    with open(filepath) as f:
+        content = f.readlines()
+    content = [x.strip() for x in content]
+    meta = {}
+    for i, line in enumerate(content):
+        if line.startswith('Station:'):
+            line = remove_duplicate_spaces_in_string(line)
+            meta['station'] = line.split(' ')[1]
+        if line.startswith('Launch time:'):
+            line = remove_duplicate_spaces_in_string(line)
+            dt = 'T'.join(line.split(' ')[2:4])
+            meta['launch_time'] = pd.to_datetime(dt)
+        if line.startswith('RS type:'):
+            line = remove_duplicate_spaces_in_string(line)
+            rs_type = line.split(' ' )[-1]
+            meta['RS_type'] = rs_type
+        if line.startswith('RS number:'):
+            line = remove_duplicate_spaces_in_string(line)
+            rs_num = line.split(' ' )[-1]
+            meta['RS_number'] = rs_num
+        if line.startswith('Reason for termination:'):
+            line = remove_duplicate_spaces_in_string(line)
+            termination = line.split(' ' )[-1]
+            meta['termination_reason'] = termination
+        if line.startswith('Record name:'):
+            meta_header = remove_duplicate_spaces_in_string(line)
+            meta_header = meta_header.split(': ')
+            meta_header[-1] = meta_header[-1].split(':')[0]
+        if i >42:
+            break
+    # read units table:        global mixratio, rho, rho_wv, height, press, g
+
+    table = pd.read_fwf(
+        filepath,
+        skiprows=22,
+        nrows=19,
+        header=None,
+        widths=[16, 16, 23, 9, 9])
+    table.columns = meta_header
+    # drop 3 last rows:
+    table = table.iloc[:-3, :]
+    # units dict:
+    units = dict(zip(table['Record name'], table['Unit']))
+    units.pop('Pscl')
+    # read all data:
+    data = pd.read_csv(
+        filepath,
+        delim_whitespace=True,
+        skiprows=44,
+        na_values=-32768)
+    # drop 3 last cols:
+    data = data.iloc[:, :-3]
+    data = data.drop('Pscl', axis=1)
+    # datetime index:
+    Time = data['time']
+    data['time'] = pd.to_timedelta(data['time'], errors='coerce', unit='sec')
+    data['time'] += meta['launch_time']
+    data.set_index('time', inplace=True)
+    sound_time = check_sound_time(data)
+    # now index as height:
+    data.set_index('Height', inplace=True)
+    data['time'] = Time
+    data = data.astype('float')
+    data.index = data.index.astype('float')
+    # to xarray:
+    ds = data.to_xarray()
+    ds = ds.sortby('Height')
+    ds = get_unique_index(ds, 'Height')
+    # interpolate:
+    h = np.linspace(31, 25000, 5000)
+    ds_list = []
+    for da in ds.data_vars.values():
+        # dropna in all vars:
+        dropped = da.dropna('Height')
+        # if some data remain, interpolate:
+        if dropped.size > 0:
+            ds_list.append(dropped.interp({'Height': h}, method='cubic'))
+        # if nothing left, create new ones with nans:
+        else:
+            nan_da = np.nan * ds['Height']
+            nan_da.name = dropped.name
+            ds_list.append(dropped)
+    ds = xr.merge(ds_list)
+    # copy general attrs:
+    for key, val in meta.items():
+        ds.attrs[key] = val
+    ds.attrs['sound_time'] = sound_time
+    ds['Height'].attrs['unit'] = 'm'
+    # copy unit attrs:
+    for key, val in units.items():
+        try:
+            ds[key].attrs['unit'] = val
+        except KeyError:
+            pass
+    ds = ds.rename({'Lat': 'lat', 'Lon': 'lon', 'Range': 'range'})
+    # add more variables: Tm, Tpw, etc...
+    ds['g'] = calculate_g(ds['lat'][0])
+    ds['g'].attrs.update({'long_name': 'gravitational accelaration',
+      'unit': 'm*sec^-2'})
+    ds['T'] -= 273.15
+    ds['T'].attrs['unit'] = 'degC'
+    ds['WVpress'] = VaporPressure(ds['TD'] - 273.15, phase="liquid", units='hPa',
+                              method='Buck')
+    ds['WVpress'].attrs['unit'] = 'hPa'
+    ds['Rho'] = DensHumid(ds['T'], ds['P'], ds['WVpress'],
+                    out='both')
+    ds['Rho'].attrs['unit'] = 'kg/m^3'
+    ds['Rho_wv'] = DensHumid(ds['T'], ds['P'], ds['WVpress'],
+                       out='wv_density')
+    ds['Rho_wv'].attrs['unit'] = 'kg/m^3'
+    # calculate Tpw with default method:
+    ds['Tpw'], chosen_method = calculate_tpw_edt(
+        ds['MR'],
+        ds['Rho'],
+        ds['Rho_wv'],
+        ds['Height'], ds['P'], ds['g'].values.item(),
+        method='trapz')
+    ds['Tpw'].attrs.update({'long_name': 'Total precipitable water',
+                            'unit': 'kg*m^-2',
+                            'integration_method': chosen_method})
+    ds['Ts'] = ds['T'][0] + 273.15
+    ds['Ts'].attrs.update({'long_name': 'Surface temperature', 'unit': 'K'})
+    ds['Tm'], chosen_method = calculate_tm_edt(ds['WVpress'], ds['T'], ds['Height'],
+                                    ds['MR'], ds['P'], method='mr_trapz')
+    ds['Tm'].attrs.update({'long_name': 'Water vapor mean atmospheric temperature',
+                              'unit': 'K', 'integration_method': chosen_method})
+    ds.attrs['launch_time'] = ds.attrs['launch_time'].strftime('%Y-%m-%d %H:%M:%S')
+    ds.attrs['sound_time'] = ds.attrs['sound_time'].strftime('%Y-%m-%d %H:%M:%S')
+    return ds
 
 
 def transform_model_levels_to_pressure(path, field_da, plevel=85.0, mm=True):
@@ -480,11 +839,12 @@ def move_bet_dagan_physical_to_main_path(bet_dagan_path):
     return year_dirs
 
 
-def read_all_physical_radiosonde(path, savepath=None, coord='time',
-                                 lower_cutoff=None, upper_cutoff=None,
-                                 concat_epoch_num=300, verbose=True, plot=True):
+def read_all_physical_radiosonde(path, savepath=None, lower_cutoff=None,
+                                 upper_cutoff=None, concat_epoch_num=300,
+                                 verbose=True):
     from aux_gps import path_glob
     from aux_gps import get_unique_index
+    from aux_gps import keep_iqr
     import xarray as xr
     from aux_gps import save_ncfile
     import gc
@@ -503,22 +863,13 @@ def read_all_physical_radiosonde(path, savepath=None, coord='time',
     for path_file in sorted(path_glob(path, '*/')):
         cnt += 1
         if path_file.is_file():
-            try:
-                if coord == 'time':
-                    ds, _ = read_one_physical_radiosonde_report(
-                        path_file, lower_cutoff=lower_cutoff, upper_cutoff=upper_cutoff)
-                    ds = get_unique_index(ds, dim='time')
-                    ds = get_unique_index(ds, dim='sound_time')
-                elif coord == 'height':
-                    _, ds = read_one_physical_radiosonde_report(
-                        path_file, lower_cutoff=lower_cutoff, upper_cutoff=upper_cutoff)
-            except TypeError:
-                continue
+            ds = read_one_physical_radiosonde_report(
+                    path_file, lower_cutoff=lower_cutoff, upper_cutoff=upper_cutoff)
             if ds is None:
                 print('{} is corrupted...'.format(
                     path_file.as_posix().split('/')[-1]))
                 continue
-            date = ds['sound_time'].dt.strftime('%Y-%m-%d %H:%M').values
+            date = ds['sound_time'].dt.strftime('%Y-%m-%d %H:%M').values.item()
             if verbose:
                 print('reading {} physical radiosonde report'.format(date))
             # ds_with_time_dim = [x for x in ds.data_vars if 'time' in ds[x].dims]
@@ -548,18 +899,29 @@ def read_all_physical_radiosonde(path, savepath=None, coord='time',
     temp_list = [xr.open_dataset(x) for x in tempfiles]
     dss = xr.concat(temp_list, 'sound_time')
     dss = dss.sortby('sound_time')
+    dss = get_unique_index(dss, 'sound_time')
+    # filter iqr:
+    da_list = []
+    for da in dss.data_vars.values():
+        if len(da.dims) == 1:
+            if da.dims[0] == 'sound_time' and da.dtype == 'float64':
+                da_list.append(keep_iqr(da, dim='sound_time'))
+    new_ds = xr.merge(da_list)
+    # replace with filtered vars:
+    for da in new_ds.data_vars:
+        dss[da] = new_ds[da]
     # dss_extra = xr.concat(ds_extra_list, 'sound_time')
     # dss = dss.merge(dss_extra)
     if lower_cutoff is not None:
-        dss['Tpw'].attrs['lower_cutoff'] = lower_cutoff
+        dss['Tpw_by_trapz'].attrs['lower_cutoff'] = lower_cutoff
         dss['Tm'].attrs['lower_cutoff'] = lower_cutoff
     if upper_cutoff is not None:
-        dss['Tpw'].attrs['upper_cutoff'] = upper_cutoff
+        dss['Tpw_by_trapz'].attrs['upper_cutoff'] = upper_cutoff
         dss['Tm'].attrs['upper_cutoff'] = upper_cutoff
     if savepath is not None:
         yr_min = dss.sound_time.min().dt.year.item()
         yr_max = dss.sound_time.max().dt.year.item()
-        filename = 'bet_dagan_phys_sounding_{}_{}-{}.nc'.format(coord, yr_min, yr_max)
+        filename = 'bet_dagan_phys_sounding_{}-{}.nc'.format(yr_min, yr_max)
         print('saving {} to {}'.format(filename, savepath))
         comp = dict(zlib=True, complevel=9)  # best compression
         encoding = {var: comp for var in dss}
@@ -580,35 +942,47 @@ def read_one_physical_radiosonde_report(path_file, lower_cutoff=None,
     import pandas as pd
     import xarray as xr
 
-    def check_sound_time(df):
-        if not df.between_time('22:00', '02:00').empty:
-            sound_time = pd.to_datetime(
-                df.index[0].strftime('%Y-%m-%d')).replace(hour=0, minute=0)
-        elif not df.between_time('10:00', '14:00').empty:
-            sound_time = pd.to_datetime(
-                df.index[0].strftime('%Y-%m-%d')).replace(hour=12, minute=0)
-        elif (df.between_time('22:00', '02:00').empty and
-              df.between_time('10:00', '14:00').empty):
-            raise ValueError(
-                '{} time is not midnight nor noon'.format(
-                    df.index[0]))
-        return sound_time
-
     def df_to_ds(df, df_extra, meta):
-        import xarray as xr
-        sound_time = check_sound_time(df)
+        import numpy as np
+        # set index the height, and transform to xarray:
+        df = df.set_index('H-Msl').squeeze()
         ds = df.to_xarray()
+        ds = ds.sortby('H-Msl')
+        ds = get_unique_index(ds, dim='H-Msl')
+        # do cubic interpolation:
+        h = np.linspace(35, 25000, 500)
+        ds_list = []
+        for da in ds.data_vars.values():
+            # dropna in all vars:
+            dropped = da.dropna('H-Msl')
+            # if some data remain, interpolate:
+            if dropped.size > 0:
+                ds_list.append(dropped.interp({'H-Msl': h}, method='cubic'))
+            # if nothing left, create new ones with nans:
+            else:
+                nan_da = np.nan * ds['H-Msl']
+                nan_da.name = dropped.name
+                ds_list.append(dropped)
+        ds = xr.merge(ds_list)
+        # add meta data:
         for name in ds.data_vars:
-            ds[name].attrs['units'] = meta['units'][name]
+            ds[name].attrs['unit'] = meta['units'][name]
+        # add more fields:
+        df_extra['sound_time'] = sound_time
+        df_extra = df_extra.set_index('sound_time')
+        ds_extra = df_extra.to_xarray()
+        # add meta date to new fields:
+        for name in ds_extra.data_vars:
+            if 'time' not in name:
+                ds_extra[name].attrs['unit'] = meta['units_extra'][name]
+        # finally, merge all ds:
+        ds = xr.merge([ds, ds_extra])
         ds.attrs['station_number'] = meta['station']
-        for col in df_extra.columns:
-            ds[col] = df_extra[col]
-            ds[col].attrs['units'] = meta['units_extra'][col]
-            ds[col] = ds[col].squeeze(drop=True)
-        ds['dt_range'] = xr.DataArray(
-            [ds.time.min().values, ds.time.max().values], dims='bnd')
-        ds['bnd'] = ['Min', 'Max']
-        ds['sound_time'] = sound_time
+        ds.attrs['operation'] = 'all physical fields were cubic interpolated to H-Msl'
+        ds.attrs['lat'] = 32.01
+        ds.attrs['lat'] = 34.81
+        ds.attrs['alt'] = 31.0
+        ds['H-Msl'].attrs['unit'] = 'm'
         return ds
 
     def calculate_tpw(df, upper=None, lower=None, method='trapz'):
@@ -689,10 +1063,19 @@ def read_one_physical_radiosonde_report(path_file, lower_cutoff=None,
             df[col] = pd.to_numeric(df[col], errors='coerce')
     # filter all entries that the first col is not null:
     df = df[~df.loc[:, 'Time'].isnull()]
-    # finally, take care of the datetime index:
-    df.Time = dt + df.Time
-    df = df.set_index('Time')
-    df.index.name = 'time'
+    # get the minimum and maximum times:
+    min_time = dt
+    max_time = dt + df['Time'].iloc[-1]
+    # reindex with datetime:
+    df['datetime_index'] = df['Time'] + dt
+    df = df.set_index('datetime_index')
+    sound_time = check_sound_time(df)
+    # now, convert Time to decimal seconds:
+    df['Time'] = df['Time'] / np.timedelta64(1, 's')
+#    # finally, add time delta to inital date and index:
+#    df.Time = dt + df.Time
+#    df = df.set_index('Time')
+#    df.index.name = 'time'
     # calculate total precipitaple water(tpw):
     # add cols to df that help calculate tpw:
     df['Dewpt'] = dewpoint_rh(df['Temp'], df['RH'])
@@ -700,46 +1083,57 @@ def read_one_physical_radiosonde_report(path_file, lower_cutoff=None,
     df['Mixratio'] = MixRatio(df['WVpress'], df['Press'])  # both in hPa
     # Calculate density of air (accounting for moisture)
     df['Rho'] = DensHumid(df['Temp'], df['Press'], df['WVpress'], out='both')
-    df['Rho_wv'] = DensHumid(df['Temp'], df['Press'], df['WVpress'], out='wv_density')
+    df['Rho_wv'] = DensHumid(
+        df['Temp'],
+        df['Press'],
+        df['WVpress'],
+        out='wv_density')
     # print('rho: {}, mix: {}, h: {}'.format(rho.shape,mixrkg.shape, hghtm.shape))
     # Trapezoidal rule to approximate TPW (units kg/m^2==mm)
-    tpw = calculate_tpw(df, lower=lower_cutoff, upper=upper_cutoff, method='trapz')
-    tpw1 = calculate_tpw(df, lower=lower_cutoff, upper=upper_cutoff, method='sum')
+    tpw = calculate_tpw(df, lower=lower_cutoff, upper=upper_cutoff,
+                        method='trapz')
+    tpw1 = calculate_tpw(
+        df,
+        lower=lower_cutoff,
+        upper=upper_cutoff,
+        method='sum')
     # calculate the mean atmospheric temperature and get surface temp in K:
     tm = calculate_tm(df, lower=lower_cutoff, upper=upper_cutoff)
-    ts = df['Temp'][0] + 273.15
-    units.update(Dewpt='deg_C', WVpress='hPa', Mixratio='gr/kg', Rho='kg/m^3', Rho_wv='kg/m^3')
+    ts = df['Temp'].iloc[0] + 273.15
+    units.update(
+        Dewpt='deg_C',
+        WVpress='hPa',
+        Mixratio='gr/kg',
+        Rho='kg/m^3',
+        Rho_wv='kg/m^3',
+        Time='sec')
     extra = np.array([ts, tm, tpw, tpw1, cloud_code, sonde_type]).reshape(1, -1)
-    df_extra = pd.DataFrame(data=extra, columns=['Ts', 'Tm', 'Tpw', 'Tpw1', 'Cloud_code', 'Sonde_type'])
-    for col in ['Ts', 'Tm', 'Tpw', 'Tpw1']:
+    df_extra = pd.DataFrame(
+        data=extra,
+        columns=[
+            'Ts',
+            'Tm',
+            'Tpw_by_trapz',
+            'Tpw_by_sum',
+            'Cloud_code',
+            'Sonde_type'])
+    for col in ['Ts', 'Tm', 'Tpw_by_trapz', 'Tpw_by_sum']:
         df_extra[col] = pd.to_numeric(df_extra[col])
-    units_extra = {'Ts': 'K', 'Tm': 'K', 'Tpw': 'kg/m^2', 'Cloud_code': '', 'Sonde_type': '', 'Tpw1': 'kg/m^2'}
+    units_extra = {
+        'Ts': 'K',
+        'Tm': 'K',
+        'Tpw_by_trapz': 'kg/m^2',
+        'Cloud_code': '',
+        'Sonde_type': '',
+        'Tpw_by_sum': 'kg/m^2'}
+    df_extra['min_time'] = min_time
+    df_extra['max_time'] = max_time
     meta = {'units': units, 'units_extra': units_extra, 'station': station_num}
-    ds_h = df.set_index('H-Msl').to_xarray()
-    # do cubic interpolation:
-    h = np.linspace(35, 25000, 500)
-    ds_h = ds_h.sortby('H-Msl')
-    ds_h = get_unique_index(ds_h, dim='H-Msl')
-    ds_hlist = []
-    for da in ds_h.data_vars.values():
-        da.attrs['units'] = meta['units'][da.name]
-        # dropna in all vars:
-        dropped = da.dropna('H-Msl')
-        # if some data remain, interpolate:
-        if dropped.size > 0:
-            ds_hlist.append(dropped.interp({'H-Msl': h}, method='cubic'))
-        # if nothing left, create new ones with nans:
-        else:
-            nan_da = np.nan * ds_h['H-Msl']
-            nan_da.name = dropped.name
-            ds_hlist.append(dropped)
-    ds_h = xr.merge(ds_hlist)
-    ds_h['sound_time'] = check_sound_time(df)
-    ds_h.attrs['station_number'] = meta['station']
+#    ds_h['sound_time'] = check_sound_time(df)
+    ds = df_to_ds(df, df_extra, meta)
     if verbose:
         print('datetime: {}, TPW: {:.2f} '.format(df.index[0], tpw))
-    ds = df_to_ds(df, df_extra, meta)
-    return ds, ds_h
+    return ds
 
 
 def classify_clouds_from_sounding(sound_path=sound_path):
