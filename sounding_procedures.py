@@ -12,6 +12,155 @@ era5_path = work_yuval / 'ERA5'
 edt_path = sound_path / 'edt'
 
 
+def process_physical_radiosonde_data(path=sound_path, savepath=None):
+    import xarray as xr
+    from aux_gps import path_glob
+    file = path_glob(path, 'bet_dagan_phys_sounding_*.nc')
+    phys = xr.load_dataset(file[0])
+        
+    return ds
+
+def process_new_field_from_physical_data(phys_ds, dim='sound_time',
+                                         field_name='pw', bottom=None,
+                                         top=None, verbose=False):
+    import xarray as xr
+    from aux_gps import keep_iqr
+    field_list = []
+    for i in range(phys_ds[dim].size):
+        record = phys_ds[dim].isel({dim: i})
+        if 'time' in dim:
+            record = record.dt.strftime('%Y-%m-%d %H:%M').values.item()
+        if verbose:
+            print('processing {}'.format(record))
+        if field_name == 'pw':
+            Dewpt = phys_ds['Dewpt'].isel({dim: i})
+            P = phys_ds['P'].isel({dim: i})
+            field, unit = wrap_xr_metpy_pw(Dewpt, P, bottom=bottom, top=top)
+        if field_name == 'tm':
+            MR = phys_ds['MR'].isel({dim: i})
+            field, unit = calculate_tm_using_mixing_ratio_trapz(MR, T, bottom=bottom, top=top)
+        field_list.append(field)
+    da = xr.DataArray(field_list, dims=[dim])
+    da[dim] = phys_ds[dim]
+    da.attrs['units'] = unit
+    if top is not None:
+        da.attrs['top'] = top.magnitude
+    if bottom is not None:
+        da.attrs['bottom'] = top.magnitude
+    da = keep_iqr(da, dim=dim, k=1.5)
+    if verbose:
+        print('Done!')
+    return da
+
+
+def wrap_xr_metpy_vapor_pressure(P, MR, verbose=False):
+    from metpy.calc import vapor_pressure
+    from metpy.units import units
+    try:
+        P_unit = P.attrs['units']
+        assert P_unit == 'hPa'
+    except KeyError:
+        P_unit = 'hPa'
+        if verbose:
+            print('assuming pressure units are hPa...')
+    try:
+        MR_unit = MR.attrs['units']
+        assert MR_unit == 'g/kg'
+    except KeyError:
+        MR_unit = 'g/kg'
+        if verbose:
+            print('assuming mixing ratio units are g/kg...')  
+    P_values = P.values * units(P_unit)
+    MR_values = MR.values * units(MR_unit)
+    VP = vapor_pressure(P_values, MR_values)
+    da = P.copy(data=VP.magnitude)
+    da.attrs['units'] = P_unit
+    return da
+
+
+def wrap_xr_metpy_mixing_ratio(P, T, RH, verbose=False):
+    from metpy.calc import mixing_ratio_from_relative_humidity
+    import numpy as np
+    from metpy.units import units
+    if np.max(RH) > 1.2:
+        RH_values = RH.values / 100.0
+    else:
+        RH_values = RH.values
+    try:
+        T_unit = T.attrs['units']
+        assert T_unit == 'degC'
+    except KeyError:
+        T_unit = 'degC'
+        if verbose:
+            print('assuming temperature units are degC...')
+        T.attrs['units'] = T_unit
+    try:
+        P_unit = P.attrs['units']
+        assert P_unit == 'hPa'
+    except KeyError:
+        P_unit = 'hPa'
+        if verbose:
+            print('assuming pressure units are hPa...')
+    T_values = T.values * units(T_unit)
+    P_values = P.values * units(P_unit)
+    mixing_ratio = mixing_ratio_from_relative_humidity(
+        RH_values, T_values, P_values)
+    da = T.copy(data=mixing_ratio.magnitude)
+    da.attrs['units'] = 'g/kg'
+    return da
+
+
+def wrap_xr_metpy_dewpoint(T, RH, verbose=False):
+    import numpy as np
+    from metpy.calc import dewpoint_from_relative_humidity
+    from metpy.units import units
+    if np.max(RH) > 1.2:
+        RH_values = RH.values / 100.0
+    else:
+        RH_values = RH.values
+    try:
+        T_unit = T.attrs['units']
+        assert T_unit == 'degC'
+    except KeyError:
+        T_unit = 'degC'
+        if verbose:
+            print('assuming temperature units are degC...')
+        T.attrs['units'] = T_unit
+    T_values = T.values * units(T_unit)
+    dewpoint = dewpoint_from_relative_humidity(T_values, RH_values)
+    da = T.copy(data=dewpoint.magnitude)
+    da.attrs['units'] = T_unit
+    return da
+
+
+def wrap_xr_metpy_pw(dewpt, pressure, bottom=None, top=None, verbose=False):
+    from metpy.calc import precipitable_water
+    from metpy.units import units
+    try:
+        T_unit = dewpt.attrs['units']
+        assert T_unit == 'degC'
+    except KeyError:
+        T_unit = 'degC'
+        if verbose:
+            print('assuming dewpoint units are degC...')
+    dew_values = dewpt.values * units(T_unit)
+    try:
+        P_unit = pressure.attrs['units']
+        assert P_unit == 'hPa'
+    except KeyError:
+        P_unit = 'hPa'
+        if verbose:
+            print('assuming pressure units are hPa...')
+    if top is not None:
+        top = top * units(P_unit)
+    if bottom is not None:
+        bottom = bottom * units(P_unit)
+    pressure_values = pressure.values * units(P_unit)
+    pw = precipitable_water(dew_values, pressure_values, bottom=bottom, top=top)
+    pw_units = pw.units.format_babel('~P')
+    return pw.magnitude, pw_units
+
+
 class Constants:
     def __init__(self):
         import astropy.units as u
@@ -839,8 +988,7 @@ def move_bet_dagan_physical_to_main_path(bet_dagan_path):
     return year_dirs
 
 
-def read_all_physical_radiosonde(path, savepath=None, lower_cutoff=None,
-                                 upper_cutoff=None, concat_epoch_num=300,
+def read_all_physical_radiosonde(path, savepath=None, concat_epoch_num=300,
                                  verbose=True):
     from aux_gps import path_glob
     from aux_gps import get_unique_index
@@ -850,21 +998,12 @@ def read_all_physical_radiosonde(path, savepath=None, lower_cutoff=None,
     import gc
     ds_list = []
     # ds_extra_list = []
-    if lower_cutoff is not None:
-        print(
-            'applying lower cutoff at {} meters for PW and Tm calculations.'.format(
-                int(lower_cutoff)))
-    if upper_cutoff is not None:
-        print(
-            'applying upper cutoff at {} meters for PW and Tm calculations.'.format(
-                int(upper_cutoff)))
     cnt = 0
     cnt_save = 0
     for path_file in sorted(path_glob(path, '*/')):
         cnt += 1
         if path_file.is_file():
-            ds = read_one_physical_radiosonde_report(
-                    path_file, lower_cutoff=lower_cutoff, upper_cutoff=upper_cutoff)
+            ds = read_one_physical_radiosonde_report(path_file)
             if ds is None:
                 print('{} is corrupted...'.format(
                     path_file.as_posix().split('/')[-1]))
@@ -910,14 +1049,6 @@ def read_all_physical_radiosonde(path, savepath=None, lower_cutoff=None,
     # replace with filtered vars:
     for da in new_ds.data_vars:
         dss[da] = new_ds[da]
-    # dss_extra = xr.concat(ds_extra_list, 'sound_time')
-    # dss = dss.merge(dss_extra)
-    if lower_cutoff is not None:
-        dss['Tpw_by_trapz'].attrs['lower_cutoff'] = lower_cutoff
-        dss['Tm'].attrs['lower_cutoff'] = lower_cutoff
-    if upper_cutoff is not None:
-        dss['Tpw_by_trapz'].attrs['upper_cutoff'] = upper_cutoff
-        dss['Tm'].attrs['upper_cutoff'] = upper_cutoff
     if savepath is not None:
         yr_min = dss.sound_time.min().dt.year.item()
         yr_max = dss.sound_time.max().dt.year.item()
@@ -932,8 +1063,7 @@ def read_all_physical_radiosonde(path, savepath=None, lower_cutoff=None,
     return dss
 
 
-def read_one_physical_radiosonde_report(path_file, lower_cutoff=None,
-                                        upper_cutoff=None, verbose=False):
+def read_one_physical_radiosonde_report(path_file, verbose=False):
     """read one(12 or 00) physical bet dagan radiosonde reports and return a df
     containing time series, PW for the whole sounding and time span of the
     sounding"""
@@ -942,86 +1072,30 @@ def read_one_physical_radiosonde_report(path_file, lower_cutoff=None,
     import pandas as pd
     import xarray as xr
 
-    def df_to_ds(df, df_extra, meta):
+    def df_to_ds_and_interpolate(df, h='Height'):
         import numpy as np
         # set index the height, and transform to xarray:
-        df = df.set_index('H-Msl').squeeze()
+        df = df.set_index(h).squeeze()
         ds = df.to_xarray()
-        ds = ds.sortby('H-Msl')
-        ds = get_unique_index(ds, dim='H-Msl')
+        ds = ds.sortby(h)
+        ds = get_unique_index(ds, dim=h)
         # do cubic interpolation:
-        h = np.linspace(35, 25000, 500)
+        height = np.linspace(35, 25000, 500)
         ds_list = []
         for da in ds.data_vars.values():
             # dropna in all vars:
-            dropped = da.dropna('H-Msl')
+            dropped = da.dropna(h)
             # if some data remain, interpolate:
             if dropped.size > 0:
-                ds_list.append(dropped.interp({'H-Msl': h}, method='cubic'))
+                ds_list.append(dropped.interp({h: height}, method='cubic'))
             # if nothing left, create new ones with nans:
             else:
-                nan_da = np.nan * ds['H-Msl']
+                nan_da = np.nan * ds[h]
                 nan_da.name = dropped.name
                 ds_list.append(dropped)
         ds = xr.merge(ds_list)
-        # add meta data:
-        for name in ds.data_vars:
-            ds[name].attrs['unit'] = meta['units'][name]
-        # add more fields:
-        df_extra['sound_time'] = sound_time
-        df_extra = df_extra.set_index('sound_time')
-        ds_extra = df_extra.to_xarray()
-        # add meta date to new fields:
-        for name in ds_extra.data_vars:
-            if 'time' not in name:
-                ds_extra[name].attrs['unit'] = meta['units_extra'][name]
-        # finally, merge all ds:
-        ds = xr.merge([ds, ds_extra])
-        ds.attrs['station_number'] = meta['station']
-        ds.attrs['operation'] = 'all physical fields were cubic interpolated to H-Msl'
-        ds.attrs['lat'] = 32.01
-        ds.attrs['lat'] = 34.81
-        ds.attrs['alt'] = 31.0
-        ds['H-Msl'].attrs['unit'] = 'm'
+        ds.attrs['operation'] = 'all physical fields were cubic interpolated to {}'.format(h)
         return ds
-
-    def calculate_tpw(df, upper=None, lower=None, method='trapz'):
-        if upper is not None:
-            df = df[df['H-Msl'] <= upper]
-        if lower is not None:
-            df = df[df['H-Msl'] >= lower]
-        specific_humidity = (df['Mixratio'] / 1000.0) / \
-            (1 + 0.001 * df['Mixratio'] / 1000.0)
-        try:
-            if method == 'trapz':
-                tpw = np.trapz(specific_humidity * df['Rho'].values,
-                               df['H-Msl'])
-            elif method == 'sum':
-                rho = df['Rho_wv']
-                rho_sum = (rho.shift(-1) + rho).dropna()
-                h = np.abs(df['H-Msl'].diff(-1))
-                tpw = 0.5 * np.sum(rho_sum * h)
-        except ValueError:
-            return np.nan
-        return tpw
-
-    def calculate_tm(df, upper=None, lower=None):
-        if upper is not None:
-            df = df[df['H-Msl'] <= upper]
-        if lower is not None:
-            df = df[df['H-Msl'] >= lower]
-        try:
-            numerator = np.trapz(
-                df['WVpress'] /
-                (df['Temp'] +
-                 273.15),
-                df['H-Msl'])
-            denominator = np.trapz(
-                df['WVpress'] / (df['Temp'] + 273.15)**2.0, df['H-Msl'])
-            tm = numerator / denominator
-        except ValueError:
-            return np.nan
-        return tm
 
     # TODO: recheck units, add to df and to units_dict
     df = pd.read_csv(
@@ -1050,11 +1124,11 @@ def read_one_physical_radiosonde_report(path_file, lower_cutoff=None,
     sonde_type = sonde_type.dropna()
     sonde_type = '_'.join(sonde_type.to_list())
     # change col names to:
-    df.columns = ['Time', 'Temp', 'RH', 'Press', 'H-Sur', 'H-Msl', 'EL',
-                  'AZ', 'W.D', 'W.S']
-    units = dict(zip(df.columns.to_list(),
-                     ['sec', 'deg_C', '%', 'mb', 'm', 'm', 'deg', 'deg', 'deg',
-                      'knots']))
+    df.columns = ['Time', 'T', 'RH', 'P', 'H-Sur', 'Height', 'EL',
+                  'AZ', 'WD', 'WS']
+    radio_units = dict(zip(df.columns.to_list(),
+                           ['sec', 'degC', '%', 'hPa', 'm', 'm', 'deg', 'deg', 'deg',
+                            'knots']))
     # iterate over the cols and change all to numeric(or timedelta) values:
     for col in df.columns:
         if col == 'Time':
@@ -1077,62 +1151,37 @@ def read_one_physical_radiosonde_report(path_file, lower_cutoff=None,
 #    df = df.set_index('Time')
 #    df.index.name = 'time'
     # calculate total precipitaple water(tpw):
-    # add cols to df that help calculate tpw:
-    df['Dewpt'] = dewpoint_rh(df['Temp'], df['RH'])
-    df['WVpress'] = VaporPressure(df['Dewpt'], units='hPa', method='Buck')
-    df['Mixratio'] = MixRatio(df['WVpress'], df['Press'])  # both in hPa
-    # Calculate density of air (accounting for moisture)
-    df['Rho'] = DensHumid(df['Temp'], df['Press'], df['WVpress'], out='both')
-    df['Rho_wv'] = DensHumid(
-        df['Temp'],
-        df['Press'],
-        df['WVpress'],
-        out='wv_density')
-    # print('rho: {}, mix: {}, h: {}'.format(rho.shape,mixrkg.shape, hghtm.shape))
-    # Trapezoidal rule to approximate TPW (units kg/m^2==mm)
-    tpw = calculate_tpw(df, lower=lower_cutoff, upper=upper_cutoff,
-                        method='trapz')
-    tpw1 = calculate_tpw(
-        df,
-        lower=lower_cutoff,
-        upper=upper_cutoff,
-        method='sum')
-    # calculate the mean atmospheric temperature and get surface temp in K:
-    tm = calculate_tm(df, lower=lower_cutoff, upper=upper_cutoff)
-    ts = df['Temp'].iloc[0] + 273.15
-    units.update(
-        Dewpt='deg_C',
-        WVpress='hPa',
-        Mixratio='gr/kg',
-        Rho='kg/m^3',
-        Rho_wv='kg/m^3',
-        Time='sec')
-    extra = np.array([ts, tm, tpw, tpw1, cloud_code, sonde_type]).reshape(1, -1)
-    df_extra = pd.DataFrame(
-        data=extra,
-        columns=[
-            'Ts',
-            'Tm',
-            'Tpw_by_trapz',
-            'Tpw_by_sum',
-            'Cloud_code',
-            'Sonde_type'])
-    for col in ['Ts', 'Tm', 'Tpw_by_trapz', 'Tpw_by_sum']:
-        df_extra[col] = pd.to_numeric(df_extra[col])
-    units_extra = {
-        'Ts': 'K',
-        'Tm': 'K',
-        'Tpw_by_trapz': 'kg/m^2',
-        'Cloud_code': '',
-        'Sonde_type': '',
-        'Tpw_by_sum': 'kg/m^2'}
-    df_extra['min_time'] = min_time
-    df_extra['max_time'] = max_time
-    meta = {'units': units, 'units_extra': units_extra, 'station': station_num}
 #    ds_h['sound_time'] = check_sound_time(df)
-    ds = df_to_ds(df, df_extra, meta)
-    if verbose:
-        print('datetime: {}, TPW: {:.2f} '.format(df.index[0], tpw))
+    ds = df_to_ds_and_interpolate(df)
+    # add meta data:
+    for name in ds.data_vars:
+        ds[name].attrs['units'] = radio_units[name]
+    # add more fields:
+    ds['Dewpt'] = wrap_xr_metpy_dewpoint(ds['T'], ds['RH'])
+    ds['Dewpt'].attrs['long_name'] = 'Dew point'
+    ds['MR'] = wrap_xr_metpy_mixing_ratio(ds['P'], ds['T'], ds['RH'])
+    ds['MR'].attrs['long_name'] = 'Water vapor mass mixing ratio'
+    ds['VP'] = wrap_xr_metpy_vapor_pressure(ds['P'], ds['MR'])
+    ds['VP'].attrs['long_name'] = 'Water vapor partial pressure'
+#        df_extra['sound_time'] = sound_time
+    ds['sound_time'] = sound_time
+    ds['min_time'] = min_time
+    ds['max_time'] = max_time
+    ds['cloud_code'] = cloud_code
+    ds['sonde_type'] = sonde_type
+#        df_extra = df_extra.set_index('sound_time')
+#        ds_extra = df_extra.to_xarray()
+#        # add meta date to new fields:
+#        for name in ds_extra.data_vars:
+#            if 'time' not in name:
+#                ds_extra[name].attrs['units'] = meta['units_extra'][name]
+    # finally, merge all ds:
+#        ds = xr.merge([ds, ds_extra])
+    ds.attrs['station_number'] = station_num
+    ds.attrs['lat'] = 32.01
+    ds.attrs['lat'] = 34.81
+    ds.attrs['alt'] = 31.0
+    ds['Height'].attrs['units'] = 'm'
     return ds
 
 
