@@ -1228,7 +1228,7 @@ def filter_nan_errors(ds, error_str='_error', dim='time', meta='action'):
     return ds
 
 
-def keep_iqr(ds, dim='time', qlow=0.25, qhigh=0.75, k=1.5):
+def keep_iqr(ds, dim='time', qlow=0.25, qhigh=0.75, k=1.5, verbose=False):
     """return the data in a dataset or dataarray only in the
     Interquartile Range (low, high)"""
     import xarray as xr
@@ -1251,7 +1251,11 @@ def keep_iqr(ds, dim='time', qlow=0.25, qhigh=0.75, k=1.5):
         iqr = high - low
         lower = low - (iqr * k)
         higher = high + (iqr * k)
+        before = da.size
         da = da.where((da < higher) & (da > lower)).dropna(dim)
+        after = da.size
+        if verbose:
+            print('dropped {} outliers from {}.'.format(before-after, da.name))
         if meta in da.attrs:
             append = True
         else:
@@ -1599,10 +1603,14 @@ def dim_intersection(da_list, dim='time', dropna=True, verbose=None):
     return new_dim
 
 
-def get_unique_index(da, dim='time'):
+def get_unique_index(da, dim='time', verbose=False):
     import numpy as np
+    before = da[dim].size
     _, index = np.unique(da[dim], return_index=True)
     da = da.isel({dim: index})
+    after = da[dim].size
+    if verbose:
+        print('dropped {} duplicate coord entries.'.format(before-after))
     return da
 
 
