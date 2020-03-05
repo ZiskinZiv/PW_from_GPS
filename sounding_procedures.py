@@ -12,13 +12,143 @@ era5_path = work_yuval / 'ERA5'
 edt_path = sound_path / 'edt'
 
 
-def process_physical_radiosonde_data(path=sound_path, savepath=None):
+def analyse_radiosonde_climatology(path=sound_path, field='Rho_wv', month=3,
+                                   times=None, hour=None):
+    import xarray as xr
+    import pandas as pd
+    from matplotlib.ticker import ScalarFormatter
+    from aux_gps import path_glob
+    file = path_glob(path, 'bet_dagan_phys_sounding_*.nc')
+    da = xr.load_dataset(file[0])[field]
+    if times is not None:
+        da = da.sel(sound_time=slice(*times))
+    if hour is not None:
+        da = da.sel(sound_time=da['sound_time.hour'] == hour)
+    name = da.attrs['long_name']
+    units = da.attrs['units']
+    clim = da.groupby('sound_time.month').mean('sound_time')
+    months = [month - 1, month, month + 1]
+    df = clim.sel(month=months).to_dataset('month').to_dataframe()
+    month_names = pd.to_datetime(months, format='%m').month_name()
+    df.reset_index(inplace=True)
+    df.loc[:, months[0]] -= df.loc[:, month]
+    df.loc[:, months[2]] -= df.loc[:, month]
+    df.loc[:, months[1]] -= df.loc[:, month]
+    ax = df.plot(x=months[0], y='Height', logy=True, color='r')
+    df.plot(x=months[1], y='Height', logy=True, ax=ax, color='k')
+    df.plot(x=months[2], y='Height', logy=True, ax=ax, color='b')
+    ax.set_xlabel('{} [{}]'.format(name, units))
+    ax.legend(month_names)
+    ax.get_yaxis().set_major_formatter(ScalarFormatter())
+    ax.set_ylabel('height [m]')
+    ax.set_ylim(100, 10000)
+    if hour is not None:
+        ax.set_title('hour = {}'.format(hour))
+    return df
+
+
+def process_physical_radiosonde_data(path=sound_path, savepath=sound_path,
+                                     verbose=False):
     import xarray as xr
     from aux_gps import path_glob
     file = path_glob(path, 'bet_dagan_phys_sounding_*.nc')
-    phys = xr.load_dataset(file[0])
-        
+    phys_ds = xr.load_dataset(file[0])
+    ds = xr.Dataset()
+    ds['PW'] = process_new_field_from_physical_data(phys_ds, dim='sound_time',
+                                                    field_name='pw',
+                                                    bottom=None,
+                                                    top=None, verbose=False)
+    ds['Tm'] = process_new_field_from_physical_data(phys_ds, dim='sound_time',
+                                                    field_name='tm',
+                                                    bottom=None,
+                                                    top=None, verbose=False)
+    ds['Ts'] = process_new_field_from_physical_data(phys_ds, dim='sound_time',
+                                                    field_name='ts',
+                                                    bottom=None,
+                                                    top=None, verbose=False)
+    data_vars = [x for x in ds.data_vars]
+    yr_min = ds['sound_time'].min().dt.year.item()
+    yr_max = ds['sound_time'].max().dt.year.item()
+    filename = 'bet_dagan_phys_{}_{}-{}.nc'.format(
+        '_'.join(data_vars), yr_min, yr_max)
+    print('saving {} to {}'.format(filename, savepath))
+    ds.to_netcdf(savepath / filename, 'w')
+    print('Done!')
     return ds
+
+
+def calculate_tm_via_pressure_sum(VP, T, Rho, P, bottom=None, top=None,
+                                  verbose=False):
+    import pandas as pd
+    try:
+        T_unit = T.attrs['units']
+        assert T_unit == 'degC'
+    except KeyError:
+        T_unit = 'degC'
+        if verbose:
+            print('assuming T units are degC...')
+    # convert to Kelvin:
+    T_values = T.values + 273.15
+    # check that VP and P have the same units:
+    assert P.attrs['units'] == VP.attrs['units']
+    # slice for top and bottom:
+    if bottom is not None:
+        P = P.where(P <= bottom, drop=True)
+        T = T.where(P <= bottom, drop=True)
+        Rho = Rho.where(P <= bottom, drop=True)
+    if top is not None:
+        P = P.where(P >= top, drop=True)
+        T = T.where(P >= top, drop=True)
+        Rho = Rho.where(P >= top, drop=True)
+    # other units don't matter since it is weighted temperature:
+    VP_values = VP.values
+    P_values = P.values
+    Rho_values = Rho.values
+    # now the pressure sum method:
+    p = pd.Series(P_values)
+    dp = p.diff(-1).abs()
+    num = pd.Series(VP_values / (T_values * Rho_values))
+    num_sum = num.shift(-1) + num
+    numerator = (num_sum * dp / 2).sum()
+    denom = pd.Series(VP_values / (T_values**2 * Rho_values))
+    denom_sum = denom.shift(-1) + denom
+    denominator = (denom_sum * dp / 2).sum()
+    tm = numerator / denominator
+    return tm, 'K'
+
+
+def wrap_xr_metpy_pw(dewpt, pressure, bottom=None, top=None, verbose=False):
+    from metpy.calc import precipitable_water
+    from metpy.units import units
+    try:
+        T_unit = dewpt.attrs['units']
+        assert T_unit == 'degC'
+    except KeyError:
+        T_unit = 'degC'
+        if verbose:
+            print('assuming dewpoint units are degC...')
+    dew_values = dewpt.values * units(T_unit)
+    try:
+        P_unit = pressure.attrs['units']
+        assert P_unit == 'hPa'
+    except KeyError:
+        P_unit = 'hPa'
+        if verbose:
+            print('assuming pressure units are hPa...')
+    if top is not None:
+        top_with_units = top * units(P_unit)
+    else:
+        top_with_units = None
+    if bottom is not None:
+        bottom_with_units = bottom * units(P_unit)
+    else:
+        bottom_with_units = None
+    pressure_values = pressure.values * units(P_unit)
+    pw = precipitable_water(dew_values, pressure_values,
+                            bottom=bottom_with_units, top=top_with_units)
+    pw_units = pw.units.format_babel('~P')
+    return pw.magnitude, pw_units
+
 
 def process_new_field_from_physical_data(phys_ds, dim='sound_time',
                                          field_name='pw', bottom=None,
@@ -33,23 +163,82 @@ def process_new_field_from_physical_data(phys_ds, dim='sound_time',
         if verbose:
             print('processing {}'.format(record))
         if field_name == 'pw':
+            long_name = 'Percipatiable water'
             Dewpt = phys_ds['Dewpt'].isel({dim: i})
             P = phys_ds['P'].isel({dim: i})
             field, unit = wrap_xr_metpy_pw(Dewpt, P, bottom=bottom, top=top)
-        if field_name == 'tm':
-            MR = phys_ds['MR'].isel({dim: i})
-            field, unit = calculate_tm_using_mixing_ratio_trapz(MR, T, bottom=bottom, top=top)
+        elif field_name == 'tm':
+            long_name = 'Water vapor mean air temperature'
+            P = phys_ds['P'].isel({dim: i})
+            VP = phys_ds['VP'].isel({dim: i})
+            T = phys_ds['T'].isel({dim: i})
+            Rho = phys_ds['Rho'].isel({dim: i})
+            field, unit = calculate_tm_via_pressure_sum(VP, T, Rho, P,
+                                                        bottom=bottom,
+                                                        top=top)
+        elif field_name == 'ts':
+            long_name = 'Surface temperature'
+            field = phys_ds['T'].isel({dim: i})[0].values.item() + 273.15
+            unit = 'K'
         field_list.append(field)
     da = xr.DataArray(field_list, dims=[dim])
     da[dim] = phys_ds[dim]
     da.attrs['units'] = unit
+    da.attrs['long_name'] = long_name
     if top is not None:
-        da.attrs['top'] = top.magnitude
+        da.attrs['top'] = top
     if bottom is not None:
-        da.attrs['bottom'] = top.magnitude
+        da.attrs['bottom'] = top
     da = keep_iqr(da, dim=dim, k=1.5)
     if verbose:
         print('Done!')
+    return da
+
+
+def calculate_absolute_humidity_from_partial_pressure(VP, T, verbose=False):
+    Rs_v = 461.52  # Specific gas const for water vapour, J kg^{-1} K^{-1}
+    try:
+        VP_unit = VP.attrs['units']
+        assert VP_unit == 'hPa'
+    except KeyError:
+        VP_unit = 'hPa'
+        if verbose:
+            print('assuming vapor units are hPa...')
+    # convert to Pa:
+    VP_values = VP.values * 100.0
+    try:
+        T_unit = T.attrs['units']
+        assert T_unit == 'degC'
+    except KeyError:
+        T_unit = 'degC'
+        if verbose:
+            print('assuming temperature units are degree celsius...')
+    # convert to Kelvin:
+    T_values = T.values + 273.15
+    Rho_wv = VP_values/(Rs_v * T_values)
+    # resulting units are kg/m^3, convert to g/m^3':
+    Rho_wv *= 1000.0
+    Rho_wv
+    da = VP.copy(data=Rho_wv)
+    da.attrs['units'] = 'g/m^3'
+    da.attrs['long_name'] = 'Absolute humidity'
+    return da
+
+
+def wrap_xr_metpy_specific_humidity(MR, verbose=False):
+    from metpy.calc import specific_humidity_from_mixing_ratio
+    from metpy.units import units
+    try:
+        MR_unit = MR.attrs['units']
+        assert MR_unit == 'g/kg'
+    except KeyError:
+        MR_unit = 'g/kg'
+        if verbose:
+            print('assuming mixing ratio units are gr/kg...')
+    MR_values = MR.values * units(MR_unit)
+    SH = specific_humidity_from_mixing_ratio(MR_values)
+    da = MR.copy(data=SH.magnitude)
+    da.attrs['units'] = MR_unit
     return da
 
 
@@ -110,6 +299,42 @@ def wrap_xr_metpy_mixing_ratio(P, T, RH, verbose=False):
     return da
 
 
+def wrap_xr_metpy_density(P, T, MR, verbose=False):
+    from metpy.calc import density
+    from metpy.units import units
+    try:
+        MR_unit = MR.attrs['units']
+        assert MR_unit == 'g/kg'
+    except KeyError:
+        MR_unit = 'g/kg'
+        if verbose:
+            print('assuming mixing ratio units are g/kg...')
+        MR.attrs['units'] = MR_unit
+    try:
+        T_unit = T.attrs['units']
+        assert T_unit == 'degC'
+    except KeyError:
+        T_unit = 'degC'
+        if verbose:
+            print('assuming temperature units are degC...')
+        T.attrs['units'] = T_unit
+    try:
+        P_unit = P.attrs['units']
+        assert P_unit == 'hPa'
+    except KeyError:
+        P_unit = 'hPa'
+        if verbose:
+            print('assuming pressure units are hPa...')
+    T_values = T.values * units(T_unit)
+    P_values = P.values * units(P_unit)
+    MR_values = MR.values * units(MR_unit)
+    Rho = density(P_values, T_values, MR_values)
+    Rho = Rho.to('g/m^3')
+    da = P.copy(data=Rho.magnitude)
+    da.attrs['units'] = 'g/m^3'
+    return da
+
+
 def wrap_xr_metpy_dewpoint(T, RH, verbose=False):
     import numpy as np
     from metpy.calc import dewpoint_from_relative_humidity
@@ -131,34 +356,6 @@ def wrap_xr_metpy_dewpoint(T, RH, verbose=False):
     da = T.copy(data=dewpoint.magnitude)
     da.attrs['units'] = T_unit
     return da
-
-
-def wrap_xr_metpy_pw(dewpt, pressure, bottom=None, top=None, verbose=False):
-    from metpy.calc import precipitable_water
-    from metpy.units import units
-    try:
-        T_unit = dewpt.attrs['units']
-        assert T_unit == 'degC'
-    except KeyError:
-        T_unit = 'degC'
-        if verbose:
-            print('assuming dewpoint units are degC...')
-    dew_values = dewpt.values * units(T_unit)
-    try:
-        P_unit = pressure.attrs['units']
-        assert P_unit == 'hPa'
-    except KeyError:
-        P_unit = 'hPa'
-        if verbose:
-            print('assuming pressure units are hPa...')
-    if top is not None:
-        top = top * units(P_unit)
-    if bottom is not None:
-        bottom = bottom * units(P_unit)
-    pressure_values = pressure.values * units(P_unit)
-    pw = precipitable_water(dew_values, pressure_values, bottom=bottom, top=top)
-    pw_units = pw.units.format_babel('~P')
-    return pw.magnitude, pw_units
 
 
 class Constants:
@@ -1011,40 +1208,36 @@ def read_all_physical_radiosonde(path, savepath=None, concat_epoch_num=300,
             date = ds['sound_time'].dt.strftime('%Y-%m-%d %H:%M').values.item()
             if verbose:
                 print('reading {} physical radiosonde report'.format(date))
-            # ds_with_time_dim = [x for x in ds.data_vars if 'time' in ds[x].dims]
-            # ds_list.append(ds[ds_with_time_dim])
             ds_list.append(ds)
-            # ds_extra = [x for x in ds.data_vars if 'time' not in ds[x].dims]
-            # ds_extra_list.append(ds[ds_extra])
-            # every 600 iters, concat:
-            if cnt % concat_epoch_num == 0:
-                cnt_save += 1
-                print('concatating and saving every {} points'.format(concat_epoch_num))
-                temp = xr.concat(ds_list, 'sound_time')
-                save_ncfile(temp, savepath, filename='bet_dagan_temp_{}.nc'.format(cnt_save))
-                del temp
-                ds_list = []
-                print("Collecting...")
-                n = gc.collect()
-                print("Number of unreachable objects collected by GC:", n)
-                print("Uncollectable garbage:", gc.garbage)
-            if cnt == len(path_glob(path, '*/')):
-                temp = xr.concat(ds_list, 'sound_time')
-                save_ncfile(temp, savepath, filename='bet_dagan_temp_{}.nc'.format(cnt_save))
-                ds_list = []
-    # dss = xr.concat(ds_list, 'time')
+#            # every 600 iters, concat:
+#            if cnt % concat_epoch_num == 0:
+#                cnt_save += 1
+#                print('concatating and saving every {} points'.format(concat_epoch_num))
+#                temp = xr.concat(ds_list, 'sound_time')
+#                save_ncfile(temp, savepath, filename='bet_dagan_temp_{}.nc'.format(cnt_save))
+#                del temp
+#                ds_list = []
+#                print("Collecting...")
+#                n = gc.collect()
+#                print("Number of unreachable objects collected by GC:", n)
+#                print("Uncollectable garbage:", gc.garbage)
+#            if cnt == len(path_glob(path, '*/')):
+#                temp = xr.concat(ds_list, 'sound_time')
+#                save_ncfile(temp, savepath, filename='bet_dagan_temp_{}.nc'.format(cnt_save))
+#                ds_list = []
+    dss = xr.concat(ds_list, 'sound_time')
     print('loading temp files and concatenating...')
-    tempfiles = path_glob(savepath, 'bet_dagan_temp*.nc')
-    temp_list = [xr.open_dataset(x) for x in tempfiles]
-    dss = xr.concat(temp_list, 'sound_time')
+#    tempfiles = path_glob(savepath, 'bet_dagan_temp*.nc')
+#    temp_list = [xr.open_dataset(x) for x in tempfiles]
+#    dss = xr.concat(temp_list, 'sound_time')
     dss = dss.sortby('sound_time')
-    dss = get_unique_index(dss, 'sound_time')
+    dss = get_unique_index(dss, 'sound_time', verbose=True)
     # filter iqr:
     da_list = []
     for da in dss.data_vars.values():
         if len(da.dims) == 1:
             if da.dims[0] == 'sound_time' and da.dtype == 'float64':
-                da_list.append(keep_iqr(da, dim='sound_time'))
+                da_list.append(keep_iqr(da, dim='sound_time', verbose=True))
     new_ds = xr.merge(da_list)
     # replace with filtered vars:
     for da in new_ds.data_vars:
@@ -1057,8 +1250,8 @@ def read_all_physical_radiosonde(path, savepath=None, concat_epoch_num=300,
         comp = dict(zlib=True, complevel=9)  # best compression
         encoding = {var: comp for var in dss}
         dss.to_netcdf(savepath / filename, 'w', encoding=encoding)
-        print('clearing temp files...')
-        [x.unlink() for x in tempfiles]
+#        print('clearing temp files...')
+#        [x.unlink() for x in tempfiles]
     print('Done!')
     return dss
 
@@ -1161,8 +1354,14 @@ def read_one_physical_radiosonde_report(path_file, verbose=False):
     ds['Dewpt'].attrs['long_name'] = 'Dew point'
     ds['MR'] = wrap_xr_metpy_mixing_ratio(ds['P'], ds['T'], ds['RH'])
     ds['MR'].attrs['long_name'] = 'Water vapor mass mixing ratio'
+    ds['Rho'] = wrap_xr_metpy_density(ds['P'], ds['T'], ds['MR'])
+    ds['Rho'].attrs['long_name'] = 'Air density'
+    ds['Q'] = wrap_xr_metpy_specific_humidity(ds['MR'])
+    ds['Q'].attrs['long_name'] = 'Specific humidity'
     ds['VP'] = wrap_xr_metpy_vapor_pressure(ds['P'], ds['MR'])
     ds['VP'].attrs['long_name'] = 'Water vapor partial pressure'
+    ds['Rho_wv'] = calculate_absolute_humidity_from_partial_pressure(
+        ds['VP'], ds['T'])
 #        df_extra['sound_time'] = sound_time
     ds['sound_time'] = sound_time
     ds['min_time'] = min_time
