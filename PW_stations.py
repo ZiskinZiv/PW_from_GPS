@@ -38,9 +38,11 @@ logs_path = geo_path / 'Python_Projects/PW_from_GPS/log_files'
 GNSS = work_yuval / 'GNSS_stations'
 cwd = Path().cwd()
 gnss_sound_stations_dict = {'acor': '08001', 'mall': '08302'}
-# TODO: finish clouds formulation in ts-tm modeling
-# TODO: finish playing with ts-tm modeling, various machine learning algos.
-# TODO: redo the hour, season and cloud selection in formulate_plot
+
+# TODO: do ZWD selection from post-proccesed GipsyX results
+# TODO: re-do the ts-tm connection for the 2013-09 to 2019 radiosonde
+# TODO: then assemble PW for all the stations.
+# TODO: somwhow check if in winter the radiosonde drifts eastwards and dries out
 class LinearRegression_with_stats(LinearRegression):
     """
     LinearRegression class after sklearn's, but calculate t-statistics
