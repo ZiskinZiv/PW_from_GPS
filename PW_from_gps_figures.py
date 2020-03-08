@@ -27,7 +27,7 @@ rc = {
     'ytick.labelsize': 'medium'}
 for key, val in rc.items():
     rcParams[key] = val
-sns.set(rc=rc, style='white')
+# sns.set(rc=rc, style='white')
 
 
 @ticker.FuncFormatter
@@ -309,6 +309,52 @@ def plot_monthly_pw_and_T(load_path=work_yuval, thresh=50, save=True):
     if save:
         plt.savefig(savefig_path / filename, bbox_inches='tight')
     return fg
+
+
+def plot_gnss_radiosonde_monthly_means(sound_path=sound_path, path=work_yuval,
+                                       times=['2014', '2019'], sample='MS',
+                                       gps_station='tela', east_height=5000):
+    import xarray as xr
+    from aux_gps import path_glob
+    import pandas as pd
+    file = path_glob(sound_path, 'bet_dagan_phys_PW_Tm_Ts_*.nc')
+    phys = xr.load_dataset(file[0])['PW']
+    if east_height is not None:
+        file = path_glob(sound_path, 'bet_dagan_edt_sounding*.nc')
+        east = xr.load_dataset(file[0])['east_distance']
+        east = east.resample(sound_time=sample).mean().sel(Height=east_height, method='nearest')
+        east_df = east.reset_coords(drop=True).to_dataframe()
+    if times is not None:
+        phys = phys.sel(sound_time=slice(*times))
+    ds = phys.resample(sound_time=sample).mean().to_dataset(name='Bet-dagan-radiosonde')
+    ds = ds.rename({'sound_time': 'time'})
+    gps = xr.load_dataset(path / 'GNSS_PW_50.nc')[gps_station]
+    if times is not None:
+        gps = gps.sel(time=slice(*times))
+    ds[gps_station] = gps.resample(time=sample).mean()
+    df = ds.to_dataframe()
+    # now plot:
+    fig, axes = plt.subplots(2, 1, sharex=True, figsize=(12, 8))
+    # [x.set_xlim([pd.to_datetime(times[0]), pd.to_datetime(times[1])])
+    #  for x in axes]
+    df.columns = ['Bet dagan soundings', '{} GNSS station'.format(gps_station)]
+    sns.lineplot(data=df, markers=['o','s'],linewidth=2.0, ax=axes[0])
+    # axes[0].legend(['Bet_Dagan soundings', 'TELA GPS station'])
+    df_r = df.iloc[:, 1] - df.iloc[:, 0]
+    df_r.columns = ['Residual distribution']
+    sns.lineplot(data=df_r, color='k', marker='o' ,linewidth=1.5, ax=axes[1])
+    if east_height is not None:
+        ax_east = axes[1].twinx()
+        sns.lineplot(data=east_df, color='red', marker='x', linewidth=1.5, ax=ax_east)
+        ax_east.set_ylabel('East drift at {} km altitude [km]'.format(east_height / 1000.0))
+    axes[1].axhline(y=0, color='r')
+    axes[0].grid(b=True, which='major')
+    axes[1].grid(b=True, which='major')
+    axes[0].set_ylabel('Precipitable Water [mm]')
+    axes[1].set_ylabel('Residuals [mm]')
+    plt.tight_layout()
+    plt.subplots_adjust(wspace=0, hspace=0.01)
+    return ds
 
 
 def plot_figure_2(path=tela_results_path, plot='WetZ', save=True):
