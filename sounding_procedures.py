@@ -290,9 +290,51 @@ def process_radiosonde_data(path=sound_path, savepath=sound_path,
     return ds
 
 
+def calculate_tm_via_trapz_height(VP, T, H):
+    from scipy.integrate import cumtrapz
+    import numpy as np
+    # change T units to K:
+    T_copy = T.copy(deep=True) + 273.15
+    num = cumtrapz(VP / T_copy, H, initial=np.nan)
+    denom = cumtrapz(VP / T_copy**2, H, initial=np.nan)
+    tm = num / denom
+    return tm
+
+
 def calculate_tm_via_pressure_sum(VP, T, Rho, P, bottom=None, top=None,
-                                  verbose=False):
+                                  cumulative=False, verbose=False):
     import pandas as pd
+    import numpy as np
+
+    def tm_sum(VP, T, Rho, P, bottom=None, top=None):
+        # slice for top and bottom:
+        if bottom is not None:
+            P = P.where(P <= bottom, drop=True)
+            T = T.where(P <= bottom, drop=True)
+            Rho = Rho.where(P <= bottom, drop=True)
+            VP = VP.where(P <= bottom, drop=True)
+        if top is not None:
+            P = P.where(P >= top, drop=True)
+            T = T.where(P >= top, drop=True)
+            Rho = Rho.where(P >= top, drop=True)
+            VP = VP.where(P >= top, drop=True)
+        # convert to Kelvin:
+        T_values = T.values + 273.15
+        # other units don't matter since it is weighted temperature:
+        VP_values = VP.values
+        P_values = P.values
+        Rho_values = Rho.values
+        # now the pressure sum method:
+        p = pd.Series(P_values)
+        dp = p.diff(-1).abs()
+        num = pd.Series(VP_values / (T_values * Rho_values))
+        num_sum = num.shift(-1) + num
+        numerator = (num_sum * dp / 2).sum()
+        denom = pd.Series(VP_values / (T_values**2 * Rho_values))
+        denom_sum = denom.shift(-1) + denom
+        denominator = (denom_sum * dp / 2).sum()
+        tm = numerator / denominator
+        return tm
     try:
         T_unit = T.attrs['units']
         assert T_unit == 'degC'
@@ -300,34 +342,24 @@ def calculate_tm_via_pressure_sum(VP, T, Rho, P, bottom=None, top=None,
         T_unit = 'degC'
         if verbose:
             print('assuming T units are degC...')
-    # convert to Kelvin:
-    T_values = T.values + 273.15
     # check that VP and P have the same units:
     assert P.attrs['units'] == VP.attrs['units']
-    # slice for top and bottom:
-    if bottom is not None:
-        P = P.where(P <= bottom, drop=True)
-        T = T.where(P <= bottom, drop=True)
-        Rho = Rho.where(P <= bottom, drop=True)
-    if top is not None:
-        P = P.where(P >= top, drop=True)
-        T = T.where(P >= top, drop=True)
-        Rho = Rho.where(P >= top, drop=True)
-    # other units don't matter since it is weighted temperature:
-    VP_values = VP.values
     P_values = P.values
-    Rho_values = Rho.values
-    # now the pressure sum method:
-    p = pd.Series(P_values)
-    dp = p.diff(-1).abs()
-    num = pd.Series(VP_values / (T_values * Rho_values))
-    num_sum = num.shift(-1) + num
-    numerator = (num_sum * dp / 2).sum()
-    denom = pd.Series(VP_values / (T_values**2 * Rho_values))
-    denom_sum = denom.shift(-1) + denom
-    denominator = (denom_sum * dp / 2).sum()
-    tm = numerator / denominator
-    return tm, 'K'
+    if cumulative:
+        tm_list = []
+        # first value is nan:
+        tm_list.append(np.nan)
+        for pre_val in P_values[1:]:
+            if np.isnan(pre_val):
+                tm_list.append(np.nan)
+                continue
+            tm = tm_sum(VP, T, Rho, P, bottom=None, top=pre_val)
+            tm_list.append(tm)
+        tm = np.array(tm_list)
+        return tm, 'K'
+    else:
+        tm = tm_sum(VP, T, Rho, P, bottom=bottom, top=top)
+        return tm, 'K'
 
 
 def wrap_xr_metpy_pw(dewpt, pressure, bottom=None, top=None, verbose=False,
@@ -771,10 +803,8 @@ def read_one_EDT_record(filepath):
     import numpy as np
     import xarray as xr
     from aux_gps import get_unique_index
-    from aux_gps import calculate_g
     from aux_gps import remove_duplicate_spaces_in_string
-    from metpy.calc import precipitable_water
-    from metpy.units import units
+    from scipy.integrate import cumtrapz
     with open(filepath) as f:
         content = f.readlines()
     content = [x.strip() for x in content]
@@ -900,6 +930,20 @@ def read_one_EDT_record(filepath):
     ds['VP'].attrs['long_name'] = 'Water vapor partial pressure'
     ds['Rho_wv'] = calculate_absolute_humidity_from_partial_pressure(
         ds['VP'], ds['T'])
+    pw = cumtrapz((ds['Q']*ds['Rho']).fillna(0), ds['Height'], initial=0)
+    ds['PW'] = xr.DataArray(pw, dims=['Height'])
+    ds['PW'].attrs['units'] = 'mm'
+    ds['PW'].attrs['long_name'] = 'Precipitable water'
+    tm = calculate_tm_via_trapz_height(
+        ds['VP'].bfill('Height'),
+        ds['T'].bfill('Height'),
+        ds['Height'])
+    ds['Tm'] = xr.DataArray(tm, dims=['Height'])
+    ds['Tm'].attrs['units'] = 'K'
+    ds['Tm'].attrs['long_name'] = 'Water vapor mean air temperature'
+    ds['Ts'] = ds['T'].dropna('Height').values[0] + 273.15
+    ds['Ts'].attrs['units'] = 'K'
+    ds['Ts'].attrs['long_name'] = 'Surface temperature'
     ds['sound_time'] = sound_time
     ds['launch_time'] = meta['launch_time']
     ds['RS_type'] = meta['RS_type']
@@ -1461,6 +1505,7 @@ def read_one_physical_radiosonde_report(path_file, verbose=False):
     from aux_gps import get_unique_index
     import pandas as pd
     import xarray as xr
+    from scipy.integrate import cumtrapz
 
     def df_to_ds_and_interpolate(df, h='Height'):
         import numpy as np
@@ -1559,6 +1604,19 @@ def read_one_physical_radiosonde_report(path_file, verbose=False):
     ds['VP'].attrs['long_name'] = 'Water vapor partial pressure'
     ds['Rho_wv'] = calculate_absolute_humidity_from_partial_pressure(
         ds['VP'], ds['T'])
+    pw = cumtrapz(ds['Q']*ds['Rho'], ds['Height'], initial=0)
+    ds['PW'] = xr.DataArray(pw, dims=['Height'])
+    ds['PW'].attrs['units'] = 'mm'
+    ds['PW'].attrs['long_name'] = 'Precipitable water'
+    tm = calculate_tm_via_trapz_height(ds['VP'], ds['T'], ds['Height'])
+#    tm, unit = calculate_tm_via_pressure_sum(ds['VP'], ds['T'], ds['Rho'], ds['P'],
+#                                             cumulative=True, verbose=False)
+    ds['Tm'] = xr.DataArray(tm, dims=['Height'])
+    ds['Tm'].attrs['units'] = 'K'
+    ds['Tm'].attrs['long_name'] = 'Water vapor mean air temperature'
+    ds['Ts'] = ds['T'].dropna('Height').values[0] + 273.15
+    ds['Ts'].attrs['units'] = 'K'
+    ds['Ts'].attrs['long_name'] = 'Surface temperature'
 #        df_extra['sound_time'] = sound_time
     ds['sound_time'] = sound_time
     ds['min_time'] = min_time
