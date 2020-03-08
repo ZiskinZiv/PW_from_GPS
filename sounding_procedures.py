@@ -10,67 +10,280 @@ from PW_paths import work_yuval
 sound_path = work_yuval / 'sounding'
 era5_path = work_yuval / 'ERA5'
 edt_path = sound_path / 'edt'
+# TODO: add pw(height) function so i can get the water vapor scale height
 
 
-def analyse_radiosonde_climatology(path=sound_path, field='Rho_wv', month=3,
+def calculate_edt_north_east_distance(ds):
+    """to be inporporated in read_all"""
+    import geopandas as gpd
+    import pandas as pd
+    import numpy as np
+
+    def change_sign(x, y, value):
+        if x <= y:
+            return -value
+        else:
+            return value
+
+    # prepare bet dagan coords:
+    bet_dagan = pd.DataFrame(index=[0])
+    bet_dagan['x'] = 34.81
+    bet_dagan['y'] = 32.01
+    bet_dagan_gdf = gpd.GeoDataFrame(
+        bet_dagan, geometry=gpd.points_from_xy(
+            bet_dagan['x'], bet_dagan['y']))
+    bet_dagan_gdf.crs = {'init': 'epsg:4326'}
+    # transform to israeli meters coords:
+    bet_dagan_gdf.to_crs(epsg=2039, inplace=True)
+    bd_as_point = bet_dagan_gdf.geometry[0]
+    bd_lon = bet_dagan.loc[0, 'x']
+    bd_lat = bet_dagan.loc[0, 'y']
+    df = ds.reset_coords(drop=True).to_dataframe()
+    df['fixed_lon'] = 34.81 * np.ones(df['lon'].shape)
+    df['fixed_lat'] = 32.01 * np.ones(df['lat'].shape)
+    gdf_fixed_lon = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df['fixed_lon'],
+                                                                     df.lat))
+    gdf_fixed_lon.crs = {'init': 'epsg:4326'}
+    gdf_fixed_lon.dropna(inplace=True)
+    gdf_fixed_lon.to_crs(epsg=2039, inplace=True)
+    gdf_fixed_lat = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.lon,
+                                                                     df['fixed_lat']))
+    gdf_fixed_lat.crs = {'init': 'epsg:4326'}
+    gdf_fixed_lat.dropna(inplace=True)
+    gdf_fixed_lat.to_crs(epsg=2039, inplace=True)
+    # calculate distance north from bet dagan coords in km:
+    df['north_distance'] = gdf_fixed_lon.geometry.distance(
+        bd_as_point) / 1000.0
+    # calculate distance east from bet dagan coords in km:
+    df['east_distance'] = gdf_fixed_lat.geometry.distance(
+        bd_as_point) / 1000.0
+    # fix sign to indicate: negtive = south:
+    df['north_distance'] = df.apply(
+        lambda x: change_sign(
+            x.lat, bd_lat, x.north_distance), axis=1)
+    # fix sign to indicate: negtive = east:
+    df['east_distance'] = df.apply(
+        lambda x: change_sign(
+            x.lon, bd_lon, x.east_distance), axis=1)
+    return df['east_distance'].to_xarray(), df['north_distance'].to_xarray()
+
+
+#def produce_radiosonde_edt_north_east_distance(path=sound_path, savepath=None,
+#                                               verbose=True):
+#    from aux_gps import path_glob
+#    import geopandas as gpd
+#    import pandas as pd
+#    import xarray as xr
+#    import numpy as np
+#
+#    def change_sign(x, y, value):
+#        if x <= y:
+#            return -value
+#        else:
+#            return value
+#    file = path_glob(path, 'bet_dagan_edt_sounding_*.nc')
+#    ds = xr.load_dataset(file[0])
+#    ds_geo = ds[['lat', 'lon']]
+#    # prepare bet dagan coords:
+#    bet_dagan = pd.DataFrame(index=[0])
+#    bet_dagan['x'] = 34.81
+#    bet_dagan['y'] = 32.01
+#    bet_dagan_gdf = gpd.GeoDataFrame(
+#        bet_dagan, geometry=gpd.points_from_xy(
+#            bet_dagan['x'], bet_dagan['y']))
+#    bet_dagan_gdf.crs = {'init': 'epsg:4326'}
+#    # transform to israeli meters coords:
+#    bet_dagan_gdf.to_crs(epsg=2039, inplace=True)
+#    bd_as_point = bet_dagan_gdf.geometry[0]
+#    bd_lon = bet_dagan.loc[0, 'x']
+#    bd_lat = bet_dagan.loc[0, 'y']
+#    ds_list = []
+#    for i in range(ds['sound_time'].size):
+#        record = ds['sound_time'].isel({'sound_time': i})
+#        record = record.dt.strftime('%Y-%m-%d %H:%M').values.item()
+#        if verbose:
+#            print('processing {}.'.format(record))
+#        sounding = ds_geo.isel({'sound_time': i})
+#        df = sounding.reset_coords(drop=True).to_dataframe()
+#        df['fixed_lon'] = 34.81 * np.ones(df['lon'].shape)
+#        df['fixed_lat'] = 32.01 * np.ones(df['lat'].shape)
+#        gdf_fixed_lon = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df['fixed_lon'],
+#                                                                         df.lat))
+#        gdf_fixed_lon.crs = {'init': 'epsg:4326'}
+#        gdf_fixed_lon.dropna(inplace=True)
+#        gdf_fixed_lon.to_crs(epsg=2039, inplace=True)
+#        gdf_fixed_lat = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.lon,
+#                                                                         df['fixed_lat']))
+#        gdf_fixed_lat.crs = {'init': 'epsg:4326'}
+#        gdf_fixed_lat.dropna(inplace=True)
+#        gdf_fixed_lat.to_crs(epsg=2039, inplace=True)
+#        # calculate distance north from bet dagan coords in km:
+#        df['north_distance'] = gdf_fixed_lon.geometry.distance(
+#            bd_as_point) / 1000.0
+#        # calculate distance east from bet dagan coords in km:
+#        df['east_distance'] = gdf_fixed_lat.geometry.distance(
+#            bd_as_point) / 1000.0
+#        # fix sign to indicate: negtive = south:
+#        df['north_distance'] = df.apply(
+#            lambda x: change_sign(
+#                x.lat, bd_lat, x.north_distance), axis=1)
+#        # fix sign to indicate: negtive = east:
+#        df['east_distance'] = df.apply(
+#            lambda x: change_sign(
+#                x.lon, bd_lon, x.east_distance), axis=1)
+#        # convert to xarray:
+#        ds_list.append(df[['east_distance', 'north_distance']].to_xarray())
+#    ds_distance = xr.concat(ds_list, 'sound_time')
+#    ds_distance['sound_time'] = ds['sound_time']
+#    ds_distance.to_netcdf(savepath / 'bet_dagan_edt_distance.nc', 'w')
+#    return ds_distance
+
+
+def analyse_radiosonde_climatology(path=sound_path, data_type='phys',
+                                   field='Rho_wv', month=3, season=None,
                                    times=None, hour=None):
     import xarray as xr
     import pandas as pd
-    from matplotlib.ticker import ScalarFormatter
+    import matplotlib.pyplot as plt
+    from matplotlib.ticker import ScalarFormatter, LogLocator, NullFormatter
     from aux_gps import path_glob
-    file = path_glob(path, 'bet_dagan_phys_sounding_*.nc')
+    file = path_glob(path, 'bet_dagan_{}_sounding_*.nc'.format(data_type))
     da = xr.load_dataset(file[0])[field]
     if times is not None:
         da = da.sel(sound_time=slice(*times))
     if hour is not None:
         da = da.sel(sound_time=da['sound_time.hour'] == hour)
-    name = da.attrs['long_name']
+    try:
+        name = da.attrs['long_name']
+    except KeyError:
+        name = field
     units = da.attrs['units']
-    clim = da.groupby('sound_time.month').mean('sound_time')
-    months = [month - 1, month, month + 1]
-    df = clim.sel(month=months).to_dataset('month').to_dataframe()
-    month_names = pd.to_datetime(months, format='%m').month_name()
-    df.reset_index(inplace=True)
-    df.loc[:, months[0]] -= df.loc[:, month]
-    df.loc[:, months[2]] -= df.loc[:, month]
-    df.loc[:, months[1]] -= df.loc[:, month]
-    ax = df.plot(x=months[0], y='Height', logy=True, color='r')
-    df.plot(x=months[1], y='Height', logy=True, ax=ax, color='k')
-    df.plot(x=months[2], y='Height', logy=True, ax=ax, color='b')
+    if season is not None:
+        clim = da.groupby('sound_time.season').mean('sound_time')
+        df = clim.to_dataset('season').to_dataframe()
+        df_copy = df.copy()
+        seasons = [x for x in df.columns if season not in x]
+        df.reset_index(inplace=True)
+        # df.loc[:, season] -= df.loc[:, season]
+        df.loc[:, seasons[0]] -= df.loc[:, season]
+        df.loc[:, seasons[1]] -= df.loc[:, season]
+        df.loc[:, seasons[2]] -= df.loc[:, season]
+        fig, ax = plt.subplots(figsize=(12, 5))
+        df.plot(x=seasons[0], y='Height', logy=True, color='r', ax=ax)
+        df.plot(x=seasons[1], y='Height', logy=True, ax=ax, color='b')
+        df.plot(x=seasons[2], y='Height', logy=True, ax=ax, color='g')
+        ax.axvline(x=0, color='k')
+        # ax.set_xlim(-1, 15)
+        ax.legend(seasons+[season], loc='best')
+    else:
+        clim = da.groupby('sound_time.month').mean('sound_time')
+        if month == 12:
+            months = [11, 12, 1]
+        elif month == 1:
+            months = [12, 1, 2]
+        else:
+            months = [month - 1, month, month + 1]
+        df_copy = clim.to_dataset('month').to_dataframe()
+        df = clim.sel(month=months).to_dataset('month').to_dataframe()
+        month_names = pd.to_datetime(months, format='%m').month_name()
+        df.reset_index(inplace=True)
+        df.loc[:, months[0]] -= df.loc[:, month]
+        df.loc[:, months[2]] -= df.loc[:, month]
+        df.loc[:, months[1]] -= df.loc[:, month]
+        ax = df.plot(x=months[0], y='Height', logy=True, color='r')
+        df.plot(x=months[1], y='Height', logy=True, ax=ax, color='k')
+        df.plot(x=months[2], y='Height', logy=True, ax=ax, color='b')
+        ax.legend(month_names)
     ax.set_xlabel('{} [{}]'.format(name, units))
-    ax.legend(month_names)
-    ax.get_yaxis().set_major_formatter(ScalarFormatter())
-    ax.set_ylabel('height [m]')
     ax.set_ylim(100, 10000)
+    ax.get_yaxis().set_major_formatter(ScalarFormatter())
+    locmaj = LogLocator(base=10,numticks=12) 
+    ax.yaxis.set_major_locator(locmaj)
+    locmin = LogLocator(base=10.0,subs=(0.2,0.4,0.6,0.8),numticks=12)
+    ax.yaxis.set_minor_locator(locmin)
+    ax.yaxis.set_minor_formatter(NullFormatter())
+    ax.set_ylabel('height [m]')
     if hour is not None:
         ax.set_title('hour = {}'.format(hour))
-    return df
+    return df_copy
 
 
-def process_physical_radiosonde_data(path=sound_path, savepath=sound_path,
-                                     verbose=False):
+def process_new_field_from_radiosonde_data(phys_ds, dim='sound_time',
+                                           field_name='pw', bottom=None,
+                                           top=None, verbose=False):
+    import xarray as xr
+    from aux_gps import keep_iqr
+    field_list = []
+    for i in range(phys_ds[dim].size):
+        record = phys_ds[dim].isel({dim: i})
+        if 'time' in dim:
+            record = record.dt.strftime('%Y-%m-%d %H:%M').values.item()
+        if verbose:
+            print('processing {} for {} field.'.format(record, field_name))
+        if field_name == 'pw':
+            long_name = 'Percipatiable water'
+            Dewpt = phys_ds['Dewpt'].isel({dim: i})
+            P = phys_ds['P'].isel({dim: i})
+            try: 
+                field, unit = wrap_xr_metpy_pw(Dewpt, P, bottom=bottom, top=top)
+            except ValueError:
+                field, unit = wrap_xr_metpy_pw(Dewpt, P, bottom=None, top=None)
+        elif field_name == 'tm':
+            long_name = 'Water vapor mean air temperature'
+            P = phys_ds['P'].isel({dim: i})
+            VP = phys_ds['VP'].isel({dim: i})
+            T = phys_ds['T'].isel({dim: i})
+            Rho = phys_ds['Rho'].isel({dim: i})
+            field, unit = calculate_tm_via_pressure_sum(VP, T, Rho, P,
+                                                        bottom=bottom,
+                                                        top=top)
+        elif field_name == 'ts':
+            long_name = 'Surface temperature'
+            dropped = phys_ds['T'].isel({dim: i}).dropna('Height')
+            field = dropped[0].values.item() + 273.15
+            unit = 'K'
+        field_list.append(field)
+    da = xr.DataArray(field_list, dims=[dim])
+    da[dim] = phys_ds[dim]
+    da.attrs['units'] = unit
+    da.attrs['long_name'] = long_name
+    if top is not None:
+        da.attrs['top'] = top
+    if bottom is not None:
+        da.attrs['bottom'] = top
+    da = keep_iqr(da, dim=dim, k=1.5)
+    if verbose:
+        print('Done!')
+    return da
+
+
+def process_radiosonde_data(path=sound_path, savepath=sound_path,
+                            data_type='phys', verbose=False):
     import xarray as xr
     from aux_gps import path_glob
-    file = path_glob(path, 'bet_dagan_phys_sounding_*.nc')
+    file = path_glob(path, 'bet_dagan_{}_sounding_*.nc'.format(data_type))
     phys_ds = xr.load_dataset(file[0])
     ds = xr.Dataset()
-    ds['PW'] = process_new_field_from_physical_data(phys_ds, dim='sound_time',
-                                                    field_name='pw',
-                                                    bottom=None,
-                                                    top=None, verbose=False)
-    ds['Tm'] = process_new_field_from_physical_data(phys_ds, dim='sound_time',
-                                                    field_name='tm',
-                                                    bottom=None,
-                                                    top=None, verbose=False)
-    ds['Ts'] = process_new_field_from_physical_data(phys_ds, dim='sound_time',
-                                                    field_name='ts',
-                                                    bottom=None,
-                                                    top=None, verbose=False)
-    data_vars = [x for x in ds.data_vars]
+    ds['PW'] = process_new_field_from_radiosonde_data(phys_ds, dim='sound_time',
+                                                      field_name='pw',
+                                                      bottom=None,
+                                                      top=None, verbose=verbose)
+    ds['Tm'] = process_new_field_from_radiosonde_data(phys_ds, dim='sound_time',
+                                                      field_name='tm',
+                                                      bottom=None,
+                                                      top=None, verbose=verbose)
+    ds['Ts'] = process_new_field_from_radiosonde_data(phys_ds, dim='sound_time',
+                                                      field_name='ts',
+                                                      bottom=None,
+                                                      top=None, verbose=verbose)
+    if data_type == 'phys':
+        ds['cloud_code'] = phys_ds['cloud_code']
+        ds['sonde_type'] = phys_ds['sonde_type']
+        ds['min_time'] = phys_ds['min_time']
+        ds['max_time'] = phys_ds['max_time']
     yr_min = ds['sound_time'].min().dt.year.item()
     yr_max = ds['sound_time'].max().dt.year.item()
-    filename = 'bet_dagan_phys_{}_{}-{}.nc'.format(
-        '_'.join(data_vars), yr_min, yr_max)
+    filename = 'bet_dagan_{}_PW_Tm_Ts_{}-{}.nc'.format(data_type, yr_min, yr_max)
     print('saving {} to {}'.format(filename, savepath))
     ds.to_netcdf(savepath / filename, 'w')
     print('Done!')
@@ -117,9 +330,11 @@ def calculate_tm_via_pressure_sum(VP, T, Rho, P, bottom=None, top=None,
     return tm, 'K'
 
 
-def wrap_xr_metpy_pw(dewpt, pressure, bottom=None, top=None, verbose=False):
+def wrap_xr_metpy_pw(dewpt, pressure, bottom=None, top=None, verbose=False,
+                     cumulative=False):
     from metpy.calc import precipitable_water
     from metpy.units import units
+    import numpy as np
     try:
         T_unit = dewpt.attrs['units']
         assert T_unit == 'degC'
@@ -144,55 +359,25 @@ def wrap_xr_metpy_pw(dewpt, pressure, bottom=None, top=None, verbose=False):
     else:
         bottom_with_units = None
     pressure_values = pressure.values * units(P_unit)
-    pw = precipitable_water(dew_values, pressure_values,
-                            bottom=bottom_with_units, top=top_with_units)
-    pw_units = pw.units.format_babel('~P')
-    return pw.magnitude, pw_units
-
-
-def process_new_field_from_physical_data(phys_ds, dim='sound_time',
-                                         field_name='pw', bottom=None,
-                                         top=None, verbose=False):
-    import xarray as xr
-    from aux_gps import keep_iqr
-    field_list = []
-    for i in range(phys_ds[dim].size):
-        record = phys_ds[dim].isel({dim: i})
-        if 'time' in dim:
-            record = record.dt.strftime('%Y-%m-%d %H:%M').values.item()
-        if verbose:
-            print('processing {}'.format(record))
-        if field_name == 'pw':
-            long_name = 'Percipatiable water'
-            Dewpt = phys_ds['Dewpt'].isel({dim: i})
-            P = phys_ds['P'].isel({dim: i})
-            field, unit = wrap_xr_metpy_pw(Dewpt, P, bottom=bottom, top=top)
-        elif field_name == 'tm':
-            long_name = 'Water vapor mean air temperature'
-            P = phys_ds['P'].isel({dim: i})
-            VP = phys_ds['VP'].isel({dim: i})
-            T = phys_ds['T'].isel({dim: i})
-            Rho = phys_ds['Rho'].isel({dim: i})
-            field, unit = calculate_tm_via_pressure_sum(VP, T, Rho, P,
-                                                        bottom=bottom,
-                                                        top=top)
-        elif field_name == 'ts':
-            long_name = 'Surface temperature'
-            field = phys_ds['T'].isel({dim: i})[0].values.item() + 273.15
-            unit = 'K'
-        field_list.append(field)
-    da = xr.DataArray(field_list, dims=[dim])
-    da[dim] = phys_ds[dim]
-    da.attrs['units'] = unit
-    da.attrs['long_name'] = long_name
-    if top is not None:
-        da.attrs['top'] = top
-    if bottom is not None:
-        da.attrs['bottom'] = top
-    da = keep_iqr(da, dim=dim, k=1.5)
-    if verbose:
-        print('Done!')
-    return da
+    if cumulative:
+        pw_list = []
+        # first value is nan:
+        pw_list.append(np.nan)
+        for pre_val in pressure_values[1:]:
+            if np.isnan(pre_val):
+                pw_list.append(np.nan)
+                continue
+            pw = precipitable_water(dew_values, pressure_values, bottom=None,
+                                    top=pre_val)
+            pw_units = pw.units.format_babel('~P')
+            pw_list.append(pw.magnitude)
+        pw = np.array(pw_list)
+        return pw, pw_units
+    else:
+        pw = precipitable_water(dew_values, pressure_values,
+                                bottom=bottom_with_units, top=top_with_units)
+        pw_units = pw.units.format_babel('~P')
+        return pw.magnitude, pw_units
 
 
 def calculate_absolute_humidity_from_partial_pressure(VP, T, verbose=False):
@@ -239,6 +424,7 @@ def wrap_xr_metpy_specific_humidity(MR, verbose=False):
     SH = specific_humidity_from_mixing_ratio(MR_values)
     da = MR.copy(data=SH.magnitude)
     da.attrs['units'] = MR_unit
+    da.attrs['long_name'] = 'Specific humidity'
     return da
 
 
@@ -264,6 +450,7 @@ def wrap_xr_metpy_vapor_pressure(P, MR, verbose=False):
     VP = vapor_pressure(P_values, MR_values)
     da = P.copy(data=VP.magnitude)
     da.attrs['units'] = P_unit
+    da.attrs['long_name'] = 'Water vapor partial pressure'
     return da
 
 
@@ -274,7 +461,7 @@ def wrap_xr_metpy_mixing_ratio(P, T, RH, verbose=False):
     if np.max(RH) > 1.2:
         RH_values = RH.values / 100.0
     else:
-        RH_values = RH.values
+        RH_values = RH.values * units('dimensionless')
     try:
         T_unit = T.attrs['units']
         assert T_unit == 'degC'
@@ -296,6 +483,7 @@ def wrap_xr_metpy_mixing_ratio(P, T, RH, verbose=False):
         RH_values, T_values, P_values)
     da = T.copy(data=mixing_ratio.magnitude)
     da.attrs['units'] = 'g/kg'
+    da.attrs['long_name'] = 'Water vapor mass mixing ratio'
     return da
 
 
@@ -332,6 +520,7 @@ def wrap_xr_metpy_density(P, T, MR, verbose=False):
     Rho = Rho.to('g/m^3')
     da = P.copy(data=Rho.magnitude)
     da.attrs['units'] = 'g/m^3'
+    da.attrs['long_name'] = 'Air density'
     return da
 
 
@@ -355,6 +544,7 @@ def wrap_xr_metpy_dewpoint(T, RH, verbose=False):
     dewpoint = dewpoint_from_relative_humidity(T_values, RH_values)
     da = T.copy(data=dewpoint.magnitude)
     da.attrs['units'] = T_unit
+    da.attrs['long_name'] = 'Dew point'
     return da
 
 
@@ -480,100 +670,100 @@ def check_sound_time(df):
     return sound_time
 
 
-def calculate_tm_edt(wvpress, tempc, height, mixratio,
-                     press, method='mr_trapz'):
-    def calculate_tm_with_method(method='mr_trapz'):
-        import numpy as np
-        import pandas as pd
-        nonlocal wvpress, tempc, height, mixratio, press
-        # conver Mixing ratio to WV-PP(e):
-        MW_dry_air = 28.9647  # gr/mol
-        MW_water = 18.015  # gr/mol
-        Epsilon = MW_water / MW_dry_air  # Epsilon=Rs_da/Rs_v;
-        mr = pd.Series(mixratio)
-        p = pd.Series(press)
-        eps_tag = mr / (1000.0 * Epsilon)
-        e = p * eps_tag / (1.0 + eps_tag)
-        try:
-            # directly use WV-PP with trapz:
-            if method == 'wv_trapz':
-                numerator = np.trapz(
-                    wvpress /
-                    (tempc +
-                     273.15),
-                    height)
-                denominator = np.trapz(
-                    wvpress / (tempc + 273.15)**2.0, height)
-                tm = numerator / denominator
-            # use WV-PP from mixing ratio with trapz:
-            elif method == 'mr_trapz':
-                numerator = np.trapz(
-                    e /
-                    (tempc +
-                     273.15),
-                    height)
-                denominator = np.trapz(
-                    e / (tempc + 273.15)**2.0, height)
-                tm = numerator / denominator
-            # use WV-PP from mixing ratio with sum:
-            elif method == 'mr_sum':
-                e_ser = pd.Series(e)
-                height = pd.Series(height)
-                e_sum = (e_ser.shift(-1) + e_ser).dropna()
-                h = height.diff(-1).abs()
-                numerator = 0.5 * (e_sum * h / (pd.Series(tempc) + 273.15)).sum()
-                denominator = 0.5 * \
-                    (e_sum * h / (pd.Series(tempc) + 273.15)**2.0).sum()
-                tm = numerator / denominator
-        except ValueError:
-            return np.nan
-        return tm
-    if method is None:
-        tm_wv_trapz = calculate_tm_with_method('wv_trapz')
-        tm_mr_trapz = calculate_tm_with_method('mr_trapz')
-        tm_sum = calculate_tm_with_method('sum')
-    else:
-        tm = calculate_tm_with_method(method)
-        chosen_method = method
-    return tm, chosen_method
-
-
-def calculate_tpw_edt(mixratio, rho, rho_wv, height, press, g, method='trapz'):
-    def calculate_tpw_with_method(method='trapz'):
-        nonlocal mixratio, rho, rho_wv, height, press, g
-        import numpy as np
-        import pandas as pd
-        # calculate specific humidity q:
-        q = (mixratio / 1000.0) / \
-            (1 + 0.001 * mixratio / 1000.0)
-        try:
-            if method == 'trapz':
-                tpw = np.trapz(q * rho,
-                               height)
-            elif method == 'sum':
-                rho_wv = pd.Series(rho_wv)
-                height = pd.Series(height)
-                rho_sum = (rho_wv.shift(-1) + rho_wv).dropna()
-                h = height.diff(-1).abs()
-                tpw = 0.5 * (rho_sum * h).sum()
-            elif method == 'psum':
-                q = pd.Series(q)
-                q_sum = q.shift(-1) + q
-                p = pd.Series(press) * 100.0  # to Pa
-                dp = p.diff(-1).abs()
-                tpw = (q_sum * dp / (2.0 * 1000 * g)).sum() * 1000.0
-        except ValueError:
-            return np.nan
-        return tpw
-    if method is None:
-        # calculate all the methods and choose trapz if all agree:
-        tpw_trapz = calculate_tpw_with_method(method='trapz')
-        tpw_sum = calculate_tpw_with_method(method='sum')
-        tpw_psum = calculate_tpw_with_method(method='psum')
-    else:
-        tpw = calculate_tpw_with_method(method=method)
-        chosen_method = method
-    return tpw, chosen_method
+#def calculate_tm_edt(wvpress, tempc, height, mixratio,
+#                     press, method='mr_trapz'):
+#    def calculate_tm_with_method(method='mr_trapz'):
+#        import numpy as np
+#        import pandas as pd
+#        nonlocal wvpress, tempc, height, mixratio, press
+#        # conver Mixing ratio to WV-PP(e):
+#        MW_dry_air = 28.9647  # gr/mol
+#        MW_water = 18.015  # gr/mol
+#        Epsilon = MW_water / MW_dry_air  # Epsilon=Rs_da/Rs_v;
+#        mr = pd.Series(mixratio)
+#        p = pd.Series(press)
+#        eps_tag = mr / (1000.0 * Epsilon)
+#        e = p * eps_tag / (1.0 + eps_tag)
+#        try:
+#            # directly use WV-PP with trapz:
+#            if method == 'wv_trapz':
+#                numerator = np.trapz(
+#                    wvpress /
+#                    (tempc +
+#                     273.15),
+#                    height)
+#                denominator = np.trapz(
+#                    wvpress / (tempc + 273.15)**2.0, height)
+#                tm = numerator / denominator
+#            # use WV-PP from mixing ratio with trapz:
+#            elif method == 'mr_trapz':
+#                numerator = np.trapz(
+#                    e /
+#                    (tempc +
+#                     273.15),
+#                    height)
+#                denominator = np.trapz(
+#                    e / (tempc + 273.15)**2.0, height)
+#                tm = numerator / denominator
+#            # use WV-PP from mixing ratio with sum:
+#            elif method == 'mr_sum':
+#                e_ser = pd.Series(e)
+#                height = pd.Series(height)
+#                e_sum = (e_ser.shift(-1) + e_ser).dropna()
+#                h = height.diff(-1).abs()
+#                numerator = 0.5 * (e_sum * h / (pd.Series(tempc) + 273.15)).sum()
+#                denominator = 0.5 * \
+#                    (e_sum * h / (pd.Series(tempc) + 273.15)**2.0).sum()
+#                tm = numerator / denominator
+#        except ValueError:
+#            return np.nan
+#        return tm
+#    if method is None:
+#        tm_wv_trapz = calculate_tm_with_method('wv_trapz')
+#        tm_mr_trapz = calculate_tm_with_method('mr_trapz')
+#        tm_sum = calculate_tm_with_method('sum')
+#    else:
+#        tm = calculate_tm_with_method(method)
+#        chosen_method = method
+#    return tm, chosen_method
+#
+#
+#def calculate_tpw_edt(mixratio, rho, rho_wv, height, press, g, method='trapz'):
+#    def calculate_tpw_with_method(method='trapz'):
+#        nonlocal mixratio, rho, rho_wv, height, press, g
+#        import numpy as np
+#        import pandas as pd
+#        # calculate specific humidity q:
+#        q = (mixratio / 1000.0) / \
+#            (1 + 0.001 * mixratio / 1000.0)
+#        try:
+#            if method == 'trapz':
+#                tpw = np.trapz(q * rho,
+#                               height)
+#            elif method == 'sum':
+#                rho_wv = pd.Series(rho_wv)
+#                height = pd.Series(height)
+#                rho_sum = (rho_wv.shift(-1) + rho_wv).dropna()
+#                h = height.diff(-1).abs()
+#                tpw = 0.5 * (rho_sum * h).sum()
+#            elif method == 'psum':
+#                q = pd.Series(q)
+#                q_sum = q.shift(-1) + q
+#                p = pd.Series(press) * 100.0  # to Pa
+#                dp = p.diff(-1).abs()
+#                tpw = (q_sum * dp / (2.0 * 1000 * g)).sum() * 1000.0
+#        except ValueError:
+#            return np.nan
+#        return tpw
+#    if method is None:
+#        # calculate all the methods and choose trapz if all agree:
+#        tpw_trapz = calculate_tpw_with_method(method='trapz')
+#        tpw_sum = calculate_tpw_with_method(method='sum')
+#        tpw_psum = calculate_tpw_with_method(method='psum')
+#    else:
+#        tpw = calculate_tpw_with_method(method=method)
+#        chosen_method = method
+#    return tpw, chosen_method
 
 
 def read_one_EDT_record(filepath):
@@ -627,8 +817,8 @@ def read_one_EDT_record(filepath):
     # drop 3 last rows:
     table = table.iloc[:-3, :]
     # units dict:
-    units = dict(zip(table['Record name'], table['Unit']))
-    units.pop('Pscl')
+    units_dict = dict(zip(table['Record name'], table['Unit']))
+    units_dict.pop('Pscl')
     # read all data:
     data = pd.read_csv(
         filepath,
@@ -639,18 +829,19 @@ def read_one_EDT_record(filepath):
     data = data.iloc[:, :-3]
     data = data.drop('Pscl', axis=1)
     # datetime index:
-    Time = data['time']
+    # Time = data['time'].copy(deep=True)
     data['time'] = pd.to_timedelta(data['time'], errors='coerce', unit='sec')
     data['time'] += meta['launch_time']
     data.set_index('time', inplace=True)
     sound_time = check_sound_time(data)
     # now index as height:
     data.set_index('Height', inplace=True)
-    data['time'] = Time
+    # data['Time'] = Time
     data = data.astype('float')
     data.index = data.index.astype('float')
     # to xarray:
     ds = data.to_xarray()
+    ds = ds.dropna('Height')
     ds = ds.sortby('Height')
     ds = get_unique_index(ds, 'Height')
     # interpolate:
@@ -661,58 +852,59 @@ def read_one_EDT_record(filepath):
         dropped = da.dropna('Height')
         # if some data remain, interpolate:
         if dropped.size > 0:
-            ds_list.append(dropped.interp({'Height': h}, method='cubic'))
+            interpolated = dropped.interp(coords={'Height': h}, method='cubic',
+                                          kwargs={'fill_value': np.nan})
+            ds_list.append(interpolated)
         # if nothing left, create new ones with nans:
         else:
             nan_da = np.nan * ds['Height']
             nan_da.name = dropped.name
             ds_list.append(dropped)
     ds = xr.merge(ds_list)
-    # copy general attrs:
-    for key, val in meta.items():
-        ds.attrs[key] = val
-    ds.attrs['sound_time'] = sound_time
-    ds['Height'].attrs['unit'] = 'm'
+    ds['Height'].attrs['units'] = 'm'
+    ds.attrs['station'] = meta['station']
     # copy unit attrs:
-    for key, val in units.items():
+    for key, val in units_dict.items():
         try:
-            ds[key].attrs['unit'] = val
+            ds[key].attrs['units'] = val
         except KeyError:
             pass
     ds = ds.rename({'Lat': 'lat', 'Lon': 'lon', 'Range': 'range'})
     # add more variables: Tm, Tpw, etc...
-    ds['g'] = calculate_g(ds['lat'][0])
-    ds['g'].attrs.update({'long_name': 'gravitational accelaration',
-      'unit': 'm*sec^-2'})
+    ds['east_distance'], ds['north_distance'] = calculate_edt_north_east_distance(
+        ds[['lat', 'lon']])
+    ds['east_distance'].attrs['units'] = 'km'
+    ds['north_distance'].attrs['units'] = 'km'
     ds['T'] -= 273.15
-    ds['T'].attrs['unit'] = 'degC'
-    ds['WVpress'] = VaporPressure(ds['TD'] - 273.15, phase="liquid", units='hPa',
-                              method='Buck')
-    ds['WVpress'].attrs['unit'] = 'hPa'
-    ds['Rho'] = DensHumid(ds['T'], ds['P'], ds['WVpress'],
-                    out='both')
-    ds['Rho'].attrs['unit'] = 'kg/m^3'
-    ds['Rho_wv'] = DensHumid(ds['T'], ds['P'], ds['WVpress'],
-                       out='wv_density')
-    ds['Rho_wv'].attrs['unit'] = 'kg/m^3'
-    # calculate Tpw with default method:
-    ds['Tpw'], chosen_method = calculate_tpw_edt(
-        ds['MR'],
-        ds['Rho'],
-        ds['Rho_wv'],
-        ds['Height'], ds['P'], ds['g'].values.item(),
-        method='trapz')
-    ds['Tpw'].attrs.update({'long_name': 'Total precipitable water',
-                            'unit': 'kg*m^-2',
-                            'integration_method': chosen_method})
-    ds['Ts'] = ds['T'][0] + 273.15
-    ds['Ts'].attrs.update({'long_name': 'Surface temperature', 'unit': 'K'})
-    ds['Tm'], chosen_method = calculate_tm_edt(ds['WVpress'], ds['T'], ds['Height'],
-                                    ds['MR'], ds['P'], method='mr_trapz')
-    ds['Tm'].attrs.update({'long_name': 'Water vapor mean atmospheric temperature',
-                              'unit': 'K', 'integration_method': chosen_method})
-    ds.attrs['launch_time'] = ds.attrs['launch_time'].strftime('%Y-%m-%d %H:%M:%S')
-    ds.attrs['sound_time'] = ds.attrs['sound_time'].strftime('%Y-%m-%d %H:%M:%S')
+    ds['T'].attrs['units'] = 'degC'
+    ds = ds.rename({'TD': 'Dewpt', 'FF': 'WS'})
+    ds['Dewpt'] -= 273.15
+    ds['Dewpt'].attrs['units'] = 'degC'
+    long_names = {'T': 'Air temperature', 'Dewpt': 'Dew point', 'RH': 'Relative humidity',
+                  'v': 'v component of wind velocity', 'u': 'u component of wind velocity',
+                  'P': 'Air pressure', 'MR': 'Water vapor mass mixing ratio',
+                  'WS': 'Wind speed', 'lon': 'Longitude', 'lat': 'Latitude'}
+    for var, long_name in long_names.items():
+        ds[var].attrs['long_name'] = long_name
+    # ds['Dewpt'] = wrap_xr_metpy_dewpoint(ds['T'], ds['RH'])
+    # ds['Dewpt'].attrs['long_name'] = 'Dew point'
+    # ds['MR'] = wrap_xr_metpy_mixing_ratio(ds['P'], ds['T'], ds['RH'])
+    # ds['MR'].attrs['long_name'] = 'Water vapor mass mixing ratio'
+    # fix MR:
+    ds['MR'] /= 1000.0
+    ds['Rho'] = wrap_xr_metpy_density(ds['P'], ds['T'], ds['MR'])
+    ds['Rho'].attrs['long_name'] = 'Air density'
+    ds['Q'] = wrap_xr_metpy_specific_humidity(ds['MR'])
+    ds['Q'].attrs['long_name'] = 'Specific humidity'
+    ds['VP'] = wrap_xr_metpy_vapor_pressure(ds['P'], ds['MR'])
+    ds['VP'].attrs['long_name'] = 'Water vapor partial pressure'
+    ds['Rho_wv'] = calculate_absolute_humidity_from_partial_pressure(
+        ds['VP'], ds['T'])
+    ds['sound_time'] = sound_time
+    ds['launch_time'] = meta['launch_time']
+    ds['RS_type'] = meta['RS_type']
+    ds['RS_number'] = meta['RS_number']
+    ds['termination_reason'] = meta['termination_reason']
     return ds
 
 
@@ -1185,29 +1377,34 @@ def move_bet_dagan_physical_to_main_path(bet_dagan_path):
     return year_dirs
 
 
-def read_all_physical_radiosonde(path, savepath=None, concat_epoch_num=300,
-                                 verbose=True):
+def read_all_radiosonde_data(path, savepath=None, data_type='phys',
+                             concat_epoch_num=300,
+                             verbose=True):
     from aux_gps import path_glob
     from aux_gps import get_unique_index
     from aux_gps import keep_iqr
     import xarray as xr
     from aux_gps import save_ncfile
-    import gc
     ds_list = []
-    # ds_extra_list = []
     cnt = 0
-    cnt_save = 0
-    for path_file in sorted(path_glob(path, '*/')):
+    if data_type == 'phys':
+        glob = '*/'
+    elif data_type == 'edt':
+        glob = '*EDT'
+    for path_file in sorted(path_glob(path, glob)):
         cnt += 1
         if path_file.is_file():
-            ds = read_one_physical_radiosonde_report(path_file)
+            if data_type == 'phys':
+                ds = read_one_physical_radiosonde_report(path_file)
+            elif data_type == 'edt':
+                ds = read_one_EDT_record(path_file)
             if ds is None:
                 print('{} is corrupted...'.format(
                     path_file.as_posix().split('/')[-1]))
                 continue
             date = ds['sound_time'].dt.strftime('%Y-%m-%d %H:%M').values.item()
             if verbose:
-                print('reading {} physical radiosonde report'.format(date))
+                print('reading {} {} radiosonde report'.format(date, data_type))
             ds_list.append(ds)
 #            # every 600 iters, concat:
 #            if cnt % concat_epoch_num == 0:
@@ -1226,7 +1423,7 @@ def read_all_physical_radiosonde(path, savepath=None, concat_epoch_num=300,
 #                save_ncfile(temp, savepath, filename='bet_dagan_temp_{}.nc'.format(cnt_save))
 #                ds_list = []
     dss = xr.concat(ds_list, 'sound_time')
-    print('loading temp files and concatenating...')
+    print('concatenating...')
 #    tempfiles = path_glob(savepath, 'bet_dagan_temp*.nc')
 #    temp_list = [xr.open_dataset(x) for x in tempfiles]
 #    dss = xr.concat(temp_list, 'sound_time')
@@ -1245,7 +1442,7 @@ def read_all_physical_radiosonde(path, savepath=None, concat_epoch_num=300,
     if savepath is not None:
         yr_min = dss.sound_time.min().dt.year.item()
         yr_max = dss.sound_time.max().dt.year.item()
-        filename = 'bet_dagan_phys_sounding_{}-{}.nc'.format(yr_min, yr_max)
+        filename = 'bet_dagan_{}_sounding_{}-{}.nc'.format(data_type, yr_min, yr_max)
         print('saving {} to {}'.format(filename, savepath))
         comp = dict(zlib=True, complevel=9)  # best compression
         encoding = {var: comp for var in dss}
