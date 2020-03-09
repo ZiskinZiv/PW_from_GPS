@@ -10,7 +10,6 @@ from PW_paths import work_yuval
 sound_path = work_yuval / 'sounding'
 era5_path = work_yuval / 'ERA5'
 edt_path = sound_path / 'edt'
-# TODO: add pw(height) function so i can get the water vapor scale height
 
 
 def calculate_edt_north_east_distance(ds):
