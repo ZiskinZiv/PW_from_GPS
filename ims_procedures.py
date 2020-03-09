@@ -2,7 +2,10 @@
 # -*- coding: utf-8 -*-
 """
 Created on Mon Jun 10 17:22:51 2019
-
+Work flow: to obtain the TD products for use with ZWD (after download):
+    1)use fill_fix_all_10mins_IMS_stations() after copying the downloaded TD
+    2)use IMS_interpolating_to_GNSS_stations_israel(dt=None, start_year=2019(latest))
+    3)use resample_GNSS_TD(path=ims_path) to resample all TD
 @author: ziskin
 """
 from PW_paths import work_yuval
@@ -115,6 +118,10 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
                                               plot=False,
                                               verbose=False,
                                               savepath=ims_path):
+    """interpolate the IMS 10 mins field(e.g., TD) to the location
+    of the GNSS sites in ISRAEL(use dt=None for this). other dt is treated
+    as datetime str and will give the "snapshot" for the field for just this
+    datetime"""
     from pykrige.rk import Krige
     import pandas as pd
     from aux_gps import path_glob
@@ -150,12 +157,12 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
         df['lon'] = T_lons
         # df = df.dropna(axis=0)
         c = np.linspace(
-            df['lat'].min().item(),
-            df['lat'].max().item(),
+            df['lat'].min(),
+            df['lat'].max(),
             df['lat'].shape[0])
         r = np.linspace(
-            df['lon'].min().item(),
-            df['lon'].max().item(),
+            df['lon'].min(),
+            df['lon'].max(),
             df['lon'].shape[0])
         rr, cc = np.meshgrid(r, c)
         vals = ~np.isnan(ts_lr_neutral)
