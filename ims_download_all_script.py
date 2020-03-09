@@ -5,7 +5,46 @@ Created on Tue Jun 25 14:29:10 2019
 
 @author: ziskin
 """
-# TODO: add option to just update recent data from 10 mins api
+
+
+#def load_saved_station(path, station_id, channel):
+#    from aux_gps import path_glob
+#    import xarray as xr
+#    files = path_glob(path, '*_{}_{}_10mins.nc'.format(station_id, channel))
+#    if len(files) == 0:
+#        return False
+#    elif len(files) == 1:
+#        return xr.load_dataset(files[0])
+#    elif len(files) > 1:
+#        raise ValueError('too many files with the same glob str')
+#
+#
+##def parse_filename(file_path):
+##    filename = file_path.as_posix().split('/')[-1].split('.')[0]
+##    station_name = filename.split('_')[0]
+##    station_id = filename.split('_')[1]
+##    channel = filename.split('_')[2]
+##    return station_name, station_id, channel
+#
+#
+def check_ds_last_datetime(ds, fmt=None):
+    """return the last datetime of the ds"""
+    import pandas as pd
+    import xarray as xr
+    if isinstance(ds, xr.DataArray):
+        ds = ds.to_dataset(name=ds.name)
+    # assume time series with one time dim:
+    time_dim = list(set(ds.dims))[0]
+    dvars = [x for x in ds.data_vars]
+    if dvars:
+        dt = ds[dvars[0]].dropna(time_dim)[time_dim][-1].values
+        dt = pd.to_datetime(dt)
+        if fmt is None:
+            return dt
+        else:
+            return dt.strftime(fmt)
+    else:
+        raise KeyError("dataset is empty ( no data vars )")
 
 
 def check_path(path):
@@ -128,9 +167,12 @@ def download_ims_single_station(stationid, savepath=None,
         earliest = pd.to_datetime(data['datetime']).strftime('%Y-%m-%d')
     data = r_late.json()['data'][0]
     latest = pd.to_datetime(data['datetime']).strftime('%Y-%m-%d')
+    # check if trying to update stations in the same day:
+    if earliest == latest:
+        logger.error('Wait for at least one day before trying to update...')
     logger.info(
          'Downloading station {} with id: {}, from {} to {}'.format(
-                 st_name,
+                 st_name[0],
                  stationid,
                  earliest,
                  latest))
@@ -210,6 +252,8 @@ def download_ims_single_station(stationid, savepath=None,
 
 
 def download_all_10mins_ims(savepath, channel_name='TD'):
+    """download all 10mins stations per specified channel, updateing fields is
+    automatic"""
     from aux_gps import path_glob
     import xarray as xr
     import logging
@@ -218,7 +262,7 @@ def download_all_10mins_ims(savepath, channel_name='TD'):
     files = sorted(path_glob(savepath, glob, return_empty_list=True))
     files = [x for x in files if x.is_file()]
     time_dim = list(set(xr.open_dataarray(files[0]).dims))[0]
-    last_dates = [xr.open_dataarray(x)[time_dim][-1].values.item() for x in files]
+    last_dates = [check_ds_last_datetime(xr.open_dataarray(x)) for x in files]
     st_id_downloaded = [int(x.as_posix().split('/')[-1].split('_')[1]) for x in files]
     d = dict(zip(st_id_downloaded, last_dates))
     stations = ims_api_get_meta(active_only=True, channel_name=channel_name)
@@ -229,6 +273,7 @@ def download_all_10mins_ims(savepath, channel_name='TD'):
                                         channel_name=channel_name,
                                         stationid=st_id, update=None)
         elif st_id in d.keys():
+            logger.info('updating station {}...'.format(st_id))
             da = download_ims_single_station(savepath=savepath,
                                              channel_name=channel_name,
                                              stationid=st_id, update=d[st_id])
