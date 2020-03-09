@@ -42,7 +42,6 @@ gnss_sound_stations_dict = {'acor': '08001', 'mall': '08302'}
 # TODO: do ZWD selection from post-proccesed GipsyX results
 # TODO: re-do the ts-tm connection for the 2013-09 to 2019 radiosonde
 # TODO: then assemble PW for all the stations.
-# TODO: somwhow check if in winter the radiosonde drifts eastwards and dries out
 class LinearRegression_with_stats(LinearRegression):
     """
     LinearRegression class after sklearn's, but calculate t-statistics
