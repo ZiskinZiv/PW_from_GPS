@@ -138,10 +138,11 @@ def single_station_rinex_using_wget(save_dir, minimum_year=None,
                                     station='tela', db='garner'):
     import subprocess
     from subprocess import CalledProcessError
-    from aux_gps import datetime_to_rinex_filename
+    from aux_gps import get_rinex_filename_from_datetime
     from aux_gps import get_timedate_and_station_code_from_rinex
     import pandas as pd
     import logging
+    today = pd.Timestamp.today().strftime('%Y-%m-%d')
     # import os
     logger = logging.getLogger('rinex_garner')
     savepath = save_dir
@@ -160,12 +161,12 @@ def single_station_rinex_using_wget(save_dir, minimum_year=None,
 #        logger.warning('Folder {} already exists.'.format(savepath))
     if minimum_year is not None:
         logger.info('starting search from year {}'.format(minimum_year))
-        dts = pd.date_range('{}-01-01'.format(minimum_year), '2019-10-15',
+        dts = pd.date_range('{}-01-01'.format(minimum_year), today,
                             freq='1D')
     else:
         today = pd.Timestamp.now().strftime('%Y-%m-%d')
         dts = pd.date_range('1988-01-01', today, freq='1D')
-    rfns = [datetime_to_rinex_filename(station, x) for x in dts.to_list()]
+    rfns = [get_rinex_filename_from_datetime(station, x) for x in dts.to_list()]
     for rfn in rfns:
         filename = rfn + '.Z'
         if (savepath / filename).is_file():
