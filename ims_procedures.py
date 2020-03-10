@@ -397,9 +397,11 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
 def resample_GNSS_TD(path=ims_path):
     from aux_gps import path_glob
     import xarray as xr
+    from aux_gps import get_unique_index
 
     def resample_GNSS_TD(ds, path, sample, sample_rate='1H'):
         # station = da.name
+        ds = get_unique_index(ds)
         print('resampaling all GNSS stations to {}'.format(sample[sample_rate]))
         years = [str(x)
                  for x in sorted(list(set(ds[time_dim].dt.year.values)))]
@@ -434,7 +436,8 @@ def resample_GNSS_TD(path=ims_path):
         return
     # first, load GNSS_TD_ALL:
     str_glob = 'GNSS_TD_ALL*.nc'
-    file = path_glob(path, str_glob)[0]
+    file = sorted(path_glob(path, str_glob))[-1]
+    print(file)
     ds = xr.open_dataset(file)
     ds.load()
     time_dim = list(set(ds.dims))[0]

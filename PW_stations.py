@@ -40,6 +40,7 @@ cwd = Path().cwd()
 gnss_sound_stations_dict = {'acor': '08001', 'mall': '08302'}
 
 # TODO: do ZWD selection from post-proccesed GipsyX results
+# TODO: fix mean_zwd_over_sound_time
 # TODO: re-do the ts-tm connection for the 2013-09 to 2019 radiosonde
 # TODO: then assemble PW for all the stations.
 class LinearRegression_with_stats(LinearRegression):
@@ -516,68 +517,54 @@ def fit_ts_tm_produce_ipw_and_compare_TELA(phys_sound_file=phys_soundings,
     return pw_gps, tpw
 
 
-def get_ts_tm_from_physical(phys=phys_soundings, plot=True):
-    import xarray as xr
-    from aux_gps import get_unique_index
-    from aux_gps import keep_iqr
-    from aux_gps import plot_tmseries_xarray
-    pds = xr.open_dataset(phys)
-    pds = pds[['Tm', 'Ts']]
-    pds = pds.rename({'Ts': 'ts', 'Tm': 'tm'})
-    pds = pds.rename({'sound_time': 'time'})
-    pds = get_unique_index(pds)
-    pds = keep_iqr(pds, k=2.0)
-    pds = pds.dropna('time')
-    if plot:
-        plot_tmseries_xarray(pds)
-    return pds
-
-
-def mean_zwd_over_sound_time(
-        phys_sound_file=phys_soundings,
-        ims_path=ims_path,
-        gps_station='tela',
-        times=['2007', '2019']):
+def mean_zwd_over_sound_time(path=work_yuval, sound_path=sound_path, data_type='phys',
+                             ims_path=ims_path, gps_station='tela',
+                             times=['2007', '2019']):
     import xarray as xr
     from aux_gps import get_unique_index
     from aux_gps import keep_iqr
     from aux_gps import multi_time_coord_slice
+    from aux_gps import path_glob
+    from aux_gps import xr_reindex_with_date_range
+    from sounding_procedures import get_field_from_radiosonde
     """mean the WetZ over the gps station soundings datetimes to get a more
         accurate realistic measurement comparison to soundings"""
-    phys = xr.open_dataset(phys_sound_file)
-    # clean and merge:
-    p_list = [get_unique_index(phys[x], 'sound_time')
-              for x in ['Ts', 'Tm', 'Tpw', 'dt_range']]
-    phys_ds = xr.merge(p_list)
-    phys_ds = keep_iqr(phys_ds, 'sound_time', k=2.0)
-    phys_ds = phys_ds.rename({'Ts': 'ts', 'Tm': 'tm'})
+    tpw = get_field_from_radiosonde(path=sound_path, field='PW', data_type=data_type,
+                                    reduce='Height', plot=False)
+    min_time = get_field_from_radiosonde(path=sound_path, field='min_time', data_type='phys',
+                                         reduce=None, plot=False)
+    max_time = get_field_from_radiosonde(path=sound_path, field='max_time', data_type='phys',
+                                         reduce=None, plot=False)
+    min_time = min_time.values
+    max_time = max_time.values
     # load the zenith wet daley for GPS (e.g.,TELA) station:
-    zwd = load_gipsyx_results(station=gps_station, plot_fields=None)
-    # zwd = xr.open_dataset(zwd_file)
-    zwd = zwd[['WetZ', 'WetZ_error']]
-    min_time = phys_ds['dt_range'].sel(bnd='Min').values
-    max_time = phys_ds['dt_range'].sel(bnd='Max').values
+    file = path_glob(path, 'ZWD_thresh_*.nc')[0]
+    zwd = xr.open_dataset(file)[gps_station]
+    zwd_error = xr.open_dataset(file)[gps_station + '_error']
+    freq = pd.infer_freq(zwd.time.values)
+    if not freq:
+        zwd = xr_reindex_with_date_range(zwd)
+        zwd_error = xr_reindex_with_date_range(zwd_error)
+        freq = pd.infer_freq(zwd.time.values)
     min_time = zwd.time.sel(time=min_time, method='nearest').values
     max_time = zwd.time.sel(time=max_time, method='nearest').values
-    freq = pd.infer_freq(zwd.time.values)
     da_group = multi_time_coord_slice(min_time, max_time, freq=freq,
                                       time_dim='time', name='sound_time')
     zwd[da_group.name] = da_group
-    ds = zwd.WetZ.groupby(zwd[da_group.name]).mean(
-        'time').to_dataset(name='{}_WetZ'.format(gps_station))
-    ds['{}_WetZ_std'.format(gps_station)] = zwd.WetZ.groupby(
+    zwd_error[da_group.name] = da_group
+    ds = zwd.groupby(zwd[da_group.name]).mean(
+        'time').to_dataset(name='{}'.format(gps_station))
+    ds['{}_std'.format(gps_station)] = zwd.groupby(
         zwd[da_group.name]).std('time')
-    ds['{}_WetZ_error'.format(gps_station)] = zwd.WetZ_error.groupby(
+    ds['{}_error'.format(gps_station)] = zwd_error.groupby(
         zwd[da_group.name]).mean('time')
-    ds['sound_time'] = phys_ds.sound_time
-    ds['tpw_bet_dagan'] = phys_ds['Tpw']
-    wetz = ds['{}_WetZ'.format(gps_station)]
-    wetz_error = ds['{}_WetZ_error'.format(gps_station)]
+    ds['sound_time'] = tpw.sound_time
+    ds['tpw_bet_dagan'] = tpw
+    wetz = ds['{}'.format(gps_station)]
+    wetz_error = ds['{}_error'.format(gps_station)]
     # do the same for surface temperature:
-    td = xr.open_dataset(ims_path / 'GNSS_5mins_TD_ALL_1996_2019.nc')
-    td = td[gps_station].to_dataset(name='ts')
-    min_time = phys_ds['dt_range'].sel(bnd='Min').values
-    max_time = phys_ds['dt_range'].sel(bnd='Max').values
+    file = path_glob(ims_path, 'GNSS_5mins_TD_ALL_*.nc')[0]
+    td = xr.open_dataset(file)[gps_station].to_dataset(name='ts')
     min_time = td.time.sel(time=min_time, method='nearest').values
     max_time = td.time.sel(time=max_time, method='nearest').values
     freq = pd.infer_freq(td.time.values)
@@ -585,8 +572,9 @@ def mean_zwd_over_sound_time(
                                       time_dim='time', name='sound_time')
     td[da_group.name] = da_group
     ts_sound = td.ts.groupby(td[da_group.name]).mean('time')
-    ts_sound['sound_time'] = phys_ds.sound_time
+    ts_sound['sound_time'] = tpw.sound_time
     ds['{}_ts'.format(gps_station)] = ts_sound
+    return ds
     # select a model:
     mda = ml_models_T_from_sounding(categories=None, models=['LR'],
                                     physical_file=phys_sound_file, plot=False,
@@ -1386,10 +1374,10 @@ def produce_single_station_IPW(zwd, Tds, mda=None, model_name='LR'):
         ipw_error = kappa_ds * zwd_error + zwd * kappa_err
         ipw_error.name = 'PW_error'
         ipw_error.attrs['long_name'] = 'Precipitable Water standard error'
-        ipw_error.attrs['units'] = 'kg / m^2'
+        ipw_error.attrs['units'] = 'mm'
         ipw.name = 'PW'
         ipw.attrs['long_name'] = 'Precipitable Water'
-        ipw.attrs['units'] = 'kg / m^2'
+        ipw.attrs['units'] = 'mm'
         ipw = ipw.to_dataset(name='PW')
         ipw['PW_error'] = ipw_error
         ipw.attrs['description'] = 'whole data Tm formulation using Bevis etal. 1992'
@@ -1418,10 +1406,10 @@ def produce_single_station_IPW(zwd, Tds, mda=None, model_name='LR'):
         ipw_error = kappa_ds * zwd_error + zwd * kappa_err
         ipw_error.name = 'PW_error'
         ipw_error.attrs['long_name'] = 'Precipitable Water standard error'
-        ipw_error.attrs['units'] = 'kg / m^2'
+        ipw_error.attrs['units'] = 'mm'
         ipw.name = 'PW'
         ipw.attrs['long_name'] = 'Precipitable Water'
-        ipw.attrs['units'] = 'kg / m^2'
+        ipw.attrs['units'] = 'mm'
         ipw = ipw.to_dataset(name='PW')
         ipw['PW_error'] = ipw_error
         ipw.attrs['description'] = 'whole data Tm formulation using {} model'.format(
@@ -2548,9 +2536,6 @@ station_continous_times = {
 
 
 
-
-
-
 def israeli_gnss_stations_long_term_trend_analysis(
         gis_path=gis_path,
         rel_plot='tela', show_names=True,
@@ -3053,76 +3038,94 @@ def filter_month_year_data_heatmap_plot(da_ts, freq='5T', thresh=50.0,
     return da
 
 
-def load_PW_with_drop_thresh(station='tela', thresh=50.0):
-    import xarray as xr
-    pw = xr.load_dataset(work_yuval / 'GNSS_PW.nc')[station]
-    if thresh is not None:
-        print('loading 5 mins GNSS PW {} station with threshold={}%.'.format(station, thresh))
-        da = filter_month_year_data_heatmap_plot(pw, freq='5T', thresh=thresh,
-                                                 plot=False, verbose=True)
-    else:
-        print('loading 5 mins GNSS PW {} station without threshold.'.format(station))
-    return da
+#def load_PW_with_drop_thresh(station='tela', thresh=50.0):
+#    import xarray as xr
+#    pw = xr.load_dataset(work_yuval / 'GNSS_PW.nc')[station]
+#    if thresh is not None:
+#        print('loading 5 mins GNSS PW {} station with threshold={}%.'.format(station, thresh))
+#        da = filter_month_year_data_heatmap_plot(pw, freq='5T', thresh=thresh,
+#                                                 plot=False, verbose=True)
+#    else:
+#        print('loading 5 mins GNSS PW {} station without threshold.'.format(station))
+#    return da
 
 
-def drop_GNSS_PW_thresh_and_combine_save_all(
-    path=work_yuval, thresh=None, to_drop=[
-        'nizn', 'hrmn'], combine_dict={
+def select_ZWD_thresh_and_combine_save_all(
+    path=work_yuval, thresh=None, to_drop=['hrmn'], combine_dict={
             'klhv': [
                 'klhv', 'lhav'], 'mrav': [
                     'gilb', 'mrav']}):
     import xarray as xr
     import numpy as np
-    GNSS_pw = xr.open_dataset(path / 'GNSS_PW.nc')
+    ds = load_gipsyx_results(field_all='WetZ')
+    ds_error = load_gipsyx_results(field_all='WetZ_error')
     thresh_list = []
-    stations_only = [x for x in GNSS_pw.data_vars if '_error' not in x]
-    for station in stations_only:
-        pw = load_PW_with_drop_thresh(station=station, thresh=thresh)
-        thresh_list.append(pw)
-    GNSS_pw_thresh = xr.merge(thresh_list)
+    thresh_error_list = []
+    # stations_only = [x for x in GNSS_pw.data_vars if '_error' not in x]
+    for station in ds.data_vars:
+        zwd = filter_month_year_data_heatmap_plot(ds[station], freq='5T', thresh=thresh,
+                                                  plot=False, verbose=True)
+        zwd_error = filter_month_year_data_heatmap_plot(ds_error[station], freq='5T', thresh=thresh,
+                                                  plot=False, verbose=True)
+        thresh_list.append(zwd)
+        thresh_error_list.append(zwd_error)
+    zwd_thresh = xr.merge(thresh_list)
+    zwd_error_thresh = xr.merge(thresh_error_list)
     if combine_dict is not None:
         # combine stations:
         combined = []
+        combined_error = []
         for new_sta, sta_to_merge in combine_dict.items():
             print('merging {} to {}'.format(sta_to_merge, new_sta))
-            combined.append(combine_PW_stations(GNSS_pw_thresh, new_sta,
+            combined.append(combine_ZWD_stations(zwd_thresh, new_sta,
+                                                sta_to_merge, thresh))
+            combined_error.append(combine_ZWD_stations(zwd_error_thresh, new_sta,
                                                 sta_to_merge, thresh))
         # drop old stations:
         sta_to_drop = [item for sublist in combine_dict.values()
                        for item in sublist]
         for sta in sta_to_drop:
-            GNSS_pw_thresh = GNSS_pw_thresh[[
-                x for x in GNSS_pw_thresh.data_vars if sta not in x]]
+            zwd_thresh = zwd_thresh[[
+                x for x in zwd_thresh.data_vars if sta not in x]]
+            zwd_error_thresh = zwd_error_thresh[[
+                x for x in zwd_error_thresh.data_vars if sta not in x]]
         # plug them in GNSS dataset:
         for sta in combined:
-            GNSS_pw_thresh[sta.name] = sta
+            zwd_thresh[sta.name] = sta
+            zwd_error_thresh[sta.name] = sta
     if to_drop is not None:
         for sta in to_drop:
             print('dropping {} station.'.format(sta))
-            GNSS_pw_thresh = GNSS_pw_thresh[[
-                x for x in GNSS_pw_thresh.data_vars if sta not in x]]
+            zwd_thresh = zwd_thresh[[
+                x for x in zwd_thresh.data_vars if sta not in x]]
+            zwd_error_thresh = zwd_error_thresh[[
+                x for x in zwd_error_thresh.data_vars if sta not in x]]
     mean_days_dropped_percent = np.mean(np.array([float(
-        GNSS_pw_thresh[x].attrs['days_dropped_percent']) for x in
-        GNSS_pw_thresh.data_vars]))
+        zwd_thresh[x].attrs['days_dropped_percent']) for x in
+        zwd_thresh.data_vars]))
     mean_months_dropped_percent = np.mean(np.array([float(
-        GNSS_pw_thresh[x].attrs['months_dropped_percent']) for x in GNSS_pw_thresh.data_vars]))
-    GNSS_pw_thresh.attrs['thresh'] = '{:.0f}'.format(thresh)
-    GNSS_pw_thresh.attrs['mean_days_dropped_percent'] = '{:.2f}'.format(mean_days_dropped_percent)
-    GNSS_pw_thresh.attrs['mean_months_dropped_percent'] = '{:.2f}'.format(mean_months_dropped_percent)
-    filename = 'GNSS_PW_thresh_{:.0f}.nc'.format(thresh)
+        zwd_thresh[x].attrs['months_dropped_percent']) for x in zwd_thresh.data_vars]))
+    zwd_thresh.attrs['thresh'] = '{:.0f}'.format(thresh)
+    zwd_thresh.attrs['mean_days_dropped_percent'] = '{:.2f}'.format(mean_days_dropped_percent)
+    zwd_thresh.attrs['mean_months_dropped_percent'] = '{:.2f}'.format(mean_months_dropped_percent)
+    # rename zwd_error to _error suffix:
+    for x in zwd_error_thresh.data_vars:
+        zwd_error_thresh = zwd_error_thresh.rename({x: x + '_error'})
+    zwd = xr.merge([zwd_thresh, zwd_error_thresh])
+    filename = 'ZWD_thresh_{:.0f}.nc'.format(thresh)
     comp = dict(zlib=True, complevel=9)  # best compression
-    encoding = {var: comp for var in GNSS_pw_thresh.data_vars}
-    GNSS_pw_thresh.to_netcdf(path / filename, 'w', encoding=encoding)
+    encoding = {var: comp for var in zwd_thresh.data_vars}
+    zwd.to_netcdf(path / filename, 'w', encoding=encoding)
     print('Done!')
-    return GNSS_pw_thresh
+    return zwd_thresh
 
 
-def combine_PW_stations(pw, name, stations, thresh=None):
+def combine_ZWD_stations(zwd, name, stations, thresh=None):
     import xarray as xr
     import numpy as np
     from aux_gps import get_unique_index
-    time_dim = list(set(pw.dims))[0]
-    slist = [pw[x] for x in stations]
+    time_dim = list(set(zwd.dims))[0]
+    slist = [zwd[x] for x in stations]
     combined_station = xr.concat(slist, time_dim)
     # take care of months and attrs:
     if thresh is not None:
@@ -3130,7 +3133,7 @@ def combine_PW_stations(pw, name, stations, thresh=None):
         for sta in stations:
             # extract month_dict from pw attrs:
             keys = ['months_{}'.format(x) for x in np.arange(1, 13)]
-            vals = [pw[sta].attrs[x] for x in keys]
+            vals = [zwd[sta].attrs[x] for x in keys]
             month_dict = dict(zip(keys, vals))
             months = [(x, y) for x, y in month_dict.items()]
             months_add += np.array([x for x in dict(months).values()])
@@ -3165,7 +3168,7 @@ def load_gipsyx_results(station='tela', sample_rate=None,
         if sample_rate is None:
             glob = '{}_PPP*.nc'.format(station.upper())
             try:
-                file = path_glob(path, glob_str=glob)[0]
+                file = sorted(path_glob(path, glob_str=glob))[-1]
                 sample_rate = '5 mins'
             except FileNotFoundError as e:
                 print(e)
@@ -3223,16 +3226,18 @@ def load_gipsyx_results(station='tela', sample_rate=None,
         da_list = []
         stations_to_put = []
         for sta in stations:
-            ds = load_one_results_ds(sta, sample_rate, plot_fields=None)
-            if ds is not None:
-                da_list.append(ds[field_all])
+            da = load_one_results_ds(sta, sample_rate, plot_fields=None)
+            if da is not None:
+                da = da[field_all]
+                da.name = sta
+                da_list.append(da)
                 stations_to_put.append(sta)
             else:
                 print('skipping station {}'.format(sta))
                 continue
-        ds = xr.concat(da_list, dim='station')
-        ds['station'] = stations_to_put
-        ds = ds.to_dataset(dim='station')
+        ds = xr.merge(da_list)
+        # ds['station'] = stations_to_put
+        # ds = ds.to_dataset(dim='station')
     return ds
 
 

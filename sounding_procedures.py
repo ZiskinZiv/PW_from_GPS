@@ -12,6 +12,26 @@ era5_path = work_yuval / 'ERA5'
 edt_path = sound_path / 'edt'
 
 
+def get_field_from_radiosonde(path=sound_path, field='Tm', data_type='phys',
+                              reduce='Height', plot=True):
+    import xarray as xr
+    from aux_gps import get_unique_index
+    from aux_gps import keep_iqr
+    from aux_gps import plot_tmseries_xarray
+    from aux_gps import path_glob
+    file = path_glob(path, 'bet_dagan_{}_sounding_*.nc'.format(data_type))[0]
+    ds = xr.open_dataset(file)
+    if field is not None:
+        da = ds[field]
+        if reduce is not None:
+            da = da.dropna(reduce)[:, -1]
+            da = get_unique_index(da, dim='sound_time')
+            da = keep_iqr(da, k=2.0, dim='sound_time')
+    if plot:
+        plot_tmseries_xarray(da)
+    return da
+
+
 def calculate_edt_north_east_distance(ds):
     """to be inporporated in read_all"""
     import geopandas as gpd
@@ -220,7 +240,7 @@ def process_new_field_from_radiosonde_data(phys_ds, dim='sound_time',
         if verbose:
             print('processing {} for {} field.'.format(record, field_name))
         if field_name == 'pw':
-            long_name = 'Percipatiable water'
+            long_name = 'Precipatiable water'
             Dewpt = phys_ds['Dewpt'].isel({dim: i})
             P = phys_ds['P'].isel({dim: i})
             try: 

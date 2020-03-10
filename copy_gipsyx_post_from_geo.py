@@ -197,7 +197,7 @@ if __name__ == '__main__':
     if pwpath is None:
         raise ValueError('Put source code folder at $PWCORE')
     # get all the names of israeli gnss stations:
-    isr_stations = pd.read_csv(pwpath / 'stations_approx_loc.txt',
+    isr_stations = pd.read_csv(pwpath / 'israeli_gnss_coords.txt',
                                delim_whitespace=True)
     isr_stations = isr_stations.index.tolist()
     if workpath is None:

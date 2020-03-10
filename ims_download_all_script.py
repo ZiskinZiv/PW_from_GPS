@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Created on Tue Jun 25 14:29:10 2019
-
+This script needs more work, mainly on updating new data
 @author: ziskin
 """
 
@@ -172,7 +172,7 @@ def download_ims_single_station(stationid, savepath=None,
         logger.error('Wait for at least one day before trying to update...')
     logger.info(
          'Downloading station {} with id: {}, from {} to {}'.format(
-                 st_name[0],
+                 st_name.values[0],
                  stationid,
                  earliest,
                  latest))
@@ -201,7 +201,11 @@ def download_ims_single_station(stationid, savepath=None,
                 logger.info('parsing to dataframe...')
                 df_list.append(parse_ims_to_df(r.json()['data'], channel_name))
             logger.info('concatanating df and transforming to xarray...')
-            df_all = pd.concat(df_list)
+            try:
+                df_all = pd.concat(df_list)
+            except ValueError:
+                logger.warning('no new data on station {}.'.format(stationid))
+                return None
             # only valid results:
             # df_valid = df_all[df_all['valid']]
             df_all.index.name = 'time'
@@ -261,7 +265,8 @@ def download_all_10mins_ims(savepath, channel_name='TD'):
     glob = '*_{}_10mins.nc'.format(channel_name)
     files = sorted(path_glob(savepath, glob, return_empty_list=True))
     files = [x for x in files if x.is_file()]
-    time_dim = list(set(xr.open_dataarray(files[0]).dims))[0]
+    if files:
+        time_dim = list(set(xr.open_dataarray(files[0]).dims))[0]
     last_dates = [check_ds_last_datetime(xr.open_dataarray(x)) for x in files]
     st_id_downloaded = [int(x.as_posix().split('/')[-1].split('_')[1]) for x in files]
     d = dict(zip(st_id_downloaded, last_dates))
@@ -277,15 +282,20 @@ def download_all_10mins_ims(savepath, channel_name='TD'):
             da = download_ims_single_station(savepath=savepath,
                                              channel_name=channel_name,
                                              stationid=st_id, update=d[st_id])
-            file = path_glob(savepath, '*_{}_{}_10mins.nc'.format(st_id, channel_name))[0]
-            da_old = xr.open_dataarray(file)
-            da = xr.concat([da, da_old], time_dim)
-            filename = '_'.join([stations['name'], str(st_id), channel_name,
-                                 '10mins']) + '.nc'
-            comp = dict(zlib=True, complevel=9)  # best compression
-            encoding = {var: comp for var in da.to_dataset().data_vars}
-            logger.info('saving to {} to {}'.format(filename, savepath))
-            da.to_netcdf(savepath / filename, 'w', encoding=encoding)
+            if da is not None:
+                file = path_glob(savepath, '*_{}_{}_10mins.nc'.format(st_id, channel_name))[0]
+                da_old = xr.load_dataarray(file)
+                da = xr.concat([da, da_old], time_dim)
+                filename = '_'.join([row['name'], str(st_id), channel_name,
+                                     '10mins']) + '.nc'
+                comp = dict(zlib=True, complevel=9)  # best compression
+                encoding = {var: comp for var in da.to_dataset().data_vars}
+                logger.info('saving to {} to {}'.format(filename, savepath))
+                try:
+                    da.to_netcdf(savepath / filename, 'w', encoding=encoding)
+                except PermissionError:
+                    (savepath / filename).unlink()
+                    da.to_netcdf(savepath / filename, 'w', encoding=encoding)
             # print('done!')
         else:
             logger.warning('station {} is already in {}, skipping...'.format(st_id,
