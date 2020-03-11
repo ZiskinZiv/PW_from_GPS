@@ -39,7 +39,7 @@ GNSS = work_yuval / 'GNSS_stations'
 cwd = Path().cwd()
 gnss_sound_stations_dict = {'acor': '08001', 'mall': '08302'}
 
-# TODO: do ZWD selection from post-proccesed GipsyX results
+# TODO: do ZWD selection from post-proccesed GipsyX results and their errors
 # TODO: fix mean_zwd_over_sound_time
 # TODO: re-do the ts-tm connection for the 2013-09 to 2019 radiosonde
 # TODO: then assemble PW for all the stations.
