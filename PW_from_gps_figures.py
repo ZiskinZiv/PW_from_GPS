@@ -74,6 +74,8 @@ def caption(text, color='blue', **kwargs):
 
 def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
                                dem_path=dem_path, save=True):
+    # TODO: add box around merged stations and removed stations
+    # TODO: add color map labels to stations removed and merged
     from aux_gps import gantt_chart
     import xarray as xr
     import pandas as pd
@@ -96,7 +98,7 @@ def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
     da['station'] = [x.upper() for x in da.station.values]
     ds = da.to_dataset('station')
     title = 'RINEX files availability for the Israeli GNSS stations'
-    ax_gantt = gantt_chart(ds, ax=ax_gantt, fw='normal', title='')
+    ax_gantt = gantt_chart(ds, ax=ax_gantt, fw='normal', title='', pe_dict={''})
     # Israel gps ims map:
     ax_map = plot_israel_map(gis_path=gis_path, ax=ax_map)
     # overlay with dem data:
