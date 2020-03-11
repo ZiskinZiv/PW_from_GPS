@@ -172,7 +172,7 @@ def consecutive_runs(arr, num=False):
     return A
 
 
-def gantt_chart(ds, fw='bold', ax=None,
+def gantt_chart(ds, fw='bold', ax=None, pe_dict=None,
                 title='RINEX files availability for the Israeli GNSS stations'):
     import pandas as pd
     import matplotlib.pyplot as plt
@@ -180,6 +180,7 @@ def gantt_chart(ds, fw='bold', ax=None,
     import seaborn as sns
     import matplotlib.dates as mdates
     from matplotlib.ticker import AutoMinorLocator
+    import matplotlib.patheffects as pe
     # TODO: fix the ticks/ticks labels
     sns.set_palette(sns.color_palette("tab10", len(ds)))
     if ax is None:
@@ -208,7 +209,10 @@ def gantt_chart(ds, fw='bold', ax=None,
 #        dt_min_list.append(dt_min)
 #        dt_max_list.append(dt_max)
         # v = int(calc(i, max = len(ds)))
-        ax.hlines(y, dt_min, dt_max, linewidth=10, color=colors[i])
+        if pe_dict is not None:
+            ax.hlines(y, dt_min, dt_max, linewidth=10, color=colors[i], path_effects=[pe.Stroke(linewidth=15, foreground='k'), pe.Normal()])
+        else:
+            ax.hlines(y, dt_min, dt_max, linewidth=10, color=colors[i])
         #plt.show()
         # ds[da][~ds[da].isnull()] = i + 1
         # ds[da] = ds[da].fillna(0)
