@@ -2,7 +2,11 @@
 # -*- coding: utf-8 -*-
 """
 Created on Mon Mar 25 15:50:20 2019
-
+work flow for ZWD and PW retreival after python copy_gipsyx_post_from_geo.py:
+    1)save_ZWD_unselected_data_and_errors
+    2)select_ZWD_thresh_and_combine_save_all
+    3)use mean_ZWD_over_sound_time_and_fit_tstm to obtain the mda (model dataarray)
+    4)assamble GNSS_PW using ...
 @author: shlomi
 """
 
@@ -39,9 +43,7 @@ GNSS = work_yuval / 'GNSS_stations'
 cwd = Path().cwd()
 gnss_sound_stations_dict = {'acor': '08001', 'mall': '08302'}
 
-# TODO: do ZWD selection from post-proccesed GipsyX results and their errors
-# TODO: fix mean_zwd_over_sound_time
-# TODO: re-do the ts-tm connection for the 2013-09 to 2019 radiosonde
+# TODO: kappa_ml_with_cats yields smaller k using cats not None, check it...
 # TODO: then assemble PW for all the stations.
 class LinearRegression_with_stats(LinearRegression):
     """
@@ -517,12 +519,14 @@ def fit_ts_tm_produce_ipw_and_compare_TELA(phys_sound_file=phys_soundings,
     return pw_gps, tpw
 
 
-def mean_zwd_over_sound_time(path=work_yuval, sound_path=sound_path, data_type='phys',
-                             ims_path=ims_path, gps_station='tela',
-                             times=['2007', '2019']):
+def mean_ZWD_over_sound_time_and_fit_tstm(path=work_yuval,
+                                          sound_path=sound_path,
+                                          data_type='phys',
+                                          ims_path=ims_path,
+                                          gps_station='tela',
+                                          times=['2007', '2019'], plot=False,
+                                          cats=None):
     import xarray as xr
-    from aux_gps import get_unique_index
-    from aux_gps import keep_iqr
     from aux_gps import multi_time_coord_slice
     from aux_gps import path_glob
     from aux_gps import xr_reindex_with_date_range
@@ -530,13 +534,15 @@ def mean_zwd_over_sound_time(path=work_yuval, sound_path=sound_path, data_type='
     """mean the WetZ over the gps station soundings datetimes to get a more
         accurate realistic measurement comparison to soundings"""
     tpw = get_field_from_radiosonde(path=sound_path, field='PW', data_type=data_type,
-                                    reduce='Height', plot=False)
+                                    reduce='Height', plot=False, times=times)
     min_time = get_field_from_radiosonde(path=sound_path, field='min_time', data_type='phys',
-                                         reduce=None, plot=False)
+                                         reduce=None, plot=False, times=times)
     max_time = get_field_from_radiosonde(path=sound_path, field='max_time', data_type='phys',
-                                         reduce=None, plot=False)
-    min_time = min_time.values
-    max_time = max_time.values
+                                         reduce=None, plot=False, times=times)
+    sound_time = get_field_from_radiosonde(path=sound_path, field='sound_time', data_type='phys',
+                                           reduce=None, plot=False, times=times)
+    min_time = min_time.dropna('sound_time').values
+    max_time = max_time.dropna('sound_time').values
     # load the zenith wet daley for GPS (e.g.,TELA) station:
     file = path_glob(path, 'ZWD_thresh_*.nc')[0]
     zwd = xr.open_dataset(file)[gps_station]
@@ -558,7 +564,7 @@ def mean_zwd_over_sound_time(path=work_yuval, sound_path=sound_path, data_type='
         zwd[da_group.name]).std('time')
     ds['{}_error'.format(gps_station)] = zwd_error.groupby(
         zwd[da_group.name]).mean('time')
-    ds['sound_time'] = tpw.sound_time
+    ds['sound_time'] = sound_time.dropna('sound_time')
     ds['tpw_bet_dagan'] = tpw
     wetz = ds['{}'.format(gps_station)]
     wetz_error = ds['{}_error'.format(gps_station)]
@@ -572,23 +578,31 @@ def mean_zwd_over_sound_time(path=work_yuval, sound_path=sound_path, data_type='
                                       time_dim='time', name='sound_time')
     td[da_group.name] = da_group
     ts_sound = td.ts.groupby(td[da_group.name]).mean('time')
-    ts_sound['sound_time'] = tpw.sound_time
+    ts_sound['sound_time'] = sound_time.dropna('sound_time')
     ds['{}_ts'.format(gps_station)] = ts_sound
-    return ds
+    ts_sound = ts_sound.rename({'sound_time': 'time'})
+    # prepare ts-tm data:
+    tm = get_field_from_radiosonde(path=sound_path, field='Tm', data_type=data_type,
+                                   reduce='Height', plot=False)
+    ts = get_field_from_radiosonde(path=sound_path, field='Ts', data_type=data_type,
+                                   reduce=None, plot=False)
+    tstm = xr.Dataset()
+    tstm['Tm'] = tm
+    tstm['Ts'] = ts
+    tstm = tstm.rename({'sound_time': 'time'})
     # select a model:
-    mda = ml_models_T_from_sounding(categories=None, models=['LR'],
-                                    physical_file=phys_sound_file, plot=False,
+    mda = ml_models_T_from_sounding(categories=cats, models=['LR', 'TSEN'],
+                                    physical_file=tstm, plot=plot,
                                     times=times)
-    model = mda.sel(name='LR').values.item()
     # compute the kappa function and multiply by ZWD to get PW(+error):
-    k, dk = kappa_ml(ts_sound, model=model, verbose=True)
-    ds['{}_pw'.format(gps_station)] = k * wetz
+    k, dk = produce_kappa_ml_with_cats(ts_sound, mda=mda, model_name='TSEN')
+    ds['{}_pw'.format(gps_station)] = k.rename({'time': 'sound_time'}) * wetz
     ds['{}_pw_error'.format(gps_station)] = np.sqrt(
         wetz_error**2.0 + dk**2.0)
     # divide by kappa calculated from bet_dagan ts to get bet_dagan zwd:
-    k = kappa(phys_ds['tm'], Tm_input=True)
+    k = kappa(tm, Tm_input=True)
     ds['zwd_bet_dagan'] = ds['tpw_bet_dagan'] / k
-    return ds
+    return ds, mda
 
 
 #def align_physical_bet_dagan_soundings_pw_to_gps_station_zwd(
@@ -1326,32 +1340,113 @@ def group_anoms_and_cluster(load_path=work_yuval, remove_grp='month', thresh=Non
     return df, labels_sorted, weights
 
 
-def produce_GNSS_station_PW(station='tela', sample_rate=None, model=None,
-                            phys=None, plot=True):
+def produce_GNSS_station_PW(station='tela', mda=None,
+                            plot=True, model_name='TSEN', model_dict=None):
     from aux_gps import plot_tmseries_xarray
+    import numpy as np
+    from aux_gps import xr_reindex_with_date_range
     """use phys=phys_soundings to use physical bet dagan radiosonde report,
     otherwise phys=None to use wyoming data. model=None is LR, model='bevis'
     is Bevis 1992-1994 et al. model
     use sample_rate=None to use full 5 min sample_rate"""
-    sample = {'1H': 'hourly', '3H': '3hourly', 'D': 'Daily', 'W': 'weekly',
-              'MS': 'monthly'}
-    zwd = load_gipsyx_results(station, sample_rate, plot_fields=None)
-    Ts = load_GNSS_TD(station, sample_rate, False)
+    zwd = load_gipsyx_results(station, sample_rate=None, plot_fields=None)
+    Ts = load_GNSS_TD(station, sample_rate=None, plot=False)
     # use of damped Ts: ?
-    Ts_daily = Ts.resample(time='1D').mean()
-    upsampled_daily = Ts_daily.resample(time='1D').ffill()
-    damped = Ts*0.25 + 0.75*upsampled_daily
-    if model is None:
-        mda = ml_models_T_from_sounding(categories=None, models=['LR'],
-                                        physical_file=phys, plot=False)
-    elif model == 'bevis':
-        mda = None
-    PW = produce_single_station_IPW(zwd, Ts, mda)
-    PW = PW.rename({'PW': station})
-    PW = PW.rename({'PW_error': '{}_error'.format(station)})
+#    Ts_daily = Ts.resample(time='1D').mean()
+#    upsampled_daily = Ts_daily.resample(time='1D').ffill()
+#    damped = Ts*0.25 + 0.75*upsampled_daily
+    if mda is None and model_dict is not None:
+        k, dk = kappa_ml(Ts, model=model_dict)
+    elif mda is not None:
+        k, dk = produce_kappa_ml_with_cats(Ts, mda=mda, model_name=model_name)
+    else:
+        raise KeyError('need model or model_dict argument for PW!')
+    PW = (k * zwd['WetZ']).to_dataset(name=station)
+    PW[station + '_error']= np.sqrt(zwd['WetZ_error']**2.0 + dk**2.0)
+    PW.attrs['units'] = 'mm'
+    PW.attrs['long_name'] = 'Precipitable water'
     if plot:
         plot_tmseries_xarray(PW)
     return PW
+
+
+def produce_kappa_ml_with_cats(Tds, mda=None, model_name='LR'):
+    """produce kappa_ml with different categories such as hour, season"""
+    import xarray as xr
+    if mda is None:
+        # Bevis 1992 relationship:
+        print('Using Bevis 1992-1994 Ts-Tm relationship.')
+        kappa_ds, kappa_err = kappa_ml(Tds, model=None)
+        return kappa_ds, kappa_err
+    time_dim = mda.attrs['time_dim']
+    hours = None
+    seasons = None
+    if 'season' in [x.split('.')[-1] for x in list(mda.dims)]:
+        val = mda['{}.season'.format(time_dim)].values.tolist()
+        key = '{}.season'.format(time_dim)
+        seasons = {key: val}
+    if 'hour' in [x.split('.')[-1] for x in list(mda.dims)]:
+        val = mda['{}.hour'.format(time_dim)].values.tolist()
+        key = '{}.hour'.format(time_dim)
+        hours = {key: val}
+    if len(mda.dims) == 1 and 'name' in mda.dims:
+        print('Found whole data Ts-Tm relationship.')
+#        Tmul = mda.sel(parameter='slope').values.item()
+#        Toff = mda.sel(parameter='intercept').values.item()
+        m = mda.sel(name=model_name).values.item()
+        kappa_ds, kappa_err = kappa_ml(
+            Tds, model=m, slope_err=mda.attrs['LR_whole_stderr_slope'])
+        return kappa_ds, kappa_err
+    elif len(mda.dims) == 2 and hours is not None:
+        print('Found hourly Ts-Tm relationship slice.')
+        kappa_list = []
+        kappa_err_list = []
+        h_key = [x for x in hours.keys()][0]
+        for hr_num in [x for x in hours.values()][0]:
+            print('working on hour {}'.format(hr_num))
+            sliced = Tds.where(Tds[h_key] == hr_num).dropna(time_dim)
+            m = mda.sel({'name': model_name, h_key: hr_num}).values.item()
+            kappa_part, kappa_err = kappa_ml(sliced, model=m)
+            kappa_list.append(kappa_part)
+            kappa_err_list.append(kappa_err)
+        des_attrs = 'hourly data Tm formulation using {} model'.format(
+            model_name)
+    elif len(mda.dims) == 2 and seasons is not None:
+        print('Found season Ts-Tm relationship slice.')
+        kappa_list = []
+        kappa_err_list = []
+        s_key = [x for x in seasons.keys()][0]
+        for season in [x for x in seasons.values()][0]:
+            print('working on season {}'.format(season))
+            sliced = Tds.where(Tds[s_key] == season).dropna(time_dim)
+            m = mda.sel({'name': model_name, s_key: season}).values.item()
+            kappa_part, kappa_err = kappa_ml(sliced, model=m)
+            kappa_list.append(kappa_part)
+            kappa_err_list.append(kappa_err)
+        des_attrs = 'seasonly data Tm formulation using {} model'.format(
+            model_name)
+    elif (len(mda.dims) == 3 and seasons is not None and hours is not None):
+        print('Found hourly and seasonly Ts-Tm relationship slice.')
+        kappa_list = []
+        kappa_err_list = []
+        h_key = [x for x in hours.keys()][0]
+        s_key = [x for x in seasons.keys()][0]
+        for hr_num in [x for x in hours.values()][0]:
+            for season in [x for x in seasons.values()][0]:
+                print('working on season {}, hour {}'.format(
+                    season, hr_num))
+                sliced = Tds.where(Tds[s_key] == season).dropna(
+                    time_dim).where(Tds[h_key] == hr_num).dropna(time_dim)
+                m = mda.sel({'name': model_name, s_key: season,
+                             h_key: hr_num}).values.item()
+                kappa_part, kappa_err = kappa_ml(sliced, model=m)
+                kappa_list.append(kappa_part)
+                kappa_err_list.append(kappa_err)
+        des_attrs = 'hourly and seasonly data Tm formulation using {} model'.format(
+            model_name)
+    kappa_ds = xr.concat(kappa_list, time_dim)
+    kappa_err_ds = xr.concat(kappa_err_list, time_dim)
+    return kappa_ds, kappa_err_ds
 
 
 def produce_single_station_IPW(zwd, Tds, mda=None, model_name='LR'):
@@ -2140,29 +2235,32 @@ def ml_models_T_from_sounding(sound_path=sound_path, categories=None,
         models = [models]
     if physical_file is not None or station is not None:
         print('Overwriting ds input...')
-        if station is not None:
-            physical_file = path_glob(sound_path, 'station_{}_soundings_ts_tm_tpw*.nc'.format(station))[0]
-            print('station {} selected and loaded.'.format(station))
-        pds = xr.open_dataset(physical_file)
+        if not isinstance(physical_file, xr.Dataset):
+            if station is not None:
+                physical_file = path_glob(sound_path, 'station_{}_soundings_ts_tm_tpw*.nc'.format(station))[0]
+                print('station {} selected and loaded.'.format(station))
+            pds = xr.open_dataset(physical_file)
+        else:
+            pds = physical_file
+        time_dim = list(set(pds.dims))[0]
         pds = pds[['Tm', 'Ts']]
         pds = pds.rename({'Ts': 'ts', 'Tm': 'tm'})
-        pds = pds.rename({'sound_time': 'time'})
-        pds = get_unique_index(pds)
-        pds = keep_iqr(pds, k=2.0)
-        ds = pds.dropna('time')
+        # pds = pds.rename({'sound_time': 'time'})
+        pds = get_unique_index(pds, dim=time_dim)
+        pds = pds.map(keep_iqr, k=2.0, dim=time_dim, keep_attrs=True)
+        ds = pds.dropna(time_dim)
     else:
         ds = xr.open_dataset(sound_path /
                              'bet_dagan_sounding_pw_Ts_Tk_with_clouds.nc')
         ds = ds.reset_coords(drop=True)
     if times is not None:
-        ds = ds.sel(time=slice(*times))
+        ds = ds.sel({time_dim: slice(*times)})
     # define the possible categories and feed their dictionary:
     possible_cats = ['season', 'hour']
     pos_cats_dict = {}
     s_order = ['DJF', 'JJA', 'SON', 'MAM']
     h_order = [12, 0]
     cld_order = [0, 1]
-    time_dim = list(set(ds.dims))[0]
     if 'season' in possible_cats:
         pos_cats_dict['{}.season'.format(time_dim)] = s_order
     if 'hour' in possible_cats:
@@ -2265,10 +2363,10 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
 #        result[0] = a
 #        result[1] = b
         # sns.regplot(ds.ts.values, ds.tm.values, ax=axes[0])
-        df = ds.ts.dropna('time').to_dataframe()
-        df['tm'] = ds.tm.dropna('time')
+        df = ds.ts.dropna(time_dim).to_dataframe()
+        df['tm'] = ds.tm.dropna(time_dim)
         try:
-            df['clouds'] = ds.any_cld.dropna('time')
+            df['clouds'] = ds.any_cld.dropna(time_dim)
             hue = 'clouds'
         except AttributeError:
             hue = None
@@ -3052,34 +3150,31 @@ def filter_month_year_data_heatmap_plot(da_ts, freq='5T', thresh=50.0,
 
 def select_ZWD_thresh_and_combine_save_all(
     path=work_yuval, thresh=None, to_drop=['hrmn'], combine_dict={
-            'klhv': [
-                'klhv', 'lhav'], 'mrav': [
-                    'gilb', 'mrav']}):
+        'klhv': [
+            'klhv', 'lhav'], 'mrav': [
+            'gilb', 'mrav']}):
     import xarray as xr
     import numpy as np
-    ds = load_gipsyx_results(field_all='WetZ')
-    ds_error = load_gipsyx_results(field_all='WetZ_error')
-    thresh_list = []
-    thresh_error_list = []
-    # stations_only = [x for x in GNSS_pw.data_vars if '_error' not in x]
-    for station in ds.data_vars:
-        zwd = filter_month_year_data_heatmap_plot(ds[station], freq='5T', thresh=thresh,
-                                                  plot=False, verbose=True)
-        zwd_error = filter_month_year_data_heatmap_plot(ds_error[station], freq='5T', thresh=thresh,
-                                                  plot=False, verbose=True)
-        thresh_list.append(zwd)
-        thresh_error_list.append(zwd_error)
-    zwd_thresh = xr.merge(thresh_list)
-    zwd_error_thresh = xr.merge(thresh_error_list)
+    from aux_gps import path_glob
+    file = path_glob(path, 'ZWD_unselected*.nc')[0]
+    ds = xr.load_dataset(file)
+    zwd_thresh = ds.map(
+        filter_month_year_data_heatmap_plot,
+        freq='5T',
+        thresh=thresh,
+        plot=False,
+        verbose=True,
+        keep_attrs=True)
     if combine_dict is not None:
+        # first add _error to combine_dict keys and values:
+        ddict = combine_dict.copy()
+        for key, val in ddict.items():
+            combine_dict[key + '_error'] = [x + '_error' for x in val]
         # combine stations:
         combined = []
-        combined_error = []
         for new_sta, sta_to_merge in combine_dict.items():
             print('merging {} to {}'.format(sta_to_merge, new_sta))
             combined.append(combine_ZWD_stations(zwd_thresh, new_sta,
-                                                sta_to_merge, thresh))
-            combined_error.append(combine_ZWD_stations(zwd_error_thresh, new_sta,
                                                 sta_to_merge, thresh))
         # drop old stations:
         sta_to_drop = [item for sublist in combine_dict.values()
@@ -3087,19 +3182,16 @@ def select_ZWD_thresh_and_combine_save_all(
         for sta in sta_to_drop:
             zwd_thresh = zwd_thresh[[
                 x for x in zwd_thresh.data_vars if sta not in x]]
-            zwd_error_thresh = zwd_error_thresh[[
-                x for x in zwd_error_thresh.data_vars if sta not in x]]
         # plug them in GNSS dataset:
         for sta in combined:
             zwd_thresh[sta.name] = sta
-            zwd_error_thresh[sta.name] = sta
     if to_drop is not None:
+        # add _error to the fields to drop:
+        to_drop += [x + '_error' for x in to_drop]
         for sta in to_drop:
             print('dropping {} station.'.format(sta))
             zwd_thresh = zwd_thresh[[
                 x for x in zwd_thresh.data_vars if sta not in x]]
-            zwd_error_thresh = zwd_error_thresh[[
-                x for x in zwd_error_thresh.data_vars if sta not in x]]
     mean_days_dropped_percent = np.mean(np.array([float(
         zwd_thresh[x].attrs['days_dropped_percent']) for x in
         zwd_thresh.data_vars]))
@@ -3108,14 +3200,10 @@ def select_ZWD_thresh_and_combine_save_all(
     zwd_thresh.attrs['thresh'] = '{:.0f}'.format(thresh)
     zwd_thresh.attrs['mean_days_dropped_percent'] = '{:.2f}'.format(mean_days_dropped_percent)
     zwd_thresh.attrs['mean_months_dropped_percent'] = '{:.2f}'.format(mean_months_dropped_percent)
-    # rename zwd_error to _error suffix:
-    for x in zwd_error_thresh.data_vars:
-        zwd_error_thresh = zwd_error_thresh.rename({x: x + '_error'})
-    zwd = xr.merge([zwd_thresh, zwd_error_thresh])
     filename = 'ZWD_thresh_{:.0f}.nc'.format(thresh)
     comp = dict(zlib=True, complevel=9)  # best compression
     encoding = {var: comp for var in zwd_thresh.data_vars}
-    zwd.to_netcdf(path / filename, 'w', encoding=encoding)
+    zwd_thresh.to_netcdf(path / filename, 'w', encoding=encoding)
     print('Done!')
     return zwd_thresh
 
@@ -3238,6 +3326,25 @@ def load_gipsyx_results(station='tela', sample_rate=None,
         ds = xr.merge(da_list)
         # ds['station'] = stations_to_put
         # ds = ds.to_dataset(dim='station')
+    return ds
+
+
+def save_ZWD_unselected_data_and_errors(savepath=None, savename='israel'):
+    import xarray as xr
+    from aux_gps import rename_data_vars
+    ds = load_gipsyx_results(field_all='WetZ')
+    ds_error = load_gipsyx_results(field_all='WetZ_error')
+    ds_error = rename_data_vars(ds_error, suffix='_error', verbose=True)
+    ds = xr.merge([ds, ds_error])
+    if savepath is not None:
+        yr_min = ds.time.min().dt.year.item()
+        yr_max = ds.time.max().dt.year.item()
+        filename = 'ZWD_unselected_{}_{}-{}.nc'.format(
+            savename, yr_min, yr_max)
+        comp = dict(zlib=True, complevel=9)  # best compression
+        encoding = {var: comp for var in ds.data_vars}
+        ds.to_netcdf(savepath / filename, 'w', encoding=encoding)
+        print('Done!')
     return ds
 
 
