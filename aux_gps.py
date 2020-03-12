@@ -12,6 +12,19 @@ from PW_paths import work_yuval
 # TODO: if not, build func to replace datetimeindex to numbers and vise versa
 
 
+def rename_data_vars(ds, suffix='_error', remove_suffix=False, verbose=False):
+    import xarray as xr
+    if not isinstance(ds, xr.Dataset):
+        raise ValueError('input must be an xarray dataset object!')
+    vnames = [x for x in ds.data_vars]
+    new_names = [x + suffix for x in ds.data_vars]
+    name_dict = dict(zip(vnames, new_names))
+    ds = ds.rename_vars(name_dict)
+    if verbose:
+        print('var names were added the suffix {}.'.format(suffix))
+    return ds
+
+
 def remove_duplicate_spaces_in_string(line):
     import re
     line_removed = " ".join(re.split("\s+", line, flags=re.UNICODE))
@@ -1232,51 +1245,43 @@ def filter_nan_errors(ds, error_str='_error', dim='time', meta='action'):
     return ds
 
 
-def keep_iqr(ds, dim='time', qlow=0.25, qhigh=0.75, k=1.5, verbose=False):
-    """return the data in a dataset or dataarray only in the
-    Interquartile Range (low, high)"""
-    import xarray as xr
-
-    def keep_iqr_da(da, dim, qlow, qhigh, meta='action'):
-        from aux_gps import add_attr_to_xr
-        try:
-            quan = da.quantile([qlow, qhigh], dim).values
-        except TypeError:
-            # support for datetime64 dtypes:
-            if da.dtype == '<M8[ns]':
-                quan = da.astype(int).quantile(
-                        [qlow, qhigh], dim).astype('datetime64[ns]').values
-            # support for timedelta64 dtypes:
-            elif da.dtype == '<m8[ns]':
-                quan = da.astype(int).quantile(
-                        [qlow, qhigh], dim).astype('timedelta64[ns]').values
-        low = quan[0]
-        high = quan[1]
-        iqr = high - low
-        lower = low - (iqr * k)
-        higher = high + (iqr * k)
-        before = da.size
-        da = da.where((da < higher) & (da > lower)).dropna(dim)
-        after = da.size
-        if verbose:
-            print('dropped {} outliers from {}.'.format(before-after, da.name))
-        if meta in da.attrs:
-            append = True
-        else:
-            append = False
-        add_attr_to_xr(
-            da, meta, ', kept IQR ({}, {}, {})'.format(
-                qlow, qhigh, k), append)
-        return da
-    if isinstance(ds, xr.DataArray):
-        filtered_da = keep_iqr_da(ds, dim, qlow, qhigh)
-    elif isinstance(ds, xr.Dataset):
-        da_list = []
-        for name in ds.data_vars:
-            da = keep_iqr_da(ds[name], dim, qlow, qhigh)
-            da_list.append(da)
-        filtered_da = xr.merge(da_list)
-    return filtered_da
+def keep_iqr(da, dim='time', qlow=0.25, qhigh=0.75, k=1.5, drop_with_freq=None,
+             verbose=False):
+    """return the data in a dataarray only in the k times the
+    Interquartile Range (low, high), drop"""
+    from aux_gps import add_attr_to_xr
+    from aux_gps import xr_reindex_with_date_range
+    try:
+        quan = da.quantile([qlow, qhigh], dim).values
+    except TypeError:
+        # support for datetime64 dtypes:
+        if da.dtype == '<M8[ns]':
+            quan = da.astype(int).quantile(
+                    [qlow, qhigh], dim).astype('datetime64[ns]').values
+        # support for timedelta64 dtypes:
+        elif da.dtype == '<m8[ns]':
+            quan = da.astype(int).quantile(
+                    [qlow, qhigh], dim).astype('timedelta64[ns]').values
+    low = quan[0]
+    high = quan[1]
+    iqr = high - low
+    lower = low - (iqr * k)
+    higher = high + (iqr * k)
+    before = da.size
+    da = da.where((da < higher) & (da > lower)).dropna(dim)
+    after = da.size
+    if verbose:
+        print('dropped {} outliers from {}.'.format(before-after, da.name))
+    if 'action' in da.attrs:
+        append = True
+    else:
+        append = False
+    add_attr_to_xr(
+        da, 'action', ', kept IQR ({}, {}, {})'.format(
+            qlow, qhigh, k), append)
+    if drop_with_freq is not None:
+        da = xr_reindex_with_date_range(da, freq=drop_with_freq)
+    return da
 
 
 def transform_ds_to_lat_lon_alt(ds, coords_name=['X', 'Y', 'Z'],
