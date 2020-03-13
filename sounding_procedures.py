@@ -13,7 +13,8 @@ edt_path = sound_path / 'edt'
 
 
 def get_field_from_radiosonde(path=sound_path, field='Tm', data_type='phys',
-                              reduce='Height', times=['2007','2019'], plot=True):
+                              reduce='min', dim='Height',
+                              times=['2007','2019'], plot=True):
     import xarray as xr
     from aux_gps import get_unique_index
     from aux_gps import keep_iqr
@@ -24,7 +25,10 @@ def get_field_from_radiosonde(path=sound_path, field='Tm', data_type='phys',
     if field is not None:
         da = ds[field]
         if reduce is not None:
-            da = da.max(reduce)
+            if reduce == 'min':
+                da = da.min(dim)
+            elif reduce == 'max':
+                da = da.max(dim)
             da = da.reset_coords(drop=True)
         da = get_unique_index(da, dim='sound_time')
         da = keep_iqr(da, k=2.0, dim='sound_time', drop_with_freq='12H')

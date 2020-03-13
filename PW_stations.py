@@ -534,7 +534,7 @@ def mean_ZWD_over_sound_time_and_fit_tstm(path=work_yuval,
     """mean the WetZ over the gps station soundings datetimes to get a more
         accurate realistic measurement comparison to soundings"""
     tpw = get_field_from_radiosonde(path=sound_path, field='PW', data_type=data_type,
-                                    reduce='Height', plot=False, times=times)
+                                    reduce='max',dim='Height', plot=False, times=times)
     min_time = get_field_from_radiosonde(path=sound_path, field='min_time', data_type='phys',
                                          reduce=None, plot=False, times=times)
     max_time = get_field_from_radiosonde(path=sound_path, field='max_time', data_type='phys',
@@ -583,9 +583,9 @@ def mean_ZWD_over_sound_time_and_fit_tstm(path=work_yuval,
     ts_sound = ts_sound.rename({'sound_time': 'time'})
     # prepare ts-tm data:
     tm = get_field_from_radiosonde(path=sound_path, field='Tm', data_type=data_type,
-                                   reduce='Height', plot=False)
+                                   reduce='min', dim='Height', plot=False)
     ts = get_field_from_radiosonde(path=sound_path, field='Ts', data_type=data_type,
-                                   reduce=None, plot=False)
+                                   reduce=None, dim='Height', plot=False)
     tstm = xr.Dataset()
     tstm['Tm'] = tm
     tstm['Ts'] = ts
