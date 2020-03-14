@@ -6,7 +6,10 @@ work flow for ZWD and PW retreival after python copy_gipsyx_post_from_geo.py:
     1)save_ZWD_unselected_data_and_errors
     2)select_ZWD_thresh_and_combine_save_all
     3)use mean_ZWD_over_sound_time_and_fit_tstm to obtain the mda (model dataarray)
-    4)assamble GNSS_PW using ...
+    3*) can't use produce_kappa_ml_with_cats for hour on 5 mins data, dahhh!
+    can do that with dayofyear, month, season (need to implement it first)
+    4)assamble GNSS_PW_thresh using mda (e.g., season) from  3 by running 
+    GNSS_PW_israeli_stations, default choice is None for mda, using whole data ts-tm 
 @author: shlomi
 """
 
@@ -110,6 +113,49 @@ class LinearRegression_with_stats(LinearRegression):
         # positive or negative.
         self.betasPValue = 1 - stats.t.cdf(abs(self.betasTStat),df)
         return self
+
+
+def compare_different_cats_bet_dagan_tela():
+    from aux_gps import error_mean_rmse
+    ds, mda = mean_ZWD_over_sound_time_and_fit_tstm(
+        plot=False, times=['2013-09', '2020'], cats=None)
+    ds_hour, mda = mean_ZWD_over_sound_time_and_fit_tstm(
+        plot=False, times=['2013-09', '2020'], cats=['hour'])
+    ds_season, mda = mean_ZWD_over_sound_time_and_fit_tstm(
+        plot=False, times=['2013-09', '2020'], cats=['season'])
+    ds_hour_season, mda = mean_ZWD_over_sound_time_and_fit_tstm(
+        plot=False, times=['2013-09', '2020'], cats=['hour', 'season'])
+    ds = ds.dropna('sound_time')
+    ds_hour = ds_hour.dropna('sound_time')
+    ds_season = ds_season.dropna('sound_time')
+    ds_hour_season = ds_hour_season.dropna('sound_time')
+    mean_none, rmse_none = error_mean_rmse(ds['tpw_bet_dagan'], ds['tela_pw'])
+    mean_hour, rmse_hour = error_mean_rmse(
+        ds_hour['tpw_bet_dagan'], ds_hour['tela_pw'])
+    mean_season, rmse_season = error_mean_rmse(
+        ds_season['tpw_bet_dagan'], ds_season['tela_pw'])
+    mean_hour_season, rmse_hour_season = error_mean_rmse(
+        ds_hour_season['tpw_bet_dagan'], ds_hour_season['tela_pw'])
+    hour_mean_per = 100 * (abs(mean_none) - abs(mean_hour)) / abs(mean_none)
+    hour_rmse_per = 100 * (abs(rmse_none) - abs(rmse_hour)) / abs(rmse_none)
+    season_mean_per = 100 * (abs(mean_none) - abs(mean_season)) / abs(mean_none)
+    season_rmse_per = 100 * (abs(rmse_none) - abs(rmse_season)) / abs(rmse_none)
+    hour_season_mean_per = 100 * (abs(mean_none) - abs(mean_hour_season)) / abs(mean_none)
+    hour_season_rmse_per = 100 * (abs(rmse_none) - abs(rmse_hour_season)) / abs(rmse_none)
+    print(
+        'whole data mean: {:.2f} and rmse: {:.2f}'.format(
+            mean_none,
+            rmse_none))
+    print(
+    'hour data mean: {:.2f} and rmse: {:.2f}, {:.1f} % and {:.1f} % better than whole data.'.format(
+        mean_hour, rmse_hour, hour_mean_per, hour_rmse_per))
+    print(
+    'season data mean: {:.2f} and rmse: {:.2f}, {:.1f} % and {:.1f} % better than whole data.'.format(
+        mean_season, rmse_season, season_mean_per, season_rmse_per))
+    print(
+    'hour and season data mean: {:.2f} and rmse: {:.2f}, {:.1f} % and {:.1f} % better than whole data.'.format(
+        mean_hour_season, rmse_hour_season, hour_season_mean_per, hour_season_rmse_per))
+    return
 
 
 def PW_trend_analysis(path=work_yuval, anom=False, station='tela'):
@@ -1205,42 +1251,48 @@ def produce_geo_df(gis_path=gis_path, plot=True):
     return ims, gps
 
 
-def save_GNSS_PW_israeli_stations(savepath=work_yuval, phys=phys_soundings):
-    from pathlib import Path
-    import pandas as pd
+def save_GNSS_PW_israeli_stations(path=work_yuval, ims_path=ims_path,
+                                  savepath=work_yuval, mda=None,
+                                  model_name='TSEN', thresh=50):
     import xarray as xr
-    sample = {'1H': 'hourly', '3H': '3hourly', 'D': 'Daily', 'W': 'weekly',
-              'MS': 'monthly'}
-    filename = 'israeli_gnss_coords.txt'
-    df = pd.read_csv(Path().cwd() / filename, header=0, delim_whitespace=True)
-    stations = df.index.tolist()
+    from aux_gps import path_glob
+    file = path_glob(path, 'ZWD_thresh_{:.0f}.nc'.format(thresh))[0]
+    zwd = xr.open_dataset(file)
+    print('loaded {} file as ZWD.'.format(file.as_posix().split('/')[-1]))
+    file = sorted(path_glob(ims_path, 'GNSS_5mins_TD_ALL_*.nc'))[-1]
+    Ts = xr.open_dataset(file)
+    print('loaded {} file as Ts.'.format(file.as_posix().split('/')[-1]))
+    stations = [x for x in zwd.data_vars]
     ds_list = []
     for sta in stations:
         print(sta, '5mins')
-        pw = produce_GNSS_station_PW(sta, None, plot=False, phys=phys)
+        pw = produce_GNSS_station_PW(zwd[sta], Ts[sta.split('_')[0]], mda=mda,
+                                     plot=False, model_name=model_name,
+                                     model_dict=None)
         ds_list.append(pw)
     ds = xr.merge(ds_list)
+    ds.attrs.update(zwd.attrs)
     if savepath is not None:
-        filename = 'GNSS_PW.nc'
+        filename = 'GNSS_PW_thresh_{:.0f}.nc'.format(thresh)
         print('saving {} to {}'.format(filename, savepath))
         comp = dict(zlib=True, complevel=9)  # best compression
         encoding = {var: comp for var in ds.data_vars}
         ds.to_netcdf(savepath / filename, 'w', encoding=encoding)
-    for skey in sample.keys():
-        ds_list = []
-        for sta in stations:
-            print(sta, sample[skey])
-            pw = produce_GNSS_station_PW(sta, skey, plot=False, phys=phys)
-            ds_list.append(pw)
-        ds = xr.merge(ds_list)
-        if savepath is not None:
-            filename = 'GNSS_{}_PW.nc'.format(sample[skey])
-            print('saving {} to {}'.format(filename, savepath))
-            comp = dict(zlib=True, complevel=9)  # best compression
-            encoding = {var: comp for var in ds.data_vars}
-            ds.to_netcdf(savepath / filename, 'w', encoding=encoding)
+#    for skey in sample.keys():
+#        ds_list = []
+#        for sta in stations:
+#            print(sta, sample[skey])
+#            pw = produce_GNSS_station_PW(sta, skey, plot=False, phys=phys)
+#            ds_list.append(pw)
+#        ds = xr.merge(ds_list)
+#        if savepath is not None:
+#            filename = 'GNSS_{}_PW.nc'.format(sample[skey])
+#            print('saving {} to {}'.format(filename, savepath))
+#            comp = dict(zlib=True, complevel=9)  # best compression
+#            encoding = {var: comp for var in ds.data_vars}
+#            ds.to_netcdf(savepath / filename, 'w', encoding=encoding)
     print('Done!')
-    return
+    return ds
 
 
 def align_group_pw_and_T_to_long_term_monthly_means_and_save(
@@ -1340,17 +1392,14 @@ def group_anoms_and_cluster(load_path=work_yuval, remove_grp='month', thresh=Non
     return df, labels_sorted, weights
 
 
-def produce_GNSS_station_PW(station='tela', mda=None,
+def produce_GNSS_station_PW(zwd_thresh, Ts, mda=None,
                             plot=True, model_name='TSEN', model_dict=None):
-    from aux_gps import plot_tmseries_xarray
     import numpy as np
-    from aux_gps import xr_reindex_with_date_range
-    """use phys=phys_soundings to use physical bet dagan radiosonde report,
-    otherwise phys=None to use wyoming data. model=None is LR, model='bevis'
-    is Bevis 1992-1994 et al. model
-    use sample_rate=None to use full 5 min sample_rate"""
-    zwd = load_gipsyx_results(station, sample_rate=None, plot_fields=None)
-    Ts = load_GNSS_TD(station, sample_rate=None, plot=False)
+    """model=None is LR, model='bevis'
+    is Bevis 1992-1994 et al."""
+    zwd_name = zwd_thresh.name
+    Ts_name = Ts.name
+    assert Ts_name in zwd_name
     # use of damped Ts: ?
 #    Ts_daily = Ts.resample(time='1D').mean()
 #    upsampled_daily = Ts_daily.resample(time='1D').ffill()
@@ -1361,12 +1410,22 @@ def produce_GNSS_station_PW(station='tela', mda=None,
         k, dk = produce_kappa_ml_with_cats(Ts, mda=mda, model_name=model_name)
     else:
         raise KeyError('need model or model_dict argument for PW!')
-    PW = (k * zwd['WetZ']).to_dataset(name=station)
-    PW[station + '_error']= np.sqrt(zwd['WetZ_error']**2.0 + dk**2.0)
-    PW.attrs['units'] = 'mm'
-    PW.attrs['long_name'] = 'Precipitable water'
+    PW = zwd_thresh.copy(deep=True)
+    if '_error' in zwd_name:
+        PW = np.sqrt(zwd_thresh**2.0 + dk**2.0)
+        PW.name = zwd_name
+        PW.attrs.update(zwd_thresh.attrs)
+        PW.attrs['units'] = 'mm'
+        PW.attrs['long_name'] = 'Precipitable water error'
+    else:
+        PW = k * zwd_thresh
+        PW.name = zwd_name
+        PW.attrs.update(zwd_thresh.attrs)
+        PW.attrs['units'] = 'mm'
+        PW.attrs['long_name'] = 'Precipitable water'
+    PW = PW.sortby('time')
     if plot:
-        plot_tmseries_xarray(PW)
+        PW.plot()
     return PW
 
 
@@ -3067,6 +3126,8 @@ def filter_month_year_data_heatmap_plot(da_ts, freq='5T', thresh=50.0,
     # calculate daily data to drop (if points less than threshold):
     df['date'] = df.index.date
     points_in_day = df.groupby(['date']).count()[name].to_frame()
+    # calculate total days with any data:
+    tot_days = points_in_day[points_in_day >0].dropna().count().values.item()
     # calculate daily data percentage (from maximum available):
     points_in_day['percent'] = (points_in_day[name] / points) * 100.0
     # get the number of days to drop and the dates themselves:
@@ -3125,6 +3186,7 @@ def filter_month_year_data_heatmap_plot(da_ts, freq='5T', thresh=50.0,
     myears = np.mean(np.array([x for x in month_dict.values()]))
     da.attrs['mean_years'] = '{:.2f}'.format(myears)
     # add some more metadata:
+    da.attrs['days_total'] = tot_days
     da.attrs['days_dropped'] = number_of_days_to_drop
     da.attrs['days_dropped_percent'] = '{:.1f}'.format(percent_of_days_to_drop)
     da.attrs['months_dropped'] = number_of_months_to_drop
@@ -3228,8 +3290,20 @@ def combine_ZWD_stations(zwd, name, stations, thresh=None):
         months = dict(zip(dict(months).keys(), months_add))
         for month, val in months.items():
             combined_station.attrs[month] = val
+            keys = ['months_{}'.format(x) for x in np.arange(1, 13)]
         combined_station.attrs['mean_years'] = np.mean(
             [x for x in months.values()])
+        tot_months = np.sum(
+            [x for x in months.values()])
+        tot_days = np.sum([zwd[x].attrs['days_total'] for x in stations])
+        days_dropped = np.sum([zwd[x].attrs['days_dropped'] for x in stations])
+        months_dropped = np.sum([zwd[x].attrs['months_dropped'] for x in stations])
+        combined_station.attrs['days_total'] = tot_days
+        combined_station.attrs['days_dropped'] = days_dropped
+        combined_station.attrs['days_dropped_percent'] = '{:.2f}'.format(100.0* days_dropped / tot_days)
+        combined_station.attrs['months_dropped'] = months_dropped
+        combined_station.attrs['months_dropped_percent'] = '{:.2f}'.format(100.0* months_dropped / tot_months)
+        # combined_station.attrs['days_dropped'] = np.sum([zwd[ for x in])
     # add attr of combined station:
     combined_station.attrs['combined_from'] = ', '.join(stations)
     combined_station.name = name
