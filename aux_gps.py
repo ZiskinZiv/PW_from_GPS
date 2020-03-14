@@ -12,6 +12,16 @@ from PW_paths import work_yuval
 # TODO: if not, build func to replace datetimeindex to numbers and vise versa
 
 
+def error_mean_rmse(y, y_pred):
+    from sklearn.metrics import mean_squared_error
+    import numpy as np
+    mse = mean_squared_error(y.values, y_pred.values)
+    rmse = np.sqrt(mse)
+    mean = np.mean(y.values-y_pred.values)
+    print('mean : {:.2f}, rmse : {:.2f}'.format(mean, rmse))
+    return mean, rmse
+
+
 def rename_data_vars(ds, suffix='_error', remove_suffix=False, verbose=False):
     import xarray as xr
     if not isinstance(ds, xr.Dataset):
@@ -42,7 +52,7 @@ def save_ncfile(xarray, savepath, filename='temp.nc'):
     xarray.to_netcdf(savepath / filename, 'w', encoding=encoding)
     print('File saved!')
     return
-    
+
 
 def weighted_long_term_monthly_means_da(da_ts, plot=True):
     """create a long term monthly means(climatology) from a dataarray time
@@ -62,8 +72,9 @@ def weighted_long_term_monthly_means_da(da_ts, plot=True):
     dfmm = pd.pivot_table(dfmm, index='year', columns='month')
     # wrong:
 #     weighted_monthly_means = dfmm * weights 
-    weighted_clim = ((dfmm).sum(axis=0) /
-                   weights.sum(axis=0)).unstack().squeeze()
+    # normalize weights:
+    wtag = weights / weights.sum(axis=0)
+    weighted_clim = (dfmm*wtag).sum(axis=0).unstack().squeeze()
     # convert back to time-series:
 #    df_ts = weighted_monthly_means.stack().reset_index()
 #    df_ts['dt'] = df_ts.year.astype(str) + '-' + df_ts.month.astype(str)
