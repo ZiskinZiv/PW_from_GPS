@@ -84,6 +84,7 @@ def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
     from aux_gps import geo_annotate
     from ims_procedures import produce_geo_ims
     from matplotlib.colors import ListedColormap
+    from aux_gps import path_glob
     fig = plt.figure(figsize=(20, 10))
     grid = plt.GridSpec(1, 2, width_ratios=[
         5, 2], wspace=0.1)
@@ -91,14 +92,20 @@ def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
     ax_map = fig.add_subplot(grid[0, 1])  # plt.subplot(122)
 #    fig, ax = plt.subplots(1, 2, sharex=False, sharey=False, figsize=(20, 6))
     # RINEX gantt chart:
-    ds = xr.open_dataset(path / 'GNSS_PW.nc')
+    file = path_glob(path, 'ZWD_unselected_israel_*.nc')[-1]
+    ds = xr.open_dataset(file)
     just_pw = [x for x in ds if 'error' not in x]
     ds = ds[just_pw]
     da = ds.to_array('station')
     da['station'] = [x.upper() for x in da.station.values]
     ds = da.to_dataset('station')
     title = 'RINEX files availability for the Israeli GNSS stations'
-    ax_gantt = gantt_chart(ds, ax=ax_gantt, fw='normal', title='', pe_dict={''})
+    ax_gantt = gantt_chart(
+        ds,
+        ax=ax_gantt,
+        fw='normal',
+        title='',
+        pe_dict=None)
     # Israel gps ims map:
     ax_map = plot_israel_map(gis_path=gis_path, ax=ax_map)
     # overlay with dem data:
@@ -119,19 +126,37 @@ def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
     # ims, gps = produce_geo_df(gis_path=gis_path, plot=False)
     print('getting solved GNSS israeli stations metadata...')
     gps = produce_geo_gnss_solved_stations(path=gis_path, plot=False)
-    gps.plot(ax=ax_map, color='black', edgecolor='black', marker='s',
+    removed = ['hrmn']
+    merged = ['klhv', 'lhav', 'mrav', 'gilb']
+    gps_list = [x for x in gps.index if x not in merged and x not in removed]
+    gps.loc[gps_list, :].plot(ax=ax_map, color='black', edgecolor='black', marker='s',
              alpha=0.7, markersize=25)
+    gps.loc[removed, :].plot(ax=ax_map, color='black', edgecolor='black', marker='s',
+            alpha=1.0, markersize=25, facecolor='white')
+    gps.loc[merged, :].plot(ax=ax_map, color='black', edgecolor='r', marker='s',
+            alpha=0.7, markersize=25)
     gps_stations = [x for x in gps.index]
     to_plot_offset = ['mrav', 'klhv', 'nzrt', 'katz', 'elro']
-    [gps_stations.remove(x) for x in to_plot_offset]
-    gps_normal_anno = gps.loc[gps_stations, :]
-    gps_offset_anno = gps.loc[to_plot_offset, :]
-    geo_annotate(ax_map, gps_normal_anno.lon, gps_normal_anno.lat,
-                 gps_normal_anno.index.str.upper(), xytext=(3, 3), fmt=None,
-                 c='k', fw='normal', fs=10, colorupdown=False)
-    geo_annotate(ax_map, gps_offset_anno.lon, gps_offset_anno.lat,
-                 gps_offset_anno.index.str.upper(), xytext=(4, -6), fmt=None,
-                 c='k', fw='normal', fs=10, colorupdown=False)
+#    [gps_stations.remove(x) for x in to_plot_offset]
+#    gps_normal_anno = gps.loc[gps_stations, :]
+#    gps_offset_anno = gps.loc[to_plot_offset, :]
+
+    for x, y, label in zip(gps.loc[gps_stations, :].lon, gps.loc[gps_stations,
+                                                                 :].lat, gps.loc[gps_stations, :].index.str.upper()):
+        if label.lower() in to_plot_offset:
+            ax_map.annotate(label, xy=(x, y), xytext=(4, -6),
+                            textcoords="offset points", color='k',
+                            fontweight='normal', fontsize=10)
+        else:
+            ax_map.annotate(label, xy=(x, y), xytext=(3, 3),
+                            textcoords="offset points", color='k',
+                            fontweight='normal', fontsize=10)
+#    geo_annotate(ax_map, gps_normal_anno.lon, gps_normal_anno.lat,
+#                 gps_normal_anno.index.str.upper(), xytext=(3, 3), fmt=None,
+#                 c='k', fw='normal', fs=10, colorupdown=False)
+#    geo_annotate(ax_map, gps_offset_anno.lon, gps_offset_anno.lat,
+#                 gps_offset_anno.index.str.upper(), xytext=(4, -6), fmt=None,
+#                 c='k', fw='normal', fs=10, colorupdown=False)
     # plot bet-dagan:
     df = pd.Series([32.00, 34.81]).to_frame().T
     df.index = ['Beit Dagan']
@@ -144,7 +169,12 @@ def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
     geo_annotate(ax_map, bet_dagan.lon, bet_dagan.lat,
                  bet_dagan.index, xytext=(4, -6), fmt=None,
                  c='k', fw='normal', fs=10, colorupdown=False)
-    plt.legend(['GNSS sites', 'radiosonde'], loc='upper left')
+    plt.legend(['GNSS \nreceiver sites',
+                'removed \nGNSS sites',
+                'merged \nGNSS sites',
+                'radiosonde\nstation'],
+               loc='upper left', framealpha=0.7, fancybox=True,
+               handletextpad=0.2, handlelength=1.5)
     fig.subplots_adjust(top=0.95,
                         bottom=0.11,
                         left=0.05,
@@ -161,37 +191,43 @@ def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
 
 
 def plot_monthly_means_box_plots(path=work_yuval, thresh=50, kind='box',
-                                 x='month', save=True):
+                                 x='month', col_wrap=5, save=True):
     import xarray as xr
     pw = xr.load_dataset(
                 work_yuval /
                 'GNSS_PW_thresh_{:.0f}.nc'.format(thresh))
+    pw = pw[[x for x in pw.data_vars if '_error' not in x]]
     attrs = [x.attrs for x in pw.data_vars.values()]
     pw = pw.resample(time='MS').mean('time')
     for i, da in enumerate(pw.data_vars):
         pw[da].attrs = attrs[i]
-    fg = plot_multi_box_xr(pw, kind=kind, x=x)
+    fg = plot_multi_box_xr(pw, kind=kind, x=x, col_wrap=col_wrap)
     for i, ax in enumerate(fg.axes.flatten()):
         title = ax.get_title().split('=')[-1].strip(' ')
-        mean_years = float(attrs[i]['mean_years'])
-        ax.set_title('')
-        ax.text(.2, .9, title,
-                horizontalalignment='center', fontweight='bold',
-                transform=ax.transAxes)
-        ax.text(.2, .8, '{:.1f} years'.format(mean_years),
-                horizontalalignment='center',
-                transform=ax.transAxes)
-        ax.yaxis.tick_left()
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-        ax.spines["bottom"].set_visible(False)
+        try:
+            mean_years = float(attrs[i]['mean_years'])
+            ax.set_title('')
+            ax.text(.2, .85, title.upper(),
+                    horizontalalignment='center', fontweight='bold',
+                    transform=ax.transAxes)
+            ax.text(.22, .72, '{:.1f} years'.format(mean_years),
+                    horizontalalignment='center',
+                    transform=ax.transAxes)
+            ax.yaxis.tick_left()
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+            ax.spines["bottom"].set_visible(False)
+        except IndexError:
+            ax.set_axis_off()
+            pass
+
     [fg.axes[x, 0].set_ylabel('PW [mm]') for x in range(len(fg.axes[:, 0]))]
 #    [fg.axes[-1, x].set_xlabel('month') for x in range(len(fg.axes[-1, :]))]
     fg.fig.subplots_adjust(top=0.98,
                            bottom=0.04,
                            left=0.035,
                            right=0.985,
-                           hspace=0.145,
+                           hspace=0.230,
                            wspace=0.145)
     filename = 'pw_monthly_means_box.png'
     if save:
@@ -199,12 +235,12 @@ def plot_monthly_means_box_plots(path=work_yuval, thresh=50, kind='box',
     return fg
 
 
-def plot_multi_box_xr(pw, kind='violin', x='month'):
+def plot_multi_box_xr(pw, kind='violin', x='month', sharex=False, sharey=False,
+                      col_wrap=5):
     import xarray as xr
     pw = pw.to_array('station')
-    cwrap = 5
-    fg = xr.plot.FacetGrid(pw, col='station', col_wrap=cwrap, sharex=True,
-                           sharey=True)
+    fg = xr.plot.FacetGrid(pw, col='station', col_wrap=col_wrap, sharex=sharex,
+                           sharey=sharey)
     for sta, ax in zip(pw['station'].values, fg.axes.flatten()):
         pw_sta = pw.sel(station=sta).reset_coords(drop=True)
         # if x == 'hour':
@@ -238,7 +274,7 @@ def plot_box_df(df, x='month', title='TELA',
         fig, ax = plt.subplots()
     if kind == 'violin':
         sns.violinplot(ax=ax, data=df, x=x, y=y, palette=pal, fliersize=4,
-                       gridsize=100, inner='quartile', scale='area')
+                       gridsize=250, inner='quartile', scale='area')
     elif kind == 'box':
         kwargs = dict(markerfacecolor='r', marker='o')
         sns.boxplot(ax=ax, data=df, x=x, y=y, palette=pal, fliersize=4,
@@ -253,55 +289,58 @@ def plot_box_df(df, x='month', title='TELA',
     return ax
 
 
-def plot_monthly_pw_and_T(load_path=work_yuval, thresh=50, save=True):
+def plot_monthly_pw_and_T(load_path=work_yuval, ims_path=ims_path, thresh=50,
+                          col_wrap=5, save=True):
     import xarray as xr
     import numpy as np
-    # monthly means file is created from this function:
-    # (in PW_stations:) align_group_pw_and_T_to_monthly_means_and_save
-    pw_and_T = xr.load_dataset(
-        load_path /
-        'PW_T_monthly_means_clim_thresh_{:.0f}.nc'.format(thresh))
-    # seperate the fields:
-    pw_only = [x for x in pw_and_T if '_T' not in x]
-    T_only = [x for x in pw_and_T if '_T' in x]
-    pw_clim = pw_and_T[pw_only]
-    attrs = [x.attrs for x in pw_clim.data_vars.values()]
-    T_clim = pw_and_T[T_only]
-    cwrap = 5
-    fg = pw_clim.to_array('station').plot(col='station', col_wrap=cwrap,
-                                          color='b', marker='o', alpha=0.7)
+    pw = xr.load_dataset(
+            work_yuval /
+            'GNSS_PW_thresh_{:.0f}.nc'.format(thresh))
+    pw = pw[[x for x in pw.data_vars if '_error' not in x]]
+    pw_clim = pw.groupby('time.month').mean('time')
+    T = xr.load_dataset(
+            ims_path /
+            'GNSS_5mins_TD_ALL_1996_2020.nc')
+    T_clim = T.groupby('time.month').mean('time')
+    attrs = [x.attrs for x in pw.data_vars.values()]
+    fg = pw_clim.to_array('station').plot(col='station', col_wrap=col_wrap,
+                                          color='b', marker='o', alpha=0.7,
+                                          sharex=False, sharey=True)
     fg.fig.subplots_adjust(wspace=0.0, hspace=0.0, right=0.974)
     col_arr = np.arange(0, len(pw_clim))
-    right_side = col_arr[cwrap-1::cwrap]
+    right_side = col_arr[col_wrap-1::col_wrap]
     for i, ax in enumerate(fg.axes.flatten()):
         title = ax.get_title().split('=')[-1].strip(' ')
-        mean_years = float(attrs[i]['mean_years'])
-        ax.set_title('')
-        ax.text(.2, .9, title,
-                horizontalalignment='center', fontweight='bold',
-                transform=ax.transAxes)
-        ax.text(.2, .8, '{:.1f} years'.format(mean_years),
-                horizontalalignment='center',
-                transform=ax.transAxes)
-        ax_t = ax.twinx()
-        T_clim['{}_T'.format(title)].plot(
-                    color='r', linestyle='dashed', marker='s', alpha=0.7,
-                    ax=ax_t)
-        ax_t.set_ylim(0, 30)
-        fg.fig.canvas.draw()
-        labels = [item.get_text() for item in ax_t.get_yticklabels()]
-        ax_t.yaxis.set_ticklabels([])
-        ax_t.tick_params(axis='y', color='r')
-        ax_t.set_ylabel('')
-        if i in right_side:
-            ax_t.set_ylabel(r'Surface temperature [$\degree$C]', fontsize=10)
-            ax_t.yaxis.set_ticklabels(labels)
-            ax_t.tick_params(axis='y', labelcolor='r', color='r')
-        # show months ticks and grid lines for pw:
-        ax.xaxis.tick_bottom()
-        ax.yaxis.grid()
-        ax.legend([ax.lines[0], ax_t.lines[0]], ['PW', 'T'],
-                  loc='upper right', fontsize=10, prop={'size': 8})
+        try:
+            mean_years = float(attrs[i]['mean_years'])
+            ax.set_title('')
+            ax.text(.2, .85, title.upper(),
+                    horizontalalignment='center', fontweight='bold',
+                    transform=ax.transAxes)
+            ax.text(.2, .73, '{:.1f} years'.format(mean_years),
+                    horizontalalignment='center',
+                    transform=ax.transAxes)
+            ax_t = ax.twinx()
+            T_clim['{}'.format(title)].plot(
+                        color='r', linestyle='dashed', marker='s', alpha=0.7,
+                        ax=ax_t)
+            ax_t.set_ylim(0, 30)
+            fg.fig.canvas.draw()
+            labels = [item.get_text() for item in ax_t.get_yticklabels()]
+            ax_t.yaxis.set_ticklabels([])
+            ax_t.tick_params(axis='y', color='r')
+            ax_t.set_ylabel('')
+            if i in right_side:
+                ax_t.set_ylabel(r'Surface temperature [$\degree$C]', fontsize=10)
+                ax_t.yaxis.set_ticklabels(labels)
+                ax_t.tick_params(axis='y', labelcolor='r', color='r')
+            # show months ticks and grid lines for pw:
+            ax.xaxis.tick_bottom()
+            ax.yaxis.grid()
+            ax.legend([ax.lines[0], ax_t.lines[0]], ['PW', 'T'],
+                      loc='upper right', fontsize=10, prop={'size': 8})
+        except IndexError:
+            pass
     # change bottom xticks to 1-12 and show them:
     fg.axes[-1, 0].xaxis.set_ticks(np.arange(1, 13))
     [fg.axes[x, 0].set_ylabel('PW [mm]') for x in range(len(fg.axes[:, 0]))]
@@ -462,8 +501,8 @@ def plot_figure_3_1(path=work_yuval, data='zwd'):
     return ax
 
 
-def plot_figure_4(physical_file=phys_soundings, model='LR',
-                  times=['2007', '2019'], save=True):
+def plot_ts_tm(path=sound_path, model='TSEN',
+               times=['2007', '2019'], save=True):
     """plot ts-tm relashonship"""
     import xarray as xr
     import matplotlib.pyplot as plt
@@ -471,14 +510,20 @@ def plot_figure_4(physical_file=phys_soundings, model='LR',
     from PW_stations import ML_Switcher
     from sklearn.metrics import mean_squared_error
     from sklearn.metrics import r2_score
-    from aux_gps import get_unique_index
     import numpy as np
     from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+    from sounding_procedures import get_field_from_radiosonde
     # sns.set_style('whitegrid')
-    pds = xr.open_dataset(phys_soundings)
-    pds = pds[['Tm', 'Ts']]
-    pds = get_unique_index(pds, 'sound_time')
-    pds = pds.sel(sound_time=slice(*times))
+    pds = xr.Dataset()
+    Ts = get_field_from_radiosonde(path=sound_path, field='Ts',
+                                   data_type='phys', reduce=None, times=times,
+                                   plot=False)
+    Tm = get_field_from_radiosonde(path=sound_path, field='Tm',
+                                   data_type='phys', reduce='min', times=times,
+                                   plot=False)
+    pds['Tm'] = Tm
+    pds['Ts'] = Ts
+    pds = pds.dropna('sound_time')
     fig, ax = plt.subplots(1, 1, figsize=(7, 7))
     pds.plot.scatter(
         x='Ts',
@@ -500,7 +545,7 @@ def plot_figure_4(physical_file=phys_soundings, model='LR',
     ax.plot(X, predict, c='r')
     bevis_tm = pds.Ts.values * 0.72 + 70.0
     ax.plot(pds.Ts.values, bevis_tm, c='purple')
-    ax.legend(['OLS ({:.2f}, {:.2f})'.format(
+    ax.legend(['{} ({:.2f}, {:.2f})'.format(model,
         coef, inter), 'Bevis 1992 et al. (0.72, 70.0)'])
 #    ax.set_xlabel('Surface Temperature [K]')
 #    ax.set_ylabel('Water Vapor Mean Atmospheric Temperature [K]')
@@ -539,10 +584,12 @@ def plot_figure_4(physical_file=phys_soundings, model='LR',
     return
 
 
-def plot_figure_5(physical_file=phys_soundings, station='tela',
-                  times=['2007', '2019'], wv_name='pw', r2=False, save=True):
+def plot_pw_tela_bet_dagan(path=work_yuval, sound_path=sound_path,
+                           ims_path=ims_path, station='tela', cats=None,
+                           times=['2007', '2019'], wv_name='pw', r2=False,
+                           save=True):
     """plot the PW of Bet-dagan vs. PW of gps station"""
-    from PW_stations import mean_zwd_over_sound_time
+    from PW_stations import mean_ZWD_over_sound_time_and_fit_tstm
     from sklearn.metrics import mean_squared_error
     from sklearn.metrics import r2_score
     import matplotlib.pyplot as plt
@@ -550,14 +597,19 @@ def plot_figure_5(physical_file=phys_soundings, station='tela',
     import numpy as np
     from mpl_toolkits.axes_grid1.inset_locator import inset_axes
     # sns.set_style('white')
-    ds = mean_zwd_over_sound_time(
-        physical_file, ims_path=ims_path, gps_station='tela',
-        times=times)
+    ds, mda = mean_ZWD_over_sound_time_and_fit_tstm(path=path, sound_path=sound_path,
+                                                    ims_path=ims_path,
+                                                    data_type='phys',
+                                                    gps_station=station,
+                                                    times=times,
+                                                    plot=False,
+                                                    cats=cats)
+    ds = ds.drop_dims('time')
     time_dim = list(set(ds.dims))[0]
     ds = ds.rename({time_dim: 'time'})
-    ds = ds.dropna('time')
-    ds = ds.sel(time=slice(*times))
     tpw = 'tpw_bet_dagan'
+    ds = ds[[tpw, 'tela_pw']].dropna('time')
+    ds = ds.sel(time=slice(*times))
     fig, ax = plt.subplots(1, 1, figsize=(7, 7))
     ds.plot.scatter(x=tpw,
                     y='tela_pw',
@@ -569,10 +621,10 @@ def plot_figure_5(physical_file=phys_soundings, station='tela',
     ax.plot(ds[tpw], ds[tpw], c='r')
     ax.legend(['y = x'], loc='upper right')
     if wv_name == 'pw':
-        ax.set_xlabel('PW from Bet-Dagan [mm]')
+        ax.set_xlabel('PW from Beit-Dagan [mm]')
         ax.set_ylabel('PW from TELA GPS station [mm]')
     elif wv_name == 'iwv':
-        ax.set_xlabel(r'IWV from Bet-dagan station [kg$\cdot$m$^{-2}$]')
+        ax.set_xlabel(r'IWV from Beit-dagan station [kg$\cdot$m$^{-2}$]')
         ax.set_ylabel(r'IWV from TELA GPS station [kg$\cdot$m$^{-2}$]')
     ax.grid()
     axin1 = inset_axes(ax, width="40%", height="40%", loc=2)
@@ -629,26 +681,34 @@ def plot_figure_5(physical_file=phys_soundings, station='tela',
     return ds
 
 
-def plot_figure_6(physical_file=phys_soundings, station='tela',
-                  times=['2007', '2019'], save=True):
-    from PW_stations import mean_zwd_over_sound_time
+def plot_zwd_tela_bet_dagan(path=work_yuval, sound_path=sound_path,
+                                   ims_path=ims_path, station='tela',
+                                   times=['2007', '2019'], cats=None,
+                                   save=True):
+    from PW_stations import mean_ZWD_over_sound_time_and_fit_tstm
     import matplotlib.pyplot as plt
     import seaborn as sns
     import pandas as pd
     import matplotlib.dates as mdates
     # sns.set_style('whitegrid')
-    ds = mean_zwd_over_sound_time(
-        physical_file, ims_path=ims_path, gps_station='tela',
-        times=times)
+    ds, mda = mean_ZWD_over_sound_time_and_fit_tstm(path=path,
+                                                    sound_path=sound_path,
+                                                    ims_path=ims_path,
+                                                    data_type='phys',
+                                                    gps_station=station,
+                                                    times=times,
+                                                    plot=False,
+                                                    cats=cats)
+    ds = ds.drop_dims('time')
     time_dim = list(set(ds.dims))[0]
     ds = ds.rename({time_dim: 'time'})
     ds = ds.dropna('time')
     ds = ds.sel(time=slice(*times))
-    df = ds[['zwd_bet_dagan', 'tela_WetZ']].to_dataframe()
+    df = ds[['zwd_bet_dagan', 'tela']].to_dataframe()
     fig, axes = plt.subplots(2, 1, sharex=True, figsize=(12, 8))
     [x.set_xlim([pd.to_datetime(times[0]), pd.to_datetime(times[1])])
      for x in axes]
-    df.columns = ['Bet_Dagan soundings', 'TELA GPS station']
+    df.columns = ['Beit Dagan soundings', 'TELA GPS station']
     sns.scatterplot(
         data=df,
         s=20,
@@ -927,7 +987,8 @@ def plot_figure_9(hydro_path=hydro_path, gis_path=gis_path, pw_anom=False,
     return ax
 
 
-def produce_table_1():
+def produce_table_1(removed=['hrmn'], merged={'klhv': ['klhv', 'lhav'],
+                    'mrav':['gilb', 'mrav']}):
     from PW_stations import produce_geo_gnss_solved_stations
     import pandas as pd
     df_gnss = produce_geo_gnss_solved_stations(plot=False)
@@ -939,6 +1000,10 @@ def produce_table_1():
             'Longitude [W]', 'Altitude [m a.s.l]']
     df.columns = cols
     df.loc['spir', 'GNSS Sites'] = 'Sapir'
+    if removed is not None:
+        df = df.loc[[x for x in df.index if x not in removed], :]
+    if merged is not None:
+        return
     print(df.to_latex(index=False))
     return df
 
@@ -1125,3 +1190,4 @@ def plot_vertical_climatology_months(path=sound_path, field='Rho_wv',
     plt.legend([x for x in ax.lines],[x for x in night.month.values])
     return day, night
 
+   
