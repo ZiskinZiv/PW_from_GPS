@@ -10,11 +10,11 @@ from PW_paths import work_yuval
 hydro_path = work_yuval / 'hydro'
 gis_path = work_yuval / 'gis'
 
-# TODO: slice hydro data for 1996-2019
-# TODO: slice 4-5 stations around a 5-km radius from the GNSS stations
-# TODO: hope for 1 continous hydro time series and work with it
-# TODO: get each tide event (with threshold) and take a few days before(parameter)
-# and mean this time-span of the PW time-series (or anomalies) and present it with graphs
+# TODO: scan for seasons in the tide events and remove summer
+# TODO: loop over tide events and choose 24 hour before positive event and
+# 24 before negative events, use frequency of 1 hour and round event time to 
+# this freq
+# TODO:build binary flood/no flood target variable
 
 
 def loop_over_gnss_hydro_and_aggregate(sel_hydro, pw_anom=False,
