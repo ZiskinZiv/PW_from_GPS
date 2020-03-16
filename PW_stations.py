@@ -1016,7 +1016,7 @@ def produce_pw_statistics(path=work_yuval, thresh=None):
     from scipy.stats import kurtosis
     from scipy.stats import skew
     import pandas as pd
-    pw = xr.load_dataset(path / 'GNSS_PW_{:.0f}.nc'.format(thresh))
+    pw = xr.load_dataset(path / 'GNSS_PW_thresh_{:.0f}.nc'.format(thresh))
     pd.options.display.float_format = '{:.1f}'.format
     mean = pw.mean('time').reset_coords().to_array(
         'index').to_dataframe('Mean')
@@ -1257,10 +1257,10 @@ def save_GNSS_PW_israeli_stations(path=work_yuval, ims_path=ims_path,
     import xarray as xr
     from aux_gps import path_glob
     file = path_glob(path, 'ZWD_thresh_{:.0f}.nc'.format(thresh))[0]
-    zwd = xr.open_dataset(file)
+    zwd = xr.load_dataset(file)
     print('loaded {} file as ZWD.'.format(file.as_posix().split('/')[-1]))
     file = sorted(path_glob(ims_path, 'GNSS_5mins_TD_ALL_*.nc'))[-1]
-    Ts = xr.open_dataset(file)
+    Ts = xr.load_dataset(file)
     print('loaded {} file as Ts.'.format(file.as_posix().split('/')[-1]))
     stations = [x for x in zwd.data_vars]
     ds_list = []
@@ -1395,6 +1395,7 @@ def group_anoms_and_cluster(load_path=work_yuval, remove_grp='month', thresh=Non
 def produce_GNSS_station_PW(zwd_thresh, Ts, mda=None,
                             plot=True, model_name='TSEN', model_dict=None):
     import numpy as np
+    from aux_gps import xr_reindex_with_date_range
     """model=None is LR, model='bevis'
     is Bevis 1992-1994 et al."""
     zwd_name = zwd_thresh.name
@@ -1424,6 +1425,7 @@ def produce_GNSS_station_PW(zwd_thresh, Ts, mda=None,
         PW.attrs['units'] = 'mm'
         PW.attrs['long_name'] = 'Precipitable water'
     PW = PW.sortby('time')
+    PW = xr_reindex_with_date_range(PW, freq='5T')
     if plot:
         PW.plot()
     return PW
@@ -3210,6 +3212,49 @@ def filter_month_year_data_heatmap_plot(da_ts, freq='5T', thresh=50.0,
 #    return da
 
 
+def calculate_zwd_altitude_fit(path=work_yuval, model='TSEN', plot=True):
+    from PW_stations import produce_geo_gnss_solved_stations
+    import xarray as xr
+    from PW_stations import ML_Switcher
+    import pandas as pd
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    df_gnss = produce_geo_gnss_solved_stations(plot=False)
+    alt = df_gnss['alt'].values
+    zwd = xr.load_dataset(path / 'ZWD_unselected_israel_1996-2020.nc')
+    zwd = zwd[[x for x in zwd.data_vars if '_error' not in x]]
+    zwd_mean = zwd.mean('time')
+    # add mean to anomalies:
+    zwd_new = zwd.resample(time='MS').mean()
+    # compute std:
+    zwd_std = zwd_new.std('time')
+    zwd_vals = zwd_mean.to_array().to_dataframe(name='zwd')
+    zwd_vals = pd.Series(zwd_vals.squeeze()).values
+    zwd_std_vals = zwd_std.to_array().to_dataframe(name='zwd')
+    zwd_std_vals = pd.Series(zwd_std_vals.squeeze()).values
+    ml = ML_Switcher()
+    fit_model = ml.pick_model(model)
+    y = zwd_vals
+    X = alt.reshape(-1, 1)
+    fit_model.fit(X, y)
+    predict = fit_model.predict(X)
+    coef = fit_model.coef_[0]
+    inter = fit_model.intercept_
+    zwd_lapse_rate = abs(coef)*1000
+    if plot:
+        fig, ax = plt.subplots(1, 1, figsize=(16, 4))
+        ax.errorbar(x=alt, y=zwd_vals, yerr=zwd_std_vals,
+                    marker='.', ls='', capsize=1.5, elinewidth=1.5,
+                    markeredgewidth=1.5, color='k')
+        ax.grid()
+        ax.plot(X, predict, c='r')
+        ax.set_xlabel('meters a.s.l')
+        ax.set_ylabel('Zenith wet delay [cm]')
+        ax.legend(['{} ({:.2f} [cm/km], {:.2f} [cm])'.format(model,
+                   zwd_lapse_rate, inter)])
+    return df_gnss['alt'], zwd_lapse_rate
+
+
 def select_ZWD_thresh_and_combine_save_all(
     path=work_yuval, thresh=None, to_drop=['hrmn'], combine_dict={
         'klhv': [
@@ -3262,6 +3307,7 @@ def select_ZWD_thresh_and_combine_save_all(
     zwd_thresh.attrs['thresh'] = '{:.0f}'.format(thresh)
     zwd_thresh.attrs['mean_days_dropped_percent'] = '{:.2f}'.format(mean_days_dropped_percent)
     zwd_thresh.attrs['mean_months_dropped_percent'] = '{:.2f}'.format(mean_months_dropped_percent)
+    zwd_thresh = zwd_thresh[sorted(zwd_thresh)]
     filename = 'ZWD_thresh_{:.0f}.nc'.format(thresh)
     comp = dict(zlib=True, complevel=9)  # best compression
     encoding = {var: comp for var in zwd_thresh.data_vars}
@@ -3270,12 +3316,20 @@ def select_ZWD_thresh_and_combine_save_all(
     return zwd_thresh
 
 
-def combine_ZWD_stations(zwd, name, stations, thresh=None):
+def combine_ZWD_stations(zwd, name, stations, thresh=None, path=work_yuval):
     import xarray as xr
     import numpy as np
     from aux_gps import get_unique_index
     time_dim = list(set(zwd.dims))[0]
     slist = [zwd[x] for x in stations]
+    # TODO: fix the zwd_lapse rate for combining stations:
+    # now fix for zwd lapse rate (how zenith wet delay drops with altitude for
+    # the merged stations):
+    df, zwd_lapse_rate= calculate_zwd_altitude_fit(path=work_yuval, model='LR',
+                                                   plot=False)
+    zwd_lapse_rate /= 1000  # in cm / meters
+    df = df.loc[stations].sort_values()
+    # finally concat them:
     combined_station = xr.concat(slist, time_dim)
     # take care of months and attrs:
     if thresh is not None:
