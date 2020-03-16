@@ -56,12 +56,18 @@ def save_ncfile(xarray, savepath, filename='temp.nc'):
 
 def weighted_long_term_monthly_means_da(da_ts, plot=True):
     """create a long term monthly means(climatology) from a dataarray time
-    series with weights of items(mins,days etc..) per each month"""
+    series with weights of items(mins,days etc..) per each month
+    apperently, DataArray.groupby('time.month').mean('time') does exactely
+    this... so this function is redundant"""
     import pandas as pd
     name = da_ts.name
     # first save attrs:
     attrs = da_ts.attrs
-    df = da_ts.to_dataframe()
+    try:
+        df = da_ts.to_dataframe()
+    except ValueError:
+        name = 'name'
+        df = da_ts.to_dataframe(name=name)
     df = df.dropna()
     df['month'] = df.index.month
     df['year'] = df.index.year
