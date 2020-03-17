@@ -3316,19 +3316,33 @@ def select_ZWD_thresh_and_combine_save_all(
     return zwd_thresh
 
 
-def combine_ZWD_stations(zwd, name, stations, thresh=None, path=work_yuval):
+def combine_ZWD_stations(zwd, name, stations, thresh=None,
+                         zwd_lapse_rate_correction=True, path=work_yuval):
     import xarray as xr
     import numpy as np
     from aux_gps import get_unique_index
     time_dim = list(set(zwd.dims))[0]
-    slist = [zwd[x] for x in stations]
-    # TODO: fix the zwd_lapse rate for combining stations:
-    # now fix for zwd lapse rate (how zenith wet delay drops with altitude for
-    # the merged stations):
-    df, zwd_lapse_rate= calculate_zwd_altitude_fit(path=work_yuval, model='LR',
-                                                   plot=False)
-    zwd_lapse_rate /= 1000  # in cm / meters
-    df = df.loc[stations].sort_values()
+    slist = [zwd[x].dropna(time_dim) for x in stations]
+    sdict = dict(zip(stations, slist))
+    if zwd_lapse_rate_correction:
+        # now fix for zwd lapse rate (how zenith wet delay drops with altitude for
+        # the merged stations):
+        df, zwd_lapse_rate = calculate_zwd_altitude_fit(path=work_yuval, model='LR',
+                                                        plot=False)
+        if '_error' in name:
+            df.index += '_error'
+        zwd_lapse_rate /= 1000  # in cm / meters
+        # get the height for the combined stations:
+        df = df.loc[stations].sort_values()
+        # get the height difference:
+        df -= df[name]
+        # loop over the merged stations and adjust the zwd lapse rate:
+        for station_name in sdict.copy().keys():
+            height_diff = df[station_name]
+            # note the sign in +=, we add zwd to higher stations if we are
+            # the combined lower station:
+            sdict[station_name] += height_diff * zwd_lapse_rate
+        slist = [x for x in sdict.values()]
     # finally concat them:
     combined_station = xr.concat(slist, time_dim)
     # take care of months and attrs:
