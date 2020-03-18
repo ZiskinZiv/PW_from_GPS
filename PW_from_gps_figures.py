@@ -369,7 +369,7 @@ def plot_gnss_radiosonde_monthly_means(sound_path=sound_path, path=work_yuval,
         phys = phys.sel(sound_time=slice(*times))
     ds = phys.resample(sound_time=sample).mean().to_dataset(name='Bet-dagan-radiosonde')
     ds = ds.rename({'sound_time': 'time'})
-    gps = xr.load_dataset(path / 'GNSS_PW_50.nc')[gps_station]
+    gps = xr.load_dataset(path / 'GNSS_PW_thresh_50.nc')[gps_station]
     if times is not None:
         gps = gps.sel(time=slice(*times))
     ds[gps_station] = gps.resample(time=sample).mean()
@@ -513,6 +513,8 @@ def plot_ts_tm(path=sound_path, model='TSEN',
     import numpy as np
     from mpl_toolkits.axes_grid1.inset_locator import inset_axes
     from sounding_procedures import get_field_from_radiosonde
+    models_dict = {'LR': 'Linear Regression',
+                   'TSEN': 'Theil–Sen Regression'}
     # sns.set_style('whitegrid')
     pds = xr.Dataset()
     Ts = get_field_from_radiosonde(path=sound_path, field='Ts',
@@ -545,7 +547,7 @@ def plot_ts_tm(path=sound_path, model='TSEN',
     ax.plot(X, predict, c='r')
     bevis_tm = pds.Ts.values * 0.72 + 70.0
     ax.plot(pds.Ts.values, bevis_tm, c='purple')
-    ax.legend(['{} ({:.2f}, {:.2f})'.format(model,
+    ax.legend(['{} ({:.2f}, {:.2f})'.format(models_dict.get(model),
         coef, inter), 'Bevis 1992 et al. (0.72, 70.0)'])
 #    ax.set_xlabel('Surface Temperature [K]')
 #    ax.set_ylabel('Water Vapor Mean Atmospheric Temperature [K]')
@@ -564,8 +566,8 @@ def plot_ts_tm(path=sound_path, model='TSEN',
     axin1.axvline(rmean, color='r', linestyle='dashed', linewidth=1)
     # axin1.set_xlabel('Residual distribution[K]')
     textstr = '\n'.join(['n={}'.format(pds.Ts.size),
-                         'RMSE: ', '{:.2f} K'.format(rmse),
-                         r'R$^2$: {:.2f}'.format(r2)])
+                         'RMSE: ', '{:.2f} K'.format(rmse)]) # ,
+                         # r'R$^2$: {:.2f}'.format(r2)])
     props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
     axin1.text(0.05, 0.95, textstr, transform=axin1.transAxes, fontsize=10,
                verticalalignment='top', bbox=props)
@@ -577,7 +579,7 @@ def plot_ts_tm(path=sound_path, model='TSEN',
 #               transform=axin1.transAxes, color='k', fontsize=10)
     axin1.set_xlim(-15, 15)
     fig.tight_layout()
-    filename = 'Bet_dagan_ts_tm_fit.png'
+    filename = 'Bet_dagan_ts_tm_fit_{}-{}.png'.format(times[0], times[1])
     caption('Water vapor mean temperature (Tm) vs. surface temperature (Ts) of the Bet-dagan radiosonde station. Ordinary least squares linear fit(red) yields the residual distribution with RMSE of 4 K. Bevis(1992) model is plotted(purple) for comparison.')
     if save:
         plt.savefig(savefig_path / filename, bbox_inches='tight')
@@ -682,9 +684,9 @@ def plot_pw_tela_bet_dagan(path=work_yuval, sound_path=sound_path,
 
 
 def plot_zwd_tela_bet_dagan(path=work_yuval, sound_path=sound_path,
-                                   ims_path=ims_path, station='tela',
-                                   times=['2007', '2019'], cats=None,
-                                   save=True):
+                            ims_path=ims_path, station='tela',
+                            times=['2007', '2020'], cats=None,
+                            save=True):
     from PW_stations import mean_ZWD_over_sound_time_and_fit_tstm
     import matplotlib.pyplot as plt
     import seaborn as sns
