@@ -1017,6 +1017,7 @@ def produce_pw_statistics(path=work_yuval, thresh=None):
     from scipy.stats import skew
     import pandas as pd
     pw = xr.load_dataset(path / 'GNSS_PW_thresh_{:.0f}.nc'.format(thresh))
+    pw = pw[[x for x in pw.data_vars if '_error' not in x]]
     pd.options.display.float_format = '{:.1f}'.format
     mean = pw.mean('time').reset_coords().to_array(
         'index').to_dataframe('Mean')
@@ -3540,6 +3541,18 @@ def get_long_trends_from_gnss_station(station='tela', modelname='LR',
     if plot:
         plot_tmseries_xarray(rds)
     return rds
+
+
+def mann_kendall_trend_analysis(da_ts, alpha=0.05, verbose=True):
+    import pymannkendall as mk
+    result = mk.original_test(da_ts, alpha)
+    if verbose:
+        print(result)
+    mkt = {}
+    for name, val in result._asdict().items():
+        mkt['mkt_' + name] = val
+    da_ts.attrs.update(mkt)
+    return da_ts
 
 
 def ML_fit_model_to_tmseries(tms_da, modelname='LR', plot=True,
