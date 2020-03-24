@@ -14,7 +14,39 @@ gis_path = work_yuval / 'gis'
 # TODO: loop over tide events and choose 24 hour before positive event and
 # 24 before negative events, use frequency of 1 hour and round event time to 
 # this freq
-# TODO:build binary flood/no flood target variable
+
+
+def preprocess_hydro_pw(pw_station='drag', hs_id=48125, path=work_yuval,
+                        hydro_path=hydro_path):
+    import xarray as xr
+    import pandas as pd
+    import numpy as np
+    # first load tides data:
+    all_tides = xr.open_dataset(hydro_path / 'hydro_tides.nc')
+    # get all tides for specific station without nans:
+    sta_slice = [x for x in all_tides.data_vars if str(hs_id) in x]
+    if not sta_slice:
+        raise KeyError('hydro station {} not found in database'.format(hs_id))
+    tides = all_tides[sta_slice].dropna('tide_start')
+    tide_starts = tides['tide_start'].where(
+        ~tides.isnull()).dropna('tide_start')['tide_start']
+    # round all tide_starts to hourly:
+    ts = tide_starts.dt.round('1H')
+    time_dt = pd.date_range(
+        start=ts.min().values.item(),
+        end=ts.max().values.item(),
+        freq='1H')
+    df = pd.DataFrame(data=np.zeros(time_dt.shape), index=time_dt)
+    df.loc[ts.values, :] = 1
+    # now load pw:
+    pw = xr.load_dataset(path / 'GNSS_PW_thresh_50.nc')[pw_station]
+    # resample to hour:
+    pw = pw.resample(time='1H')
+    pw_df = pw.dropna('time').to_dataframe()
+    # now align the both dataframes:
+    pw_df['tides'] = df['tides']
+    pw_df['tides'] = pw_df['tides'].fillna(0)
+    return pw_df
 
 
 def loop_over_gnss_hydro_and_aggregate(sel_hydro, pw_anom=False,
