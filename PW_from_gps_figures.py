@@ -229,7 +229,7 @@ def plot_monthly_means_box_plots(path=work_yuval, thresh=50, kind='box',
                            right=0.985,
                            hspace=0.230,
                            wspace=0.145)
-    filename = 'pw_monthly_means_box.png'
+    filename = 'pw_monthly_means_{}.png'.format(kind)
     if save:
         plt.savefig(savefig_path / filename, bbox_inches='tight')
     return fg
@@ -264,7 +264,7 @@ def plot_box_df(df, x='month', title='TELA',
     if x == 'month':
         df[x] = df.index.month
         pal = sns.color_palette("Paired", 12)
-        ylimits = (5, 40)
+        ylimits = (0, 40)
     elif x == 'hour':
         df[x] = df.index.hour
         pal = sns.color_palette("Paired", 12)
@@ -990,7 +990,7 @@ def plot_figure_9(hydro_path=hydro_path, gis_path=gis_path, pw_anom=False,
 
 
 def produce_table_1(removed=['hrmn'], merged={'klhv': ['klhv', 'lhav'],
-                    'mrav':['gilb', 'mrav']}):
+                    'mrav': ['gilb', 'mrav']}):
     from PW_stations import produce_geo_gnss_solved_stations
     import pandas as pd
     df_gnss = produce_geo_gnss_solved_stations(plot=False)
@@ -1005,7 +1005,7 @@ def produce_table_1(removed=['hrmn'], merged={'klhv': ['klhv', 'lhav'],
     if removed is not None:
         df = df.loc[[x for x in df.index if x not in removed], :]
     if merged is not None:
-        return
+        return df
     print(df.to_latex(index=False))
     return df
 
@@ -1192,4 +1192,46 @@ def plot_vertical_climatology_months(path=sound_path, field='Rho_wv',
     plt.legend([x for x in ax.lines],[x for x in night.month.values])
     return day, night
 
-   
+
+def plot_pw_lapse_rate_fit(path=work_yuval, model='TSEN', plot=True):
+    from PW_stations import produce_geo_gnss_solved_stations
+    import xarray as xr
+    from PW_stations import ML_Switcher
+    import pandas as pd
+    import matplotlib.pyplot as plt
+    pw = xr.load_dataset(path / 'GNSS_PW_thresh_50.nc')
+    pw = pw[[x for x in pw.data_vars if '_error' not in x]]
+    df_gnss = produce_geo_gnss_solved_stations(plot=False)
+    df_gnss = df_gnss.loc[[x for x in pw.data_vars], :]
+    alt = df_gnss['alt'].values
+    # add mean to anomalies:
+    pw_new = pw.resample(time='MS').mean()
+    pw_mean = pw_new.mean('time')
+    # compute std:
+#    pw_std = pw_new.std('time')
+    pw_std = (pw_new.groupby('time.month') - pw_new.groupby('time.month').mean('time')).std('time')
+    pw_vals = pw_mean.to_array().to_dataframe(name='pw')
+    pw_vals = pd.Series(pw_vals.squeeze()).values
+    pw_std_vals = pw_std.to_array().to_dataframe(name='pw')
+    pw_std_vals = pd.Series(pw_std_vals.squeeze()).values
+    ml = ML_Switcher()
+    fit_model = ml.pick_model(model)
+    y = pw_vals
+    X = alt.reshape(-1, 1)
+    fit_model.fit(X, y)
+    predict = fit_model.predict(X)
+    coef = fit_model.coef_[0]
+    inter = fit_model.intercept_
+    pw_lapse_rate = abs(coef)*1000
+    if plot:
+        fig, ax = plt.subplots(1, 1, figsize=(16, 4))
+        ax.errorbar(x=alt, y=pw_vals, yerr=pw_std_vals,
+                    marker='.', ls='', capsize=1.5, elinewidth=1.5,
+                    markeredgewidth=1.5, color='k')
+        ax.grid()
+        ax.plot(X, predict, c='r')
+        ax.set_xlabel('meters a.s.l')
+        ax.set_ylabel('Precipitable Water [mm]')
+        ax.legend(['{} ({:.2f} [mm/km], {:.2f} [mm])'.format(model,
+                   pw_lapse_rate, inter)])
+    return df_gnss['alt'], pw_lapse_rate
