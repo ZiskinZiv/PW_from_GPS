@@ -3220,10 +3220,12 @@ def calculate_zwd_altitude_fit(path=work_yuval, model='TSEN', plot=True):
     import pandas as pd
     import matplotlib.pyplot as plt
     import seaborn as sns
-    df_gnss = produce_geo_gnss_solved_stations(plot=False)
-    alt = df_gnss['alt'].values
-    zwd = xr.load_dataset(path / 'ZWD_unselected_israel_1996-2020.nc')
+    from sklearn import metrics
+    zwd = xr.load_dataset(path / 'ZWD_thresh_50.nc')
     zwd = zwd[[x for x in zwd.data_vars if '_error' not in x]]
+    df_gnss = produce_geo_gnss_solved_stations(plot=False)
+    df_gnss = df_gnss.loc[[x for x in zwd.data_vars], :]
+    alt = df_gnss['alt'].values
     zwd_mean = zwd.mean('time')
     # add mean to anomalies:
     zwd_new = zwd.resample(time='MS').mean()
@@ -3242,17 +3244,33 @@ def calculate_zwd_altitude_fit(path=work_yuval, model='TSEN', plot=True):
     coef = fit_model.coef_[0]
     inter = fit_model.intercept_
     zwd_lapse_rate = abs(coef)*1000
+    r2 = metrics.r2_score(y, predict)
     if plot:
-        fig, ax = plt.subplots(1, 1, figsize=(16, 4))
-        ax.errorbar(x=alt, y=zwd_vals, yerr=zwd_std_vals,
-                    marker='.', ls='', capsize=1.5, elinewidth=1.5,
-                    markeredgewidth=1.5, color='k')
-        ax.grid()
-        ax.plot(X, predict, c='r')
-        ax.set_xlabel('meters a.s.l')
-        ax.set_ylabel('Zenith wet delay [cm]')
-        ax.legend(['{} ({:.2f} [cm/km], {:.2f} [cm])'.format(model,
-                   zwd_lapse_rate, inter)])
+        fig, ax_lapse = plt.subplots(figsize=(10, 6))
+        sns.regplot(x=alt, y=zwd_vals, color='r',
+                    scatter_kws={'color': 'b'}, x_estimator=np.mean, ax=ax_lapse)
+        ax_lapse.set_xlabel('Altitude [m]')
+        ax_lapse.set_ylabel('Zenith Wet Delay [cm]')
+        ax_lapse.text(0.5, 0.95, 'Lapse rate: {:.2f} cm/km'.format(zwd_lapse_rate),
+                      horizontalalignment='center', verticalalignment='center',
+                      transform=ax_lapse.transAxes, fontsize=12, color='k',
+                      fontweight='bold')
+        ax_lapse.grid()
+#        fig, ax = plt.subplots(1, 1, figsize=(16, 4))
+#        ax.errorbar(x=alt, y=zwd_vals, yerr=zwd_std_vals,
+#                    marker='.', ls='', capsize=1.5, elinewidth=1.5,
+#                    markeredgewidth=1.5, color='k')
+#        ax.grid()
+#        ax.plot(X, predict, c='r')
+#        ax.set_xlabel('meters a.s.l')
+#        ax.set_ylabel('Zenith wet delay [cm]')
+#        ax.legend(['{} (slope={:.2f} [cm/km], intercept={:.2f} [cm], R$^2$={:.2f}'.format(model,
+#                   zwd_lapse_rate, inter, r2)])
+##        ax.text(0.8, 0.8, r'R$^2$: {:.2f}'.format(r2), bbox=dict(boxstyle="round",
+##                   ec='k',
+##                   fc='w',
+##                   ), transform=ax.transAxes)
+        fig.tight_layout()
     return df_gnss['alt'], zwd_lapse_rate
 
 
