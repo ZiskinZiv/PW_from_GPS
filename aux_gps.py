@@ -12,6 +12,45 @@ from PW_paths import work_yuval
 # TODO: if not, build func to replace datetimeindex to numbers and vise versa
 
 
+def loess_curve(da_ts, time_dim='time', season=None, plot=True):
+    from skmisc.loess import loess
+    import matplotlib.pyplot as plt
+    import xarray as xr
+    import numpy as np
+    if season is not None:
+        da_ts = da_ts.sel({time_dim: da_ts[time_dim + '.season'] == season})
+    x = da_ts.dropna(time_dim)[time_dim].values
+    y = da_ts.dropna(time_dim).values
+    l_obj = loess(x, y)
+    l_obj.fit()
+    pred = l_obj.predict(x, stderror=True)
+    conf = pred.confidence()
+    lowess = np.copy(pred.values)
+    ll = np.copy(conf.lower)
+    ul = np.copy(conf.upper)
+    da_lowess = xr.Dataset()
+    da_lowess['mean'] = xr.DataArray(lowess, dims=[time_dim])
+    da_lowess['upper'] = xr.DataArray(ul, dims=[time_dim])
+    da_lowess['lower'] = xr.DataArray(ll, dims=[time_dim])
+    da_lowess[time_dim] = x
+    if plot:
+        plt.plot(x, y, '+')
+        plt.plot(x, lowess)
+        plt.fill_between(x, ll, ul, alpha=.33)
+        plt.show()
+    return da_lowess
+
+
+def autocorr_plot(da_ts, max_lag=40):
+    import pandas as pd
+    ser = pd.Series(da_ts)
+    corrs = [ser.autocorr(lag=x) for x in range(0, max_lag)]
+    lags = [x for x in range(0, max_lag)]
+    lags_ser = pd.Series(corrs, index=lags)
+    ax = lags_ser.plot(kind='bar', rot=0, figsize=(10, 5))
+    return ax
+
+
 def error_mean_rmse(y, y_pred):
     from sklearn.metrics import mean_squared_error
     import numpy as np
