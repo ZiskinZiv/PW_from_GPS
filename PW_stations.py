@@ -1011,13 +1011,15 @@ def filter_stations(path, group_name='israeli', save=False):
 #        return intr
 
 
-def produce_pw_statistics(path=work_yuval, thresh=None):
+def produce_pw_statistics(path=work_yuval, mm=True, thresh=50):
     import xarray as xr
     from scipy.stats import kurtosis
     from scipy.stats import skew
     import pandas as pd
     pw = xr.load_dataset(path / 'GNSS_PW_thresh_{:.0f}.nc'.format(thresh))
     pw = pw[[x for x in pw.data_vars if '_error' not in x]]
+    if mm:
+        pw = pw.resample(time='MS').mean()
     pd.options.display.float_format = '{:.1f}'.format
     mean = pw.mean('time').reset_coords().to_array(
         'index').to_dataframe('Mean')
@@ -1336,12 +1338,13 @@ def align_group_pw_and_T_to_long_term_monthly_means_and_save(
 
 
 def group_anoms_and_cluster(load_path=work_yuval, remove_grp='month', thresh=None, grp='hour',
-                            season=None, n_clusters=4, load_mm=False):
+                            season=None, n_clusters=4):
     import xarray as xr
     from sklearn.cluster import KMeans
     # load data and save attrs in dict:
 #    pw = xr.load_dataset(work_yuval/'GNSS_PW_anom_{:.0f}_hour_dayofyear.nc'.format(thresh))
     pw = xr.load_dataset(load_path / 'GNSS_PW_thresh_{:.0f}.nc'.format(thresh))
+    pw = pw[[x for x in pw.data_vars if '_error' not in x]]
     attrs = {da: val.attrs for (da, val) in pw.data_vars.items()}
     # use upper() on names:
     da = pw.to_array('station')
@@ -1349,10 +1352,6 @@ def group_anoms_and_cluster(load_path=work_yuval, remove_grp='month', thresh=Non
     pw = da.to_dataset('station')
     for da in pw.data_vars.values():
         da.attrs = attrs.get(da.name.lower())
-    # for now, drop hrmn and nizn station from analysis:
-#    if to_drop is not None:
-#        for sta in to_drop:
-#            pw = pw[[x for x in pw.data_vars if sta not in x]]
     # extract weights from attrs:
     weights = [float(x.attrs['mean_years']) for x in pw.data_vars.values()]
     weights = np.array(weights) / np.max(np.array(weights))
@@ -1360,18 +1359,12 @@ def group_anoms_and_cluster(load_path=work_yuval, remove_grp='month', thresh=Non
     if season is not None and grp == 'hour':
         pw = pw.sel(time=pw['time.season'] == season)
     # groupby and create means:
-    if not load_mm:
-        if remove_grp is not None:
-            print('removing long term {}ly means first'.format(remove_grp))
-            pw = pw.groupby('time.{}'.format(remove_grp)) - pw.groupby('time.{}'.format(remove_grp)).mean('time')
-            pw_anom = pw
-        else:
-            # pw_anom = pw_mean - pw_mean.mean('{}'.format(grp))
-            pw_anom = pw.groupby('time.{}'.format('month')).mean('time')
-    else:
-        pw_mean = xr.load_dataset(load_path / 'PW_T_monthly_means_clim_thresh_{:.0f}.nc'.format(thresh))
-        just_pw = [x for x in pw_mean.data_vars if '_T' not in x]                   
-        pw_anom = pw_mean[just_pw]
+    if remove_grp is not None:
+        print('removing long term {}ly means first'.format(remove_grp))
+        pw = pw.groupby('time.{}'.format(remove_grp)) - pw.groupby('time.{}'.format(remove_grp)).mean('time')
+    pw_anom = pw.groupby('time.{}'.format(grp)).mean('time')
+    pw_anom = pw_anom.reset_coords(drop=True)
+        # pw_anom = pw.groupby('time.{}'.format('month')).mean('time')
     # to dataframe:
     df = pw_anom.to_dataframe()
     weights = pd.Series(weights, index=[x for x in pw.data_vars])
@@ -3559,6 +3552,31 @@ def get_long_trends_from_gnss_station(station='tela', modelname='LR',
     if plot:
         plot_tmseries_xarray(rds)
     return rds
+
+def pettitt_test_on_pw(da_ts, sample=None, alpha=0.05):
+#    [m n]=size(data);
+#    for t=2:1:m
+#        for j=1:1:m
+#          v(t-1,j)=sign(data(t-1,1)-data(j,1));
+#          V(t-1)=sum(v(t-1,:));
+#        end
+#    end
+#    U=cumsum(V);
+#    loc=find(abs(U)==max(abs(U)));
+#    K=max(abs(U));
+#    pvalue=2*exp((-6*K^2)/(m^3+m^2));
+#    a=[loc; K ;pvalue];
+    return 
+
+def normality_test_on_pw(da_ts, sample=None, alpha=0.05):
+    from statsmodels.stats.diagnostic import lilliefors
+    if sample is not None:
+        da_ts = da_ts.resample(time=sample).mean()
+    mean, pvalue = lilliefors(da_ts.dropna('time'))
+    if pvalue < alpha:
+        return 'Not Normally distributed with alpha {}'.format(alpha)
+    else:
+        return 'Normally distributed with alpha {}'.format(alpha)
 
 
 def mann_kendall_trend_analysis(da_ts, alpha=0.05, verbose=True):
