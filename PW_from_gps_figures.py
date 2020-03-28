@@ -62,6 +62,14 @@ def qualitative_cmap(n=2):
                 mcolors.BASE_COLORS['c'],
                 mcolors.BASE_COLORS['m']]
         cmap = mcolors.ListedColormap(colorsList)
+    elif n == 5:
+        colorsList = [
+                mcolors.BASE_COLORS['r'],
+                mcolors.BASE_COLORS['g'],
+                mcolors.BASE_COLORS['c'],
+                mcolors.BASE_COLORS['m'],
+                mcolors.BASE_COLORS['b']]
+        cmap = mcolors.ListedColormap(colorsList)
     return cmap
 
 
@@ -198,7 +206,14 @@ def plot_monthly_means_box_plots(path=work_yuval, thresh=50, kind='box',
                 'GNSS_PW_thresh_{:.0f}.nc'.format(thresh))
     pw = pw[[x for x in pw.data_vars if '_error' not in x]]
     attrs = [x.attrs for x in pw.data_vars.values()]
-    pw = pw.resample(time='MS').mean('time')
+    if x == 'month':
+        pw = pw.resample(time='MS').mean('time')
+    elif x == 'hour':
+        # pw = pw.resample(time='1H').mean('time')
+        # pw = pw.groupby('time.hour').mean('time')
+        pw = xr.load_dataset(work_yuval / 'GNSS_PW_hourly_thresh_{:.0f}.nc'.format(thresh))
+        # first remove long term monthly means:
+        pw = pw.groupby('time.month') - pw.groupby('time.month').mean('time')
     for i, da in enumerate(pw.data_vars):
         pw[da].attrs = attrs[i]
     fg = plot_multi_box_xr(pw, kind=kind, x=x, col_wrap=col_wrap)
@@ -229,7 +244,7 @@ def plot_monthly_means_box_plots(path=work_yuval, thresh=50, kind='box',
                            right=0.985,
                            hspace=0.230,
                            wspace=0.145)
-    filename = 'pw_monthly_means_{}.png'.format(kind)
+    filename = 'pw_{}ly_means_{}.png'.format(x, kind)
     if save:
         plt.savefig(savefig_path / filename, bbox_inches='tight')
     return fg
@@ -267,8 +282,9 @@ def plot_box_df(df, x='month', title='TELA',
         ylimits = (0, 40)
     elif x == 'hour':
         df[x] = df.index.hour
+        # df[x] = df.index
         pal = sns.color_palette("Paired", 12)
-        ylimits = (-4, 4)
+        ylimits = (-2, 2)
     y = df.columns[0]
     if ax is None:
         fig, ax = plt.subplots()
@@ -289,24 +305,28 @@ def plot_box_df(df, x='month', title='TELA',
     return ax
 
 
-def plot_monthly_pw_and_T(load_path=work_yuval, ims_path=ims_path, thresh=50,
-                          col_wrap=5, save=True):
+def plot_means_pw(load_path=work_yuval, ims_path=ims_path, thresh=50,
+                  col_wrap=5, means='hour', save=True):
     import xarray as xr
     import numpy as np
     pw = xr.load_dataset(
             work_yuval /
             'GNSS_PW_thresh_{:.0f}.nc'.format(thresh))
     pw = pw[[x for x in pw.data_vars if '_error' not in x]]
-    pw_clim = pw.groupby('time.month').mean('time')
-    T = xr.load_dataset(
-            ims_path /
-            'GNSS_5mins_TD_ALL_1996_2020.nc')
-    T_clim = T.groupby('time.month').mean('time')
+    if means == 'hour':
+        # remove long term monthly means:
+        pw_clim = pw.groupby('time.month') - pw.groupby('time.month').mean('time')    
+        pw_clim = pw_clim.groupby('time.{}'.format(means)).mean('time')
+    else:
+        pw_clim = pw.groupby('time.{}'.format(means)).mean('time')
+#    T = xr.load_dataset(
+#            ims_path /
+#            'GNSS_5mins_TD_ALL_1996_2020.nc')
+#    T_clim = T.groupby('time.month').mean('time')
     attrs = [x.attrs for x in pw.data_vars.values()]
     fg = pw_clim.to_array('station').plot(col='station', col_wrap=col_wrap,
                                           color='b', marker='o', alpha=0.7,
                                           sharex=False, sharey=True)
-    fg.fig.subplots_adjust(wspace=0.0, hspace=0.0, right=0.974)
     col_arr = np.arange(0, len(pw_clim))
     right_side = col_arr[col_wrap-1::col_wrap]
     for i, ax in enumerate(fg.axes.flatten()):
@@ -320,33 +340,42 @@ def plot_monthly_pw_and_T(load_path=work_yuval, ims_path=ims_path, thresh=50,
             ax.text(.2, .73, '{:.1f} years'.format(mean_years),
                     horizontalalignment='center',
                     transform=ax.transAxes)
-            ax_t = ax.twinx()
-            T_clim['{}'.format(title)].plot(
-                        color='r', linestyle='dashed', marker='s', alpha=0.7,
-                        ax=ax_t)
-            ax_t.set_ylim(0, 30)
+#            ax_t = ax.twinx()
+#            T_clim['{}'.format(title)].plot(
+#                        color='r', linestyle='dashed', marker='s', alpha=0.7,
+#                        ax=ax_t)
+#            ax_t.set_ylim(0, 30)
             fg.fig.canvas.draw()
-            labels = [item.get_text() for item in ax_t.get_yticklabels()]
-            ax_t.yaxis.set_ticklabels([])
-            ax_t.tick_params(axis='y', color='r')
-            ax_t.set_ylabel('')
-            if i in right_side:
-                ax_t.set_ylabel(r'Surface temperature [$\degree$C]', fontsize=10)
-                ax_t.yaxis.set_ticklabels(labels)
-                ax_t.tick_params(axis='y', labelcolor='r', color='r')
+
+#            labels = [item.get_text() for item in ax_t.get_yticklabels()]
+#            ax_t.yaxis.set_ticklabels([])
+#            ax_t.tick_params(axis='y', color='r')
+#            ax_t.set_ylabel('')
+#            if i in right_side:
+#                ax_t.set_ylabel(r'Surface temperature [$\degree$C]', fontsize=10)
+#                ax_t.yaxis.set_ticklabels(labels)
+#                ax_t.tick_params(axis='y', labelcolor='r', color='r')
             # show months ticks and grid lines for pw:
             ax.xaxis.tick_bottom()
+            ax.yaxis.tick_left()
             ax.yaxis.grid()
-            ax.legend([ax.lines[0], ax_t.lines[0]], ['PW', 'T'],
-                      loc='upper right', fontsize=10, prop={'size': 8})
+#            ax.legend([ax.lines[0], ax_t.lines[0]], ['PW', 'T'],
+#                      loc='upper right', fontsize=10, prop={'size': 8})
+#            ax.legend([ax.lines[0]], ['PW'],
+#                      loc='upper right', fontsize=10, prop={'size': 8})
         except IndexError:
             pass
     # change bottom xticks to 1-12 and show them:
-    fg.axes[-1, 0].xaxis.set_ticks(np.arange(1, 13))
+    # fg.axes[-1, 0].xaxis.set_ticks(np.arange(1, 13))
     [fg.axes[x, 0].set_ylabel('PW [mm]') for x in range(len(fg.axes[:, 0]))]
     # adjust subplots:
-    fg.fig.subplots_adjust(hspace=0.08, right=0.959)
-    filename = 'PW_T_climatology.png'
+    fg.fig.subplots_adjust(top=0.977,
+                           bottom=0.039,
+                           left=0.036,
+                           right=0.959,
+                           hspace=0.185,
+                           wspace=0.125)
+    filename = 'PW_{}_climatology.png'.format(means)
     if save:
         plt.savefig(savefig_path / filename, bbox_inches='tight')
     return fg
@@ -562,6 +591,7 @@ def plot_ts_tm(path=sound_path, model='TSEN',
     axin1.yaxis.tick_right()
     rmean = np.mean(resid)
     rmse = np.sqrt(mean_squared_error(y, predict))
+    print(rmean, rmse)
     r2 = r2_score(y, predict)
     axin1.axvline(rmean, color='r', linestyle='dashed', linewidth=1)
     # axin1.set_xlabel('Residual distribution[K]')
@@ -1010,16 +1040,16 @@ def produce_table_1(removed=['hrmn'], merged={'klhv': ['klhv', 'lhav'],
     return df
 
 
-def produce_table_2(thresh=50):
+def produce_table_2(thresh=50, mm=True):
     from PW_stations import produce_pw_statistics
-    df = produce_pw_statistics(thresh=thresh)
+    df = produce_pw_statistics(thresh=thresh, mm=mm)
     print(df.to_latex(index=False))
     return df
 
 
 def plot_grp_anomlay_heatmap(load_path=work_yuval, gis_path=gis_path,
-                             thresh=None, grp='hour', remove_grp=None, season=None,
-                             n_clusters=4, load_mm=False, save=True, title=False):
+                             thresh=50, grp='hour', remove_grp=None, season=None,
+                             n_clusters=4, save=True, title=False):
     import xarray as xr
     import seaborn as sns
     import numpy as np
@@ -1039,7 +1069,7 @@ def plot_grp_anomlay_heatmap(load_path=work_yuval, gis_path=gis_path,
 
     df, labels_sorted, weights = group_anoms_and_cluster(
             load_path=load_path, thresh=thresh, grp=grp, season=season,
-            n_clusters=n_clusters, remove_grp=remove_grp, load_mm=load_mm)
+            n_clusters=n_clusters, remove_grp=remove_grp)
     # create figure and subplots axes:
     fig = plt.figure(figsize=(15, 10))
     if title:
