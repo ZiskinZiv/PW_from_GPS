@@ -40,7 +40,7 @@ def export_pw_station_to_csv(pw_da, savepath=work_yuval):
     # df[name] = df[name].map("{.:2}".format)
     df[name] = df[name].map("{0:.2f}".format)
     filename = 'PW_{}_{}_for_RHtests.csv'.format(name, sample)
-    df.to_csv(savepath / filename, index=False, header=False, sep=' ')
+    df.to_csv(savepath / filename, index=False, header=False, sep=',')
     return df
 
 
