@@ -87,13 +87,43 @@ def export_pw_station_to_csv(pw_da, savepath):
     return df
 
 
-def run_RH_tests(station='tela', path=None, sample='monthly'):
+def check_station_name(name):
+    # import os
+    if isinstance(name, list):
+        name = [str(x).lower() for x in name]
+        for nm in name:
+            if len(nm) != 4:
+                raise argparse.ArgumentTypeError('{} should be 4 letters...'.format(nm))
+        return name
+    else:
+        name = str(name).lower()
+        if len(name) != 4:
+            raise argparse.ArgumentTypeError(name + ' should be 4 letters...')
+        return name
+
+
+def run_RH_tests(station='tela', path=None, sample='monthly', args=None):
     import rpy2.robjects as robjects
     from pathlib import Path
     #from rpy2.robjects.packages import importr
     #from rpy2.rinterface import RRuntimeWarning
     #base = importr('base')
     #base.warnings()
+    if args is not None:
+        if args.plev is not None:
+            plev = args.plev
+        else:
+            plev = 0.95
+        if args.Ny4a is not None:
+            Ny4a = args.Ny4a
+        else:
+            Ny4a = 0
+        if args.Mq is not None:
+            Mq = args.Mq
+        else:
+            Mq = 12
+    print('Running homogenization on {} {} means'.format(station, sample))
+    print('with parameters: plev {}, Ny4a {}, Mq {}.'.format(plev, Ny4a, Mq))
     r = robjects.r
     r.source('RHtests.R')
     in_file = "{}/PW_{}_{}_means_for_RHtests.csv".format(
@@ -102,14 +132,16 @@ def run_RH_tests(station='tela', path=None, sample='monthly'):
         print('{} not found ...\n pls run export_pw_station_to_csv or export_all'.format(in_file))
         return
     # now r.FindU and other functions working
-    out = "{}/{}_{}_means_out".format(path.as_posix(), station, sample)
+    out = "{}/{}_{}_means_plev{}_Mq{}out".format(path.as_posix(), station, sample, round(100*plev), Mq)
     print('running FindU')
     r.FindU(InSeries=in_file,
             output=out,
-            MissingValueCode="-999.00")
+            MissingValueCode="-999.00", p_lev=plev, Mq=Mq, Ny4a=Ny4a)
+    print('')
     print('running StepSize')
     r.StepSize(InSeries=in_file, output=out, MissingValueCode="-999.00",
-               InCs=out + '_mCs.txt')
+               InCs=out + '_mCs.txt', p_lev=plev, Mq=Mq, Ny4a=Ny4a)
+    print('')
     return
 
 
@@ -128,20 +160,27 @@ if __name__ == '__main__':
     optional = parser._action_groups.pop()
     required = parser.add_argument_group('required arguments')
     # remove this line: optional = parser...
-    required.add_argument('--station', help="GNSS 4 letter station", type=str)
+    required.add_argument('--station', nargs='+', help="GNSS 4 letter station", type=check_station_name)
     
-    #optional.add_argument('--station', nargs='+',
-    #                      help='GPS station name, 4 UPPERCASE letters',
-    #                      type=check_station_name)
+    optional.add_argument('--sample', help='select monthly or daily',
+                          type=str, choices=['monthly', 'daily'])
+    optional.add_argument('--plev', help='pvalue significance',
+                          type=float, choices=[0.75, 0.80, 0.90, 0.95, 0.99, 0.9999])
+    optional.add_argument('--Mq', help='number of points(categories) for which the empirical PDF are to be estimated', type=int)
+    optional.add_argument('--Ny4a', help='maximum number of years of data immidiately before or after a changepoint to be used to estimate the PDF', type=int)
 #                          metavar=str(cds.start_year) + ' to ' + str(cds.end_year))
 #    optional.add_argument('--half', help='a spescific six months to download,\
 #                          e.g, 1 or 2', type=int, choices=[1, 2],
 #                          metavar='1 or 2')
     parser._action_groups.append(optional)  # added this line
     args = parser.parse_args()
+    if args.sample is None:
+        args.sample = 'monthly'
     # print(parser.format_help())
 #    # print(vars(args))
     if args.station is None:
         print('station is a required argument, run with -h...')
         sys.exit()
-    run_RH_tests(args.station, path=savepath, sample='monthly')
+    for station in args.station:
+        run_RH_tests(station, path=savepath, sample=args.sample, args=args)
+
