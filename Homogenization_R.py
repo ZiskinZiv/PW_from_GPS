@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Created on Sun Mar 29 17:04:31 2020
-
+TODO: read all stations for xarray and produce statistics
 @author: shlomi
 """
 #def download_packages():
@@ -13,13 +13,60 @@ Created on Sun Mar 29 17:04:31 2020
 #    # utils.install_packages("remotes")
 #    rm=importr("remotes")
 #    rm.install_github('ECCM-CDAS/RHtests/V4_files')
+adjusted_stations = ['bshm', 'elat']
+
+def df_to_da_with_stats(loadpath, station='tela', sample='monthly', field='PW',
+                        rfunc='StepSize', plot=True):
+    kwargs = locals()
+    kwargs.pop('plot')
+    df, stats = read_dat_file(**kwargs)
+    da = df['mean_adj'].to_xarray()
+    da = da.rename({'date': 'time'})
+    da.name = '{}_mean_adj'.format(station)
+    da.attrs['units'] = 'mm'
+    da.attrs.update(stats)
+    if plot:
+        da.plot()
+    return da
 
 
-def read_dat_file(loadpath, station='tela', sample='monthly'):
+def read_stat_txt_file(loadpath, station='tela', sample='monthly',
+                       field='PW', rfunc='StepSize'):
+    from aux_gps import path_glob
+    import re
+    rfunc_dict = {'FindU': 'Ustat', 'FindUD': 'UDstat', 'StepSize': 'FINAL_Fstat'}
+    file = path_glob(
+        loadpath, '{}_{}_{}_means_*_{}.txt'.format(station, field, sample, rfunc_dict.get(rfunc)))[0]
+    f = open(file, 'r')
+    lines = f.readlines()
+    ##steps=  3 ; trend= 0.008495 ( 0.005017 , 0.011973 ) (p= 1 ); cor= 0.2084 ( 0.0786 , 0.3313 ) 0.9993 
+    stats = {}
+    for line in lines:
+        if line.startswith('#steps'):
+            intercept = line.split(';')[-1]
+            inter_list = re.findall("[^a-zA-Z:]([-+]?\d+[\.]?\d*)", intercept)
+            stats['interpect'] = inter_list[0]
+            stats['interpect_95'] = inter_list[1:3]
+            stats['interpect_pvalue'] = inter_list[-1]
+            trend = line.split(';')[-2]
+            trend_list = re.findall("[^a-zA-Z:]([-+]?\d+[\.]?\d*)", trend)
+            stats['trend'] = trend_list[0]
+            stats['trend_95'] = trend_list[1:3]
+            stats['trend_pvalue'] = trend_list[-1]
+    if sample == 'monthly':
+        stats['trend_units'] = 'per_month'
+    elif sample == 'daily':
+        stats['trend_units'] = 'per_day'
+    return stats
+
+
+def read_dat_file(loadpath, station='tela', sample='monthly',
+                  field='PW', rfunc='StepSize'):
     import pandas as pd
     from aux_gps import path_glob
+    rfunc_dict = {'FindU': 'U', 'FindUD': 'UD', 'StepSize': 'FINAL_F'}
     file = path_glob(
-        loadpath, '{}_{}_means_out_*.dat'.format(station, sample))[0]
+        loadpath, '{}_{}_{}_means_*_{}.dat'.format(station, field, sample, rfunc_dict.get(rfunc)))[0]
     df = pd.read_csv(
         file,
         header=None,
@@ -30,7 +77,7 @@ def read_dat_file(loadpath, station='tela', sample='monthly'):
         'date',
         station,
         'trend_shift',
-        'mean_adjusted',
+        'mean_adj',
         '{}_anom'.format(station),
         'anom_trend_shift',
         'seasonal_trend_shift',
@@ -44,29 +91,36 @@ def read_dat_file(loadpath, station='tela', sample='monthly'):
         df['date'] = pd.to_datetime(df['date'], format='%Y%m%d')
     df = df.set_index(df['date'])
     df = df.drop(['ind', 'date'], axis=1)
-    return df
+    stats = read_stat_txt_file(loadpath, station=station, sample=sample,
+                       field=field, rfunc=rfunc)
+    return df, stats
 
 
-def export_all(loadpath, savepath, sample='MS'):
+def export_all(loadpath, savepath, sample='MS', field='PW'):
     import xarray as xr
-    pw = xr.load_dataset(loadpath / 'GNSS_PW_thresh_50.nc')
     if sample == 'MS':
         print('Monthly means selected:')
     elif sample == '1D':
         print('Daily means selected:')
-    pw = pw[[x for x in pw.data_vars if '_error' not in x]]
-    pw = pw.resample(time=sample).mean()
-    for da in pw.data_vars:
+    if field == 'PW':
+        ds = xr.load_dataset(loadpath / 'GNSS_PW_thresh_50.nc')
+    elif field == 'ALT':
+        ds = xr.load_dataset(loadpath / 'alt_thresh_50.nc')
+    print('{} field selected.'.format(field))
+    ds = ds[[x for x in ds.data_vars if '_error' not in x]]
+    ds = ds.resample(time=sample).mean()
+    for da in ds.data_vars:
         print('exporting {} station to csv'.format(da.upper()))
-        _ = export_pw_station_to_csv(pw[da], savepath=savepath)
+        _ = export_time_series_station_to_csv(ds[da], savepath=savepath,
+                                              field=field)
     print('Done!')
     return
 
 
-def export_pw_station_to_csv(pw_da, savepath):
+def export_time_series_station_to_csv(da_ts, savepath, field='PW'):
     import pandas as pd
-    name = pw_da.name
-    df = pw_da.to_dataframe()
+    name = da_ts.name
+    df = da_ts.to_dataframe()
     df['year'] = df.index.year
     df['month'] = df.index.month
     if pd.infer_freq(df.index) == 'D':
@@ -82,7 +136,7 @@ def export_pw_station_to_csv(pw_da, savepath):
     df = df.fillna(-999.0)
     # df[name] = df[name].map("{.:2}".format)
     df[name] = df[name].map("{0:.2f}".format)
-    filename = 'PW_{}_{}_for_RHtests.csv'.format(name, sample)
+    filename = '{}_{}_{}_for_RHtests.csv'.format(field, name, sample)
     df.to_csv(savepath / filename, index=False, header=False, sep=',')
     return df
 
@@ -102,47 +156,144 @@ def check_station_name(name):
         return name
 
 
-def run_RH_tests(station='tela', path=None, sample='monthly', args=None):
+def run_RHtests_function(name='FindU', station='tela', sample='monthly',
+                         field='PW', ref=None, path=None, params=None):
     import rpy2.robjects as robjects
     from pathlib import Path
-    #from rpy2.robjects.packages import importr
-    #from rpy2.rinterface import RRuntimeWarning
-    #base = importr('base')
-    #base.warnings()
-    if args is not None:
-        if args.plev is not None:
-            plev = args.plev
-        else:
-            plev = 0.95
-        if args.Ny4a is not None:
-            Ny4a = args.Ny4a
-        else:
-            Ny4a = 0
-        if args.Mq is not None:
-            Mq = args.Mq
-        else:
-            Mq = 12
-    print('Running homogenization on {} {} means'.format(station, sample))
-    print('with parameters: plev {}, Ny4a {}, Mq {}.'.format(plev, Ny4a, Mq))
     r = robjects.r
     r.source('RHtests.R')
-    in_file = "{}/PW_{}_{}_means_for_RHtests.csv".format(
-        path.as_posix(), station, sample)
-    if not Path(in_file).is_file():
-        print('{} not found ...\n pls run export_pw_station_to_csv or export_all'.format(in_file))
-        return
-    # now r.FindU and other functions working
-    out = "{}/{}_{}_means_plev{}_Mq{}out".format(path.as_posix(), station, sample, round(100*plev), Mq)
-    print('running FindU')
-    r.FindU(InSeries=in_file,
-            output=out,
-            MissingValueCode="-999.00", p_lev=plev, Mq=Mq, Ny4a=Ny4a)
-    print('')
-    print('running StepSize')
-    r.StepSize(InSeries=in_file, output=out, MissingValueCode="-999.00",
-               InCs=out + '_mCs.txt', p_lev=plev, Mq=Mq, Ny4a=Ny4a)
-    print('')
+    # options for name: FindU, FindUD, StepSize, FindU.wRef, FindUD.wRef, StepSize.wRef
+    rfunc = r(name)
+    if params is not None:
+        if params.plev is not None:
+            plev = params.plev
+        else:
+            plev = 0.95
+        if params.Ny4a is not None:
+            Ny4a = params.Ny4a
+        else:
+            Ny4a = 0
+        if params.Mq is not None:
+            Mq = params.Mq
+        else:
+            Mq = 12
+    if ref is None:
+        print('Running homogenization on {} {} {} means Without Reference Station:'.format(field, station, sample))
+        print('with parameters: plev {}, Ny4a {}, Mq {}.'.format(plev, Ny4a, Mq))
+        in_file = "{}/{}_{}_{}_means_for_RHtests.csv".format(
+            path.as_posix(), field, station, sample)
+        if not Path(in_file).is_file():
+            print(
+                '{} not found ...\n pls run export_time_series_station_to_csv or export_all'.format(in_file))
+            return
+        # now r.FindU and other functions working
+        out = "{}/{}_{}_{}_means_plev{}_Mq{}_OUT".format(
+            path.as_posix(), station, field, sample, round(100 * plev), Mq)
+        print('running {}...'.format(name))
+        if name == 'FindU':
+            rfunc(InSeries=in_file,
+                  output=out,
+                  MissingValueCode="-999.00", p_lev=plev, Mq=Mq, Ny4a=Ny4a)
+        elif name == 'FindUD':
+            # InCs = out + '_mCs.txt'
+            InCs = out + '_1Cs.txt'
+            if not Path(InCs).is_file():
+                print(
+                        '{} not found ...\n pls run FindU first'.format(InCs))
+                return
+            rfunc(InSeries=in_file,
+                  output=out, InCs=InCs,
+                  MissingValueCode="-999.00", p_lev=plev, Mq=Mq, Ny4a=Ny4a)
+        elif name == 'StepSize':
+            InCs = out + '_mCs.txt'
+            if not Path(InCs).is_file():
+                print(
+                        '{} not found ...\n pls run FindU first'.format(InCs))
+                return
+            rfunc(InSeries=in_file,
+                  output=out.replace('OUT', 'FINAL'), InCs=InCs,
+                  MissingValueCode="-999.00", p_lev=plev, Mq=Mq, Ny4a=Ny4a)
+        print('')
     return
+
+
+#def run_RH_tests(station='tela', path=None, sample='monthly', field='PW',
+#                 args=None):
+#    import rpy2.robjects as robjects
+#    from pathlib import Path
+#    r = robjects.r
+#    r.source('RHtests.R')
+#    FindU = r('FindU')
+#    StepSize = r('StepSize')
+#    FindU_wRef = r('FindU.wRef')
+#    StepSize_wRef = r('StepSize.wRef')
+#    #from rpy2.robjects.packages import importr
+#    #from rpy2.rinterface import RRuntimeWarning
+#    #base = importr('base')
+#    # base.warnings()
+#    if args is not None:
+#        if args.plev is not None:
+#            plev = args.plev
+#        else:
+#            plev = 0.95
+#        if args.Ny4a is not None:
+#            Ny4a = args.Ny4a
+#        else:
+#            Ny4a = 0
+#        if args.Mq is not None:
+#            Mq = args.Mq
+#        else:
+#            Mq = 12
+#        if args.ref is not None:
+#            ref = args.ref
+#        else:
+#            ref = None
+#    if ref is None:
+#        print('Running homogenization on {} {} {} means Without Reference Station:'.format(field, station, sample))
+#        print('with parameters: plev {}, Ny4a {}, Mq {}.'.format(plev, Ny4a, Mq))
+#        in_file = "{}/{}_{}_{}_means_for_RHtests.csv".format(
+#            path.as_posix(), field, station, sample)
+#        if not Path(in_file).is_file():
+#            print(
+#                '{} not found ...\n pls run export_time_series_station_to_csv or export_all'.format(in_file))
+#            return
+#        # now r.FindU and other functions working
+#        out = "{}/{}_{}_{}_means_plev{}_Mq{}_out".format(
+#            path.as_posix(), field, station, sample, round(100 * plev), Mq)
+#        print('running FindU')
+#        FindU(InSeries=in_file,
+#              output=out,
+#              MissingValueCode="-999.00", p_lev=plev, Mq=Mq, Ny4a=Ny4a)
+#        print('')
+#        print('running StepSize')
+#        StepSize(InSeries=in_file, output=out, MissingValueCode="-999.00",
+#                 InCs=out + '_mCs.txt', p_lev=plev, Mq=Mq, Ny4a=Ny4a)
+#        print('')
+#    else:
+#        print('Running homogenization on {} {} {} means with reference station ():'.format(field, station, sample, ref))
+#        print('with parameters: plev {}, Ny4a {}, Mq {}.'.format(plev, Ny4a, Mq))
+#        B_file = "{}/{}_{}_{}_means_for_RHtests.csv".format(
+#            path.as_posix(), field, station, sample)
+#        R_file = "{}/{}_{}_{}_means_for_RHtests.csv".format(
+#            path.as_posix(), field, ref, sample)
+#        if not Path(B_file).is_file() or not Path(R_file).is_file():
+#            print(
+#                '{} not found ...\n pls run export_pw_station_to_csv or export_all'.format(in_file))
+#            return
+#        # now r.FindU and other functions working
+#        out = "{}/{}_{}_{}_means_ref_{}_plev{}_Mq{}out".format(
+#            path.as_posix(), field, station, sample, ref, round(100 * plev), Mq)
+#        print('running FindU_wRef')
+#        FindU_wRef(Bseries=B_file,
+#                   output=out, Rseries=R_file,
+#                   MissingValueCode="-999.00", p_lev=plev, Mq=Mq, Ny4a=Ny4a)
+#        print('')
+#        print('running StepSize_wRef')
+#        StepSize_wRef(Bseries=B_file, output=out, MissingValueCode="-999.00",
+#                      InCs=out + '_mCs.txt', p_lev=plev, Mq=Mq, Ny4a=Ny4a,
+#                      Rseries=R_file)
+#        print('')
+#    return
 
 
 if __name__ == '__main__':
@@ -161,6 +312,8 @@ if __name__ == '__main__':
     required = parser.add_argument_group('required arguments')
     # remove this line: optional = parser...
     required.add_argument('--station', nargs='+', help="GNSS 4 letter station", type=check_station_name)
+    required.add_argument('--field', help='Either PW or ALT for now', choices=['PW', 'ALT'])
+    required.add_argument('--rfunc', help='R function from RHtests.R', choices=['FindU', 'FindUD', 'StepSize'])
     
     optional.add_argument('--sample', help='select monthly or daily',
                           type=str, choices=['monthly', 'daily'])
@@ -168,6 +321,7 @@ if __name__ == '__main__':
                           type=float, choices=[0.75, 0.80, 0.90, 0.95, 0.99, 0.9999])
     optional.add_argument('--Mq', help='number of points(categories) for which the empirical PDF are to be estimated', type=int)
     optional.add_argument('--Ny4a', help='maximum number of years of data immidiately before or after a changepoint to be used to estimate the PDF', type=int)
+    optional.add_argument('--ref', help='Reference station', type=check_station_name)
 #                          metavar=str(cds.start_year) + ' to ' + str(cds.end_year))
 #    optional.add_argument('--half', help='a spescific six months to download,\
 #                          e.g, 1 or 2', type=int, choices=[1, 2],
@@ -181,6 +335,13 @@ if __name__ == '__main__':
     if args.station is None:
         print('station is a required argument, run with -h...')
         sys.exit()
+    if args.field is None:
+        print('field is a required argument, run with -h...')
+        sys.exit()
+    if args.rfunc is None:
+        print('rfunc is a required argument, run with -h...')
+        sys.exit()
     for station in args.station:
-        run_RH_tests(station, path=savepath, sample=args.sample, args=args)
+        run_RHtests_function(name=args.rfunc, station=station, sample=args.sample,
+                         field=args.field, ref=args.ref, path=savepath, params=args)
 
