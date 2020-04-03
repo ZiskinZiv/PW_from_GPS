@@ -3,8 +3,8 @@
 """
 Created on Mon Mar 25 15:50:20 2019
 work flow for ZWD and PW retreival after python copy_gipsyx_post_from_geo.py:
-    1)save_ZWD_unselected_data_and_errors
-    2)select_ZWD_thresh_and_combine_save_all
+    1)save_PPP_field_unselected_data_and_errors(field='ZWD')
+    2)select_PPP_field_thresh_and_combine_save_all(field='ZWD')
     3)use mean_ZWD_over_sound_time_and_fit_tstm to obtain the mda (model dataarray)
     3*) can't use produce_kappa_ml_with_cats for hour on 5 mins data, dahhh!
     can do that with dayofyear, month, season (need to implement it first)
@@ -3267,15 +3267,17 @@ def calculate_zwd_altitude_fit(path=work_yuval, model='TSEN', plot=True):
     return df_gnss['alt'], zwd_lapse_rate
 
 
-def select_ZWD_thresh_and_combine_save_all(
+
+
+def select_PPP_field_thresh_and_combine_save_all(
     path=work_yuval, thresh=None, to_drop=['hrmn'], combine_dict={
         'klhv': [
             'klhv', 'lhav'], 'mrav': [
-            'gilb', 'mrav']}):
+            'gilb', 'mrav']}, field='ZWD'):
     import xarray as xr
     import numpy as np
     from aux_gps import path_glob
-    file = path_glob(path, 'ZWD_unselected*.nc')[0]
+    file = path_glob(path, '{}_unselected*.nc'.format(field))[0]
     ds = xr.load_dataset(file)
     zwd_thresh = ds.map(
         filter_month_year_data_heatmap_plot,
@@ -3293,8 +3295,12 @@ def select_ZWD_thresh_and_combine_save_all(
         combined = []
         for new_sta, sta_to_merge in combine_dict.items():
             print('merging {} to {}'.format(sta_to_merge, new_sta))
+            if field == 'ZWD':
+                lapse = True
+            elif field == 'alt':
+                lapse = False
             combined.append(combine_ZWD_stations(zwd_thresh, new_sta,
-                                                sta_to_merge, thresh))
+                                                 sta_to_merge, thresh, zwd_lapse_rate_correction=lapse))
         # drop old stations:
         sta_to_drop = [item for sublist in combine_dict.values()
                        for item in sublist]
@@ -3320,7 +3326,7 @@ def select_ZWD_thresh_and_combine_save_all(
     zwd_thresh.attrs['mean_days_dropped_percent'] = '{:.2f}'.format(mean_days_dropped_percent)
     zwd_thresh.attrs['mean_months_dropped_percent'] = '{:.2f}'.format(mean_months_dropped_percent)
     zwd_thresh = zwd_thresh[sorted(zwd_thresh)]
-    filename = 'ZWD_thresh_{:.0f}.nc'.format(thresh)
+    filename = '{}_thresh_{:.0f}.nc'.format(field, thresh)
     comp = dict(zlib=True, complevel=9)  # best compression
     encoding = {var: comp for var in zwd_thresh.data_vars}
     zwd_thresh.to_netcdf(path / filename, 'w', encoding=encoding)
@@ -3483,18 +3489,19 @@ def load_gipsyx_results(station='tela', sample_rate=None,
     return ds
 
 
-def save_ZWD_unselected_data_and_errors(savepath=None, savename='israel'):
+def save_PPP_field_unselected_data_and_errors(savepath=None, savename='israel',
+                                              field='ZWD'):
     import xarray as xr
     from aux_gps import rename_data_vars
-    ds = load_gipsyx_results(field_all='WetZ')
-    ds_error = load_gipsyx_results(field_all='WetZ_error')
+    ds = load_gipsyx_results(field_all=field)
+    ds_error = load_gipsyx_results(field_all='{}_error'.format(field))
     ds_error = rename_data_vars(ds_error, suffix='_error', verbose=True)
     ds = xr.merge([ds, ds_error])
     if savepath is not None:
         yr_min = ds.time.min().dt.year.item()
         yr_max = ds.time.max().dt.year.item()
-        filename = 'ZWD_unselected_{}_{}-{}.nc'.format(
-            savename, yr_min, yr_max)
+        filename = '{}_unselected_{}_{}-{}.nc'.format(field,
+                                                      savename, yr_min, yr_max)
         comp = dict(zlib=True, complevel=9)  # best compression
         encoding = {var: comp for var in ds.data_vars}
         ds.to_netcdf(savepath / filename, 'w', encoding=encoding)
@@ -3568,11 +3575,15 @@ def pettitt_test_on_pw(da_ts, sample=None, alpha=0.05):
 #    a=[loc; K ;pvalue];
     return 
 
-def normality_test_on_pw(da_ts, sample=None, alpha=0.05):
+def normality_test_on_pw(da_ts, sample=None, alpha=0.05, test='shapiro'):
     from statsmodels.stats.diagnostic import lilliefors
+    from scipy.stats import shapiro
     if sample is not None:
         da_ts = da_ts.resample(time=sample).mean()
-    mean, pvalue = lilliefors(da_ts.dropna('time'))
+    if test == 'shapiro':
+        mean, pvalue = shapiro(da_ts.dropna('time'))
+    else:
+        mean, pvalue = lilliefors(da_ts.dropna('time'))
     if pvalue < alpha:
         return 'Not Normally distributed with alpha {}'.format(alpha)
     else:
