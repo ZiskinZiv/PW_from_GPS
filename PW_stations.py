@@ -1011,14 +1011,18 @@ def filter_stations(path, group_name='israeli', save=False):
 #        return intr
 
 
-def produce_pw_statistics(path=work_yuval, mm=True, thresh=50):
+def produce_pw_statistics(path=work_yuval, resample_to_mm=True, thresh=50,
+                          pw_input=None):
     import xarray as xr
     from scipy.stats import kurtosis
     from scipy.stats import skew
     import pandas as pd
-    pw = xr.load_dataset(path / 'GNSS_PW_thresh_{:.0f}.nc'.format(thresh))
-    pw = pw[[x for x in pw.data_vars if '_error' not in x]]
-    if mm:
+    if pw_input is None:
+        pw = xr.load_dataset(path / 'GNSS_PW_thresh_{:.0f}.nc'.format(thresh))
+        pw = pw[[x for x in pw.data_vars if '_error' not in x]]
+    else:
+        pw = pw_input
+    if resample_to_mm:
         pw = pw.resample(time='MS').mean()
     pd.options.display.float_format = '{:.1f}'.format
     mean = pw.mean('time').reset_coords().to_array(
@@ -3277,7 +3281,7 @@ def select_PPP_field_thresh_and_combine_save_all(
     import xarray as xr
     import numpy as np
     from aux_gps import path_glob
-    file = path_glob(path, '{}_unselected*.nc'.format(field))[0]
+    file = path_glob(path, '{}_unselected*.nc'.format(field.upper()))[0]
     ds = xr.load_dataset(file)
     zwd_thresh = ds.map(
         filter_month_year_data_heatmap_plot,
@@ -3296,11 +3300,11 @@ def select_PPP_field_thresh_and_combine_save_all(
         for new_sta, sta_to_merge in combine_dict.items():
             print('merging {} to {}'.format(sta_to_merge, new_sta))
             if field == 'ZWD':
-                lapse = True
+                cor = 'zwd_lapse_rate'
             elif field == 'alt':
-                lapse = False
-            combined.append(combine_ZWD_stations(zwd_thresh, new_sta,
-                                                 sta_to_merge, thresh, zwd_lapse_rate_correction=lapse))
+                cor = 'mean'
+            combined.append(combine_PPP_stations(zwd_thresh, new_sta,
+                                                 sta_to_merge, thresh, correction=cor))
         # drop old stations:
         sta_to_drop = [item for sublist in combine_dict.values()
                        for item in sublist]
@@ -3326,7 +3330,7 @@ def select_PPP_field_thresh_and_combine_save_all(
     zwd_thresh.attrs['mean_days_dropped_percent'] = '{:.2f}'.format(mean_days_dropped_percent)
     zwd_thresh.attrs['mean_months_dropped_percent'] = '{:.2f}'.format(mean_months_dropped_percent)
     zwd_thresh = zwd_thresh[sorted(zwd_thresh)]
-    filename = '{}_thresh_{:.0f}.nc'.format(field, thresh)
+    filename = '{}_thresh_{:.0f}.nc'.format(field.upper(), thresh)
     comp = dict(zlib=True, complevel=9)  # best compression
     encoding = {var: comp for var in zwd_thresh.data_vars}
     zwd_thresh.to_netcdf(path / filename, 'w', encoding=encoding)
@@ -3334,15 +3338,18 @@ def select_PPP_field_thresh_and_combine_save_all(
     return zwd_thresh
 
 
-def combine_ZWD_stations(zwd, name, stations, thresh=None,
-                         zwd_lapse_rate_correction=True, path=work_yuval):
+def combine_PPP_stations(zwd, name, stations, thresh=None,
+                         correction='zwd_lapse_rate',
+                         path=work_yuval):
     import xarray as xr
     import numpy as np
     from aux_gps import get_unique_index
+    import pandas as pd
+    # correction can be 'zwd_lapse_rate' or 'mean'
     time_dim = list(set(zwd.dims))[0]
     slist = [zwd[x].dropna(time_dim) for x in stations]
     sdict = dict(zip(stations, slist))
-    if zwd_lapse_rate_correction:
+    if correction == 'zwd_lapse_rate':
         # now fix for zwd lapse rate (how zenith wet delay drops with altitude for
         # the merged stations):
         df, zwd_lapse_rate = calculate_zwd_altitude_fit(path=work_yuval, model='LR',
@@ -3360,6 +3367,14 @@ def combine_ZWD_stations(zwd, name, stations, thresh=None,
             # note the sign in +=, we add zwd to higher stations if we are
             # the combined lower station:
             sdict[station_name] += height_diff * zwd_lapse_rate
+        slist = [x for x in sdict.values()]
+    elif correction == 'mean':
+        mean_list = [sdict[x].mean('time').values.item() for x in sdict.keys()]
+        df = pd.DataFrame(mean_list, index=sdict.keys(), columns=['mean'])
+        df -= df.loc[name]
+        for station_name in sdict.copy().keys():
+            mean_diff = df.loc[station_name, 'mean']
+            sdict[station_name] -= mean_diff
         slist = [x for x in sdict.values()]
     # finally concat them:
     combined_station = xr.concat(slist, time_dim)
@@ -3500,7 +3515,7 @@ def save_PPP_field_unselected_data_and_errors(savepath=None, savename='israel',
     if savepath is not None:
         yr_min = ds.time.min().dt.year.item()
         yr_max = ds.time.max().dt.year.item()
-        filename = '{}_unselected_{}_{}-{}.nc'.format(field,
+        filename = '{}_unselected_{}_{}-{}.nc'.format(field.upper(),
                                                       savename, yr_min, yr_max)
         comp = dict(zlib=True, complevel=9)  # best compression
         encoding = {var: comp for var in ds.data_vars}
