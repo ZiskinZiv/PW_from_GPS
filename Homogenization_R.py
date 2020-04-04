@@ -2,8 +2,14 @@
 # -*- coding: utf-8 -*-
 """
 Created on Sun Mar 29 17:04:31 2020
-TODO: read all stations for xarray and produce statistics
 @author: shlomi
+methodology: run FindU on ALT and find corresponding changepoints in PW 
+(FindU, FindUD), also look for RINEX availability gaps for changepoints
+# quationable stations:
+# 'jslm': FindUD finds 3 points but not in sync with ALT
+# 'katz': many point in ALT (UD), a few in PW , one corresponding
+# Qmout error: FindU no 1 type and FindUD finds homogenoues, stepsize fails:
+#: kabr, drag, csar, mrav, nizn
 """
 #def download_packages():
 #    from rpy2.robjects.packages import importr
@@ -13,18 +19,106 @@ TODO: read all stations for xarray and produce statistics
 #    # utils.install_packages("remotes")
 #    rm=importr("remotes")
 #    rm.install_github('ECCM-CDAS/RHtests/V4_files')
-adjusted_stations = ['bshm', 'elat']
+from PW_paths import work_yuval
+adjusted_stations = ['bshm', 'dsea', 'elat', 'elro', 'katz', 'klhv', 'nrif',
+                     'nzrt', 'ramo', 'slom', 'tela', 'yrcm']
+gis_path = work_yuval / 'gis'
+homo_path = work_yuval / 'homogenization'
+
+
+def compare_adj_pw(path=work_yuval, homo_path=homo_path, gis_path=gis_path,
+                   stations=adjusted_stations):
+    import xarray as xr
+    from PW_stations import produce_pw_statistics
+    from PW_stations import mann_kendall_trend_analysis
+    import numpy as np
+    import pandas as pd
+    adj_pw = load_adjusted_stations(
+        homo_path, stations=stations, sample='monthly', field='PW',
+        gis_path=gis_path, just_adjusted=True)
+    pw = xr.load_dataset(path / 'GNSS_PW_hourly_thresh_50.nc')
+    pw = pw.resample(time='MS').mean('time')
+    adjusted_names = [x.split('_')[0] for x in adj_pw.data_vars]
+    originals = xr.merge([x for x in pw.data_vars.values() if x.name in adjusted_names])
+    compare = xr.merge([adj_pw, originals])
+    compare = compare[[x for x in sorted(compare)]]
+    df_stats = produce_pw_statistics(resample_to_mm=False, pw_input=compare)
+    attrs = [x.attrs for x in compare.data_vars.values() if '_mean_adj' in x.name]
+    names = [x.name for x in compare.data_vars.values() if '_mean_adj' in x.name]
+    attrs = dict(zip(names, attrs))
+    anoms = compare.groupby('time.month') - compare.groupby('time.month').mean('time')
+    for name in names:
+        anoms[name].attrs = attrs.get(name)
+    anoms = anoms.reset_coords(drop=True)
+    anoms = anoms.map(mann_kendall_trend_analysis, alpha=0.05, verbose=False)
+    mkt_trends = [anoms[x].attrs['mkt_trend'] for x in anoms.data_vars]
+    mkt_bools = [anoms[x].attrs['mkt_h'] for x in anoms.data_vars]
+    mkt_slopes = [anoms[x].attrs['mkt_slope'] for x in anoms.data_vars]
+    trends = []
+    for x in anoms.data_vars:
+        try:
+            trends.append(anoms[x].attrs['trend'])
+        except KeyError:
+            trends.append(np.nan)
+    df_trends = pd.DataFrame(trends, index=[x for x in anoms.data_vars], columns=['trend'])
+    df_trends['mkt_trend'] = mkt_trends
+    df_trends['mkt_h'] = mkt_bools
+    df_trends['mkt_slope'] = mkt_slopes
+    df_trends['trend'] = df_trends['trend'].astype(float)
+    return anoms, df_trends, df_stats
+
+
+def load_adjusted_stations(
+        loadpath, stations=adjusted_stations, sample='monthly', field='PW',
+        gis_path=gis_path, just_adjusted=True):
+    import xarray as xr
+    from PW_stations import produce_geo_gnss_solved_stations
+    # first assemble all adjusted stations:
+    adj_list = []
+    for station in stations:
+        da = df_to_da_with_stats(loadpath, station, sample=sample,
+                                 field=field, df_field='mean_adj',
+                                 update_stats=True, rfunc='StepSize',
+                                 plot=False)
+        adj_list.append(da)
+    # then assemble all other stations:
+    df = produce_geo_gnss_solved_stations(path=gis_path, plot=False)
+    all_stations = [x for x in df.index if x not in ['gilb', 'lhav', 'hrmn']]
+    other = sorted([x for x in all_stations if x not in adjusted_stations])
+    other_list = []
+    for station in other:
+        da = df_to_da_with_stats(loadpath, station, sample=sample,
+                                 field=field, rfunc='FindU', df_field=station,
+                                 update_stats=False, plot=False)
+        other_list.append(da)
+    if just_adjusted:
+#        adjusted_names = [x.name.split('_')[0] for x in adj_list]
+#        print(adjusted_names)
+#        originals = [x for x in other_list if x.name in adjusted_names]
+#        print(originals)
+        adj_pw = xr.merge(adj_list)
+        adj_pw = adj_pw[[x for x in sorted(adj_pw)]]
+    else:
+        adj_pw = xr.merge(adj_list + other_list)
+        adj_pw = adj_pw[[x for x in sorted(adj_pw)]]
+    return adj_pw
+
 
 def df_to_da_with_stats(loadpath, station='tela', sample='monthly', field='PW',
-                        rfunc='StepSize', plot=True):
+                        rfunc='StepSize', df_field='mean_adj',
+                        update_stats=True, plot=True):
     kwargs = locals()
-    kwargs.pop('plot')
+    [kwargs.pop(x) for x in ['plot', 'update_stats', 'df_field']]
     df, stats = read_dat_file(**kwargs)
-    da = df['mean_adj'].to_xarray()
+    da = df[df_field].to_xarray()
     da = da.rename({'date': 'time'})
-    da.name = '{}_mean_adj'.format(station)
+    if df_field == station:
+        da.name = station
+    else:
+        da.name = '{}_{}'.format(station, df_field)
     da.attrs['units'] = 'mm'
-    da.attrs.update(stats)
+    if update_stats:
+        da.attrs.update(stats)
     if plot:
         da.plot()
     return da
@@ -105,7 +199,7 @@ def export_all(loadpath, savepath, sample='MS', field='PW'):
     if field == 'PW':
         ds = xr.load_dataset(loadpath / 'GNSS_PW_thresh_50.nc')
     elif field == 'ALT':
-        ds = xr.load_dataset(loadpath / 'alt_thresh_50.nc')
+        ds = xr.load_dataset(loadpath / 'ALT_thresh_50.nc')
     print('{} field selected.'.format(field))
     ds = ds[[x for x in ds.data_vars if '_error' not in x]]
     ds = ds.resample(time=sample).mean()
