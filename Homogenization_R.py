@@ -21,13 +21,59 @@ methodology: run FindU on ALT and find corresponding changepoints in PW
 #    rm.install_github('ECCM-CDAS/RHtests/V4_files')
 from PW_paths import work_yuval
 adjusted_stations = ['bshm', 'dsea', 'elat', 'elro', 'katz', 'klhv', 'nrif',
-                     'nzrt', 'ramo', 'slom', 'tela', 'yrcm']
+                     'tela']
+unchanged_stations = ['alon', 'csar', 'drag', 'jslm', 'kabr', 'mrav', 'nizn',
+                      'nzrt', 'ramo', 'slom', 'spir', 'yosh', 'yrcm']
 gis_path = work_yuval / 'gis'
 homo_path = work_yuval / 'homogenization'
 
 
+def save_pw_monthly_means_and_anoms(loadpath=homo_path, savepath=work_yuval,
+                                    thresh=50):
+    import xarray as xr
+    pw_o = xr.open_dataset(
+                savepath /
+                'GNSS_PW_thresh_{:.0f}.nc'.format(thresh))
+    pw_o = pw_o[[x for x in pw_o.data_vars if '_error' not in x]]
+    attrs_o = [x.attrs for x in pw_o.data_vars.values()]
+    pw = load_adjusted_stations(loadpath, rename_adjusted=True,
+                                return_ds='all')
+    attrs = [x.attrs for x in pw.data_vars.values()]
+    names = [x.name for x in pw.data_vars.values()]
+    attrs = dict(zip(names, attrs))
+    attrs_o = dict(zip(names, attrs_o))
+    anoms = pw.groupby('time.month') - pw.groupby('time.month').mean('time')
+    anoms = anoms.reset_coords(drop=True)
+    for name in names:
+        pw[name].attrs.update(attrs_o.get(name))
+        anoms[name].attrs = attrs.get(name)
+        anoms[name].attrs.update(attrs_o.get(name))
+    filename = 'GNSS_PW_monthly_thresh_50.nc'
+    pw.to_netcdf(savepath/filename, 'w')
+    print('{} was save to {}'.format(filename, savepath))
+    filename = 'GNSS_PW_monthly_anoms_thresh_50.nc'
+    anoms.to_netcdf(savepath/filename, 'w')
+    print('{} was save to {}'.format(filename, savepath))
+    return
+
+
+def compare_pw_trend_mann_kendall(loadpath=homo_path):
+    from PW_stations import mann_kendall_trend_analysis
+    pw = load_adjusted_stations(loadpath, rename_adjusted=True,
+                                return_ds='all')
+    attrs = [x.attrs for x in pw.data_vars.values()]
+    names = [x.name for x in pw.data_vars.values()]
+    attrs = dict(zip(names, attrs))
+    anoms = pw.groupby('time.month') - pw.groupby('time.month').mean('time')
+    anoms = anoms.reset_coords(drop=True)
+    for name in names:
+        anoms[name].attrs = attrs.get(name)
+    anoms = anoms.map(mann_kendall_trend_analysis, verbose=False)
+    return anoms
+
+
 def compare_adj_pw(path=work_yuval, homo_path=homo_path, gis_path=gis_path,
-                   stations=adjusted_stations):
+                   stations=adjusted_stations, unchanged=unchanged_stations):
     import xarray as xr
     from PW_stations import produce_pw_statistics
     from PW_stations import mann_kendall_trend_analysis
@@ -35,7 +81,7 @@ def compare_adj_pw(path=work_yuval, homo_path=homo_path, gis_path=gis_path,
     import pandas as pd
     adj_pw = load_adjusted_stations(
         homo_path, stations=stations, sample='monthly', field='PW',
-        gis_path=gis_path, just_adjusted=True)
+        gis_path=gis_path, return_ds='adjusted')
     pw = xr.load_dataset(path / 'GNSS_PW_hourly_thresh_50.nc')
     pw = pw.resample(time='MS').mean('time')
     adjusted_names = [x.split('_')[0] for x in adj_pw.data_vars]
@@ -70,7 +116,8 @@ def compare_adj_pw(path=work_yuval, homo_path=homo_path, gis_path=gis_path,
 
 def load_adjusted_stations(
         loadpath, stations=adjusted_stations, sample='monthly', field='PW',
-        gis_path=gis_path, just_adjusted=True):
+        gis_path=gis_path, return_ds='adjusted', rename_adjusted=False):
+    # return_ds : adjusted, unchanged, all
     import xarray as xr
     from PW_stations import produce_geo_gnss_solved_stations
     # first assemble all adjusted stations:
@@ -88,17 +135,23 @@ def load_adjusted_stations(
     other_list = []
     for station in other:
         da = df_to_da_with_stats(loadpath, station, sample=sample,
-                                 field=field, rfunc='FindU', df_field=station,
-                                 update_stats=False, plot=False)
+                                 field=field, rfunc='StepSize', df_field=station,
+                                 update_stats=True, plot=False)
         other_list.append(da)
-    if just_adjusted:
+    if rename_adjusted:
+        for da in adj_list:
+            da.name = da.name.split('_')[0]
+    if return_ds == 'adjusted':
 #        adjusted_names = [x.name.split('_')[0] for x in adj_list]
 #        print(adjusted_names)
 #        originals = [x for x in other_list if x.name in adjusted_names]
 #        print(originals)
         adj_pw = xr.merge(adj_list)
         adj_pw = adj_pw[[x for x in sorted(adj_pw)]]
-    else:
+    elif return_ds == 'unchanged':
+        adj_pw = xr.merge(other_list)
+        adj_pw = adj_pw[[x for x in sorted(adj_pw)]]
+    elif return_ds == 'all':
         adj_pw = xr.merge(adj_list + other_list)
         adj_pw = adj_pw[[x for x in sorted(adj_pw)]]
     return adj_pw
