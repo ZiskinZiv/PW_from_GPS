@@ -1341,8 +1341,9 @@ def align_group_pw_and_T_to_long_term_monthly_means_and_save(
     return pw_clim
 
 
-def group_anoms_and_cluster(load_path=work_yuval, remove_grp='month', thresh=None, grp='hour',
-                            season=None, n_clusters=4):
+def group_anoms_and_cluster(load_path=work_yuval, remove_grp='month',
+                            thresh=50, grp='hour', with_weights=True,
+                            season=None, n_clusters=4, pw_input=None):
     import xarray as xr
     from sklearn.cluster import KMeans
     # load data and save attrs in dict:
@@ -1369,12 +1370,17 @@ def group_anoms_and_cluster(load_path=work_yuval, remove_grp='month', thresh=Non
     pw_anom = pw.groupby('time.{}'.format(grp)).mean('time')
     pw_anom = pw_anom.reset_coords(drop=True)
         # pw_anom = pw.groupby('time.{}'.format('month')).mean('time')
+    if pw_input is not None:
+        pw_anom = pw_input
     # to dataframe:
     df = pw_anom.to_dataframe()
     weights = pd.Series(weights, index=[x for x in pw.data_vars])
     if n_clusters is not None:
         # cluster the anomalies:
-        clr = KMeans(n_clusters=n_clusters, random_state=0).fit(df.T, sample_weight=weights)
+        if with_weights:
+            clr = KMeans(n_clusters=n_clusters, random_state=0).fit(df.T, sample_weight=weights)
+        else:
+            clr = KMeans(n_clusters=n_clusters, random_state=0).fit(df.T)
         # get the labels start with 1:
         clr.labels_ += 1
         # clustering = DBSCAN(eps=3, min_samples=2).fit(df)
@@ -3607,12 +3613,18 @@ def normality_test_on_pw(da_ts, sample=None, alpha=0.05, test='shapiro'):
 
 def mann_kendall_trend_analysis(da_ts, alpha=0.05, verbose=True):
     import pymannkendall as mk
+    from scipy.stats.mstats import theilslopes
+    import numpy as np
+    import pandas as pd
     result = mk.original_test(da_ts, alpha)
     if verbose:
         print(result)
     mkt = {}
     for name, val in result._asdict().items():
         mkt['mkt_' + name] = val
+    masked = np.ma.masked_array(da_ts, mask=np.isnan(da_ts))
+    slope, inter, conf_lo, conf_up = theilslopes(y=masked, alpha=alpha)
+    mkt['mkt_trend_95'] = [conf_lo, conf_up]
     da_ts.attrs.update(mkt)
     return da_ts
 
