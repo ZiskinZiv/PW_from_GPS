@@ -201,13 +201,16 @@ def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
 def plot_monthly_means_box_plots(path=work_yuval, thresh=50, kind='box',
                                  x='month', col_wrap=5, save=True):
     import xarray as xr
-    pw = xr.load_dataset(
+    pw = xr.open_dataset(
                 work_yuval /
                 'GNSS_PW_thresh_{:.0f}.nc'.format(thresh))
     pw = pw[[x for x in pw.data_vars if '_error' not in x]]
     attrs = [x.attrs for x in pw.data_vars.values()]
     if x == 'month':
-        pw = pw.resample(time='MS').mean('time')
+        pw = xr.load_dataset(
+                work_yuval /
+                'GNSS_PW_monthly_thresh_{:.0f}.nc'.format(thresh))
+        # pw = pw.resample(time='MS').mean('time')
     elif x == 'hour':
         # pw = pw.resample(time='1H').mean('time')
         # pw = pw.groupby('time.hour').mean('time')
@@ -279,7 +282,7 @@ def plot_box_df(df, x='month', title='TELA',
     if x == 'month':
         df[x] = df.index.month
         pal = sns.color_palette("Paired", 12)
-        ylimits = (0, 40)
+        ylimits = (5, 40)
     elif x == 'hour':
         df[x] = df.index.hour
         # df[x] = df.index
@@ -1040,11 +1043,127 @@ def produce_table_1(removed=['hrmn'], merged={'klhv': ['klhv', 'lhav'],
     return df
 
 
-def produce_table_2(thresh=50, mm=True):
+def produce_table_stats(thresh=50):
     from PW_stations import produce_pw_statistics
-    df = produce_pw_statistics(thresh=thresh, mm=mm)
+    import xarray as xr
+    pw_mm = xr.load_dataset(
+            work_yuval /
+             'GNSS_PW_monthly_thresh_{:.0f}.nc'.format(thresh))
+
+    df = produce_pw_statistics(thresh=thresh, resample_to_mm=False
+                               , pw_input=pw_mm)
     print(df.to_latex(index=False))
     return df
+
+
+def produce_table_mann_kendall(thresh=50):
+    from PW_stations import mann_kendall_trend_analysis
+    import xarray as xr
+    import pandas as pd
+    anoms = xr.load_dataset(
+            work_yuval /
+             'GNSS_PW_monthly_anoms_thresh_{:.0f}.nc'.format(thresh))
+    anoms = anoms.map(mann_kendall_trend_analysis, verbose=False)
+    mkt_trends = [anoms[x].attrs['mkt_trend'] for x in anoms.data_vars]
+    mkt_bools = [anoms[x].attrs['mkt_h'] for x in anoms.data_vars]
+    mkt_slopes = [anoms[x].attrs['mkt_slope'] for x in anoms.data_vars]
+    mkt_pvalue = [anoms[x].attrs['mkt_p'] for x in anoms.data_vars]
+    mkt_95_lo = [anoms[x].attrs['mkt_trend_95'][0] for x in anoms.data_vars]
+    mkt_95_up = [anoms[x].attrs['mkt_trend_95'][1] for x in anoms.data_vars]
+    df = pd.DataFrame(mkt_trends, index=[x for x in anoms.data_vars], columns=['mkt_trend'])
+    df['mkt_h'] = mkt_bools
+    # transform into per decade:
+    df['mkt_slope'] = mkt_slopes
+    df['mkt_pvalue'] = mkt_pvalue
+    df['mkt_95_lo'] = mkt_95_lo
+    df['mkt_95_up'] = mkt_95_up
+    df[['mkt_slope', 'mkt_95_lo', 'mkt_95_up']] *= 120
+    df.index = df.index.str.upper()
+    df['Sen\'s slope'] = df['mkt_slope'].map('{:,.2f}'.format)
+    df.loc[:, 'Sen\'s slope'][~df['mkt_h']] = 'No trend'
+    con = ['({:.2f}, {:.2f})'.format(x, y) for (x, y) in list(
+        zip(df['mkt_95_lo'].values, df['mkt_95_up'].values))]
+    df['95% confidence intervals'] = con
+    df.loc[:, '95% confidence intervals'][~df['mkt_h']] = '-'
+    df = df[['Sen\'s slope', '95% confidence intervals']]
+    print(df.to_latex())
+    return df
+
+
+def plot_monthly_means_anomalies_with_station_mean(load_path=work_yuval,
+                                                   thresh=50, save=True):
+    import xarray as xr
+    import seaborn as sns
+    from palettable.scientific import diverging as divsci
+    import numpy as np
+    import matplotlib.dates as mdates
+    import pandas as pd
+    div_cmap = divsci.Vik_20.mpl_colormap
+    anoms = xr.load_dataset(
+            load_path /
+             'GNSS_PW_monthly_anoms_thresh_{:.0f}.nc'.format(thresh))
+    df = anoms.to_dataframe()
+    df.columns = [x.upper() for x in df.columns]
+    fig = plt.figure(figsize=(20, 10))
+    grid = plt.GridSpec(
+        2, 1, height_ratios=[
+            4, 1], hspace=0)
+    ax_heat = fig.add_subplot(grid[0, 0])  # plt.subplot(221)
+    ax_group = fig.add_subplot(grid[1, 0])  # plt.subplot(223)
+    cbar_ax = fig.add_axes([0.95, 0.24, 0.01, 0.745])  #[left, bottom, width,
+    # height]
+    ax_heat = sns.heatmap(
+            df.T,
+            center=0.0,
+            cmap=div_cmap,
+            yticklabels=True,
+            ax=ax_heat,
+            cbar_ax=cbar_ax,
+            cbar_kws={'label': '[mm]'}, xticklabels=False)
+    # activate top ticks and tickslabales:
+    ax_heat.xaxis.set_tick_params(bottom='off', labelbottom='off')
+    # emphasize the yticklabels (stations):
+    ax_heat.yaxis.set_tick_params(left='on')
+    ax_heat.set_yticklabels(ax_heat.get_ymajorticklabels(),
+                            fontweight='bold', fontsize=10)
+    ts = df.T.median().shift(periods=-1, freq='15D')
+    ts.index.name = ''
+    # dt_as_int = [x for x in range(len(ts.index))]
+    # xticks_labels = ts.index.strftime('%Y-%m').values[::6]
+    # xticks = dt_as_int[::6]
+    # xticks = ts.index
+    # ts.index = dt_as_int
+    ts.plot(ax=ax_group, color='k')
+    # group_limit = ax_heat.get_xlim()
+    ax_group.set_xlim(ts.index.min(), ts.index.max() +
+                      pd.Timedelta(15, unit='D'))
+    ax_group.set_ylabel('[mm]')
+    # set ticks and align with heatmap axis (move by 0.5):
+    # ax_group.set_xticks(dt_as_int)
+    # offset = 1
+#    ax_group.xaxis.set(ticks=np.arange(offset / 2.,
+#                                       max(dt_as_int) + 1 - min(dt_as_int),
+#                                       offset),
+#                       ticklabels=dt_as_int)
+    # move the lines also by 0.5 to align with heatmap:
+    # lines = ax_group.lines  # get the lines
+    # [x.set_xdata(x.get_xdata() - min(dt_as_int) + 0.5) for x in lines]
+    # ax_group.xaxis.set(ticks=xticks, ticklabels=xticks_labels)
+    # ax_group.xaxis.set(ticks=xticks)
+    years_fmt = mdates.DateFormatter('%Y')
+    ax_group.xaxis.set_major_locator(mdates.YearLocator())
+    ax_group.xaxis.set_major_formatter(years_fmt)
+    ax_group.xaxis.set_minor_locator(mdates.MonthLocator())
+    ax_group.grid()
+    # ax_group.axvline('2015-09-15')
+    # ax_group.axhline(2.5)
+    # plt.setp(ax_group.xaxis.get_majorticklabels(), rotation=45 )
+    fig.tight_layout()
+    fig.subplots_adjust(right=0.946)
+    if save:
+        filename = 'pw_monthly_means_anomaly_heatmap.png'
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
+    return fig
 
 
 def plot_grp_anomlay_heatmap(load_path=work_yuval, gis_path=gis_path,
