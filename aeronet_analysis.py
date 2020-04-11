@@ -43,6 +43,7 @@ def read_all_stations(path=aero_path, savepath=aero_path, glob='*.lev20'):
 
 def read_one_station(filepath, savepath=None):
     import pandas as pd
+    kind = filepath.as_posix().split('.')[-1]
     df = pd.read_csv(filepath, header=6, na_values=-999)
     # create datetime index:
     df['dt'] = df['Date(dd:mm:yyyy)'].astype(str) + ' ' + \
@@ -58,9 +59,11 @@ def read_one_station(filepath, savepath=None):
     # cols to keep:
     to_keep = [x for x in df.columns if 'AOD' in x]
     to_keep += [x for x in df.columns if 'Angstrom' in x]
-    to_keep += ['Precipitable_Water(cm)', 'Solar_Zenith_Angle(Degrees)',
-                'Optical_Air_Mass', 'Sensor_Temperature(Degrees_C)',
-                'Ozone(Dobson)', 'NO2(Dobson)']
+    more_fields = ['Precipitable_Water(cm)', 'Solar_Zenith_Angle(Degrees)',
+                   'Optical_Air_Mass', 'Sensor_Temperature(Degrees_C)',
+                   'Ozone(Dobson)', 'NO2(Dobson)', 'Pressure(hPa)']
+    for field in more_fields:
+        to_keep += [x for x in df.columns if field == x]
     to_keep = [x for x in to_keep if 'Empty' not in x]
     to_keep = [x for x in to_keep if 'Exact' not in x]
     df = df[to_keep].astype(float)
@@ -76,8 +79,8 @@ def read_one_station(filepath, savepath=None):
     if savepath is not None:
         max_year = ds['time'].max().dt.year.item()
         min_year = ds['time'].min().dt.year.item()
-        filename = 'AERONET_{}_{}-{}.nc'.format(
-                meta['AERONET_Site_Name'], min_year, max_year)
+        filename = 'AERONET_{}_{}_{}-{}.nc'.format(
+                meta['AERONET_Site_Name'], kind, min_year, max_year)
         comp = dict(zlib=True, complevel=9)  # best compression
         encoding = {var: comp for var in ds.data_vars}
         ds.to_netcdf(savepath / filename, 'w', encoding=encoding)
