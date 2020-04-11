@@ -37,7 +37,9 @@ def save_pw_monthly_means_and_anoms(loadpath=homo_path, savepath=work_yuval,
     pw_o = pw_o[[x for x in pw_o.data_vars if '_error' not in x]]
     attrs_o = [x.attrs for x in pw_o.data_vars.values()]
     pw = load_adjusted_stations(loadpath, rename_adjusted=True,
-                                return_ds='all')
+                                return_ds='all+shifts')
+    shifts = pw[[x for x in pw.data_vars if '_shift' in x]]
+    pw = pw[[x for x in pw.data_vars if '_shift' not in x]]
     attrs = [x.attrs for x in pw.data_vars.values()]
     names = [x.name for x in pw.data_vars.values()]
     attrs = dict(zip(names, attrs))
@@ -48,11 +50,15 @@ def save_pw_monthly_means_and_anoms(loadpath=homo_path, savepath=work_yuval,
         pw[name].attrs.update(attrs_o.get(name))
         anoms[name].attrs = attrs.get(name)
         anoms[name].attrs.update(attrs_o.get(name))
-    filename = 'GNSS_PW_monthly_thresh_50.nc'
+    filename = 'GNSS_PW_monthly_thresh_50_homogenized.nc'
     pw.to_netcdf(savepath/filename, 'w')
     print('{} was save to {}'.format(filename, savepath))
-    filename = 'GNSS_PW_monthly_anoms_thresh_50.nc'
+    filename = 'GNSS_PW_monthly_anoms_thresh_50_homogenized.nc'
     anoms.to_netcdf(savepath/filename, 'w')
+    print('{} was save to {}'.format(filename, savepath))
+    # now save shifts data:
+    filename = 'GNSS_PW_monthly_shifts_thresh_50.nc'
+    shifts.to_netcdf(savepath/filename, 'w')
     print('{} was save to {}'.format(filename, savepath))
     return
 
@@ -117,17 +123,23 @@ def compare_adj_pw(path=work_yuval, homo_path=homo_path, gis_path=gis_path,
 def load_adjusted_stations(
         loadpath, stations=adjusted_stations, sample='monthly', field='PW',
         gis_path=gis_path, return_ds='adjusted', rename_adjusted=False):
-    # return_ds : adjusted, unchanged, all
+    # return_ds : adjusted, unchanged, all, all+shifts
     import xarray as xr
     from PW_stations import produce_geo_gnss_solved_stations
     # first assemble all adjusted stations:
     adj_list = []
+    shift_list = []
     for station in stations:
         da = df_to_da_with_stats(loadpath, station, sample=sample,
                                  field=field, df_field='mean_adj',
                                  update_stats=True, rfunc='StepSize',
                                  plot=False)
+        shift = df_to_da_with_stats(loadpath, station, sample=sample,
+                                    field=field, df_field='shift',
+                                    update_stats=False, rfunc='StepSize',
+                                    plot=False)
         adj_list.append(da)
+        shift_list.append(shift)
     # then assemble all other stations:
     df = produce_geo_gnss_solved_stations(path=gis_path, plot=False)
     all_stations = [x for x in df.index if x not in ['gilb', 'lhav', 'hrmn']]
@@ -153,6 +165,9 @@ def load_adjusted_stations(
         adj_pw = adj_pw[[x for x in sorted(adj_pw)]]
     elif return_ds == 'all':
         adj_pw = xr.merge(adj_list + other_list)
+        adj_pw = adj_pw[[x for x in sorted(adj_pw)]]
+    elif return_ds == 'all+shifts':
+        adj_pw = xr.merge(adj_list + other_list + shift_list)
         adj_pw = adj_pw[[x for x in sorted(adj_pw)]]
     return adj_pw
 
@@ -238,6 +253,7 @@ def read_dat_file(loadpath, station='tela', sample='monthly',
         df['date'] = pd.to_datetime(df['date'], format='%Y%m%d')
     df = df.set_index(df['date'])
     df = df.drop(['ind', 'date'], axis=1)
+    df['shift'] = df['mean_adj'] - df[station]
     stats = read_stat_txt_file(loadpath, station=station, sample=sample,
                        field=field, rfunc=rfunc)
     return df, stats

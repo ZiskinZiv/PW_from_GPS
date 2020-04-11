@@ -10,6 +10,7 @@ work flow for ZWD and PW retreival after python copy_gipsyx_post_from_geo.py:
     can do that with dayofyear, month, season (need to implement it first)
     4)assamble GNSS_PW_thresh using mda (e.g., season) from  3 by running 
     GNSS_PW_israeli_stations, default choice is None for mda, using whole data ts-tm 
+    5) do homogenization using Homogenization_R.py and run homogenize_pw_dataset
 @author: shlomi
 """
 
@@ -3224,7 +3225,9 @@ def calculate_zwd_altitude_fit(path=work_yuval, model='TSEN', plot=True):
     import matplotlib.pyplot as plt
     import seaborn as sns
     from sklearn import metrics
-    zwd = xr.load_dataset(path / 'ZWD_thresh_50.nc')
+    from aux_gps import path_glob
+    file = path_glob(path, 'ZWD_unselected_israel_*.nc')[-1]
+    zwd = xr.load_dataset(file)
     zwd = zwd[[x for x in zwd.data_vars if '_error' not in x]]
     df_gnss = produce_geo_gnss_solved_stations(plot=False)
     df_gnss = df_gnss.loc[[x for x in zwd.data_vars], :]
@@ -3277,13 +3280,10 @@ def calculate_zwd_altitude_fit(path=work_yuval, model='TSEN', plot=True):
     return df_gnss['alt'], zwd_lapse_rate
 
 
-
-
 def select_PPP_field_thresh_and_combine_save_all(
-    path=work_yuval, thresh=None, to_drop=['hrmn'], combine_dict={
-        'klhv': [
-            'klhv', 'lhav'], 'mrav': [
-            'gilb', 'mrav']}, field='ZWD'):
+        path=work_yuval, thresh=None, to_drop=['hrmn', 'nizn', 'spir'],
+        combine_dict={'klhv': ['klhv', 'lhav'], 'mrav': ['gilb', 'mrav']},
+        field='ZWD'):
     import xarray as xr
     import numpy as np
     from aux_gps import path_glob
@@ -3627,6 +3627,37 @@ def mann_kendall_trend_analysis(da_ts, alpha=0.05, verbose=True):
     mkt['mkt_trend_95'] = [conf_lo, conf_up]
     da_ts.attrs.update(mkt)
     return da_ts
+
+
+def homogenize_pw_dataset(path=work_yuval, thresh=50, savepath=work_yuval):
+    import xarray as xr
+    from aux_gps import dim_intersection
+    pw_5min = xr.load_dataset(path / 'GNSS_PW_thresh_{:.0f}.nc'.format(thresh))
+    shifts = xr.load_dataset(
+        path / 'GNSS_PW_monthly_shifts_thresh_{:.0f}.nc'.format(thresh))
+    shifts_5min = shifts.resample(time='5T').ffill()
+    for st_shift in shifts_5min.data_vars:
+        station = st_shift.split('_')[0]
+        print('shifting {} station'.format(station))
+        new_time = dim_intersection([pw_5min[station], shifts_5min[st_shift]])
+        pw_5min[station].loc[{'time': new_time}] += shifts_5min[st_shift].loc[{'time': new_time}]
+        pw_5min[station].attrs['homogenized'] = 'True'
+    if savepath is not None:
+        print('saving 5 min data:')
+        filename = 'GNSS_PW_thresh_{:.0f}_homogenized.nc'.format(thresh)
+        print('saving {} to {}'.format(filename, savepath))
+        comp = dict(zlib=True, complevel=9)  # best compression
+        encoding = {var: comp for var in pw_5min}
+        pw_5min.to_netcdf(savepath / filename, 'w', encoding=encoding)
+#        print('resampling to hourly and saving data:')
+#        pw_hour = pw_5min.resample(time='1H', keep_attrs=True).mean('time', keep_attrs=True)
+#        filename = 'GNSS_PW_hourly_thresh_{:.0f}_homogenized.nc'.format(thresh)
+#        print('saving {} to {}'.format(filename, savepath))
+#        comp = dict(zlib=True, complevel=9)  # best compression
+#        encoding = {var: comp for var in pw_hour}
+#        pw_hour.to_netcdf(savepath / filename, 'w', encoding=encoding)
+#        print('Done!')
+    return pw_5min
 
 
 def ML_fit_model_to_tmseries(tms_da, modelname='LR', plot=True,

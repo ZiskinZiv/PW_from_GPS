@@ -107,7 +107,7 @@ def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
     da = ds.to_array('station')
     da['station'] = [x.upper() for x in da.station.values]
     ds = da.to_dataset('station')
-    title = 'RINEX files availability for the Israeli GNSS stations'
+    title = 'Daily RINEX files availability for the Israeli GNSS stations'
     ax_gantt = gantt_chart(
         ds,
         ax=ax_gantt,
@@ -134,7 +134,7 @@ def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
     # ims, gps = produce_geo_df(gis_path=gis_path, plot=False)
     print('getting solved GNSS israeli stations metadata...')
     gps = produce_geo_gnss_solved_stations(path=gis_path, plot=False)
-    removed = ['hrmn']
+    removed = ['hrmn', 'nizn', 'spir']
     merged = ['klhv', 'lhav', 'mrav', 'gilb']
     gps_list = [x for x in gps.index if x not in merged and x not in removed]
     gps.loc[gps_list, :].plot(ax=ax_map, color='black', edgecolor='black', marker='s',
@@ -192,7 +192,7 @@ def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
     # plt.legend(['IMS stations', 'GNSS stations'], loc='upper left')
 
     filename = 'rinex_israeli_gnss_map.png'
-    caption('RINEX files availability for the Israeli GNSS station network at the SOPAC/GARNER website')
+    caption('Daily RINEX files availability for the Israeli GNSS station network at the SOPAC/GARNER website')
     if save:
         plt.savefig(savefig_path / filename, bbox_inches='tight')
     return fig
@@ -209,12 +209,12 @@ def plot_monthly_means_box_plots(path=work_yuval, thresh=50, kind='box',
     if x == 'month':
         pw = xr.load_dataset(
                 work_yuval /
-                'GNSS_PW_monthly_thresh_{:.0f}.nc'.format(thresh))
+                'GNSS_PW_monthly_thresh_{:.0f}_homogenized.nc'.format(thresh))
         # pw = pw.resample(time='MS').mean('time')
     elif x == 'hour':
         # pw = pw.resample(time='1H').mean('time')
         # pw = pw.groupby('time.hour').mean('time')
-        pw = xr.load_dataset(work_yuval / 'GNSS_PW_hourly_thresh_{:.0f}.nc'.format(thresh))
+        pw = xr.load_dataset(work_yuval / 'GNSS_PW_hourly_thresh_{:.0f}_homogenized.nc'.format(thresh))
         # first remove long term monthly means:
         pw = pw.groupby('time.month') - pw.groupby('time.month').mean('time')
     for i, da in enumerate(pw.data_vars):
@@ -287,7 +287,7 @@ def plot_box_df(df, x='month', title='TELA',
         df[x] = df.index.hour
         # df[x] = df.index
         pal = sns.color_palette("Paired", 12)
-        ylimits = (-2, 2)
+        ylimits = (-7, 7)
     y = df.columns[0]
     if ax is None:
         fig, ax = plt.subplots()
@@ -314,7 +314,7 @@ def plot_means_pw(load_path=work_yuval, ims_path=ims_path, thresh=50,
     import numpy as np
     pw = xr.load_dataset(
             work_yuval /
-            'GNSS_PW_thresh_{:.0f}.nc'.format(thresh))
+            'GNSS_PW_thresh_{:.0f}_homogenized.nc'.format(thresh))
     pw = pw[[x for x in pw.data_vars if '_error' not in x]]
     if means == 'hour':
         # remove long term monthly means:
@@ -401,7 +401,7 @@ def plot_gnss_radiosonde_monthly_means(sound_path=sound_path, path=work_yuval,
         phys = phys.sel(sound_time=slice(*times))
     ds = phys.resample(sound_time=sample).mean().to_dataset(name='Bet-dagan-radiosonde')
     ds = ds.rename({'sound_time': 'time'})
-    gps = xr.load_dataset(path / 'GNSS_PW_thresh_50.nc')[gps_station]
+    gps = xr.load_dataset(path / 'GNSS_PW_thresh_50_homogenized.nc')[gps_station]
     if times is not None:
         gps = gps.sel(time=slice(*times))
     ds[gps_station] = gps.resample(time=sample).mean()
@@ -1048,7 +1048,7 @@ def produce_table_stats(thresh=50):
     import xarray as xr
     pw_mm = xr.load_dataset(
             work_yuval /
-             'GNSS_PW_monthly_thresh_{:.0f}.nc'.format(thresh))
+             'GNSS_PW_monthly_thresh_{:.0f}_homogenized.nc'.format(thresh))
 
     df = produce_pw_statistics(thresh=thresh, resample_to_mm=False
                                , pw_input=pw_mm)
@@ -1163,7 +1163,7 @@ def plot_monthly_means_anomalies_with_station_mean(load_path=work_yuval,
     if save:
         filename = 'pw_monthly_means_anomaly_heatmap.png'
         plt.savefig(savefig_path / filename, bbox_inches='tight')
-    return fig
+    return ts
 
 
 def plot_grp_anomlay_heatmap(load_path=work_yuval, gis_path=gis_path,
@@ -1307,6 +1307,22 @@ def plot_grp_anomlay_heatmap(load_path=work_yuval, gis_path=gis_path,
 #        plt.savefig(savefig_path / filename, bbox_inches='tight')
         plt.savefig(savefig_path / filename, orientation='landscape')
     return df
+
+
+def plot_lomb_scargle(path=work_yuval):
+    from aux_gps import lomb_scargle_xr
+    import xarray as xr
+    pw_mm = xr.load_dataset(path / 'GNSS_PW_monthly_thresh_50_homogenized.nc')
+    pw_mm_median = pw_mm.to_array('station').median('station')
+    da = lomb_scargle_xr(
+        pw_mm_median.dropna('time'),
+        user_freq='MS',
+        kwargs={
+            'nyquist_factor': 1,
+            'samples_per_peak': 100})
+    plt.ylabel('')
+    plt.title('Lomb–Scargle periodogram')
+    return da
 
 
 def plot_vertical_climatology_months(path=sound_path, field='Rho_wv',
