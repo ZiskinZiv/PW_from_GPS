@@ -554,7 +554,34 @@ def get_julian_dates_from_da(da):
     return jul.values, jul_no_nans.values
 
 
-def fft_xr(xarray, units='cpy', nan_fill='mean', plot=True):
+def lomb_scargle_xr(da_ts, units='cpy', user_freq='MS', plot=True, kwargs=None):
+    from astropy.timeseries import LombScargle
+    import pandas as pd
+    import xarray as xr
+    time_dim = list(set(da_ts.dims))[0]
+    sp_str = pd.infer_freq(da_ts[time_dim].values)
+    if not sp_str:
+        print('using user-defined freq: {}'.format(user_freq))
+        sp_str = user_freq
+    cpy_freq_dict = {'MS': 12, 'D': 365.25, 'H': 8766}
+    t = [x for x in range(da_ts[time_dim].size)]
+    y = da_ts.values
+    lomb_kwargs = {'samples_per_peak': 10, 'nyquist_factor': 2}
+    if kwargs is not None:
+        lomb_kwargs.update(kwargs)
+    freq, power = LombScargle(t, y).autopower(**lomb_kwargs)
+    cpy_freq = cpy_freq_dict.get(sp_str)
+    da = xr.DataArray(power, dims=['freq'])
+    da['freq'] = freq * cpy_freq
+    da.attrs['long_name'] = 'Power from LombScargle'
+    da.name = '{}_power'.format(da_ts.name)
+    da['freq'].attrs['long_name'] = 'Cycles per Year'
+    if plot:
+        da.plot()
+    return da
+
+
+def fft_xr(xarray, units='cpy', nan_fill='mean', user_freq='MS', plot=True):
     import numpy as np
     import pandas as pd
     import matplotlib.pyplot as plt
@@ -572,19 +599,24 @@ def fft_xr(xarray, units='cpy', nan_fill='mean', plot=True):
             x = da.fillna(da.mean(time_dim))
         # infer freq of time series:
         sp_str = pd.infer_freq(x[time_dim].values)
-        if not sp_str:
-            raise Exception('Didnt find a frequency for {}, check for nans!'.format(da.name))
-        if len(sp_str) > 1:
-            sp_str = [char for char in sp_str]
-            mul = int(sp_str[0])
-            period = sp_str[1]
-        elif len(sp_str) == 1:
-            mul = 1
-            period = sp_str[0]
-        p_name = periods[period][0]
-        # number of seconds in freq units in time-series:
-        p_val = mul * periods[period][1]
-        print('found {} {} frequency in {} time-series'.format(mul, p_name, da.name))
+        if user_freq is None:
+            if not sp_str:
+                raise Exception('Didnt find a frequency for {}, check for nans!'.format(da.name))
+            if len(sp_str) > 1:
+                sp_str = [char for char in sp_str]
+                mul = int(sp_str[0])
+                period = sp_str[1]
+            elif len(sp_str) == 1:
+                mul = 1
+                period = sp_str[0]
+            p_name = periods[period][0]
+            p_val = mul * periods[period][1]
+            print('found {} {} frequency in {} time-series'.format(mul, p_name, da.name))
+        else:
+            p_name = periods[user_freq][0]
+            # number of seconds in freq units in time-series:
+            p_val = periods[user_freq][1]
+            print('using user freq of {}'.format(user_freq))
         # run fft:
         p = 20 * np.log10(np.abs(np.fft.rfft(x)))
         if units == 'cpy':
