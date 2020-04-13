@@ -39,9 +39,7 @@ def preprocess_hydro_pw(pw_station='drag', hs_id=48125, path=work_yuval,
     df = pd.DataFrame(data=np.zeros(time_dt.shape), index=time_dt)
     df.loc[ts.values, :] = 1
     # now load pw:
-    pw = xr.load_dataset(path / 'GNSS_PW_thresh_50.nc')[pw_station]
-    # resample to hour:
-    pw = pw.resample(time='1H')
+    pw = xr.load_dataset(path / 'GNSS_PW_hourly_thresh_50_homogenized.nc')[pw_station]
     pw_df = pw.dropna('time').to_dataframe()
     # now align the both dataframes:
     pw_df['tides'] = df['tides']
@@ -53,17 +51,23 @@ def loop_over_gnss_hydro_and_aggregate(sel_hydro, pw_anom=False,
                                        max_flow_thresh=None,
                                        hydro_path=hydro_path,
                                        work_yuval=work_yuval, ndays=5,
+                                       ndays_forward=1,
                                        plot=True, plot_all=False):
     import xarray as xr
     import matplotlib.pyplot as plt
-    if (hydro_path / 'aggregate_ds.nc').is_file():
-        print('loading aggregate_ds.nc...')
-        ds = xr.open_dataset(hydro_path / 'aggregate_ds.nc')
+    from aux_gps import path_glob
+    filename = 'PW_tide_sites_{}_{}.nc'.format(ndays, ndays_forward)
+    if pw_anom:
+        filename = 'PW_tide_sites_anom_{}_{}.nc'.format(ndays, ndays_forward)
+    if (hydro_path / filename).is_file():
+        print('loading {}...'.format(filename))
+        ds = xr.load_dataset(hydro_path / filename)
     else:
         if pw_anom:
-            gnss_pw = xr.open_dataset(work_yuval / 'GNSS_PW_hourly_anom_hour_dayofyear.nc')
+            file = path_glob(work_yuval, 'GNSS_PW_anom_*.nc')[-1]
+            gnss_pw = xr.open_dataset(file)
         else:
-            gnss_pw = xr.open_dataset(work_yuval / 'GNSS_PW.nc')
+            gnss_pw = xr.open_dataset(work_yuval / 'GNSS_PW_thresh_50_homogenized.nc')
         just_pw = [x for x in gnss_pw.data_vars if '_error' not in x]
         gnss_pw = gnss_pw[just_pw]
         da_list = []
@@ -81,14 +85,14 @@ def loop_over_gnss_hydro_and_aggregate(sel_hydro, pw_anom=False,
                         gnss_pw[gnss_sta],
                         hydro_ids,
                         max_flow_thresh=max_flow_thresh,
-                        ndays=ndays,
+                        ndays=ndays, ndays_forward=ndays_forward,
                         plot=plot_all)
                     da_list.append(dass)
                 except ValueError as e:
                     print('skipping {} because {}'.format(gnss_sta, e))
                     continue
         ds = xr.merge(da_list)
-        ds.to_netcdf(hydro_path / 'aggregate_ds.nc', 'w')
+        ds.to_netcdf(hydro_path / filename, 'w')
     if plot:
         names = [x for x in ds.data_vars]
         fig, ax = plt.subplots()
@@ -114,7 +118,8 @@ def loop_over_gnss_hydro_and_aggregate(sel_hydro, pw_anom=False,
 
 
 def aggregate_get_ndays_pw_hydro(pw_da, hs_ids, max_flow_thresh=None,
-                                 hydro_path=hydro_path, ndays=5, plot=True):
+                                 hydro_path=hydro_path, ndays=5,
+                                 ndays_forward=1, plot=True):
     import xarray as xr
     import matplotlib.pyplot as plt
     das = []
@@ -132,7 +137,7 @@ def aggregate_get_ndays_pw_hydro(pw_da, hs_ids, max_flow_thresh=None,
             max_flows, pw_ndays, da = get_n_days_pw_hydro_all(pw_da, sid,
                                                               max_flow_thresh=max_flow_thresh,
                                                               hydro_path=hydro_path,
-                                                              ndays=ndays,
+                                                              ndays=ndays, ndays_forward=ndays_forward,
                                                               return_max_flows=True,
                                                               plot=False)
             das.append(da)
@@ -189,7 +194,7 @@ def aggregate_get_ndays_pw_hydro(pw_da, hs_ids, max_flow_thresh=None,
 
 
 def get_n_days_pw_hydro_all(pw_da, hs_id, max_flow_thresh=None,
-                            hydro_path=hydro_path, ndays=5,
+                            hydro_path=hydro_path, ndays=5, ndays_forward=1,
                             return_max_flows=False, plot=True):
     """calculate the mean of the PW ndays before all tide events in specific
     hydro station. can use max_flow_thresh to get only event with al least
@@ -197,23 +202,27 @@ def get_n_days_pw_hydro_all(pw_da, hs_id, max_flow_thresh=None,
     # important, DO NOT dropna pw_da!
     import xarray as xr
     import matplotlib.pyplot as plt
+    import pandas as pd
 
-    def get_n_days_pw_hydro_one_event(pw_da, tide_start, ndays=ndays):
-        import pandas as pd
+    def get_n_days_pw_hydro_one_event(pw_da, tide_start, ndays=ndays, ndays_forward=0):
         freq = pd.infer_freq(pw_da.time.values)
         # for now, work with 5 mins data:
         if freq == '5T':
             points = int(ndays) * 24 * 12
+            points_forward = int(ndays_forward) * 24 * 12
         elif freq == 'H':
             points = int(ndays) * 24
+            points_forward = int(ndays_forward) * 24
         lag = pd.timedelta_range(end=0, periods=points, freq=freq)
+        forward_lag = pd.timedelta_range(start=0, periods=points_forward, freq=freq)
+        lag = lag.union(forward_lag)
         time_arr = pd.to_datetime(pw_da.time.values)
         tide_start = pd.to_datetime(tide_start).round(freq)
         ts_loc = time_arr.get_loc(tide_start)
         # days = pd.Timedelta(ndays, unit='D')
         # time_slice = [tide_start - days, tide_start]
         # pw = pw_da.sel(time=slice(*time_slice))
-        pw = pw_da.isel(time=slice(ts_loc - points, ts_loc))
+        pw = pw_da.isel(time=slice(ts_loc - points, ts_loc + points_forward -1))
         return pw, lag
 
     # first load tides data:
@@ -228,6 +237,11 @@ def get_n_days_pw_hydro_all(pw_da, hs_id, max_flow_thresh=None,
     # get max flow tides data:
     mf = [x for x in tides.data_vars if 'max_flow' in x]
     max_flows = tides[mf].dropna('tide_start').to_array('max_flow').squeeze()
+    # also get tide end and tide max data:
+#    te = [x for x in tides.data_vars if 'tide_end' in x]
+#    tide_ends = tides[te].dropna('tide_start').to_array('tide_end').squeeze()
+#    tm = [x for x in tides.data_vars if 'tide_max' in x]
+#    tide_maxs = tides[tm].dropna('tide_start').to_array('tide_max').squeeze()
     # slice minmum time for convenience:
     min_pw_time = pw_da.dropna('time').time.min().values
     tide_starts = tide_starts.sel(tide_start=slice(min_pw_time, None))
@@ -243,7 +257,9 @@ def get_n_days_pw_hydro_all(pw_da, hs_id, max_flow_thresh=None,
             max_flows > max_flow_thresh).dropna('tide_start')
     pw_list = []
     for ts in tide_starts.values:
-        pw, lag = get_n_days_pw_hydro_one_event(pw_da, ts, ndays=ndays)
+#        te = tide_ends.sel(tide_start=ts).values
+#        tm = tide_maxs.sel(tide_start=ts).values
+        pw, lag = get_n_days_pw_hydro_one_event(pw_da, ts, ndays=ndays, ndays_forward=ndays_forward)
         pw.attrs['ts'] = ts
         pw_list.append(pw)
     # filter events that no PW exists:
