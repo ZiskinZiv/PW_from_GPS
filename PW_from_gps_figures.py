@@ -198,12 +198,14 @@ def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
     return fig
 
 
-def plot_monthly_means_box_plots(path=work_yuval, thresh=50, kind='box',
-                                 x='month', col_wrap=5, save=True):
+def plot_means_box_plots(path=work_yuval, thresh=50, kind='box',
+                         x='month', col_wrap=5, ylimits=None,
+                         xlimits=None, anoms=True, bins=None,
+                         season=None, attrs_plot=True, save=True):
     import xarray as xr
     pw = xr.open_dataset(
                 work_yuval /
-                'GNSS_PW_thresh_{:.0f}.nc'.format(thresh))
+                'GNSS_PW_thresh_{:.0f}_homogenized.nc'.format(thresh))
     pw = pw[[x for x in pw.data_vars if '_error' not in x]]
     attrs = [x.attrs for x in pw.data_vars.values()]
     if x == 'month':
@@ -215,38 +217,46 @@ def plot_monthly_means_box_plots(path=work_yuval, thresh=50, kind='box',
         # pw = pw.resample(time='1H').mean('time')
         # pw = pw.groupby('time.hour').mean('time')
         pw = xr.load_dataset(work_yuval / 'GNSS_PW_hourly_thresh_{:.0f}_homogenized.nc'.format(thresh))
+        pw = pw[[x for x in pw.data_vars if '_error' not in x]]
         # first remove long term monthly means:
-        pw = pw.groupby('time.month') - pw.groupby('time.month').mean('time')
+        if anoms:
+            pw = pw.groupby('time.month') - pw.groupby('time.month').mean('time')
+    elif x == 'day':
+        # pw = pw.resample(time='1H').mean('time')
+        # pw = pw.groupby('time.hour').mean('time')
+        pw = xr.load_dataset(work_yuval / 'GNSS_PW_daily_thresh_{:.0f}_homogenized.nc'.format(thresh))
+        pw = pw[[x for x in pw.data_vars if '_error' not in x]]
+        # first remove long term monthly means:
+        if anoms:
+            pw = pw.groupby('time.month') - pw.groupby('time.month').mean('time')
+    if season is not None:
+        print('{} season is selected'.format(season))
+        pw = pw.sel(time=pw['time.season']==season)
     for i, da in enumerate(pw.data_vars):
         pw[da].attrs = attrs[i]
-    fg = plot_multi_box_xr(pw, kind=kind, x=x, col_wrap=col_wrap)
+    if not attrs_plot:
+        attrs = None
+    fg = plot_multi_box_xr(pw, kind=kind, x=x, col_wrap=col_wrap,
+                           ylimits=ylimits, xlimits=xlimits, attrs=attrs,
+                           bins=bins)
+    attrs = [x.attrs for x in pw.data_vars.values()]
     for i, ax in enumerate(fg.axes.flatten()):
-        title = ax.get_title().split('=')[-1].strip(' ')
         try:
             mean_years = float(attrs[i]['mean_years'])
-            ax.set_title('')
-            ax.text(.2, .85, title.upper(),
-                    horizontalalignment='center', fontweight='bold',
-                    transform=ax.transAxes)
-            ax.text(.22, .72, '{:.1f} years'.format(mean_years),
-                    horizontalalignment='center',
-                    transform=ax.transAxes)
-            ax.yaxis.tick_left()
-            ax.spines["top"].set_visible(False)
-            ax.spines["right"].set_visible(False)
-            ax.spines["bottom"].set_visible(False)
+#            print(i)
+            # print(mean_years)
         except IndexError:
             ax.set_axis_off()
             pass
-
-    [fg.axes[x, 0].set_ylabel('PW [mm]') for x in range(len(fg.axes[:, 0]))]
+    if kind != 'hist':
+        [fg.axes[x, 0].set_ylabel('PW [mm]') for x in range(len(fg.axes[:, 0]))]
 #    [fg.axes[-1, x].set_xlabel('month') for x in range(len(fg.axes[-1, :]))]
     fg.fig.subplots_adjust(top=0.98,
-                           bottom=0.04,
-                           left=0.035,
+                           bottom=0.05,
+                           left=0.025,
                            right=0.985,
-                           hspace=0.230,
-                           wspace=0.145)
+                           hspace=0.27,
+                           wspace=0.215)
     filename = 'pw_{}ly_means_{}.png'.format(x, kind)
     if save:
         plt.savefig(savefig_path / filename, bbox_inches='tight')
@@ -254,12 +264,13 @@ def plot_monthly_means_box_plots(path=work_yuval, thresh=50, kind='box',
 
 
 def plot_multi_box_xr(pw, kind='violin', x='month', sharex=False, sharey=False,
-                      col_wrap=5):
+                      col_wrap=5, ylimits=None, xlimits=None, attrs=None,
+                      bins=None):
     import xarray as xr
     pw = pw.to_array('station')
     fg = xr.plot.FacetGrid(pw, col='station', col_wrap=col_wrap, sharex=sharex,
                            sharey=sharey)
-    for sta, ax in zip(pw['station'].values, fg.axes.flatten()):
+    for i, (sta, ax) in enumerate(zip(pw['station'].values, fg.axes.flatten())):
         pw_sta = pw.sel(station=sta).reset_coords(drop=True)
         # if x == 'hour':
         #     # remove seasonal signal:
@@ -268,43 +279,97 @@ def plot_multi_box_xr(pw, kind='violin', x='month', sharex=False, sharey=False,
         #     # remove daily signal:
         #     pw_sta = pw_sta.groupby('time.hour') - pw_sta.groupby('time.hour').mean('time')            
         df = pw_sta.to_dataframe(sta)
-        plot_box_df(df, ax=ax, x=x, title=sta, ylabel='', kind=kind)
+        if attrs is not None:
+            plot_box_df(df, ax=ax, x=x, title=sta, ylabel='', kind=kind,
+                        ylimits=ylimits, xlimits=xlimits, attrs=attrs[i], bins=bins)
+        else:
+            plot_box_df(df, ax=ax, x=x, title=sta, ylabel='', kind=kind,
+                        ylimits=ylimits, xlimits=xlimits, attrs=None, bins=bins)
     return fg
 
 
 def plot_box_df(df, x='month', title='TELA',
-                ylabel=r'IWV [kg$\cdot$m$^{-2}$]', ax=None, kind='violin'):
+                ylabel=r'IWV [kg$\cdot$m$^{-2}$]', ax=None, kind='violin',
+                ylimits=(5, 40), xlimits=None, attrs=None, bins=None):
     # x=hour is experimental
     import seaborn as sns
     from matplotlib.ticker import MultipleLocator
     import matplotlib.pyplot as plt
+    import numpy as np
+    from scipy.stats import kurtosis
+    from scipy.stats import skew
     # df = da_ts.to_dataframe()
     if x == 'month':
         df[x] = df.index.month
         pal = sns.color_palette("Paired", 12)
-        ylimits = (5, 40)
     elif x == 'hour':
         df[x] = df.index.hour
         # df[x] = df.index
         pal = sns.color_palette("Paired", 12)
-        ylimits = (-7, 7)
     y = df.columns[0]
     if ax is None:
         fig, ax = plt.subplots()
-    if kind == 'violin':
+    if kind is None:
+        df = df.groupby(x).mean()
+        df.plot(ax=ax, legend=False, marker='o')
+        ax.set_xlabel('Time of day [UTC]')
+    elif kind == 'violin':
         sns.violinplot(ax=ax, data=df, x=x, y=y, palette=pal, fliersize=4,
                        gridsize=250, inner='quartile', scale='area')
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        ax.set_xlabel('')
     elif kind == 'box':
         kwargs = dict(markerfacecolor='r', marker='o')
         sns.boxplot(ax=ax, data=df, x=x, y=y, palette=pal, fliersize=4,
                     whis=1.5, flierprops=kwargs)
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        ax.set_xlabel('')
+    elif kind == 'hist':
+        if bins is None:
+            bins = 15
+        a = df[y].dropna()
+        sns.distplot(ax=ax, a=a, norm_hist=True, bins=bins, axlabel='PW [mm]')
+        xmean = df[y].mean()
+        xmedian = df[y].median()
+        std = df[y].std()
+        sk = skew(df[y].dropna().values)
+        kurt = kurtosis(df[y].dropna().values)
+        # xmode = df[y].mode().median()
+        data_x, data_y = ax.lines[0].get_data()
+        ymean = np.interp(xmean, data_x, data_y)
+        ymed = np.interp(xmedian, data_x, data_y)
+        # ymode = np.interp(xmode, data_x, data_y)
+        ax.vlines(x=xmean, ymin=0, ymax=ymean, color='r', linestyle='--')
+        ax.vlines(x=xmedian, ymin=0, ymax=ymed, color='g', linestyle='-')
+        # ax.vlines(x=xmode, ymin=0, ymax=ymode, color='k', linestyle='-')
+        # ax.legend(['Mean:{:.1f}'.format(xmean),'Median:{:.1f}'.format(xmedian),'Mode:{:.1f}'.format(xmode)])
+        ax.legend(['Mean: {:.1f}'.format(xmean),'Median: {:.1f}'.format(xmedian)])
+        ax.text(0.55, 0.45, "Std-Dev:    {:.1f}\nSkewness: {:.1f}\nKurtosis:   {:.1f}".format(std, sk, kurt),transform=ax.transAxes)
     ax.yaxis.set_minor_locator(MultipleLocator(5))
     ax.yaxis.grid(True, which='minor', linestyle='--', linewidth=1, alpha=0.7)
     ax.yaxis.grid(True, linestyle='--', linewidth=1, alpha=0.7)
-    ax.set_ylabel(ylabel)
-    ax.set_title(title)
-    ax.set_xlabel('')
-    ax.set_ylim(*ylimits)
+    title = ax.get_title().split('=')[-1].strip(' ')
+    if attrs is not None:
+        mean_years = float(attrs['mean_years'])
+        ax.set_title('')
+        ax.text(.2, .85, y.upper(),
+                horizontalalignment='center', fontweight='bold',
+                transform=ax.transAxes)
+        if kind is not None:
+            if kind != 'hist':
+                ax.text(.22, .72, '{:.1f} years'.format(mean_years),
+                        horizontalalignment='center',
+                        transform=ax.transAxes)
+    ax.yaxis.tick_left()
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["bottom"].set_visible(False)
+    if ylimits is not None:
+        ax.set_ylim(*ylimits)
+    if xlimits is not None:
+        ax.set_xlim(*xlimits)
     return ax
 
 
@@ -1060,34 +1125,62 @@ def produce_table_mann_kendall(thresh=50):
     from PW_stations import mann_kendall_trend_analysis
     import xarray as xr
     import pandas as pd
+
+    def process_mkt(ds_in, alpha=0.05, seasonal=False, factor=120):
+        ds = ds_in.map(
+            mann_kendall_trend_analysis,
+            alpha=alpha,
+            seasonal=seasonal,
+            verbose=False)
+        ds = ds.rename({'dim_0': 'mkt'})
+        df = ds.to_dataframe().T
+        df = df.drop(['test_name', 'trend', 'h', 'z', 's', 'var_s'], axis=1)
+        df['id'] = df.index.str.upper()
+        df = df[['id', 'Tau', 'p', 'slope']]
+        df.index.name = ''
+        df['slope'] = df['slope'] * factor
+        df['slope'] = df['slope'][df['p'] < 0.05]
+        df.loc[:, 'p'][df['p'] < 0.0001] = '<0.0001'
+        df['p'][df['p'] != '<0.0001'] = df['p'][df['p'] !=
+                                                '<0.0001'].astype(float).map('{:,.4f}'.format)
+        df['Tau'] = df['Tau'].map('{:,.4f}'.format)
+        df['slope'] = df['slope'].map('{:,.2f}'.format)
+        df['slope'][df['slope'] == 'nan'] = '-'
+        df.columns = ['Site ID', "Kendall's Tau", 'P-value', "Sen's slope"]
+        return df
+
     anoms = xr.load_dataset(
             work_yuval /
-             'GNSS_PW_monthly_anoms_thresh_{:.0f}.nc'.format(thresh))
-    anoms = anoms.map(mann_kendall_trend_analysis, verbose=False)
-    mkt_trends = [anoms[x].attrs['mkt_trend'] for x in anoms.data_vars]
-    mkt_bools = [anoms[x].attrs['mkt_h'] for x in anoms.data_vars]
-    mkt_slopes = [anoms[x].attrs['mkt_slope'] for x in anoms.data_vars]
-    mkt_pvalue = [anoms[x].attrs['mkt_p'] for x in anoms.data_vars]
-    mkt_95_lo = [anoms[x].attrs['mkt_trend_95'][0] for x in anoms.data_vars]
-    mkt_95_up = [anoms[x].attrs['mkt_trend_95'][1] for x in anoms.data_vars]
-    df = pd.DataFrame(mkt_trends, index=[x for x in anoms.data_vars], columns=['mkt_trend'])
-    df['mkt_h'] = mkt_bools
-    # transform into per decade:
-    df['mkt_slope'] = mkt_slopes
-    df['mkt_pvalue'] = mkt_pvalue
-    df['mkt_95_lo'] = mkt_95_lo
-    df['mkt_95_up'] = mkt_95_up
-    df[['mkt_slope', 'mkt_95_lo', 'mkt_95_up']] *= 120
-    df.index = df.index.str.upper()
-    df['Sen\'s slope'] = df['mkt_slope'].map('{:,.2f}'.format)
-    df.loc[:, 'Sen\'s slope'][~df['mkt_h']] = 'No trend'
-    con = ['({:.2f}, {:.2f})'.format(x, y) for (x, y) in list(
-        zip(df['mkt_95_lo'].values, df['mkt_95_up'].values))]
-    df['95% confidence intervals'] = con
-    df.loc[:, '95% confidence intervals'][~df['mkt_h']] = '-'
-    df = df[['Sen\'s slope', '95% confidence intervals']]
-    print(df.to_latex())
-    return df
+             'GNSS_PW_monthly_anoms_thresh_{:.0f}_homogenized.nc'.format(thresh))
+    mm = xr.load_dataset(
+        work_yuval /
+        'GNSS_PW_monthly_thresh_{:.0f}_homogenized.nc'.format(thresh))
+    df_anoms = process_mkt(anoms)
+    df_mm = process_mkt(mm, seasonal=True)
+#    mkt_trends = [anoms[x].attrs['mkt_trend'] for x in anoms.data_vars]
+#    mkt_bools = [anoms[x].attrs['mkt_h'] for x in anoms.data_vars]
+#    mkt_slopes = [anoms[x].attrs['mkt_slope'] for x in anoms.data_vars]
+#    mkt_pvalue = [anoms[x].attrs['mkt_p'] for x in anoms.data_vars]
+#    mkt_95_lo = [anoms[x].attrs['mkt_trend_95'][0] for x in anoms.data_vars]
+#    mkt_95_up = [anoms[x].attrs['mkt_trend_95'][1] for x in anoms.data_vars]
+#    df = pd.DataFrame(mkt_trends, index=[x for x in anoms.data_vars], columns=['mkt_trend'])
+#    df['mkt_h'] = mkt_bools
+#    # transform into per decade:
+#    df['mkt_slope'] = mkt_slopes
+#    df['mkt_pvalue'] = mkt_pvalue
+#    df['mkt_95_lo'] = mkt_95_lo
+#    df['mkt_95_up'] = mkt_95_up
+#    df[['mkt_slope', 'mkt_95_lo', 'mkt_95_up']] *= 120
+#    df.index = df.index.str.upper()
+#    df['Sen\'s slope'] = df['mkt_slope'].map('{:,.2f}'.format)
+#    df.loc[:, 'Sen\'s slope'][~df['mkt_h']] = 'No trend'
+#    con = ['({:.2f}, {:.2f})'.format(x, y) for (x, y) in list(
+#        zip(df['mkt_95_lo'].values, df['mkt_95_up'].values))]
+#    df['95% confidence intervals'] = con
+#    df.loc[:, '95% confidence intervals'][~df['mkt_h']] = '-'
+#    df = df[['Sen\'s slope', '95% confidence intervals']]
+    print(df_anoms.to_latex(index=False))
+    return df_anoms, df_mm
 
 
 def plot_monthly_means_anomalies_with_station_mean(load_path=work_yuval,
@@ -1309,7 +1402,7 @@ def plot_grp_anomlay_heatmap(load_path=work_yuval, gis_path=gis_path,
     return df
 
 
-def plot_lomb_scargle(path=work_yuval):
+def plot_lomb_scargle(path=work_yuval, save=True):
     from aux_gps import lomb_scargle_xr
     import xarray as xr
     pw_mm = xr.load_dataset(path / 'GNSS_PW_monthly_thresh_50_homogenized.nc')
@@ -1322,6 +1415,12 @@ def plot_lomb_scargle(path=work_yuval):
             'samples_per_peak': 100})
     plt.ylabel('')
     plt.title('Lomb–Scargle periodogram')
+    plt.xlim([0, 4])
+    plt.grid()
+    filename = 'Lomb_scargle_monthly_means.png'
+    if save:
+#        plt.savefig(savefig_path / filename, bbox_inches='tight')
+        plt.savefig(savefig_path / filename, orientation='landscape')
     return da
 
 
@@ -1400,3 +1499,131 @@ def plot_pw_lapse_rate_fit(path=work_yuval, model='TSEN', plot=True):
         ax.legend(['{} ({:.2f} [mm/km], {:.2f} [mm])'.format(model,
                    pw_lapse_rate, inter)])
     return df_gnss['alt'], pw_lapse_rate
+
+
+def plot_time_series_as_barplot(ts, anoms=False, ts_ontop=None):
+    # plt.style.use('fast')
+    time_dim = list(set(ts.dims))[0]
+    fig, ax = plt.subplots(figsize=(20, 6), dpi=150)
+    import matplotlib.dates as mdates
+    import matplotlib.ticker
+    from matplotlib.ticker import (AutoMinorLocator, MultipleLocator)
+    import pandas as pd
+    if not anoms:
+        # sns.barplot(x=ts[time_dim].values, y=ts.values, ax=ax, linewidth=5)
+        ax.bar(ts[time_dim].values, ts.values, linewidth=5, width=0.0,
+               facecolor='black', edgecolor='black')
+        # Series.plot.bar(ax=ax, linewidth=0, width=1)
+    else:
+        warm = 'tab:orange'
+        cold = 'tab:blue'
+        positive = ts.where(ts > 0).dropna(time_dim)
+        negative = ts.where(ts < 0).dropna(time_dim)
+        ax.bar(
+            positive[time_dim].values,
+            positive.values,
+            linewidth=3.0,
+            width=1.0,
+            facecolor=warm, edgecolor=warm, alpha=1.0)
+        ax.bar(
+            negative[time_dim].values,
+            negative.values,
+            width=1.0,
+            linewidth=3.0,
+            facecolor=cold, edgecolor=cold, alpha=1.0)
+    if ts_ontop is not None:
+        ax_twin = ax.twinx()
+        color = 'red'
+        ts_ontop.plot.line(color=color, linewidth=2.0, ax=ax_twin)
+        ax_twin.set_ylabel('PW [mm]', color=color)  # we already handled the x-label with ax1
+        ax_twin.tick_params(axis='y', labelcolor=color)
+        ax_twin.legend(['3-month running mean of PW anomalies'])
+        title_add = ' and the median Precipitable Water anomalies from Israeli GNSS sites'
+        l2 = ax_twin.get_ylim()
+        ax.set_ylim(l2)
+    else:
+        title_add = ''
+        
+    ax.grid(None)
+    ax.set_xlim([pd.to_datetime('1996'), pd.to_datetime('2020')])
+    ax.set_title('Multivariate ENSO Index Version 2 {}'.format(title_add))
+    ax.set_ylabel('MEI.v2')
+    # ax.xaxis.set_major_locator(MultipleLocator(20))
+    # Change minor ticks to show every 5. (20/4 = 5)
+#    ax.xaxis.set_minor_locator(AutoMinorLocator(4))
+    years_fmt = mdates.DateFormatter('%Y')
+    # ax.figure.autofmt_xdate()
+    ax.xaxis.set_major_locator(mdates.YearLocator(2))
+    ax.xaxis.set_minor_locator(mdates.YearLocator(1)) 
+    ax.xaxis.set_major_formatter(years_fmt)
+
+    # ax.xaxis.set_minor_locator(mdates.MonthLocator())
+    ax.figure.autofmt_xdate()
+#     plt.tick_params(
+#            axis='x',          # changes apply to the x-axis
+#            which='both',      # both major and minor ticks are affected
+#            bottom=True,      # ticks along the bottom edge are off
+#            top=False,         # ticks along the top edge are off
+#            labelbottom=True)
+    # fig.tight_layout()
+    plt.show()
+    return
+
+
+def plot_tide_pw_lags(path=hydro_path, pw_anom=False, rolling='1H', save=True):
+    from aux_gps import path_glob
+    import xarray as xr
+    import numpy as np
+    file = path_glob(path, 'PW_tide_sites_*.nc')[-1]
+    if pw_anom:
+        file = path_glob(path, 'PW_tide_sites_anom_*.nc')[-1]
+    ds = xr.load_dataset(file)
+    names = [x for x in ds.data_vars]
+    fig, ax = plt.subplots(figsize=(8, 6))
+    for name in names:
+        da = ds.mean('station').mean('tide_start')[name]
+        ser = da.to_series()
+        if rolling is not None:
+            ser = ser.rolling(rolling).mean()
+        time=(ser.index / np.timedelta64(1, 'D')).astype(float)
+        # ser = ser.loc[pd.Timedelta(-2.2,unit='D'):pd.Timedelta(1, unit='D')]
+        ser.index = time
+
+        ser.plot(marker='.', linewidth=0., ax=ax)
+    ax.set_xlabel('Days around tide event')
+    ax.set_ylabel('PW [mm]')
+    hstations = [ds[x].attrs['hydro_stations'] for x in ds.data_vars]
+    events = [ds[x].attrs['total_events'] for x in ds.data_vars]
+    fmt = list(zip(names, hstations, events))
+    ax.legend(['{} with {} stations ({} total events)'.format(x.upper(), y, z)
+               for x, y, z in fmt])
+    ax.set_xlim([-3, 1])
+    ax.axvline(0, color='k', linestyle='--')
+    ax.grid()
+    filename = 'pw_tide_sites.png'
+    if pw_anom:
+        filename = 'pw_tide_sites_anom.png'
+    if save:
+#        plt.savefig(savefig_path / filename, bbox_inches='tight')
+        plt.savefig(savefig_path / filename, orientation='landscape')
+#    ax.xaxis.set_major_locator(mdates.HourLocator(interval=24)) # tick every two hours
+#    ax.xaxis.set_major_formatter(mdates.DateFormatter('%H'))
+#    locator = mdates.AutoDateLocator(minticks=3, maxticks=7)
+#    formatter = mdates.ConciseDateFormatter(locator)
+#    ax.xaxis.set_major_locator(locator)
+#    ax.xaxis.set_major_formatter(formatter)
+    # title = 'Mean PW for tide stations near all GNSS stations'
+    # ax.set_title(title)    
+    return
+
+
+def plot_hist_with_seasons(da_ts):
+    import seaborn as sns
+    fig, ax = plt.subplots(figsize=(10, 7))
+    sns.kdeplot(da_ts.dropna('time'), ax=ax, color='k')
+    sns.kdeplot(da_ts.sel(time=da_ts['time.season']=='DJF').dropna('time'), legend=False, ax=ax, shade=True)
+    sns.kdeplot(da_ts.sel(time=da_ts['time.season']=='MAM').dropna('time'),  legend=False,ax=ax, shade=True)
+    sns.kdeplot(da_ts.sel(time=da_ts['time.season']=='JJA').dropna('time'), legend=False ,ax=ax, shade=True)
+    sns.kdeplot(da_ts.sel(time=da_ts['time.season']=='SON').dropna('time'), legend=False, ax=ax, shade=True)
+    plt.legend(['ALL','MAM', 'DJF', 'SON', 'JJA'])
+    return
