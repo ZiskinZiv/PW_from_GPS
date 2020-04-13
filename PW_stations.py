@@ -8,9 +8,9 @@ work flow for ZWD and PW retreival after python copy_gipsyx_post_from_geo.py:
     3)use mean_ZWD_over_sound_time_and_fit_tstm to obtain the mda (model dataarray)
     3*) can't use produce_kappa_ml_with_cats for hour on 5 mins data, dahhh!
     can do that with dayofyear, month, season (need to implement it first)
-    4)assamble GNSS_PW_thresh using mda (e.g., season) from  3 by running 
-    GNSS_PW_israeli_stations, default choice is None for mda, using whole data ts-tm 
+    4)save_GNSS_PW_israeli_stations using mda (e.g., season) from  3 
     5) do homogenization using Homogenization_R.py and run homogenize_pw_dataset
+    6) for hydro analysis and more run produce_all_GNSS_PW_anomalies
 @author: shlomi
 """
 
@@ -1019,7 +1019,7 @@ def produce_pw_statistics(path=work_yuval, resample_to_mm=True, thresh=50,
     from scipy.stats import skew
     import pandas as pd
     if pw_input is None:
-        pw = xr.load_dataset(path / 'GNSS_PW_thresh_{:.0f}.nc'.format(thresh))
+        pw = xr.load_dataset(path / 'GNSS_PW_thresh_{:.0f}_homogenized.nc'.format(thresh))
         pw = pw[[x for x in pw.data_vars if '_error' not in x]]
     else:
         pw = pw_input
@@ -2969,11 +2969,11 @@ def GNSS_pw_to_X_using_window(gnss_path=work_yuval, hydro_path=hydro_path,
     return X, y
 
 
-def produce_all_GNSS_PW_anomalies(load_path=work_yuval, thresh=None,
+def produce_all_GNSS_PW_anomalies(load_path=work_yuval, thresh=50,
                                   grp1='hour', grp2='dayofyear',
                                   savepath=work_yuval):
     import xarray as xr
-    GNSS_pw = xr.open_dataset(load_path / 'GNSS_PW_{:.0f}.nc'.format(thresh))
+    GNSS_pw = xr.open_dataset(load_path / 'GNSS_PW_thresh_{:.0f}_homogenized.nc'.format(thresh))
     anom_list = []
     stations_only = [x for x in GNSS_pw.data_vars if '_error' not in x]
     for station in stations_only:
@@ -3611,22 +3611,30 @@ def normality_test_on_pw(da_ts, sample=None, alpha=0.05, test='shapiro'):
         return 'Normally distributed with alpha {}'.format(alpha)
 
 
-def mann_kendall_trend_analysis(da_ts, alpha=0.05, verbose=True):
+def mann_kendall_trend_analysis(da_ts, alpha=0.05, seasonal=False, CI=False,
+                                verbose=True):
     import pymannkendall as mk
     from scipy.stats.mstats import theilslopes
     import numpy as np
     import pandas as pd
-    result = mk.original_test(da_ts, alpha)
+    if seasonal:
+        result = mk.seasonal_test(da_ts, alpha=alpha)
+        test = 'Seasonal Mann Kendall Test'
+    else:
+        result = mk.original_test(da_ts, alpha=alpha)
+        test = 'Mann Kendall Test'
     if verbose:
         print(result)
     mkt = {}
+    mkt['test_name'] = test
     for name, val in result._asdict().items():
-        mkt['mkt_' + name] = val
-    masked = np.ma.masked_array(da_ts, mask=np.isnan(da_ts))
-    slope, inter, conf_lo, conf_up = theilslopes(y=masked, alpha=alpha)
-    mkt['mkt_trend_95'] = [conf_lo, conf_up]
-    da_ts.attrs.update(mkt)
-    return da_ts
+        mkt[name] = val
+    if CI:
+        masked = np.ma.masked_array(da_ts, mask=np.isnan(da_ts))
+        slope, inter, conf_lo, conf_up = theilslopes(y=masked, alpha=alpha)
+        mkt['CI_95'] = [conf_lo, conf_up]
+    # da_ts.attrs.update(mkt)
+    return pd.Series(mkt)
 
 
 def homogenize_pw_dataset(path=work_yuval, thresh=50, savepath=work_yuval):
