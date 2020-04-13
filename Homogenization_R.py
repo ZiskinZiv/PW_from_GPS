@@ -22,8 +22,8 @@ methodology: run FindU on ALT and find corresponding changepoints in PW
 from PW_paths import work_yuval
 adjusted_stations = ['bshm', 'dsea', 'elat', 'elro', 'katz', 'klhv', 'nrif',
                      'tela']
-unchanged_stations = ['alon', 'csar', 'drag', 'jslm', 'kabr', 'mrav', 'nizn',
-                      'nzrt', 'ramo', 'slom', 'spir', 'yosh', 'yrcm']
+unchanged_stations = ['alon', 'csar', 'drag', 'jslm', 'kabr', 'mrav',
+                      'nzrt', 'ramo', 'slom', 'yosh', 'yrcm']
 gis_path = work_yuval / 'gis'
 homo_path = work_yuval / 'homogenization'
 
@@ -142,7 +142,7 @@ def load_adjusted_stations(
         shift_list.append(shift)
     # then assemble all other stations:
     df = produce_geo_gnss_solved_stations(path=gis_path, plot=False)
-    all_stations = [x for x in df.index if x not in ['gilb', 'lhav', 'hrmn']]
+    all_stations = [x for x in df.index if x not in ['gilb', 'lhav', 'hrmn', 'nizn', 'spir']]
     other = sorted([x for x in all_stations if x not in adjusted_stations])
     other_list = []
     for station in other:
