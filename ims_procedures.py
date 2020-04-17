@@ -818,23 +818,23 @@ def create_lat_lon_mesh(lats=[29.5, 33.5], lons=[34, 36],
     return da
 
 
-def read_save_ims_10mins(path=ims_10mins_path, var='TD'):
-    import xarray as xr
-    search_str = '*' + var + '_10mins.nc'
-    da_list = []
-    for file_and_path in path.glob(search_str):
-        da = xr.open_dataarray(file_and_path)
-        print('reading ims 10mins {} data for {} station'.format(var, da.name))
-        da_list.append(da)
-    print('merging...')
-    ds = xr.merge(da_list)
-    comp = dict(zlib=True, complevel=9)  # best compression
-    encoding = {var: comp for var in ds.data_vars}
-    filename = 'ims_' + var + '_10mins.nc'
-    print('saving...')
-    ds.to_netcdf(path / filename, 'w', encoding=encoding)
-    print('{} was saved to {}.'.format(filename, path))
-    return ds
+#def read_save_ims_10mins(path=ims_10mins_path, var='TD'):
+#    import xarray as xr
+#    search_str = '*' + var + '_10mins.nc'
+#    da_list = []
+#    for file_and_path in path.glob(search_str):
+#        da = xr.load_dataarray(file_and_path)
+#        print('reading ims 10mins {} data for {} station'.format(var, da.name))
+#        da_list.append(da)
+#    print('merging...')
+#    ds = xr.merge(da_list)
+#    comp = dict(zlib=True, complevel=9)  # best compression
+#    encoding = {var: comp for var in ds.data_vars}
+#    filename = 'ims_' + var + '_10mins.nc'
+#    print('saving...')
+#    ds.to_netcdf(path / filename, 'w', encoding=encoding)
+#    print('{} was saved to {}.'.format(filename, path))
+#    return ds
 
 
 def analyse_10mins_ims_field(path=ims_10mins_path, var='TD',
@@ -910,7 +910,8 @@ def geo_pandas_time_snapshot(path=ims_path, var='TD', freq='10mins',
     cols_list = []
     for dvar in ds.data_vars.values():
         value = dvar.values.item()
-        id_ = dvar.attrs['station_id']
+        id_ = dvar.attrs[        print('post-proccessing {} data for {} station, ({}/{})'.format(field,
+              da.name, cnt, len(files)))'station_id']
         lat = dvar.attrs['station_lat']
         lon = dvar.attrs['station_lon']
         alt = dvar.attrs['station_alt']
@@ -1039,7 +1040,8 @@ def read_ims_metadata_from_files(path=gis_path, freq='10mins'):
         ims.columns = cols
         # ims.index = ims['ID'].astype(int)
         # ims = ims.drop('ID', axis=1)
-        # fix lat, lon cols:
+        # fix lat, lon co        print('post-proccessing {} data for {} station, ({}/{})'.format(field,
+              da.name, cnt, len(files)))ls:
         ims['lat'] = ims['lat'].str.replace(u'\xba', '').astype(float)
         ims['lon'] = ims['lon'].str.replace(u'\xba', '').astype(float)
         # fix alt col:
@@ -1132,7 +1134,8 @@ def ims_api_get_meta(active_only=True, channel_name='TD'):
 #        s_year = starting_date.year
 #        e_year = end_date.year
 #        years = np.arange(s_year, e_year + 1)
-#        dates = [starting_date.replace(year=x) for x in years]
+#        dates = [startin        print('post-proccessing {} data for {} station, ({}/{})'.format(field,
+              da.name, cnt, len(files)))g_date.replace(year=x) for x in years]
 #        if (end_date - dates[-1]).days > 0:
 #            dates.append(end_date)
 #        return dates
@@ -1211,9 +1214,10 @@ def fill_fix_all_10mins_IMS_stations(path=ims_10mins_path,
     cnt = 1
     da_list = []
     for file_and_path in files:
-        da = xr.open_dataarray(file_and_path)
+        name = file_and_path.as_posix().split('/')[-1].split('.')[0].split('_')[0]
         print('post-proccessing {} data for {} station, ({}/{})'.format(field,
-              da.name, cnt, len(files)))
+              name, cnt, len(files)))
+        da = xr.open_dataarray(file_and_path)
         sid = da.attrs['station_id']
         row = meta[meta.ID == sid]
         if da.name == 'ARIEL':
