@@ -910,8 +910,7 @@ def geo_pandas_time_snapshot(path=ims_path, var='TD', freq='10mins',
     cols_list = []
     for dvar in ds.data_vars.values():
         value = dvar.values.item()
-        id_ = dvar.attrs[        print('post-proccessing {} data for {} station, ({}/{})'.format(field,
-              da.name, cnt, len(files)))'station_id']
+        id_ = dvar.attrs['station_id']
         lat = dvar.attrs['station_lat']
         lon = dvar.attrs['station_lon']
         alt = dvar.attrs['station_alt']
@@ -1040,8 +1039,7 @@ def read_ims_metadata_from_files(path=gis_path, freq='10mins'):
         ims.columns = cols
         # ims.index = ims['ID'].astype(int)
         # ims = ims.drop('ID', axis=1)
-        # fix lat, lon co        print('post-proccessing {} data for {} station, ({}/{})'.format(field,
-              da.name, cnt, len(files)))ls:
+        # fix lat, lon cols:
         ims['lat'] = ims['lat'].str.replace(u'\xba', '').astype(float)
         ims['lon'] = ims['lon'].str.replace(u'\xba', '').astype(float)
         # fix alt col:
@@ -1134,8 +1132,7 @@ def ims_api_get_meta(active_only=True, channel_name='TD'):
 #        s_year = starting_date.year
 #        e_year = end_date.year
 #        years = np.arange(s_year, e_year + 1)
-#        dates = [startin        print('post-proccessing {} data for {} station, ({}/{})'.format(field,
-              da.name, cnt, len(files)))g_date.replace(year=x) for x in years]
+#        dates = [starting_date.replace(year=x) for x in years]
 #        if (end_date - dates[-1]).days > 0:
 #            dates.append(end_date)
 #        return dates
