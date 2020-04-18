@@ -107,7 +107,7 @@ def download_ims_single_station(stationid, savepath=None,
         # add all channels d/l here:
         import pandas as pd
         ds = df.to_xarray()
-        ds['time'] = pd.to_datetime(ds.time)
+        ds['time'] = pd.to_datetime(ds.time.values)
         channel_name = [*ds.data_vars.keys()][0].split('_')[0]
         channel_id = ds[channel_name + '_id'].isel(time=0).values.item()
         to_drop = [x for x in ds.data_vars.keys() if 'value' not in x]
