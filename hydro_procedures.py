@@ -30,14 +30,19 @@ def preprocess_hydro_pw(pw_station='drag', hs_id=48125, path=work_yuval,
     tides = all_tides[sta_slice].dropna('tide_start')
     tide_starts = tides['tide_start'].where(
         ~tides.isnull()).dropna('tide_start')['tide_start']
+    tide_ends = tides['TS_{}_tide_end'.format(hs_id)].where(
+        ~tides.isnull()).dropna('tide_start')['TS_{}_tide_end'.format(hs_id)]
     # round all tide_starts to hourly:
     ts = tide_starts.dt.round('1H')
+    ts_end = tide_ends.dt.round('1H')
     time_dt = pd.date_range(
-        start=ts.min().values.item(),
-        end=ts.max().values.item(),
+        start=ts.min().values,
+        end=ts_end.max().values,
         freq='1H')
     df = pd.DataFrame(data=np.zeros(time_dt.shape), index=time_dt)
     df.loc[ts.values, :] = 1
+    df.loc[ts_end.values, :] = 2
+    df.columns = ['tides']
     # now load pw:
     pw = xr.load_dataset(path / 'GNSS_PW_hourly_thresh_50_homogenized.nc')[pw_station]
     pw_df = pw.dropna('time').to_dataframe()
