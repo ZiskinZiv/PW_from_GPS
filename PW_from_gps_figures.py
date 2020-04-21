@@ -201,7 +201,7 @@ def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
 def plot_means_box_plots(path=work_yuval, thresh=50, kind='box',
                          x='month', col_wrap=5, ylimits=None,
                          xlimits=None, anoms=True, bins=None,
-                         season=None, attrs_plot=True, save=True):
+                         season=None, attrs_plot=True, save=True, ds_input=None):
     import xarray as xr
     pw = xr.open_dataset(
                 work_yuval /
@@ -220,7 +220,8 @@ def plot_means_box_plots(path=work_yuval, thresh=50, kind='box',
         pw = pw[[x for x in pw.data_vars if '_error' not in x]]
         # first remove long term monthly means:
         if anoms:
-            pw = pw.groupby('time.month') - pw.groupby('time.month').mean('time')
+            pw = xr.load_dataset(work_yuval / 'GNSS_PW_hourly_anoms_thresh_{:.0f}_homogenized.nc'.format(thresh))
+            # pw = pw.groupby('time.dayofyear') - pw.groupby('time.dayofyear').mean('time')
     elif x == 'day':
         # pw = pw.resample(time='1H').mean('time')
         # pw = pw.groupby('time.hour').mean('time')
@@ -228,17 +229,28 @@ def plot_means_box_plots(path=work_yuval, thresh=50, kind='box',
         pw = pw[[x for x in pw.data_vars if '_error' not in x]]
         # first remove long term monthly means:
         if anoms:
-            pw = pw.groupby('time.month') - pw.groupby('time.month').mean('time')
+            # pw = pw.groupby('time.month') - pw.groupby('time.month').mean('time')
+            pw = pw.groupby('time.dayofyear') - pw.groupby('time.dayodyear').mean('time')
     if season is not None:
-        print('{} season is selected'.format(season))
-        pw = pw.sel(time=pw['time.season']==season)
+        if season != 'all':
+            print('{} season is selected'.format(season))
+            pw = pw.sel(time=pw['time.season'] == season)
+            all_seas = False
+        else:
+            print('all seasons selected')
+            all_seas = True
+    else:
+        all_seas = False
     for i, da in enumerate(pw.data_vars):
         pw[da].attrs = attrs[i]
     if not attrs_plot:
         attrs = None
+    if ds_input is not None:
+        # be carful!:
+        pw = ds_input
     fg = plot_multi_box_xr(pw, kind=kind, x=x, col_wrap=col_wrap,
                            ylimits=ylimits, xlimits=xlimits, attrs=attrs,
-                           bins=bins)
+                           bins=bins, all_seasons=all_seas)
     attrs = [x.attrs for x in pw.data_vars.values()]
     for i, ax in enumerate(fg.axes.flatten()):
         try:
@@ -257,7 +269,10 @@ def plot_means_box_plots(path=work_yuval, thresh=50, kind='box',
                            right=0.985,
                            hspace=0.27,
                            wspace=0.215)
-    filename = 'pw_{}ly_means_{}.png'.format(x, kind)
+    if season is not None:
+        filename = 'pw_{}ly_means_{}_seas_{}.png'.format(x, kind, season)
+    else:
+        filename = 'pw_{}ly_means_{}.png'.format(x, kind)
     if save:
         plt.savefig(savefig_path / filename, bbox_inches='tight')
     return fg
@@ -265,26 +280,50 @@ def plot_means_box_plots(path=work_yuval, thresh=50, kind='box',
 
 def plot_multi_box_xr(pw, kind='violin', x='month', sharex=False, sharey=False,
                       col_wrap=5, ylimits=None, xlimits=None, attrs=None,
-                      bins=None):
+                      bins=None, all_seasons=False):
     import xarray as xr
     pw = pw.to_array('station')
     fg = xr.plot.FacetGrid(pw, col='station', col_wrap=col_wrap, sharex=sharex,
                            sharey=sharey)
     for i, (sta, ax) in enumerate(zip(pw['station'].values, fg.axes.flatten())):
         pw_sta = pw.sel(station=sta).reset_coords(drop=True)
+        if all_seasons:
+            pw_seas = pw_sta.sel(time=pw_sta['time.season']=='DJF')
+            df = pw_seas.to_dataframe(sta)
+            plot_box_df(df, ax=ax, x=x, title=sta, ylabel='', kind=kind,
+                        ylimits=ylimits, xlimits=xlimits, attrs=None, bins=bins)
+            pw_seas = pw_sta.sel(time=pw_sta['time.season']=='MAM')
+            df = pw_seas.to_dataframe(sta)
+            plot_box_df(df, ax=ax, x=x, title=sta, ylabel='', kind=kind,
+                        ylimits=ylimits, xlimits=xlimits, attrs=None, bins=bins)
+            pw_seas = pw_sta.sel(time=pw_sta['time.season']=='JJA')
+            df = pw_seas.to_dataframe(sta)
+            plot_box_df(df, ax=ax, x=x, title=sta, ylabel='', kind=kind,
+                        ylimits=ylimits, xlimits=xlimits, attrs=None, bins=bins)
+            pw_seas = pw_sta.sel(time=pw_sta['time.season']=='SON')
+            df = pw_seas.to_dataframe(sta)
+            plot_box_df(df, ax=ax, x=x, title=sta, ylabel='', kind=kind,
+                        ylimits=ylimits, xlimits=xlimits, attrs=attrs[i], bins=bins)
+            if sta == 'nrif' or sta == 'elat':
+                ax.legend(['DJF', 'MAM', 'JJA', 'SON'],
+                          prop={'size':8}, loc='upper center', framealpha=0.5, fancybox=True)
+            else:
+                ax.legend(['DJF', 'MAM', 'JJA', 'SON'],
+                          prop={'size':8}, loc='best', framealpha=0.5, fancybox=True)
+        else:
         # if x == 'hour':
         #     # remove seasonal signal:
         #     pw_sta = pw_sta.groupby('time.dayofyear') - pw_sta.groupby('time.dayofyear').mean('time')
         # elif x == 'month':
         #     # remove daily signal:
         #     pw_sta = pw_sta.groupby('time.hour') - pw_sta.groupby('time.hour').mean('time')            
-        df = pw_sta.to_dataframe(sta)
-        if attrs is not None:
-            plot_box_df(df, ax=ax, x=x, title=sta, ylabel='', kind=kind,
-                        ylimits=ylimits, xlimits=xlimits, attrs=attrs[i], bins=bins)
-        else:
-            plot_box_df(df, ax=ax, x=x, title=sta, ylabel='', kind=kind,
-                        ylimits=ylimits, xlimits=xlimits, attrs=None, bins=bins)
+            df = pw_sta.to_dataframe(sta)
+            if attrs is not None:
+                plot_box_df(df, ax=ax, x=x, title=sta, ylabel='', kind=kind,
+                            ylimits=ylimits, xlimits=xlimits, attrs=attrs[i], bins=bins)
+            else:
+                plot_box_df(df, ax=ax, x=x, title=sta, ylabel='', kind=kind,
+                            ylimits=ylimits, xlimits=xlimits, attrs=None, bins=bins)
     return fg
 
 
@@ -322,7 +361,7 @@ def plot_box_df(df, x='month', title='TELA',
     elif kind == 'box':
         kwargs = dict(markerfacecolor='r', marker='o')
         sns.boxplot(ax=ax, data=df, x=x, y=y, palette=pal, fliersize=4,
-                    whis=1.5, flierprops=kwargs)
+                    whis=1.0, flierprops=kwargs,showfliers=False)
         ax.set_ylabel(ylabel)
         ax.set_title(title)
         ax.set_xlabel('')
