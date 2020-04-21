@@ -12,6 +12,13 @@ from PW_paths import work_yuval
 # TODO: if not, build func to replace datetimeindex to numbers and vise versa
 
 
+def groupby_date_xr(da_ts):
+    df = da_ts.to_dataframe()
+    df['date'] = df.index.date
+    date = df['date'].to_xarray()
+    return date
+
+
 def loess_curve(da_ts, time_dim='time', season=None, plot=True):
     from skmisc.loess import loess
     import matplotlib.pyplot as plt
@@ -563,19 +570,26 @@ def lomb_scargle_xr(da_ts, units='cpy', user_freq='MS', plot=True, kwargs=None):
     if not sp_str:
         print('using user-defined freq: {}'.format(user_freq))
         sp_str = user_freq
-    cpy_freq_dict = {'MS': 12, 'D': 365.25, 'H': 8766}
+    if units == 'cpy':
+        # cycles per year:
+        freq_dict = {'MS': 12, 'D': 365.25, 'H': 8766}
+        long_name = 'Cycles per Year'
+    elif units == 'cpd':
+        # cycles per day:
+        freq_dict = {'H': 24}
+        long_name = 'Cycles per Day'
     t = [x for x in range(da_ts[time_dim].size)]
     y = da_ts.values
     lomb_kwargs = {'samples_per_peak': 10, 'nyquist_factor': 2}
     if kwargs is not None:
         lomb_kwargs.update(kwargs)
     freq, power = LombScargle(t, y).autopower(**lomb_kwargs)
-    cpy_freq = cpy_freq_dict.get(sp_str)
+    unit_freq = freq_dict.get(sp_str)
     da = xr.DataArray(power, dims=['freq'])
-    da['freq'] = freq * cpy_freq
+    da['freq'] = freq * unit_freq
     da.attrs['long_name'] = 'Power from LombScargle'
     da.name = '{}_power'.format(da_ts.name)
-    da['freq'].attrs['long_name'] = 'Cycles per Year'
+    da['freq'].attrs['long_name'] = long_name
     if plot:
         da.plot()
     return da
