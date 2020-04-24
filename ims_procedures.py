@@ -23,6 +23,61 @@ cwd = Path().cwd()
 #In [21]: both = xr.Dataset({'some_missing': some_missing, 'filled': filled})
 
 
+
+
+def produce_relative_frequency_wind_direction(path=ims_path,
+                                              station='TEL-AVIV-COAST',
+                                              season='DJF', with_weights=False,
+                                              plot=True):
+    import xarray as xr
+    import matplotlib.pyplot as plt
+    wd = xr.open_dataset(path / 'IMS_WD_israeli_10mins.nc')[station]
+    wd.load()
+    wd.name = 'WD'
+    wd = wd.sel(time=wd['time.season'] == season)
+    all_Q = wd.groupby('time.hour').count()
+    Q1 = wd.where((wd >= 0) & (wd < 90)).dropna('time')
+    Q2 = wd.where((wd >= 90) & (wd < 180)).dropna('time')
+    Q3 = wd.where((wd >= 180.1) & (wd < 270)).dropna('time')
+    Q4 = wd.where((wd >= 270) & (wd < 360)).dropna('time')
+    Q = xr.concat([Q1, Q2, Q3, Q4], 'Q')
+    Q['Q'] = [x + 1 for x in range(4)]
+    Q_freq = 100.0 * (Q.groupby('time.hour').count() / all_Q)
+    if with_weights:
+        ws = xr.open_dataset(path / 'IMS_WS_israeli_10mins.nc')[station]
+        ws.load()
+        ws = ws.sel(time=ws['time.season'] == season)
+        ws.name = 'WS'
+        wind = xr.merge([ws, wd])
+        wind = wind.dropna('time')
+        all_Q = wind['WD'].groupby('time.hour').count()
+        Q1 = wind['WS'].where(
+            (wind['WD'] >= 0) & (wind['WD'] < 90)).dropna('time')
+        Q2 = wind['WS'].where(
+            (wind['WD'] >= 90) & (wind['WD'] < 180)).dropna('time')
+        Q3 = wind['WS'].where(
+            (wind['WD'] >= 180) & (wind['WD'] < 270)).dropna('time')
+        Q4 = wind['WS'].where(
+            (wind['WD'] >= 270) & (wind['WD'] < 360)).dropna('time')
+        Q = xr.concat([Q1, Q2, Q3, Q4], 'Q')
+        Q['Q'] = [x + 1 for x in range(4)]
+        Q_ratio = (Q.groupby('time.hour').count() / all_Q)
+        Q_mean = Q.groupby('time.hour').mean() / Q.groupby('time.hour').max()
+        Q_freq = 100 * ((Q_mean * Q_ratio) / (Q_mean * Q_ratio).sum('Q'))
+    if plot:
+        fig, ax = plt.subplots(figsize=(10, 8))
+        for q in Q_freq['Q']:
+            Q_freq.sel(Q=q).plot(ax=ax)
+        ax.set_title(
+            'Relative wind direction frequency in {} IMS station in {} season'.format(
+                station, season))
+        ax.set_ylabel('Relative frequency [%]')
+        ax.set_xlabel('Time of day [UTC]')
+    ax.legend([r'0$\degree$-90$\degree$', r'90$\degree$-180$\degree$',
+               r'180$\degree$-270$\degree$', r'270$\degree$-360$\degree$'])
+    return Q_freq
+
+
 def clip_raster(fp=awd_path/'Israel_Area.tif',
                 out_tif=awd_path/'israel_dem.tif',
                 minx=34.0, miny=29.0, maxx=36.5, maxy=34.0):
