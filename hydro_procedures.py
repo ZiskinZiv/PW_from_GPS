@@ -11,13 +11,128 @@ hydro_path = work_yuval / 'hydro'
 gis_path = work_yuval / 'gis'
 
 # TODO: scan for seasons in the tide events and remove summer
-# TODO: loop over tide events and choose 24 hour before positive event and
-# 24 before negative events, use frequency of 1 hour and round event time to 
-# this freq
+# TODO: prepare pw_hourly_50 so no homogenized data will enter
+
+
+def permutation_scikit(X, y, plot=True):
+    import matplotlib.pyplot as plt
+    from sklearn.svm import SVC
+    from sklearn.model_selection import KFold
+    from sklearn.model_selection import permutation_test_score
+    svm = SVC(kernel='rbf')
+    cv = KFold(2, shuffle=True)
+    n_classes = 2
+    score, permutation_scores, pvalue = permutation_test_score(
+            svm, X, y, scoring="accuracy", cv=cv, n_permutations=1000, n_jobs=1)
+
+    print("Classification score %s (pvalue : %s)" % (score, pvalue))
+    plt.hist(permutation_scores, 20, label='Permutation scores',
+             edgecolor='black')
+    ylim = plt.ylim()
+    plt.plot(2 * [score], ylim, '--g', linewidth=3,
+         label='Classification Score'
+         ' (pvalue %s)' % pvalue)
+    plt.plot(2 * [1. / n_classes], ylim, '--k', linewidth=3, label='Luck')
+    
+    plt.ylim(ylim)
+    plt.legend()
+    plt.xlabel('Score')
+    plt.show()
+    return
+
+
+def scikit_fit_predict(X, y, seed=42, plot=True):
+    # check permutations with scikit learn
+    from sklearn.model_selection import train_test_split
+    from sklearn.svm import SVC
+    import numpy as np
+    import matplotlib.pyplot as plt
+    X_tt, X_test, y_tt, y_test = train_test_split(
+        X, y, test_size=0.3, shuffle=True, random_state=seed)
+    clf = SVC(gamma='auto')
+    scores = []
+    for i in range(1000):
+        X_train, X_val, y_train, y_val = train_test_split(
+            X_tt, y_tt, shuffle=True, test_size=0.5, random_state=i)
+        clf.fit(X_train, y_train)
+        scores.append(clf.score(X_val, y_val))
+    scores = np.array(scores)
+    if plot:
+        plt.hist(scores, bins=15)
+    return scores
+    # clf.fit(X,y)
+
+
+def produce_X_y(station='drag', hs_id=48125, lag=25, path=work_yuval,
+                        hydro_path=hydro_path, with_ends=False, seed=42,
+                        verbose=True):
+    import pandas as pd
+    import numpy as np
+    df = preprocess_hydro_pw(
+        pw_station=station,
+        hs_id=hs_id,
+        path=path,
+        hydro_path=hydro_path,
+        with_ends=with_ends)
+    # first produce all the positives:
+    # get the tides datetimes:
+    y_pos = df[df['tides'] == 1]['tides']
+    # get the datetimes of 24 hours before tide event (not inclusive):
+    y_lag_pos = y_pos.index - pd.Timedelta(lag, unit='H')
+    masks = [(df.index > start) & (df.index < end)
+             for start, end in zip(y_lag_pos, y_pos.index)]
+    # also drop event if less than 24 hour before available:
+    pw_pos_list = []
+    ind = []
+    bad_ind = []
+    for i, tide in enumerate(masks):
+        if len(df['tides'][tide]) == (lag - 1):
+            pw_pos_list.append(df[station][tide])
+            ind.append(i)
+        else:
+            bad_ind.append(i)
+    # get the indices of the dropped events:
+    # ind = [x[0] for x in pw_pos_list]
+    if bad_ind:
+        if verbose:
+            print('{} are without full 24 hours before record.'.format(
+                ','.join([x for x in df.iloc[bad_ind].index.strftime('%Y-%m-%d:%H:00:00')])))
+    # drop the events in y so len(y) == in each x from tides_list:
+    y_pos_arr = y_pos.iloc[ind].values
+    # now get the negative y's:
+    y_neg_arr = np.zeros(y_pos_arr.shape)
+    cnt = 0
+    pw_neg_list = []
+    np.random.seed(seed)
+    while cnt < len(y_neg_arr):
+        # get a random date from df:
+        r = np.random.randint(low=0, high=len(df))
+        # slice -24 to 24 range with t=0 being the random date:
+        sliced = df.iloc[r - lag:r + lag]
+        # if tides inside this date range, continue:
+        if y_pos.iloc[ind].index in sliced.index:
+            if verbose:
+                print('found positive tide in randomly sliced 48 window')
+            continue
+        # now if no 24 items exist, also continue:
+        negative = df.iloc[r - lag:r - 1][station]
+        if len(negative) != (lag-1):
+            if verbose:
+                print('didnt find full {} hours sliced negative'.format(lag-1))
+            continue
+        # else, append to pw_neg_list and increase cnt
+        pw_neg_list.append(negative)
+        cnt += 1
+    # lastly, assemble for X, y using np.columnstack:
+    y = np.concatenate([y_pos_arr, y_neg_arr])
+    X = np.stack([[x.values for x in pw_pos_list] + 
+                        [x.values for x in pw_neg_list]])
+    X = X.squeeze()
+    return X, y
 
 
 def preprocess_hydro_pw(pw_station='drag', hs_id=48125, path=work_yuval,
-                        hydro_path=hydro_path):
+                        hydro_path=hydro_path, with_ends=False):
     import xarray as xr
     import pandas as pd
     import numpy as np
@@ -41,7 +156,8 @@ def preprocess_hydro_pw(pw_station='drag', hs_id=48125, path=work_yuval,
         freq='1H')
     df = pd.DataFrame(data=np.zeros(time_dt.shape), index=time_dt)
     df.loc[ts.values, :] = 1
-    df.loc[ts_end.values, :] = 2
+    if with_ends:
+        df.loc[ts_end.values, :] = 2
     df.columns = ['tides']
     # now load pw:
     pw = xr.load_dataset(path / 'GNSS_PW_hourly_thresh_50_homogenized.nc')[pw_station]
