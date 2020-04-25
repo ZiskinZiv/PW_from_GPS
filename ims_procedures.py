@@ -25,12 +25,23 @@ cwd = Path().cwd()
 
 
 
+
+
 def produce_relative_frequency_wind_direction(path=ims_path,
                                               station='TEL-AVIV-COAST',
                                               season='DJF', with_weights=False,
+                                              pw_station='tela',
                                               plot=True):
     import xarray as xr
     import matplotlib.pyplot as plt
+    import numpy as np
+
+    def make_patch_spines_invisible(ax):
+        ax.set_frame_on(True)
+        ax.patch.set_visible(False)
+        for sp in ax.spines.values():
+            sp.set_visible(False)
+
     wd = xr.open_dataset(path / 'IMS_WD_israeli_10mins.nc')[station]
     wd.load()
     wd.name = 'WD'
@@ -43,6 +54,12 @@ def produce_relative_frequency_wind_direction(path=ims_path,
     Q = xr.concat([Q1, Q2, Q3, Q4], 'Q')
     Q['Q'] = [x + 1 for x in range(4)]
     Q_freq = 100.0 * (Q.groupby('time.hour').count() / all_Q)
+    T = xr.open_dataset(path / 'IMS_TD_israeli_10mins.nc')[station]
+    T.load()
+    T = T.groupby('time.month') - T.groupby('time.month').mean('time')
+    T = T.reset_coords(drop=True)
+    T = T.sel(time=T['time.season'] == season)
+    T = T.groupby('time.hour').mean('time')
     if with_weights:
         ws = xr.open_dataset(path / 'IMS_WS_israeli_10mins.nc')[station]
         ws.load()
@@ -65,7 +82,7 @@ def produce_relative_frequency_wind_direction(path=ims_path,
         Q_mean = Q.groupby('time.hour').mean() / Q.groupby('time.hour').max()
         Q_freq = 100 * ((Q_mean * Q_ratio) / (Q_mean * Q_ratio).sum('Q'))
     if plot:
-        fig, ax = plt.subplots(figsize=(10, 8))
+        fig, ax = plt.subplots(figsize=(16, 8))
         for q in Q_freq['Q']:
             Q_freq.sel(Q=q).plot(ax=ax)
         ax.set_title(
@@ -73,8 +90,36 @@ def produce_relative_frequency_wind_direction(path=ims_path,
                 station, season))
         ax.set_ylabel('Relative frequency [%]')
         ax.set_xlabel('Time of day [UTC]')
-    ax.legend([r'0$\degree$-90$\degree$', r'90$\degree$-180$\degree$',
-               r'180$\degree$-270$\degree$', r'270$\degree$-360$\degree$'])
+        ax.legend([r'0$\degree$-90$\degree$', r'90$\degree$-180$\degree$',
+                   r'180$\degree$-270$\degree$', r'270$\degree$-360$\degree$'], loc='upper left')
+        ax.set_xticks(np.arange(0, 24, step=1))
+        ax.grid()
+        if pw_station is not None:
+            pw = xr.open_dataset(
+                work_yuval /
+                'GNSS_PW_thresh_50_homogenized.nc')[pw_station]
+            pw.load().dropna('time')
+            pw = pw.groupby('time.month') - pw.groupby('time.month').mean('time')
+            pw = pw.reset_coords(drop=True)
+            pw = pw.sel(time=pw['time.season'] == season)
+            pw = pw.groupby('time.hour').mean()
+            axpw = ax.twinx()
+            pw.plot.line(ax=axpw, color='k', marker='o')
+            axpw.axhline(0, color='k', linestyle='--')
+            axpw.legend(['{} PW anomalies'.format(pw_station.upper())], loc='upper right')
+            axpw.set_ylabel('PW anomalies [mm]')
+            axt = ax.twinx()
+            axt.spines["right"].set_position(("axes", 1.05))
+            # Having been created by twinx, par2 has its frame off, so the line of its
+            # detached spine is invisible.  First, activate the frame but make the patch
+            # and spines invisible.
+            make_patch_spines_invisible(axt)
+            # Second, show the right spine.
+            axt.spines["right"].set_visible(True)
+            p3, = T.plot.line(ax=axt, marker='s',color='m', label="Temperature")
+            axt.yaxis.label.set_color(p3.get_color())
+            axt.tick_params(axis='y', colors=p3.get_color())
+            axt.set_ylabel('Temperature anomalies [$C\degree$]')
     return Q_freq
 
 
