@@ -221,7 +221,7 @@ def plot_means_box_plots(path=work_yuval, thresh=50, kind='box',
         # first remove long term monthly means:
         if anoms:
             pw = xr.load_dataset(work_yuval / 'GNSS_PW_hourly_anoms_thresh_{:.0f}_homogenized.nc'.format(thresh))
-            # pw = pw.groupby('time.dayofyear') - pw.groupby('time.dayofyear').mean('time')
+            # pw = pw.groupby('time.month') - pw.groupby('time.month').mean('time')
     elif x == 'day':
         # pw = pw.resample(time='1H').mean('time')
         # pw = pw.groupby('time.hour').mean('time')
