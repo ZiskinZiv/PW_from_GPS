@@ -22,15 +22,240 @@ cwd = Path().cwd()
 #
 #In [21]: both = xr.Dataset({'some_missing': some_missing, 'filled': filled})
 
+# kabr, nzrt, katz, elro, klhv, yrcm have ims stations not close to them!
+gnss_ims_dict = {
+    'alon': 'ASHQELON-PORT', 'bshm': 'HAIFA-TECHNION', 'csar': 'HADERA-PORT',
+    'tela': 'TEL-AVIV-COAST', 'slom': 'BESOR-FARM', 'kabr': 'SHAVE-ZIYYON',
+    'nzrt': 'DEIR-HANNA', 'katz': 'GAMLA', 'elro': 'MEROM-GOLAN-PICMAN',
+    'mrav': 'MAALE-GILBOA', 'yosh': 'ARIEL', 'jslm': 'JERUSALEM-GIVAT-RAM',
+    'drag': 'METZOKE-DRAGOT', 'dsea': 'SEDOM', 'ramo': 'MIZPE-RAMON-20120927',
+    'nrif': 'NEOT-SMADAR', 'elat': 'ELAT', 'klhv': 'SHANI',
+    'yrcm': 'ZOMET-HANEGEV'}
 
 
+def align_10mins_ims_to_gnss_and_save(ims_path=ims_path, field='G',
+                                      gnss_ims_dict=gnss_ims_dict,
+                                      savepath=work_yuval):
+    import xarray as xr
+    d = dict(zip(gnss_ims_dict.values(), gnss_ims_dict.keys()))
+    gnss_list = []
+    for station, gnss_site in d.items():
+        print('loading IMS station {}'.format(station))
+        ims_field = xr.load_dataset(ims_path / 'IMS_{}_israeli_10mins.nc'.format(field))[station]
+        gnss = ims_field.load()
+        gnss.name = gnss_site
+        gnss.attrs['IMS_station'] = station
+        gnss_list.append(gnss)
+    gnss_sites = xr.merge(gnss_list)
+    if savepath is not None:
+        filename = 'GNSS_IMS_{}_israeli_10mins.nc'.format(field)
+        print('saving {} to {}'.format(filename, savepath))
+        comp = dict(zlib=True, complevel=9)  # best compression
+        encoding = {var: comp for var in gnss_sites.data_vars}
+        gnss_sites.to_netcdf(savepath / filename, 'w', encoding=encoding)
+        print('Done!')
+    return gnss_sites
 
+
+def produce_10mins_gustiness(path=ims_path, rolling=5):
+    import xarray as xr
+    from aux_gps import keep_iqr
+    ws = xr.load_dataset(path / 'IMS_WS_israeli_10mins.nc')
+    stations = [x for x in ws.data_vars]
+    g_list = []
+    for station in stations:
+        print('proccesing station {}'.format(station))
+        attrs = ws[station].attrs
+        g = ws[station].rolling(time=rolling).std() / ws[station].rolling(time=rolling).mean()
+        g = keep_iqr(g)
+        g.name = station
+        g.attrs = attrs
+        g_list.append(g)
+    G = xr.merge(g_list)
+    filename = 'IMS_G_israeli_10mins.nc'
+    print('saving {} to {}'.format(filename, path))
+    comp = dict(zlib=True, complevel=9)  # best compression
+    encoding = {var: comp for var in G.data_vars}
+    G.to_netcdf(path / filename, 'w', encoding=encoding)
+    print('Done resampling!')
+    return G
+
+
+def produce_10mins_absolute_humidity(path=ims_path):
+    from sounding_procedures import wrap_xr_metpy_mixing_ratio
+    from aux_gps import dim_intersection
+    import xarray as xr
+    P = xr.load_dataset(path / 'IMS_BP_israeli_10mins.nc')
+    stations = [x for x in P.data_vars]
+    T = xr.open_dataset(path / 'IMS_TD_israeli_10mins.nc')
+    T = T[stations].load()
+    RH = xr.open_dataset(path / 'IMS_RH_israeli_10mins.nc')
+    RH = RH[stations].load()
+    mr_list = []
+    for station in stations:
+        print('proccesing station {}'.format(station))
+        p = P[station]
+        t = T[station]
+        rh = RH[station]
+        new_time = dim_intersection([p, t, rh])
+        p = p.sel(time=new_time)
+        rh = rh.sel(time=new_time)
+        t = t.sel(time=new_time)
+        mr = wrap_xr_metpy_mixing_ratio(p, t, rh, verbose=True)
+        mr_list.append(mr)
+    MR = xr.merge(mr_list)
+    filename = 'IMS_MR_israeli_10mins.nc'
+    print('saving {} to {}'.format(filename, path))
+    comp = dict(zlib=True, complevel=9)  # best compression
+    encoding = {var: comp for var in MR.data_vars}
+    MR.to_netcdf(path / filename, 'w', encoding=encoding)
+    print('Done resampling!')
+    return MR
+
+
+def produce_wind_frequency_gustiness(path=ims_path,
+                                     station='TEL-AVIV-COAST',
+                                     season='DJF', plot=True):
+    import xarray as xr
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from aux_gps import keep_iqr
+    ws = xr.open_dataset(path / 'IMS_WS_israeli_10mins.nc')[station]
+    ws.load()
+    ws = ws.sel(time=ws['time.season'] == season)
+    gustiness = ws.rolling(time=5).std() / ws.rolling(time=5).mean()
+    gustiness = keep_iqr(gustiness)
+    gustiness_anoms = gustiness.groupby('time.month') - gustiness.groupby('time.month').mean('time')
+    gustiness_anoms = gustiness_anoms.reset_coords(drop=True)
+    G = gustiness_anoms.groupby('time.hour').mean('time')
+    wd = xr.open_dataset(path / 'IMS_WD_israeli_10mins.nc')[station]
+    wd.load()
+    wd.name = 'WD'
+    wd = wd.sel(time=wd['time.season'] == season)
+    all_Q = wd.groupby('time.hour').count()
+    Q1 = wd.where((wd >= 0) & (wd < 90)).dropna('time')
+    Q2 = wd.where((wd >= 90) & (wd < 180)).dropna('time')
+    Q3 = wd.where((wd >= 180.1) & (wd < 270)).dropna('time')
+    Q4 = wd.where((wd >= 270) & (wd < 360)).dropna('time')
+    Q = xr.concat([Q1, Q2, Q3, Q4], 'Q')
+    Q['Q'] = [x + 1 for x in range(4)]
+    Q_freq = 100.0 * (Q.groupby('time.hour').count() / all_Q)
+    if plot:
+        fig, ax = plt.subplots(figsize=(16, 8))
+        for q in Q_freq['Q']:
+            Q_freq.sel(Q=q).plot(ax=ax)
+        ax.set_title(
+            'Relative wind direction frequency in {} IMS station in {} season'.format(
+                station, season))
+        ax.set_ylabel('Relative frequency [%]')
+        ax.set_xlabel('Time of day [UTC]')
+        ax.set_xticks(np.arange(0, 24, step=1))
+        ax.legend([r'0$\degree$-90$\degree$', r'90$\degree$-180$\degree$',
+                   r'180$\degree$-270$\degree$', r'270$\degree$-360$\degree$'], loc='upper left')
+        ax.grid()
+        ax2 = ax.twinx()
+        G.plot.line(ax=ax2, color='k', marker='o')
+        ax2.axhline(0, color='k', linestyle='--')
+        ax2.legend(['{} Gustiness anomalies'.format(station)], loc='upper right')
+        ax2.set_ylabel('Gustiness anomalies')
+    return
+
+
+def produce_gustiness(path=ims_path,
+                      station='TEL-AVIV-COAST',
+                      season='DJF', pw_station='tela', temp=False,
+                      plot=True):
+    import xarray as xr
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from aux_gps import keep_iqr
+    from aux_gps import groupby_date_xr
+    from matplotlib.ticker import FixedLocator
+
+    def align_yaxis(ax1, v1, ax2, v2):
+        """adjust ax2 ylimit so that v2 in ax2 is aligned to v1 in ax1"""
+        _, y1 = ax1.transData.transform((0, v1))
+        _, y2 = ax2.transData.transform((0, v2))
+        adjust_yaxis(ax2,(y1-y2)/2,v2)
+        adjust_yaxis(ax1,(y2-y1)/2,v1)
+    
+    def adjust_yaxis(ax,ydif,v):
+        """shift axis ax by ydiff, maintaining point v at the same location"""
+        inv = ax.transData.inverted()
+        _, dy = inv.transform((0, 0)) - inv.transform((0, ydif))
+        miny, maxy = ax.get_ylim()
+        miny, maxy = miny - v, maxy - v
+        if -miny>maxy or (-miny==maxy and dy > 0):
+            nminy = miny
+            nmaxy = miny*(maxy+dy)/(miny+dy)
+        else:
+            nmaxy = maxy
+            nminy = maxy*(miny+dy)/(maxy+dy)
+        ax.set_ylim(nminy+v, nmaxy+v)
+
+    def make_patch_spines_invisible(ax):
+        ax.set_frame_on(True)
+        ax.patch.set_visible(False)
+        for sp in ax.spines.values():
+            sp.set_visible(False)
+
+    g = xr.open_dataset(path / 'IMS_G_israeli_10mins.nc')[station]
+    g.load()
+    g = g.sel(time=g['time.season'] == season)
+    date = groupby_date_xr(g)
+    # g_anoms = g.groupby('time.month') - g.groupby('time.month').mean('time')
+    g_anoms = g.groupby(date) - g.groupby(date).mean('time')
+    g_anoms = g_anoms.reset_coords(drop=True)
+    G = g_anoms.groupby('time.hour').mean('time')
+    if plot:
+        fig, ax = plt.subplots(figsize=(16, 8))
+        G.plot(ax=ax, color='b', marker='o')
+        ax.set_title(
+            'Gustiness {} IMS station in {} season'.format(
+                station, season))
+        ax.axhline(0, color='b', linestyle='--')
+        ax.set_ylabel('Gustiness anomalies [dimensionless]', color='b')
+        ax.set_xlabel('Time of day [UTC]')
+        ax.set_xticks(np.arange(0, 24, step=1))
+        ax.yaxis.label.set_color('b')
+        ax.tick_params(axis='y', colors='b')
+        ax.grid()
+        if pw_station is not None:
+            pw = xr.open_dataset(
+                work_yuval /
+                'GNSS_PW_thresh_50_homogenized.nc')[pw_station]
+            pw.load().dropna('time')
+            pw = pw.sel(time=pw['time.season'] == season)
+            date = groupby_date_xr(pw)
+            pw = pw.groupby(date) - pw.groupby(date).mean('time')
+            pw = pw.reset_coords(drop=True)
+            pw = pw.groupby('time.hour').mean()
+            axpw = ax.twinx()
+            pw.plot.line(ax=axpw, color='k', marker='o')
+            axpw.axhline(0, color='k', linestyle='--')
+            axpw.legend(['{} PW anomalies'.format(pw_station.upper())], loc='upper right')
+            axpw.set_ylabel('PW anomalies [mm]')
+            align_yaxis(ax, 0, axpw, 0)
+            if temp:
+                axt = ax.twinx()
+                axt.spines["right"].set_position(("axes", 1.05))
+                # Having been created by twinx, par2 has its frame off, so the line of its
+                # detached spine is invisible.  First, activate the frame but make the patch
+                # and spines invisible.
+                make_patch_spines_invisible(axt)
+                # Second, show the right spine.
+                axt.spines["right"].set_visible(True)
+                p3, = T.plot.line(ax=axt, marker='s',color='m', label="Temperature")
+                axt.yaxis.label.set_color(p3.get_color())
+                axt.tick_params(axis='y', colors=p3.get_color())
+                axt.set_ylabel('Temperature anomalies [$C\degree$]')
+    return G
 
 
 def produce_relative_frequency_wind_direction(path=ims_path,
                                               station='TEL-AVIV-COAST',
                                               season='DJF', with_weights=False,
-                                              pw_station='tela',
+                                              pw_station='tela', temp=False,
                                               plot=True):
     import xarray as xr
     import matplotlib.pyplot as plt
@@ -108,18 +333,19 @@ def produce_relative_frequency_wind_direction(path=ims_path,
             axpw.axhline(0, color='k', linestyle='--')
             axpw.legend(['{} PW anomalies'.format(pw_station.upper())], loc='upper right')
             axpw.set_ylabel('PW anomalies [mm]')
-            axt = ax.twinx()
-            axt.spines["right"].set_position(("axes", 1.05))
-            # Having been created by twinx, par2 has its frame off, so the line of its
-            # detached spine is invisible.  First, activate the frame but make the patch
-            # and spines invisible.
-            make_patch_spines_invisible(axt)
-            # Second, show the right spine.
-            axt.spines["right"].set_visible(True)
-            p3, = T.plot.line(ax=axt, marker='s',color='m', label="Temperature")
-            axt.yaxis.label.set_color(p3.get_color())
-            axt.tick_params(axis='y', colors=p3.get_color())
-            axt.set_ylabel('Temperature anomalies [$C\degree$]')
+            if temp:
+                axt = ax.twinx()
+                axt.spines["right"].set_position(("axes", 1.05))
+                # Having been created by twinx, par2 has its frame off, so the line of its
+                # detached spine is invisible.  First, activate the frame but make the patch
+                # and spines invisible.
+                make_patch_spines_invisible(axt)
+                # Second, show the right spine.
+                axt.spines["right"].set_visible(True)
+                p3, = T.plot.line(ax=axt, marker='s',color='m', label="Temperature")
+                axt.yaxis.label.set_color(p3.get_color())
+                axt.tick_params(axis='y', colors=p3.get_color())
+                axt.set_ylabel('Temperature anomalies [$C\degree$]')
     return Q_freq
 
 
