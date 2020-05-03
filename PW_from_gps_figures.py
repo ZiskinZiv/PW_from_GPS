@@ -50,6 +50,29 @@ def lat_formatter(x, pos):
         return r'0$\degree$'
 
 
+def align_yaxis(ax1, v1, ax2, v2):
+    """adjust ax2 ylimit so that v2 in ax2 is aligned to v1 in ax1"""
+    _, y1 = ax1.transData.transform((0, v1))
+    _, y2 = ax2.transData.transform((0, v2))
+    adjust_yaxis(ax2, (y1 - y2) / 2, v2)
+    adjust_yaxis(ax1, (y2 - y1) / 2, v1)
+
+
+def adjust_yaxis(ax, ydif, v):
+    """shift axis ax by ydiff, maintaining point v at the same location"""
+    inv = ax.transData.inverted()
+    _, dy = inv.transform((0, 0)) - inv.transform((0, ydif))
+    miny, maxy = ax.get_ylim()
+    miny, maxy = miny - v, maxy - v
+    if -miny > maxy or (-miny == maxy and dy > 0):
+        nminy = miny
+        nmaxy = miny * (maxy + dy) / (miny + dy)
+    else:
+        nmaxy = maxy
+        nminy = maxy * (miny + dy) / (maxy + dy)
+    ax.set_ylim(nminy + v, nmaxy + v)
+
+
 def qualitative_cmap(n=2):
     import matplotlib.colors as mcolors
     if n == 2:
@@ -199,7 +222,8 @@ def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
 
 
 def plot_means_box_plots(path=work_yuval, thresh=50, kind='box',
-                         x='month', col_wrap=5, ylimits=None,
+                         x='month', col_wrap=5, ylimits=None, twin=None,
+                         twin_attrs=None,
                          xlimits=None, anoms=True, bins=None,
                          season=None, attrs_plot=True, save=True, ds_input=None):
     import xarray as xr
@@ -221,6 +245,9 @@ def plot_means_box_plots(path=work_yuval, thresh=50, kind='box',
         # first remove long term monthly means:
         if anoms:
             pw = xr.load_dataset(work_yuval / 'GNSS_PW_hourly_anoms_thresh_{:.0f}_homogenized.nc'.format(thresh))
+            if twin is not None:
+                twin = twin.groupby('time.month') - twin.groupby('time.month').mean('time')
+                twin = twin.reset_coords(drop=True)
             # pw = pw.groupby('time.month') - pw.groupby('time.month').mean('time')
     elif x == 'day':
         # pw = pw.resample(time='1H').mean('time')
@@ -236,6 +263,8 @@ def plot_means_box_plots(path=work_yuval, thresh=50, kind='box',
             print('{} season is selected'.format(season))
             pw = pw.sel(time=pw['time.season'] == season)
             all_seas = False
+            if twin is not None:
+                twin = twin.sel(time=twin['time.season'] == season)
         else:
             print('all seasons selected')
             all_seas = True
@@ -250,7 +279,8 @@ def plot_means_box_plots(path=work_yuval, thresh=50, kind='box',
         pw = ds_input
     fg = plot_multi_box_xr(pw, kind=kind, x=x, col_wrap=col_wrap,
                            ylimits=ylimits, xlimits=xlimits, attrs=attrs,
-                           bins=bins, all_seasons=all_seas)
+                           bins=bins, all_seasons=all_seas, twin=twin,
+                           twin_attrs=twin_attrs)
     attrs = [x.attrs for x in pw.data_vars.values()]
     for i, ax in enumerate(fg.axes.flatten()):
         try:
@@ -280,9 +310,11 @@ def plot_means_box_plots(path=work_yuval, thresh=50, kind='box',
 
 def plot_multi_box_xr(pw, kind='violin', x='month', sharex=False, sharey=False,
                       col_wrap=5, ylimits=None, xlimits=None, attrs=None,
-                      bins=None, all_seasons=False):
+                      bins=None, all_seasons=False, twin=None, twin_attrs=None):
     import xarray as xr
     pw = pw.to_array('station')
+    if twin is not None:
+        twin = twin.to_array('station')
     fg = xr.plot.FacetGrid(pw, col='station', col_wrap=col_wrap, sharex=sharex,
                            sharey=sharey)
     for i, (sta, ax) in enumerate(zip(pw['station'].values, fg.axes.flatten())):
@@ -291,24 +323,35 @@ def plot_multi_box_xr(pw, kind='violin', x='month', sharex=False, sharey=False,
             pw_seas = pw_sta.sel(time=pw_sta['time.season']=='DJF')
             df = pw_seas.to_dataframe(sta)
             plot_box_df(df, ax=ax, x=x, title=sta, ylabel='', kind=kind,
-                        ylimits=ylimits, xlimits=xlimits, attrs=None, bins=bins)
+                        ylimits=ylimits, xlimits=xlimits, attrs=None, bins=bins,
+                        marker='o')
             pw_seas = pw_sta.sel(time=pw_sta['time.season']=='MAM')
             df = pw_seas.to_dataframe(sta)
             plot_box_df(df, ax=ax, x=x, title=sta, ylabel='', kind=kind,
-                        ylimits=ylimits, xlimits=xlimits, attrs=None, bins=bins)
+                        ylimits=ylimits, xlimits=xlimits, attrs=None, bins=bins,
+                        marker='^')
             pw_seas = pw_sta.sel(time=pw_sta['time.season']=='JJA')
             df = pw_seas.to_dataframe(sta)
             plot_box_df(df, ax=ax, x=x, title=sta, ylabel='', kind=kind,
-                        ylimits=ylimits, xlimits=xlimits, attrs=None, bins=bins)
+                        ylimits=ylimits, xlimits=xlimits, attrs=None, bins=bins,
+                        marker='s')
             pw_seas = pw_sta.sel(time=pw_sta['time.season']=='SON')
             df = pw_seas.to_dataframe(sta)
             plot_box_df(df, ax=ax, x=x, title=sta, ylabel='', kind=kind,
-                        ylimits=ylimits, xlimits=xlimits, attrs=attrs[i], bins=bins)
+                        ylimits=ylimits, xlimits=xlimits, attrs=attrs[i], bins=bins,
+                        marker='x')
+            df = pw_sta.to_dataframe(sta)
+            plot_box_df(df, ax=ax, x=x, title=sta, ylabel='', kind=kind,
+                        ylimits=ylimits, xlimits=xlimits, attrs=attrs[i], bins=bins,
+                        marker='d')
             if sta == 'nrif' or sta == 'elat':
-                ax.legend(['DJF', 'MAM', 'JJA', 'SON'],
+                ax.legend(['DJF', 'MAM', 'JJA', 'SON', 'Annual'],
                           prop={'size':8}, loc='upper center', framealpha=0.5, fancybox=True)
+            elif sta == 'yrcm' or sta == 'ramo':
+                ax.legend(['DJF', 'MAM', 'JJA', 'SON', 'Annual'],
+                          prop={'size':8}, loc='upper right', framealpha=0.5, fancybox=True)
             else:
-                ax.legend(['DJF', 'MAM', 'JJA', 'SON'],
+                ax.legend(['DJF', 'MAM', 'JJA', 'SON', 'Annual'],
                           prop={'size':8}, loc='best', framealpha=0.5, fancybox=True)
         else:
         # if x == 'hour':
@@ -318,18 +361,26 @@ def plot_multi_box_xr(pw, kind='violin', x='month', sharex=False, sharey=False,
         #     # remove daily signal:
         #     pw_sta = pw_sta.groupby('time.hour') - pw_sta.groupby('time.hour').mean('time')            
             df = pw_sta.to_dataframe(sta)
+            if twin is not None:
+                twin_sta = twin.sel(station=sta).reset_coords(drop=True)
+                twin_df = twin_sta.to_dataframe(sta)
+            else:
+                twin_df = None
             if attrs is not None:
                 plot_box_df(df, ax=ax, x=x, title=sta, ylabel='', kind=kind,
-                            ylimits=ylimits, xlimits=xlimits, attrs=attrs[i], bins=bins)
+                            ylimits=ylimits, xlimits=xlimits, attrs=attrs[i],
+                            bins=bins, twin_df=twin_df, twin_attrs=twin_attrs)
             else:
                 plot_box_df(df, ax=ax, x=x, title=sta, ylabel='', kind=kind,
-                            ylimits=ylimits, xlimits=xlimits, attrs=None, bins=bins)
+                            ylimits=ylimits, xlimits=xlimits, attrs=None,
+                            bins=bins, twin_df=twin_df, twin_attrs=twin_attrs)
     return fg
 
 
-def plot_box_df(df, x='month', title='TELA',
+def plot_box_df(df, x='month', title='TELA', marker='o',
                 ylabel=r'IWV [kg$\cdot$m$^{-2}$]', ax=None, kind='violin',
-                ylimits=(5, 40), xlimits=None, attrs=None, bins=None):
+                ylimits=(5, 40), xlimits=None, attrs=None, bins=None, twin_df=None,
+                twin_attrs=None):
     # x=hour is experimental
     import seaborn as sns
     from matplotlib.ticker import MultipleLocator
@@ -343,6 +394,8 @@ def plot_box_df(df, x='month', title='TELA',
         pal = sns.color_palette("Paired", 12)
     elif x == 'hour':
         df[x] = df.index.hour
+        if twin_df is not None:
+            twin_df[x] = twin_df.index.hour
         # df[x] = df.index
         pal = sns.color_palette("Paired", 12)
     y = df.columns[0]
@@ -350,7 +403,15 @@ def plot_box_df(df, x='month', title='TELA',
         fig, ax = plt.subplots()
     if kind is None:
         df = df.groupby(x).mean()
-        df.plot(ax=ax, legend=False, marker='o')
+        df.plot(ax=ax, legend=False, marker=marker)
+        if twin_df is not None:
+            twin_df = twin_df.groupby(x).mean()
+            twinx = ax.twinx()
+            twin_df.plot.line(ax=twinx, color='r', marker='s')
+            ax.axhline(0, color='k', linestyle='--')
+            if twin_attrs is not None:
+                twinx.set_ylabel(twin_attrs['ylabel'])
+            align_yaxis(ax, 0, twinx, 0)
         ax.set_xlabel('Time of day [UTC]')
     elif kind == 'violin':
         sns.violinplot(ax=ax, data=df, x=x, y=y, palette=pal, fliersize=4,
@@ -407,6 +468,9 @@ def plot_box_df(df, x='month', title='TELA',
     ax.spines["bottom"].set_visible(False)
     if ylimits is not None:
         ax.set_ylim(*ylimits)
+        if twin_attrs is not None:
+            twinx.set_ylim(*twin_attrs['ylimits'])
+            align_yaxis(ax, 0, twinx, 0)
     if xlimits is not None:
         ax.set_xlim(*xlimits)
     return ax
@@ -922,7 +986,8 @@ def plot_israel_map(gis_path=gis_path, rc=rc, ax=None):
 
 
 def plot_israel_with_stations(gis_path=gis_path, dem_path=dem_path, ims=True,
-                              gps=True, radio=True, terrain=True, save=True):
+                              gps=True, radio=True, terrain=True,
+                              ims_names=False, save=True):
     from PW_stations import produce_geo_gnss_solved_stations
     from aux_gps import geo_annotate
     from ims_procedures import produce_geo_ims
@@ -939,6 +1004,10 @@ def plot_israel_with_stations(gis_path=gis_path, dem_path=dem_path, ims=True,
         ims_t.plot(ax=ax, color='red', edgecolor='black', alpha=0.5)
         station_names.append('ims')
         legend.append('IMS stations')
+        if ims_names:
+            geo_annotate(ax, ims_t.lon, ims_t.lat,
+                         ims_t['name_english'], xytext=(3, 3), fmt=None,
+                         c='k', fw='normal', fs=7, colorupdown=False)
     # ims, gps = produce_geo_df(gis_path=gis_path, plot=False)
     if gps:
         print('getting solved GNSS israeli stations metadata...')
