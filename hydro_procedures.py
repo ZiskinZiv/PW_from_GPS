@@ -12,50 +12,248 @@ gis_path = work_yuval / 'gis'
 
 # TODO: scan for seasons in the tide events and remove summer
 # TODO: prepare pw_hourly_50 so no homogenized data will enter
+def plot_all_decompositions(X, y, n=2):
+    import xarray as xr
+    models = [
+        'PCA',
+        'LDA',
+        'ISO_MAP',
+        'LLE',
+        'LLE-modified',
+        'LLE-hessian',
+        'LLE-ltsa',
+        'MDA',
+        'RTE',
+        'SE',
+        'TSNE',
+        'NCA']
+    names = [
+        'Principal Components',
+        'Linear Discriminant',
+        'Isomap',
+        'Locally Linear Embedding',
+        'Modified LLE',
+        'Hessian LLE',
+        'Local Tangent Space Alignment',
+        'MDS embedding',
+        'Random forest',
+        'Spectral embedding',
+        't-SNE',
+        'NCA embedding']
+    name_dict = dict(zip(models, names))
+    da = xr.DataArray(models, dims=['model'])
+    da['model'] = models
+    fg = xr.plot.FacetGrid(da, col='model', col_wrap=4, sharex=False, sharey=False)
+    for model_str, ax in zip(da['model'].values, fg.axes.flatten()):
+        model = model_str.split('-')[0]
+        method = model_str.split('-')[-1]
+        if model == method:
+            method = None
+        ax = scikit_decompose(X, y, model=model, n=n, method=method, ax=ax)
+        ax.set_title(name_dict[model_str])
+        ax.set_xlabel('')
+        ax.set_ylabel('')
+    fg.fig.suptitle('various decomposition projections (n={})'.format(n))
+    return
 
 
-def permutation_scikit(X, y, plot=True):
+def scikit_decompose(X, y, model='PCA', n=2, method=None, ax=None):
+    from sklearn import (manifold, datasets, decomposition, ensemble,
+                         discriminant_analysis, random_projection, neighbors)
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    import pandas as pd
+    from mpl_toolkits.mplot3d import Axes3D
+    n_neighbors = 30
+    if model == 'PCA':
+        X_decomp = decomposition.TruncatedSVD(n_components=n).fit_transform(X)
+        # df.plot.scatter(x='{}_1'.format(model), y='{}_2'.format(model), c='flood', s=50,cmap='Paired')
+        # ax = sns.catplot(data=df, x='{}_1'.format(model), y='{}_2'.format(model), hue='flood')
+        # ax.set_xlabel = '{}_1'.format(model)
+        # ax.set_ylabel = '{}_2'.format(model)
+    elif model == 'LDA':
+        X2 = X.copy()
+        X2.flat[::X.shape[1] + 1] += 0.01
+        X_decomp = discriminant_analysis.LinearDiscriminantAnalysis(n_components=n
+                                                                    ).fit_transform(X2, y)
+    elif model == 'ISO_MAP':
+        X_decomp = manifold.Isomap(
+            n_neighbors, n_components=n).fit_transform(X)
+    elif model == 'LLE':
+        # method = 'standard', 'modified', 'hessian' 'ltsa'
+        if method is None:
+            method = 'standard'
+        clf = manifold.LocallyLinearEmbedding(n_neighbors, n_components=2,
+                                              method=method)
+        X_decomp = clf.fit_transform(X)
+    elif model == 'MDA':
+        clf = manifold.MDS(n_components=n, n_init=1, max_iter=100)
+        X_decomp = clf.fit_transform(X)
+    elif model == 'RTE':
+        hasher = ensemble.RandomTreesEmbedding(n_estimators=200, random_state=0,
+                                               max_depth=5)
+        X_transformed = hasher.fit_transform(X)
+        pca = decomposition.TruncatedSVD(n_components=n)
+        X_decomp = pca.fit_transform(X_transformed)
+    elif model == 'SE':
+        embedder = manifold.SpectralEmbedding(n_components=n, random_state=0,
+                                              eigen_solver="arpack")
+        X_decomp = embedder.fit_transform(X)
+    elif model == 'TSNE':
+        tsne = manifold.TSNE(n_components=n, init='pca', random_state=0)
+        X_decomp = tsne.fit_transform(X)
+    elif model == 'NCA':
+        nca = neighbors.NeighborhoodComponentsAnalysis(init='random',
+                                                       n_components=n, random_state=0)
+        X_decomp = nca.fit_transform(X, y)
+
+    df = pd.DataFrame(X_decomp)
+    df.columns = [
+        '{}_{}'.format(
+            model,
+            x +
+            1) for x in range(
+            X_decomp.shape[1])]
+    df['flood'] = y
+    df['flood'] = df['flood'].astype(int)
+    df_1 = df[df['flood'] == 1]
+    df_0 = df[df['flood'] == 0]
+    if X_decomp.shape[1] == 1:
+        if ax is not None:
+            df_1.plot.scatter(ax=ax,
+                x='{}_1'.format(model),
+                y='{}_1'.format(model),
+                color='b',
+                label='1',
+                s=50)
+        else:
+            ax = df_1.plot.scatter(
+                              x='{}_1'.format(model),
+                              y='{}_1'.format(model),
+                              color='b',
+                              label='1',
+                              s=50)
+        df_0.plot.scatter(
+            ax=ax,
+            x='{}_1'.format(model),
+            y='{}_1'.format(model),
+            color='r',
+            label='0',
+            s=50)
+    elif X_decomp.shape[1] == 2:
+        if ax is not None:
+            df_1.plot.scatter(ax=ax,
+                              x='{}_1'.format(model),
+                              y='{}_2'.format(model),
+                              color='b',
+                              label='1',
+                              s=50)
+        else:
+            ax = df_1.plot.scatter(
+                x='{}_1'.format(model),
+                y='{}_2'.format(model),
+                color='b',
+                label='1',
+                s=50)
+        df_0.plot.scatter(
+            ax=ax,
+            x='{}_1'.format(model),
+            y='{}_2'.format(model),
+            color='r',
+            label='0',
+            s=50)
+    elif X_decomp.shape[1] == 3:
+        ax = plt.figure().gca(projection='3d')
+        # df_1.plot.scatter(x='{}_1'.format(model), y='{}_2'.format(model), z='{}_3'.format(model), color='b', label='1', s=50, ax=threedee)
+        ax.scatter(df_1['{}_1'.format(model)],
+                   df_1['{}_2'.format(model)],
+                   df_1['{}_3'.format(model)],
+                   color='b',
+                   label='1',
+                   s=50)
+        ax.scatter(df_0['{}_1'.format(model)],
+                   df_0['{}_2'.format(model)],
+                   df_0['{}_3'.format(model)],
+                   color='r',
+                   label='0',
+                   s=50)
+        ax.set_xlabel('{}_1'.format(model))
+        ax.set_ylabel('{}_2'.format(model))
+        ax.set_zlabel('{}_3'.format(model))
+    return ax
+
+
+def permutation_scikit(X, y, cv=False, plot=True):
     import matplotlib.pyplot as plt
     from sklearn.svm import SVC
+    from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
     from sklearn.model_selection import KFold
+    from sklearn.model_selection import StratifiedKFold
+    from sklearn.model_selection import GridSearchCV
     from sklearn.model_selection import permutation_test_score
-    svm = SVC(kernel='rbf')
-    cv = KFold(2, shuffle=True)
-    n_classes = 2
-    score, permutation_scores, pvalue = permutation_test_score(
-            svm, X, y, scoring="accuracy", cv=cv, n_permutations=1000, n_jobs=1)
+    from sklearn.model_selection import train_test_split
+    from sklearn.metrics import classification_report, confusion_matrix
+    if not cv:
+        clf = SVC(kernel='rbf')
+        # clf = LinearDiscriminantAnalysis()
+        # cv = StratifiedKFold(2, shuffle=True)
+        cv = KFold(2, shuffle=True)
+        n_classes = 2
+        score, permutation_scores, pvalue = permutation_test_score(
+            clf, X, y, scoring="accuracy", cv=cv, n_permutations=1000, n_jobs=1)
 
-    print("Classification score %s (pvalue : %s)" % (score, pvalue))
-    plt.hist(permutation_scores, 20, label='Permutation scores',
-             edgecolor='black')
-    ylim = plt.ylim()
-    plt.plot(2 * [score], ylim, '--g', linewidth=3,
-         label='Classification Score'
-         ' (pvalue %s)' % pvalue)
-    plt.plot(2 * [1. / n_classes], ylim, '--k', linewidth=3, label='Luck')
-    
-    plt.ylim(ylim)
-    plt.legend()
-    plt.xlabel('Score')
-    plt.show()
+        print("Classification score %s (pvalue : %s)" % (score, pvalue))
+        plt.hist(permutation_scores, 20, label='Permutation scores',
+                 edgecolor='black')
+        ylim = plt.ylim()
+        plt.plot(2 * [score], ylim, '--g', linewidth=3,
+                 label='Classification Score'
+                 ' (pvalue %s)' % pvalue)
+        plt.plot(2 * [1. / n_classes], ylim, '--k', linewidth=3, label='Luck')
+
+        plt.ylim(ylim)
+        plt.legend()
+        plt.xlabel('Score')
+        plt.show()
+    else:
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.3, shuffle=True, random_state=42)
+        param_grid = {
+            'C': [
+                0.1, 1, 10, 100], 'gamma': [
+                1, 0.1, 0.01, 0.001], 'kernel': [
+                'rbf', 'poly', 'sigmoid']}
+        grid = GridSearchCV(SVC(), param_grid, refit=True, verbose=2)
+        grid.fit(X_train, y_train)
+        print(grid.best_estimator_)
+        grid_predictions = grid.predict(X_test)
+        print(confusion_matrix(y_test, grid_predictions))
+        print(classification_report(y_test, grid_predictions))
     return
 
 
 def scikit_fit_predict(X, y, seed=42, plot=True):
     # check permutations with scikit learn
     from sklearn.model_selection import train_test_split
+    from sklearn.discriminant_analysis import LinearDiscriminantAnalysis, QuadraticDiscriminantAnalysis
+    from sklearn.metrics import f1_score
     from sklearn.svm import SVC
     import numpy as np
     import matplotlib.pyplot as plt
     X_tt, X_test, y_tt, y_test = train_test_split(
         X, y, test_size=0.3, shuffle=True, random_state=seed)
     clf = SVC(gamma='auto')
+    # clf = LinearDiscriminantAnalysis()
+    # clf = QuadraticDiscriminantAnalysis()
     scores = []
     for i in range(1000):
         X_train, X_val, y_train, y_val = train_test_split(
             X_tt, y_tt, shuffle=True, test_size=0.5, random_state=i)
         clf.fit(X_train, y_train)
-        scores.append(clf.score(X_val, y_val))
+        y_pred = clf.predict(X_val)
+        # scores.append(clf.score(X_val, y_val))
+        scores.append(f1_score(y_val, y_pred))
     scores = np.array(scores)
     if plot:
         plt.hist(scores, bins=15)
@@ -63,9 +261,10 @@ def scikit_fit_predict(X, y, seed=42, plot=True):
     # clf.fit(X,y)
 
 
-def produce_X_y(station='drag', hs_id=48125, lag=25, path=work_yuval,
-                        hydro_path=hydro_path, with_ends=False, seed=42,
-                        verbose=True):
+def produce_X_y(station='drag', hs_id=48125, lag=25, anoms=True,
+                neg_pos_ratio=2,
+                path=work_yuval, hydro_path=hydro_path, with_ends=False, seed=42,
+                verbose=True):
     import pandas as pd
     import numpy as np
     df = preprocess_hydro_pw(
@@ -73,7 +272,7 @@ def produce_X_y(station='drag', hs_id=48125, lag=25, path=work_yuval,
         hs_id=hs_id,
         path=path,
         hydro_path=hydro_path,
-        with_ends=with_ends)
+        with_ends=with_ends, anoms=anoms)
     # first produce all the positives:
     # get the tides datetimes:
     y_pos = df[df['tides'] == 1]['tides']
@@ -99,8 +298,8 @@ def produce_X_y(station='drag', hs_id=48125, lag=25, path=work_yuval,
                 ','.join([x for x in df.iloc[bad_ind].index.strftime('%Y-%m-%d:%H:00:00')])))
     # drop the events in y so len(y) == in each x from tides_list:
     y_pos_arr = y_pos.iloc[ind].values
-    # now get the negative y's:
-    y_neg_arr = np.zeros(y_pos_arr.shape)
+    # now get the negative y's with neg_pos_ratio (set to 1 if the same pos=neg):
+    y_neg_arr = np.zeros(y_pos_arr.shape[0] * neg_pos_ratio)
     cnt = 0
     pw_neg_list = []
     np.random.seed(seed)
@@ -132,7 +331,7 @@ def produce_X_y(station='drag', hs_id=48125, lag=25, path=work_yuval,
 
 
 def preprocess_hydro_pw(pw_station='drag', hs_id=48125, path=work_yuval,
-                        hydro_path=hydro_path, with_ends=False):
+                        anoms=True, hydro_path=hydro_path, with_ends=False):
     import xarray as xr
     import pandas as pd
     import numpy as np
@@ -160,7 +359,10 @@ def preprocess_hydro_pw(pw_station='drag', hs_id=48125, path=work_yuval,
         df.loc[ts_end.values, :] = 2
     df.columns = ['tides']
     # now load pw:
-    pw = xr.load_dataset(path / 'GNSS_PW_hourly_thresh_50_homogenized.nc')[pw_station]
+    if anoms:
+        pw = xr.load_dataset(path / 'GNSS_PW_anom_hourly_50_hour_dayofyear.nc')[pw_station]
+    else:
+        pw = xr.load_dataset(path / 'GNSS_PW_hourly_thresh_50.nc')[pw_station]
     pw_df = pw.dropna('time').to_dataframe()
     # now align the both dataframes:
     pw_df['tides'] = df['tides']
