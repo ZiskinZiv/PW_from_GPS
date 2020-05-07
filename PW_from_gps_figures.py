@@ -103,6 +103,137 @@ def caption(text, color='blue', **kwargs):
     return
 
 
+def plot_gustiness(path=work_yuval, site='tela', season='JJA', ax=None):
+    import xarray as xr
+    from aux_gps import groupby_date_xr
+    g = xr.open_dataset(path / 'GNSS_IMS_G_israeli_10mins_anoms.nc')[site]
+    g.load()
+    g = g.sel(time=g['time.season'] == season)
+#    date = groupby_date_xr(g)
+#    # g_anoms = g.groupby('time.month') - g.groupby('time.month').mean('time')
+#    g_anoms = g.groupby(date) - g.groupby(date).mean('time')
+#    g_anoms = g_anoms.reset_coords(drop=True)
+    G = g.groupby('time.hour').mean('time') * 100.0
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(16, 8))
+    Gline = G.plot(ax=ax, color='b', marker='o', label='Gustiness')
+    ax.set_title(
+        'Gustiness {} IMS station in {} season'.format(
+            site, season))
+    ax.axhline(0, color='b', linestyle='--')
+    ax.set_ylabel('Gustiness anomalies [dimensionless]', color='b')
+    ax.set_xlabel('Time of day [UTC]')
+    # ax.set_xticks(np.arange(0, 24, step=1))
+    ax.yaxis.label.set_color('b')
+    ax.tick_params(axis='y', colors='b')
+    ax.grid()
+    pw = xr.open_dataset(
+        work_yuval /
+        'GNSS_PW_hourly_anoms_thresh_50_homogenized.nc')[site]
+    pw.load().dropna('time')
+    pw = pw.sel(time=pw['time.season'] == season)
+#    date = groupby_date_xr(pw)
+#    pw = pw.groupby(date) - pw.groupby(date).mean('time')
+#    pw = pw.reset_coords(drop=True)
+    pw = pw.groupby('time.hour').mean()
+    axpw = ax.twinx()
+    PWline = pw.plot.line(ax=axpw, color='k', marker='s', label='PW')
+    axpw.axhline(0, color='k', linestyle='--')
+    lns = Gline + PWline
+    axpw.set_ylabel('PW anomalies [mm]')
+    align_yaxis(ax, 0, axpw, 0)
+    return lns
+
+
+def plot_gustiness_facetgrid(path=work_yuval, season='JJA', save=True):
+    import xarray as xr
+    gnss_ims_dict = {
+        'alon': 'ASHQELON-PORT', 'bshm': 'HAIFA-TECHNION', 'csar': 'HADERA-PORT',
+        'tela': 'TEL-AVIV-COAST', 'slom': 'BESOR-FARM', 'kabr': 'SHAVE-ZIYYON',
+        'nzrt': 'DEIR-HANNA', 'katz': 'GAMLA', 'elro': 'MEROM-GOLAN-PICMAN',
+        'mrav': 'MAALE-GILBOA', 'yosh': 'ARIEL', 'jslm': 'JERUSALEM-GIVAT-RAM',
+        'drag': 'METZOKE-DRAGOT', 'dsea': 'SEDOM', 'ramo': 'MIZPE-RAMON-20120927',
+        'nrif': 'NEOT-SMADAR', 'elat': 'ELAT', 'klhv': 'SHANI',
+        'yrcm': 'ZOMET-HANEGEV'}
+    da = xr.DataArray([x for x in gnss_ims_dict.values()], dims=['GNSS'])
+    da['GNSS'] = [x for x in gnss_ims_dict.keys()]
+    to_remove = ['kabr', 'nzrt', 'katz', 'elro', 'klhv', 'yrcm', 'slom']
+    sites = [x for x in da['GNSS'].values if x not in to_remove]
+    da = da.sel(GNSS=sites)
+    fg = xr.plot.FacetGrid(
+        da,
+        col='GNSS',
+        col_wrap=3,
+        sharex=False,
+        sharey=False, figsize=(20, 20))
+    for i, (site, ax) in enumerate(zip(da['GNSS'].values, fg.axes.flatten())):
+        lns = plot_gustiness(path=path, site=site, season=season, ax=ax)
+        labs = [l.get_label() for l in lns]
+        if site in ['tela', 'alon', 'dsea', 'csar', 'elat', 'nrif']:
+            ax.legend(lns, labs, loc='upper center',prop={'size':8}, framealpha=0.5, fancybox=True, title=site.upper())
+        elif site in ['drag']:
+            ax.legend(lns, labs, loc='upper right',prop={'size':8}, framealpha=0.5, fancybox=True, title=site.upper())
+        else:
+            ax.legend(lns, labs, loc='best',prop={'size':8}, framealpha=0.5, fancybox=True, title=site.upper())
+        ax.set_title('')
+        ax.set_ylabel(r'G anomalies $\times$$10^{2}$')
+#        ax.text(.8, .85, site.upper(),
+#            horizontalalignment='center', fontweight='bold',
+#            transform=ax.transAxes)
+    for i, ax in enumerate(fg.axes.flatten()):
+        if i > (da.GNSS.size-1):
+            ax.set_axis_off()
+            pass
+    fg.fig.tight_layout()
+    fg.fig.subplots_adjust(top=0.974,
+                           bottom=0.053,
+                           left=0.041,
+                           right=0.955,
+                           hspace=0.15,
+                           wspace=0.3)
+    filename = 'gustiness_israeli_gnss_pw_diurnal_{}.png'.format(season)
+    if save:
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
+    return fg
+
+
+def plot_fft_diurnal(path=work_yuval, save=True):
+    import xarray as xr
+    import numpy as np
+    import matplotlib.ticker as tck
+    sns.set_style("whitegrid",
+                  {'axes.grid': True,
+                   'xtick.bottom': True,
+                   'font.family': 'serif',
+                   'ytick.left': True})
+    sns.set_context('paper')
+    power = xr.load_dataset(path / 'GNSS_PW_power_spectrum_diurnal.nc')
+    power = power.to_array('site')
+    sites = [x for x in power.site.values]
+    fg = power.plot.line(col='site', col_wrap=4, sharex=False, figsize=(20,18))
+    fg.set_xlabels('Frequency [cpd]')
+    fg.set_ylabels('PW PSD [dB]')
+    ticklabels = np.arange(0, 7)
+    for ax, site in zip(fg.axes.flatten(), sites):
+        sns.despine()
+        ax.set_title('')
+        ax.set_xticklabels(ticklabels)
+        # ax.tick_params(axis='y', which='minor')
+        ax.yaxis.set_minor_locator(tck.AutoMinorLocator())
+        ax.set_xlim(0, 6.5)
+        ax.set_ylim(70, 125)
+        ax.grid(True)
+        ax.grid(which='minor', axis='y')
+        ax.text(.8, .85, site.upper(),
+                horizontalalignment='center', fontweight='bold',
+                transform=ax.transAxes)
+    fg.fig.tight_layout()
+    filename = 'power_pw_diurnal.png'
+    if save:
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
+    return fg
+
+
 def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
                                dem_path=dem_path, save=True):
     # TODO: add box around merged stations and removed stations
