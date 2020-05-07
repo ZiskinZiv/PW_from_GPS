@@ -58,20 +58,14 @@ def plot_all_decompositions(X, y, n=2):
 
 
 def scikit_decompose(X, y, model='PCA', n=2, method=None, ax=None):
-    from sklearn import (manifold, datasets, decomposition, ensemble,
-                         discriminant_analysis, random_projection, neighbors)
-    import numpy as np
+    from sklearn import (manifold, decomposition, ensemble,
+                         discriminant_analysis, neighbors)
     import matplotlib.pyplot as plt
-    import seaborn as sns
     import pandas as pd
-    from mpl_toolkits.mplot3d import Axes3D
+    # from mpl_toolkits.mplot3d import Axes3D
     n_neighbors = 30
     if model == 'PCA':
         X_decomp = decomposition.TruncatedSVD(n_components=n).fit_transform(X)
-        # df.plot.scatter(x='{}_1'.format(model), y='{}_2'.format(model), c='flood', s=50,cmap='Paired')
-        # ax = sns.catplot(data=df, x='{}_1'.format(model), y='{}_2'.format(model), hue='flood')
-        # ax.set_xlabel = '{}_1'.format(model)
-        # ax.set_ylabel = '{}_2'.format(model)
     elif model == 'LDA':
         X2 = X.copy()
         X2.flat[::X.shape[1] + 1] += 0.01
@@ -122,23 +116,23 @@ def scikit_decompose(X, y, model='PCA', n=2, method=None, ax=None):
     if X_decomp.shape[1] == 1:
         if ax is not None:
             df_1.plot.scatter(ax=ax,
+                              x='{}_1'.format(model),
+                              y='{}_1'.format(model),
+                              color='b',marker='s', alpha=0.3,
+                              label='1',
+                              s=50)
+        else:
+            ax = df_1.plot.scatter(
                 x='{}_1'.format(model),
                 y='{}_1'.format(model),
                 color='b',
                 label='1',
                 s=50)
-        else:
-            ax = df_1.plot.scatter(
-                              x='{}_1'.format(model),
-                              y='{}_1'.format(model),
-                              color='b',
-                              label='1',
-                              s=50)
         df_0.plot.scatter(
             ax=ax,
             x='{}_1'.format(model),
             y='{}_1'.format(model),
-            color='r',
+            color='r',marker='x',
             label='0',
             s=50)
     elif X_decomp.shape[1] == 2:
@@ -146,7 +140,7 @@ def scikit_decompose(X, y, model='PCA', n=2, method=None, ax=None):
             df_1.plot.scatter(ax=ax,
                               x='{}_1'.format(model),
                               y='{}_2'.format(model),
-                              color='b',
+                              color='b',marker='s', alpha=0.3,
                               label='1',
                               s=50)
         else:
@@ -196,12 +190,12 @@ def permutation_scikit(X, y, cv=False, plot=True):
     from sklearn.metrics import classification_report, confusion_matrix
     if not cv:
         clf = SVC(kernel='rbf')
-        # clf = LinearDiscriminantAnalysis()
+        clf = LinearDiscriminantAnalysis()
         # cv = StratifiedKFold(2, shuffle=True)
         cv = KFold(2, shuffle=True)
         n_classes = 2
         score, permutation_scores, pvalue = permutation_test_score(
-            clf, X, y, scoring="accuracy", cv=cv, n_permutations=1000, n_jobs=1)
+            clf, X, y, scoring="f1", cv=cv, n_permutations=1000, n_jobs=1)
 
         print("Classification score %s (pvalue : %s)" % (score, pvalue))
         plt.hist(permutation_scores, 20, label='Permutation scores',
@@ -238,25 +232,60 @@ def scikit_fit_predict(X, y, seed=42, plot=True):
     from sklearn.model_selection import train_test_split
     from sklearn.discriminant_analysis import LinearDiscriminantAnalysis, QuadraticDiscriminantAnalysis
     from sklearn.metrics import f1_score
+    from sklearn.metrics import plot_roc_curve
     from sklearn.svm import SVC
+    from scipy import interp
+    from sklearn.metrics import auc
     import numpy as np
     import matplotlib.pyplot as plt
     X_tt, X_test, y_tt, y_test = train_test_split(
         X, y, test_size=0.3, shuffle=True, random_state=seed)
-    clf = SVC(gamma='auto')
-    # clf = LinearDiscriminantAnalysis()
+    # clf = SVC(gamma='auto')
+    clf = LinearDiscriminantAnalysis()
     # clf = QuadraticDiscriminantAnalysis()
     scores = []
-    for i in range(1000):
+    fig, ax = plt.subplots()
+    tprs = []
+    aucs = []
+    mean_fpr = np.linspace(0, 1, 100)
+    for i in range(100):
+        clf = LinearDiscriminantAnalysis()
         X_train, X_val, y_train, y_val = train_test_split(
             X_tt, y_tt, shuffle=True, test_size=0.5, random_state=i)
         clf.fit(X_train, y_train)
+        viz = plot_roc_curve(clf, X_val, y_val,
+             name='ROC run {}'.format(i),
+             alpha=0.3, lw=1, ax=ax)
+        interp_tpr = interp(mean_fpr, viz.fpr, viz.tpr)
+        interp_tpr[0] = 0.0
+        tprs.append(interp_tpr)
+        aucs.append(viz.roc_auc)
         y_pred = clf.predict(X_val)
         # scores.append(clf.score(X_val, y_val))
         scores.append(f1_score(y_val, y_pred))
     scores = np.array(scores)
+    ax.plot([0, 1], [0, 1], linestyle='--', lw=2, color='r',
+            label='Chance', alpha=.8)
+    mean_tpr = np.mean(tprs, axis=0)
+    mean_tpr[-1] = 1.0
+    mean_auc = auc(mean_fpr, mean_tpr)
+    std_auc = np.std(aucs)
+    ax.plot(mean_fpr, mean_tpr, color='b',
+            label=r'Mean ROC (AUC = %0.2f $\pm$ %0.2f)' % (mean_auc, std_auc),
+            lw=2, alpha=.8)
+    
+    std_tpr = np.std(tprs, axis=0)
+    tprs_upper = np.minimum(mean_tpr + std_tpr, 1)
+    tprs_lower = np.maximum(mean_tpr - std_tpr, 0)
+    ax.fill_between(mean_fpr, tprs_lower, tprs_upper, color='grey', alpha=.2,
+                    label=r'$\pm$ 1 std. dev.')
+    
+    ax.set(xlim=[-0.05, 1.05], ylim=[-0.05, 1.05],
+           title="Receiver operating characteristic example")
+    ax.legend(loc="lower right")
     if plot:
-        plt.hist(scores, bins=15)
+        plt.figure()
+        plt.hist(scores, bins=15, edgecolor='k')
     return scores
     # clf.fit(X,y)
 
