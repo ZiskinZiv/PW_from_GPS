@@ -2907,6 +2907,166 @@ def israeli_gnss_stations_long_term_trend_analysis(
 #    dsr.to_netcdf(path / new_filename, 'w', encoding=encoding)
 #    print('Done!')
 #    return dsr
+
+
+def run_MLR_diurnal_harmonics_GNSS(path=work_yuval, season=None, site='tela'):
+    from sklearn.linear_model import LinearRegression
+    from sklearn.metrics import explained_variance_score
+    import xarray as xr
+    harmonic = xr.load_dataset(path / 'GNSS_PW_harmonics_diurnal.nc')['{}_mean'.format(site)]
+    if season is not None:
+        harmonic = harmonic.sel(season=season)
+    else:
+        harmonic = harmonic.sel(season='ALL')
+    pw = xr.open_dataset(path / 'GNSS_PW_anom_50_removed_daily.nc')[site]
+    pw.load()
+    if season is not None:
+        pw = pw.sel(time=pw['time.season'] == season)
+    pw = pw.groupby('time.hour').mean()
+    # pre-proccess:
+    harmonic = harmonic.transpose('hour', 'cpd')
+    X = harmonic.values
+    y= pw.values.reshape(-1, 1)
+    exp_list = []
+    for cpd in harmonic['cpd'].values:
+        X = harmonic.sel(cpd=cpd).values.reshape(-1, 1)
+        lr = LinearRegression(fit_intercept=False)
+        lr.fit(X, y)
+        y_pred = lr.predict(X)
+        ex_var = explained_variance_score(y, y_pred)
+        exp_list.append(ex_var)
+    explained = np.array(exp_list) * 100.0
+    exp_dict = dict(zip([x for x in harmonic['cpd'].values], explained))
+    exp_dict['total'] = np.sum(explained)
+    exp_dict['season'] = season
+    exp_dict['site'] = site
+    return exp_dict
+
+
+def perform_harmonic_analysis_all_GNSS(path=work_yuval, n=6,
+                                       savepath=work_yuval):
+    import xarray as xr
+    pw = xr.load_dataset(path / 'GNSS_PW_anom_50_removed_daily.nc')
+    dss_list = []
+    for site in pw:
+        print('performing harmonic analysis for GNSS {} site:'.format(site))
+        dss = harmonic_analysis_GNSS(pw[site], n=n)
+        dss_list.append(dss)
+    dss_all = xr.merge(dss_list)
+    if savepath is not None:
+        filename = 'GNSS_PW_harmonics_diurnal.nc'
+        comp = dict(zlib=True, complevel=9)  # best compression
+        encoding = {var: comp for var in dss_all.data_vars}
+        dss_all.to_netcdf(savepath / filename, 'w', encoding=encoding)
+        print('Done!')
+    return dss_all
+
+
+def harmonic_analysis_GNSS(da, n=6):
+    import xarray as xr
+    from aux_gps import fit_da_to_model
+    time_dim = list(set(da.dims))[0]
+    harmonics = [x + 1 for x in range(n)]
+    seasons = ['JJA', 'SON', 'DJF', 'MAM', 'ALL']
+    print('perdorming harmonic analysis with 1 to {} cycles per day.'.format(n))
+    season_list = []
+    for season in seasons:
+        if season != 'ALL':
+            print('analysing season {}.'.format(season))
+            das = da.sel({time_dim: da['{}.season'.format(time_dim)] == season})
+        else:
+            print('analysing ALL seasons.')
+            das = da
+        params_list = []
+        di_mean_list = []
+        di_std_list = []
+        for cpd in harmonics:
+            print('fitting harmonic #{}'.format(cpd))
+            params = dict(
+                sin_freq={
+                    'value': cpd}, sin_amp={
+                    'value': 1.0}, sin_phase={
+                    'value': 0})
+            res = fit_da_to_model(
+                das,
+                modelname='sin',
+                params=params,
+                plot=False,
+                verbose=False)
+            name = da.name.split('_')[0]
+            params_da = xr.DataArray([x for x in res.attrs.values()],
+                                      dims=['params'])
+            params_da['params'] = [x for x in res.attrs.keys()]
+            params_da.name = name + '_params'
+            name = res.name.split('_')[0]
+            diurnal_mean = res.groupby('{}.hour'.format(time_dim)).mean()
+            diurnal_std = res.groupby('{}.hour'.format(time_dim)).std()
+            # diurnal_mean.attrs.update(attrs)
+            # diurnal_std.attrs.update(attrs)
+            diurnal_mean.name = name + '_mean'
+            diurnal_std.name = name + '_std'
+            params_list.append(params_da)
+            di_mean_list.append(diurnal_mean)
+            di_std_list.append(diurnal_std)
+        da_mean = xr.concat(di_mean_list, 'cpd')
+        da_std = xr.concat(di_std_list, 'cpd')
+        da_params = xr.concat(params_list, 'cpd')
+        ds = da_mean.to_dataset(name=da_mean.name)
+        ds[da_std.name] = da_std
+        ds['cpd'] = harmonics
+        ds[da_params.name] = da_params
+        season_list.append(ds)
+    dss = xr.concat(season_list, 'season')
+    dss['season'] = seasons
+    return dss
+
+
+def extract_diurnal_freq_GNSS(path=work_yuval, eps=0.001, n=6):
+    """extract the magnitude of the first n diurnal harmonics form the
+    GNSS power spectra"""
+    import xarray as xr
+
+    def extract_freq(power, eps=0.001, cen_freq=1):
+        freq_band = [cen_freq - eps, cen_freq + eps]
+        mag = power.sel(freq=slice(*freq_band)).mean('freq')
+        return mag
+
+    power = xr.load_dataset(path / 'GNSS_PW_power_spectrum_diurnal.nc')
+    diurnal_list = []
+    for station in power:
+        print('extracting {} freqs from station {}.'.format(n, station))
+        magnitudes = [extract_freq(power[station], eps=eps, cen_freq=(x+1)) for x in range(n)]
+        da = xr.DataArray(magnitudes, dims=['freq'])
+        da['freq'] = [x+1 for x in range(n)]
+        da.name = station
+        diurnal_list.append(da)
+    mag = xr.merge(diurnal_list)
+    return mag
+
+
+def produce_GNSS_fft_diurnal(path=work_yuval, savepath=work_yuval, plot=False):
+    """do FFT on the daily anomalies of the GNSS PW in order to find the
+    diurnal and sub-diurnal harmonics, and save them"""
+    from aux_gps import fft_xr
+    import xarray as xr
+    pw = xr.load_dataset(path / 'GNSS_PW_anom_50_removed_daily.nc')
+    fft_list = []
+    for station in pw:
+        da = fft_xr(pw[station], nan_fill='zero', user_freq=None, units='cpd',
+                    plot=False)
+        fft_list.append(da)
+    power = xr.merge(fft_list)
+    if plot:
+        power.to_array('station').mean('station').plot(xscale='log')
+    if savepath is not None:
+        filename = 'GNSS_PW_power_spectrum_diurnal.nc'
+        comp = dict(zlib=True, complevel=9)  # best compression
+        encoding = {var: comp for var in power.data_vars}
+        power.to_netcdf(savepath / filename, 'w', encoding=encoding)
+        print('Done!')
+    return power
+
+
 def classify_tide_events(gnss_path=work_yuval, hydro_path=hydro_path,
                          station='tela', window='1D', sample='hourly',
                          hydro_station=48130):
@@ -2971,18 +3131,29 @@ def GNSS_pw_to_X_using_window(gnss_path=work_yuval, hydro_path=hydro_path,
 
 def produce_all_GNSS_PW_anomalies(load_path=work_yuval, thresh=50,
                                   grp1='hour', grp2='dayofyear',
+                                  remove_daily_only=False,
                                   savepath=work_yuval):
     import xarray as xr
+    from aux_gps import groupby_date_xr
     GNSS_pw = xr.open_dataset(load_path / 'GNSS_PW_thresh_{:.0f}_homogenized.nc'.format(thresh))
     anom_list = []
     stations_only = [x for x in GNSS_pw.data_vars if '_error' not in x]
     for station in stations_only:
         pw = GNSS_pw[station]
-        pw_anom = produce_PW_anomalies(pw, grp1, grp2, False)
+        if remove_daily_only:
+            print('{}'.format(station))
+            date = groupby_date_xr(pw)
+            pw_anom = pw.groupby(date) - pw.groupby(date).mean('time')
+            pw_anom = pw_anom.reset_coords(drop=True)
+        else:
+            pw_anom = produce_PW_anomalies(pw, grp1, grp2, False)
         anom_list.append(pw_anom)
     GNSS_pw_anom = xr.merge(anom_list)
     if savepath is not None:
-        filename = 'GNSS_PW_anom_{:.0f}_{}_{}.nc'.format(thresh, grp1, grp2)
+        if remove_daily_only:
+            filename = 'GNSS_PW_anom_{:.0f}_removed_daily.nc'.format(thresh)
+        else:
+            filename = 'GNSS_PW_anom_{:.0f}_{}_{}.nc'.format(thresh, grp1, grp2)
         comp = dict(zlib=True, complevel=9)  # best compression
         encoding = {var: comp for var in GNSS_pw_anom.data_vars}
         GNSS_pw_anom.to_netcdf(savepath / filename, 'w', encoding=encoding)
