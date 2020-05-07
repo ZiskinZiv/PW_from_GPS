@@ -12,6 +12,91 @@ from PW_paths import work_yuval
 # TODO: if not, build func to replace datetimeindex to numbers and vise versa
 
 
+def grab_n_consecutive_epochs_from_ts(da_ts, sep='nan', n=10):
+    """grabs n consecutive epochs from time series (xarray dataarrays)
+    and return list of either dataarrays"""
+    df = da_ts.to_dataframe()
+    A = consecutive_runs(df, num='nan')
+    A = A.sort_values('total_not-nan', ascending=False)
+    da_list = []
+    for i in range(n):
+        start = A.iloc[i, 0]
+        end = A.iloc[i, 1]
+        da = da_ts.isel(time=slice(start, end))
+        da_list.append(da)
+    return da_list
+
+
+#def assemble_semi_period(reduced_da_ts):
+#    import numpy as np
+#    import xarray as xr
+#    period = [x for x in reduced_da_ts.dims][0]
+#    if period == 'month':
+#        plength = reduced_da_ts[period].size
+#        mnth_arr = np.arange(1, 13)
+#        mnth_splt = np.array_split(mnth_arr, int(12/plength))
+#        vals = reduced_da_ts.values
+#        vals_list = []
+#        vals_list.append(vals)
+#        for i in range(len(mnth_splt)-1):
+#            vals_list.append(vals)
+#        modified_reduced = xr.DataArray(np.concatenate(vals_list), dims=['month'])
+#        modified_reduced['month'] = mnth_arr
+#        return modified_reduced
+#    elif period == 'hour':
+#        plength = reduced_da_ts[period].size
+#        hr_arr = np.arange(0, 24)
+#        hr_splt = np.array_split(hr_arr, int(24/plength))
+#        vals = reduced_da_ts.values
+#        vals_list = []
+#        vals_list.append(vals)
+#        for i in range(len(hr_splt)-1):
+#            vals_list.append(vals)
+#        modified_reduced = xr.DataArray(np.concatenate(vals_list), dims=['hour'])
+#        modified_reduced['hour'] = hr_arr
+#        return modified_reduced
+#
+#
+#def groupby_semi_period(da_ts, period='6M'):
+#    """return an xarray DataArray with the semi period of 1 to 11 months or
+#    1 to 23 hours.
+#    Input: period : string, first char is period length, second is frequency.
+#    for now support is M for month and H for hour."""
+#    import numpy as np
+#    df = da_ts.to_dataframe()
+#    plength = [x for x in period if x.isdigit()]
+#    if len(plength) == 1:
+#        plength = int(plength[0])
+#    elif len(plength) == 2:
+#        plength = int(''.join(plength))
+#    freq = [x for x in period if x.isalpha()][0]
+#    print(plength, freq)
+#    if freq == 'M':
+#        if np.mod(12, plength) != 0:
+#            raise('pls choose integer amounts, e.g., 3M, 4M, 6M...')
+#        mnth_arr = np.arange(1, 13)
+#        mnth_splt = np.array_split(mnth_arr, int(12 / plength))
+#        rpld = {}
+#        for i in range(len(mnth_splt) - 1):
+#            rpld.update(dict(zip(mnth_splt[i + 1], mnth_splt[0])))
+#        df['month'] = df.index.month
+#        df['month'] = df['month'].replace(rpld)
+#        month = df['month'].to_xarray()
+#        return month
+#    if freq == 'H':
+#        if np.mod(24, plength) != 0:
+#            raise('pls choose integer amounts, e.g., 6H, 8H, 12H...')
+#        hr_arr = np.arange(0, 24)
+#        hr_splt = np.array_split(hr_arr, int(24 / plength))
+#        rpld = {}
+#        for i in range(len(hr_splt) - 1):
+#            rpld.update(dict(zip(hr_splt[i + 1], hr_splt[0])))
+#        df['hour'] = df.index.hour
+#        df['hour'] = df['hour'].replace(rpld)
+#        hour = df['hour'].to_xarray()
+#        return hour
+
+
 def groupby_date_xr(da_ts):
     df = da_ts.to_dataframe()
     df['date'] = df.index.date
@@ -159,6 +244,7 @@ def create_monthly_index(dt_da, period=6, unit='month'):
 
 def compute_consecutive_events_datetimes(da_ts, time_dim='time',
                                          minimum_epochs=10):
+    """WARNING : for large xarrays it takes alot of time and memory!"""
     import pandas as pd
     import xarray as xr
     df = da_ts.notnull().to_dataframe()
@@ -176,6 +262,7 @@ def compute_consecutive_events_datetimes(da_ts, time_dim='time',
         dt_max = dt_max.append(end)
         dt_max = dt_max.index
     events = []
+    print('done part1')
     for i_min, i_max in zip(dt_min, dt_max):
         events.append(da_ts.sel({time_dim: slice(i_min, i_max)}))
     events_da = xr.concat(events, 'event')
@@ -228,7 +315,10 @@ def consecutive_runs(arr, num=False):
         a = arr
     elif isinstance(arr, list):
         a = np.array(arr)
-    isone = np.concatenate(([1], np.equal(a, num).view(np.int8), [1]))
+    if num == 'nan':
+        isone = np.concatenate(([1], np.isnan(a).view(np.int8), [1]))
+    else:
+        isone = np.concatenate(([1], np.equal(a, num).view(np.int8), [1]))
     absdiff = np.abs(np.diff(isone))
     # Runs start and end where absdiff is 1.
     ranges = np.where(absdiff == 1)[0].reshape(-1, 2)
@@ -241,6 +331,8 @@ def consecutive_runs(arr, num=False):
             notnum = 0
         elif num == 0:
             notnum = 1
+        elif num == 'nan':
+            notnum = 'not-nan'
         A.columns = [
             '{}_{}_start'.format(
                 name, notnum), '{}_{}_end'.format(
@@ -481,7 +573,8 @@ def lmfit_params(model_name, k=None):
     # add with tuples: (NAME VALUE VARY MIN  MAX  EXPR  BRUTE_STEP)
     amp = ['sin_amp', 50, True, None, None, None, None]
     phase = ['sin_phase', 0, True, None, None, None, None]
-    freq = ['sin_freq', 1/365.0, True, None, None, None]
+    # freq = ['sin_freq', 1/365.0, True, None, None, None]
+    freq = ['sin_freq', 4, True, None, None, None]
     sin_params.add(*amp)
     sin_params.add(*phase)
     sin_params.add(*freq)
@@ -515,24 +608,36 @@ def lmfit_params(model_name, k=None):
         return sum_sin_params + line_params
 
 
-def fit_da_to_model(da, params, model_dict={'model_name': 'sin'},
-                    method='leastsq', times=None, plot=True, verbose=True):
+def fit_da_to_model(da, params=None, modelname='sin', method='leastsq', times=None, plot=True, verbose=True):
     """options for modelname:'sin', 'sin_linear', 'line', 'sin_constant', and
     'sum_sin'"""
     # for sum_sin or sum_sin_linear use model_dict={'model_name': 'sum_sin', k:3}
+    # usage for params: you need to know the parameter names first:
+    # modelname='sin', params=dict(sin_freq={'value':3},sin_amp={'value':0.3},sin_phase={'value':0})
+    # fit_da_to_model(alon, modelname='sin', params=dict(sin_freq={'value':3},sin_amp={'value':0.3},sin_phase={'value':0}))
     import matplotlib.pyplot as plt
     import pandas as pd
+    import xarray as xr
     time_dim = list(set(da.dims))[0]
     if times is not None:
         da = da.sel({time_dim: slice(*times)})
     lm = lmfit_model_switcher()
-    model = lm.pick_model(**model_dict)
+    lm.pick_model(modelname)
+    lm.generate_params(**params)
+    params = lm.params
+    model = lm.model
     if verbose:
         print(model)
+        print(params)
     jul, jul_no_nans = get_julian_dates_from_da(da)
     y = da.dropna(time_dim).values
     result = model.fit(**params, data=y, time=jul_no_nans, method=method)
     fit_y = result.eval(**result.best_values, time=jul)
+    fit = xr.DataArray(fit_y, dims=time_dim)
+    fit[time_dim] = da[time_dim]
+    fit.name = da.name + '_fit'
+    fit.attrs.update(**result.best_values)
+    # return fit
     if verbose:
         print(result.best_values)
     if plot:
@@ -541,7 +646,7 @@ def fit_da_to_model(da, params, model_dict={'model_name': 'sin'},
         dt = pd.to_datetime(da[time_dim].values)
         ax.plot(dt, fit_y, c='r')
         plt.legend(['data', 'fit'])
-    return result
+    return fit
 
 
 def get_julian_dates_from_da(da):
@@ -595,11 +700,13 @@ def lomb_scargle_xr(da_ts, units='cpy', user_freq='MS', plot=True, kwargs=None):
     return da
 
 
-def fft_xr(xarray, units='cpy', nan_fill='mean', user_freq='MS', plot=True):
+def fft_xr(xarray, method='fft', units='cpy', nan_fill='mean', user_freq='MS',
+           plot=True):
     import numpy as np
     import pandas as pd
     import matplotlib.pyplot as plt
     import xarray as xr
+    from scipy import signal
 #    import matplotlib
 #    matplotlib.rcParams['text.usetex'] = True
 
@@ -611,15 +718,21 @@ def fft_xr(xarray, units='cpy', nan_fill='mean', user_freq='MS', plot=True):
             p_units = 'amp'
         if nan_fill == 'mean':
             x = da.fillna(da.mean(time_dim))
+        elif nan_fill == 'zero':
+            x = da.fillna(0)
         # infer freq of time series:
         sp_str = pd.infer_freq(x[time_dim].values)
         if user_freq is None:
             if not sp_str:
                 raise Exception('Didnt find a frequency for {}, check for nans!'.format(da.name))
             if len(sp_str) > 1:
-                sp_str = [char for char in sp_str]
-                mul = int(sp_str[0])
-                period = sp_str[1]
+                mul = [char for char in sp_str if char.isdigit()]
+                sp_str = ''.join([char for char in sp_str if char.isalpha()])
+                if not mul:
+                    mul = 1
+                else:
+                    mul = int(mul[0])
+                period = sp_str
             elif len(sp_str) == 1:
                 mul = 1
                 period = sp_str[0]
@@ -631,13 +744,21 @@ def fft_xr(xarray, units='cpy', nan_fill='mean', user_freq='MS', plot=True):
             # number of seconds in freq units in time-series:
             p_val = periods[user_freq][1]
             print('using user freq of {}'.format(user_freq))
-        # run fft:
-        p = 20 * np.log10(np.abs(np.fft.rfft(x)))
+        print('sample rate in seconds: {}'.format(p_val))
+        if method == 'fft':
+            # run fft:
+            p = 20 * np.log10(np.abs(np.fft.rfft(x, n=None)))
+            f = np.linspace(0, (1 / p_val) / 2, len(p))
+        elif method == 'welch':
+            f, p = signal.welch(x, 1e-6, 'hann', 1024, scaling='spectrum')
         if units == 'cpy':
             unit_freq = 1.0 / periods['Y'][1]  # in Hz
+            print('unit_freq: cycles per year ({} seconds)'.format(periods['Y'][1]))
+        elif units == 'cpd':
+            unit_freq = 1.0 / periods['D'][1]  # in Hz
+            print('unit_freq: cycles per day ({} seconds)'.format(periods['D'][1]))
             # unit_freq_in_time_series = unit_freq * p_val   # in Hz
         # f = np.linspace(0, unit_freq_in_time_series / 2, len(p))
-        f = np.linspace(0, (1 / p_val) / 2, len(p))
         f_in_unit_freq = f / unit_freq
         p_units = '{}^2/{}'.format(p_units, units)
         power = xr.DataArray(p, dims=['freq'])
@@ -679,8 +800,18 @@ def fft_xr(xarray, units='cpy', nan_fill='mean', user_freq='MS', plot=True):
             ds.attrs['full_name'] = 'Power spectra for {}'.format(xarray.attrs['full_name'])
         except KeyError:
             pass
+    elif isinstance(xarray, list):
+        p_list = []
+        for da in xarray:
+            p_list.append(fft_da(da, units, nan_fill, periods))
+        ds = xr.merge(p_list, compat='override')
+        da_from_ds = ds.to_array(dim='epochs')
+        try:
+            ds.attrs['full_name'] = 'Power spectra for {}'.format(da.attrs['full_name'])
+        except KeyError:
+            pass
         if plot:
-            da_mean = da_from_ds.mean('station')
+            da_mean = da_from_ds.mean('epochs')
             da_mean.attrs = da_from_ds.attrs
             # da_from_ds.plot.line(xscale='log', yscale='log', hue='station')
             fig, ax = plt.subplots(figsize=(8, 6))
@@ -1779,7 +1910,30 @@ class lmfit_model_switcher(object):
         # Get the method from 'self'. Default to a lambda.
         method = getattr(self, method_name, lambda: "Invalid ML Model")
         # Call the method as we return it
-        return method(*args, **kwargs)
+        self.model = method(*args, **kwargs)
+        return self
+
+    def pick_param(self, name, **kwargs):
+        # **kwargs.keys() = value, vary, min, max, expr
+        if not hasattr(self, 'model'):
+            raise('pls pick model first!')
+            return
+        else:
+            self.model.set_param_hint(name, **kwargs)
+        return
+
+    def generate_params(self, **kwargs):
+        if not hasattr(self, 'model'):
+            raise('pls pick model first!')
+            return
+        else:
+            if kwargs is not None:
+                for key, val in kwargs.items():
+                    self.model.set_param_hint(key, **val)
+                self.params = self.model.make_params()
+            else:
+                self.params = self.model.make_params()
+        return
 
     def line(self, line_pre='line_'):
         from lmfit import Model
@@ -1803,8 +1957,8 @@ class lmfit_model_switcher(object):
 
         constant = ConstantModel(prefix=con_pre)
         lmfit = lmfit_model_switcher()
-        sin = lmfit.pick_model('sin', sin_pre)
-        return sin + constant
+        lmfit.pick_model('sin', sin_pre)
+        return lmfit.model + constant
 
     def sin_linear(self, sin_pre='sin_', line_pre='line_'):
         lmfit = lmfit_model_switcher()
