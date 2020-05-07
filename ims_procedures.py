@@ -22,7 +22,7 @@ cwd = Path().cwd()
 #
 #In [21]: both = xr.Dataset({'some_missing': some_missing, 'filled': filled})
 
-# kabr, nzrt, katz, elro, klhv, yrcm have ims stations not close to them!
+# kabr, nzrt, katz, elro, klhv, yrcm, slom have ims stations not close to them!
 gnss_ims_dict = {
     'alon': 'ASHQELON-PORT', 'bshm': 'HAIFA-TECHNION', 'csar': 'HADERA-PORT',
     'tela': 'TEL-AVIV-COAST', 'slom': 'BESOR-FARM', 'kabr': 'SHAVE-ZIYYON',
@@ -164,7 +164,7 @@ def produce_wind_frequency_gustiness(path=ims_path,
 def produce_gustiness(path=ims_path,
                       station='TEL-AVIV-COAST',
                       season='DJF', pw_station='tela', temp=False,
-                      plot=True):
+                      ax=None):
     import xarray as xr
     import matplotlib.pyplot as plt
     import numpy as np
@@ -199,6 +199,7 @@ def produce_gustiness(path=ims_path,
         for sp in ax.spines.values():
             sp.set_visible(False)
 
+    print('loading {} IMS station...'.format(station))
     g = xr.open_dataset(path / 'IMS_G_israeli_10mins.nc')[station]
     g.load()
     g = g.sel(time=g['time.season'] == season)
@@ -207,48 +208,48 @@ def produce_gustiness(path=ims_path,
     g_anoms = g.groupby(date) - g.groupby(date).mean('time')
     g_anoms = g_anoms.reset_coords(drop=True)
     G = g_anoms.groupby('time.hour').mean('time')
-    if plot:
+    if ax is None:
         fig, ax = plt.subplots(figsize=(16, 8))
-        G.plot(ax=ax, color='b', marker='o')
-        ax.set_title(
-            'Gustiness {} IMS station in {} season'.format(
-                station, season))
-        ax.axhline(0, color='b', linestyle='--')
-        ax.set_ylabel('Gustiness anomalies [dimensionless]', color='b')
-        ax.set_xlabel('Time of day [UTC]')
-        ax.set_xticks(np.arange(0, 24, step=1))
-        ax.yaxis.label.set_color('b')
-        ax.tick_params(axis='y', colors='b')
-        ax.grid()
-        if pw_station is not None:
-            pw = xr.open_dataset(
-                work_yuval /
-                'GNSS_PW_thresh_50_homogenized.nc')[pw_station]
-            pw.load().dropna('time')
-            pw = pw.sel(time=pw['time.season'] == season)
-            date = groupby_date_xr(pw)
-            pw = pw.groupby(date) - pw.groupby(date).mean('time')
-            pw = pw.reset_coords(drop=True)
-            pw = pw.groupby('time.hour').mean()
-            axpw = ax.twinx()
-            pw.plot.line(ax=axpw, color='k', marker='o')
-            axpw.axhline(0, color='k', linestyle='--')
-            axpw.legend(['{} PW anomalies'.format(pw_station.upper())], loc='upper right')
-            axpw.set_ylabel('PW anomalies [mm]')
-            align_yaxis(ax, 0, axpw, 0)
-            if temp:
-                axt = ax.twinx()
-                axt.spines["right"].set_position(("axes", 1.05))
-                # Having been created by twinx, par2 has its frame off, so the line of its
-                # detached spine is invisible.  First, activate the frame but make the patch
-                # and spines invisible.
-                make_patch_spines_invisible(axt)
-                # Second, show the right spine.
-                axt.spines["right"].set_visible(True)
-                p3, = T.plot.line(ax=axt, marker='s',color='m', label="Temperature")
-                axt.yaxis.label.set_color(p3.get_color())
-                axt.tick_params(axis='y', colors=p3.get_color())
-                axt.set_ylabel('Temperature anomalies [$C\degree$]')
+    G.plot(ax=ax, color='b', marker='o')
+    ax.set_title(
+        'Gustiness {} IMS station in {} season'.format(
+            station, season))
+    ax.axhline(0, color='b', linestyle='--')
+    ax.set_ylabel('Gustiness anomalies [dimensionless]', color='b')
+    ax.set_xlabel('Time of day [UTC]')
+    ax.set_xticks(np.arange(0, 24, step=1))
+    ax.yaxis.label.set_color('b')
+    ax.tick_params(axis='y', colors='b')
+    ax.grid()
+    if pw_station is not None:
+        pw = xr.open_dataset(
+            work_yuval /
+            'GNSS_PW_thresh_50_homogenized.nc')[pw_station]
+        pw.load().dropna('time')
+        pw = pw.sel(time=pw['time.season'] == season)
+        date = groupby_date_xr(pw)
+        pw = pw.groupby(date) - pw.groupby(date).mean('time')
+        pw = pw.reset_coords(drop=True)
+        pw = pw.groupby('time.hour').mean()
+        axpw = ax.twinx()
+        pw.plot.line(ax=axpw, color='k', marker='o')
+        axpw.axhline(0, color='k', linestyle='--')
+        axpw.legend(['{} PW anomalies'.format(pw_station.upper())], loc='upper right')
+        axpw.set_ylabel('PW anomalies [mm]')
+        align_yaxis(ax, 0, axpw, 0)
+        if temp:
+            axt = ax.twinx()
+            axt.spines["right"].set_position(("axes", 1.05))
+            # Having been created by twinx, par2 has its frame off, so the line of its
+            # detached spine is invisible.  First, activate the frame but make the patch
+            # and spines invisible.
+            make_patch_spines_invisible(axt)
+            # Second, show the right spine.
+            axt.spines["right"].set_visible(True)
+            p3, = T.plot.line(ax=axt, marker='s',color='m', label="Temperature")
+            axt.yaxis.label.set_color(p3.get_color())
+            axt.tick_params(axis='y', colors=p3.get_color())
+            axt.set_ylabel('Temperature anomalies [$C\degree$]')
     return G
 
 
@@ -903,8 +904,7 @@ def Interpolating_models_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
         X = np.column_stack([Xrr, Ycc, Z])
         XX, YY, ZZ = pyproj.transform(lla, ecef, rr, cc, awd.values,
                                       radians=False)
-        rr_cc_as_cols = np.column_stack([XX.flatten(), YY.flatten(),
-                                         ZZ.flatten()])
+        rr_cc_as_cols = np.column_stack([XX.flatten(), YY.flatten(), ZZ.flatten()])
     else:
         X = np.column_stack([rr[vals], cc[vals]])
         rr_cc_as_cols = np.column_stack([rr.flatten(), cc.flatten()])
