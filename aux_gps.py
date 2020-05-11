@@ -12,6 +12,29 @@ from PW_paths import work_yuval
 # TODO: if not, build func to replace datetimeindex to numbers and vise versa
 
 
+def select_months(da_ts, months, remove=False, reindex=True):
+    import xarray as xr
+    from aux_gps import xr_reindex_with_date_range
+    import pandas as pd
+    import numpy as np
+    time_dim = list(set(da_ts.dims))[0]
+    attrs = da_ts.attrs
+    if remove:
+        all_months = np.arange(1, 13)
+        months = list(set(all_months).difference(set(months)))
+    print('selecting months #{} from {}'.format(', #'.join([str(x) for x in months]), da_ts.name))
+    to_add = []
+    for month in months:
+        sliced = da_ts.sel({time_dim: da_ts['{}.month'.format(time_dim)] == int(month)})
+        to_add.append(sliced)
+    da = xr.concat(to_add, time_dim)
+    da.attrs = attrs
+    if reindex:
+        freq = pd.infer_freq(da_ts[time_dim].values)
+        da = xr_reindex_with_date_range(da, freq=freq)
+    return da
+
+
 def run_MLR_diurnal_harmonics(harmonic_dss, season=None, n_max=4, plot=True,
                               ax=None, legend_loc=None):
     from sklearn.linear_model import LinearRegression
@@ -28,7 +51,7 @@ def run_MLR_diurnal_harmonics(harmonic_dss, season=None, n_max=4, plot=True,
     if season is not None:
         harmonic = harmonic_dss.sel(season=season)
     else:
-        harmonic = harmonic_dss.sel(season='ALL')
+        harmonic = harmonic_dss # .sel(season='ALL')
     # pre-proccess:
     harmonic = harmonic.transpose('hour', 'cpd', ...)
     harmonic = harmonic.sel(cpd=slice(1, n_max))
@@ -92,8 +115,6 @@ def harmonic_analysis_xr(da, n=6, normalize=False, anomalize=False, freq='D',
     time_dim = list(set(da.dims))[0]
     if anomalize:
         da = anomalize_xr(da, freq=freq)
-    harmonics = [x + 1 for x in range(n)]
-    init_values = [1.0/float(x) for x in harmonics]
     seasons = ['JJA', 'SON', 'DJF', 'MAM', 'ALL']
     print('station name: {}'.format(da.name))
     print('performing harmonic analysis with 1 to {} cycles per day.'.format(n))
@@ -105,50 +126,66 @@ def harmonic_analysis_xr(da, n=6, normalize=False, anomalize=False, freq='D',
         else:
             print('analysing ALL seasons.')
             das = da
-        params_list = []
-        di_mean_list = []
-        di_std_list = []
-        for cpd, init_val in zip(harmonics, init_values):
-            print('fitting harmonic #{}'.format(cpd))
-            params = dict(
-                sin_freq={
-                    'value': cpd}, sin_amp={
-                    'value': init_val}, sin_phase={
-                    'value': 0})
-            res = fit_da_to_model(
-                das,
-                modelname='sin',
-                params=params,
-                plot=False,
-                verbose=False)
-            name = da.name.split('_')[0]
-            params_da = xr.DataArray([x for x in res.attrs.values()],
-                                      dims=['params'])
-            params_da['params'] = [x for x in res.attrs.keys()]
-            params_da.name = name + '_params'
-            name = res.name.split('_')[0]
-            diurnal_mean = res.groupby('{}.hour'.format(time_dim)).mean()
-            diurnal_std = res.groupby('{}.hour'.format(time_dim)).std()
-            # diurnal_mean.attrs.update(attrs)
-            # diurnal_std.attrs.update(attrs)
-            diurnal_mean.name = name + '_mean'
-            diurnal_std.name = name + '_std'
-            params_list.append(params_da)
-            di_mean_list.append(diurnal_mean)
-            di_std_list.append(diurnal_std)
-        da_mean = xr.concat(di_mean_list, 'cpd')
-        da_std = xr.concat(di_std_list, 'cpd')
-        da_params = xr.concat(params_list, 'cpd')
-        ds = da_mean.to_dataset(name=da_mean.name)
-        ds[da_std.name] = da_std
-        ds['cpd'] = harmonics
-        ds[da_params.name] = da_params
-        ds[das.name] = das.groupby('{}.hour'.format(time_dim)).mean()
+        ds = harmonic_da(das, n=n)
         season_list.append(ds)
     dss = xr.concat(season_list, 'season')
     dss['season'] = seasons
     dss.attrs['field'] = field
     return dss
+
+
+def harmonic_da(da_ts, n=3, field=None, init=None):
+    from aux_gps import fit_da_to_model
+    import xarray as xr
+    time_dim = list(set(da_ts.dims))[0]
+    harmonics = [x + 1 for x in range(n)]
+    if init is not None:
+        init_amp = da_ts.groupby('{}.hour'.format(time_dim)).mean().mean('hour').values
+    else:
+        init_amp = 1.0
+    init_values = [init_amp/float(x) for x in harmonics]
+    params_list = []
+    di_mean_list = []
+    di_std_list = []
+    for cpd, init_val in zip(harmonics, init_values):
+        print('fitting harmonic #{}'.format(cpd))
+        params = dict(
+            sin_freq={
+                'value': cpd}, sin_amp={
+                'value': init_val}, sin_phase={
+                'value': 0})
+        res = fit_da_to_model(
+            da_ts,
+            modelname='sin',
+            params=params,
+            plot=False,
+            verbose=False)
+        name = da_ts.name.split('_')[0]
+        params_da = xr.DataArray([x for x in res.attrs.values()],
+                                  dims=['params'])
+        params_da['params'] = [x for x in res.attrs.keys()]
+        params_da.name = name + '_params'
+        name = res.name.split('_')[0]
+        diurnal_mean = res.groupby('{}.hour'.format(time_dim)).mean()
+        diurnal_std = res.groupby('{}.hour'.format(time_dim)).std()
+        # diurnal_mean.attrs.update(attrs)
+        # diurnal_std.attrs.update(attrs)
+        diurnal_mean.name = name + '_mean'
+        diurnal_std.name = name + '_std'
+        params_list.append(params_da)
+        di_mean_list.append(diurnal_mean)
+        di_std_list.append(diurnal_std)
+    da_mean = xr.concat(di_mean_list, 'cpd')
+    da_std = xr.concat(di_std_list, 'cpd')
+    da_params = xr.concat(params_list, 'cpd')
+    ds = da_mean.to_dataset(name=da_mean.name)
+    ds[da_std.name] = da_std
+    ds['cpd'] = harmonics
+    ds[da_params.name] = da_params
+    ds[da_ts.name] = da_ts.groupby('{}.hour'.format(time_dim)).mean()
+    if field is not None:
+        ds.attrs['field'] = field
+    return ds
 
 
 def anomalize_xr(da_ts, freq='D'):  # i.e., like deseason
