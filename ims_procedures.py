@@ -32,6 +32,47 @@ gnss_ims_dict = {
     'nrif': 'NEOT-SMADAR', 'elat': 'ELAT', 'klhv': 'SHANI',
     'yrcm': 'ZOMET-HANEGEV'}
 
+ims_units_dict = {
+    'BP': 'hPa',
+    'NIP': 'W/m^2',
+    'Rain': 'mm',
+    'TD': 'deg_C',
+    'WD': 'deg',
+    'WS': 'm/s',
+    'G': ''}
+
+
+def perform_harmonic_analysis_all_IMS(path=ims_path, var='BP', n=4,
+                                      savepath=ims_path):
+    import xarray as xr
+    from aux_gps import harmonic_analysis_xr
+    from aux_gps import keep_iqr
+    ims = xr.load_dataset(path / 'IMS_{}_israeli_10mins.nc'.format(var))
+    sites = [x for x in gnss_ims_dict.values()]
+    ims_actual_sites = [x for x in ims if x in sites]
+    ims = ims[ims_actual_sites]
+    if var == 'NIP':
+        ims = xr.merge([keep_iqr(ims[x]) for x in ims])
+        max_nip = ims.to_array('site').max()
+        ims /= max_nip
+    dss_list = []
+    for site in ims:
+        da = ims[site]
+        da = keep_iqr(da)
+        print('performing harmonic analysis for IMS {} field at {} site:'.format(var, site))
+        dss = harmonic_analysis_xr(da, n=n, anomalize=True, normalize=False)
+        dss_list.append(dss)
+    dss_all = xr.merge(dss_list)
+    dss_all.attrs['field'] = var
+    dss_all.attrs['units'] = ims_units_dict[var]
+    if savepath is not None:
+        filename = 'IMS_{}_harmonics_diurnal.nc'.format(var)
+        comp = dict(zlib=True, complevel=9)  # best compression
+        encoding = {var: comp for var in dss_all.data_vars}
+        dss_all.to_netcdf(savepath / filename, 'w', encoding=encoding)
+        print('Done!')
+    return dss_all
+
 
 def align_10mins_ims_to_gnss_and_save(ims_path=ims_path, field='G',
                                       gnss_ims_dict=gnss_ims_dict,
@@ -1567,7 +1608,7 @@ def fill_fix_all_10mins_IMS_stations(path=ims_10mins_path,
             print('skipping {} station...'.format(da.name))
             continue
         no_row_in_meta = row.empty
-        assert not no_row_in_meta
+        # assert not no_row_in_meta
         if field == 'Rain':
             if da.name == 'YOTVATA':
                 da = da.loc['2009-09-01':]
@@ -1605,11 +1646,12 @@ def fill_fix_all_10mins_IMS_stations(path=ims_10mins_path,
             elif da.name == 'EN-KARMEL':
                 da = da.loc['1993-12-01':]
                 print('{} station is sliced!'.format(da.name))
-        # if no_row_in_meta:
-        #     print('{} not exist in meta'.format(da.name))
-        da.attrs['station_lat'] = row.lat.values.item()
-        da.attrs['station_lon'] = row.lon.values.item()
-        da.attrs['station_alt'] = row.alt.values.item()
+        if no_row_in_meta:
+            print('{} not exist in meta'.format(da.name))
+        else:
+            da.attrs['station_lat'] = row.lat.values.item()
+            da.attrs['station_lon'] = row.lon.values.item()
+            da.attrs['station_alt'] = row.alt.values.item()
         if field == 'TD' and not fix_only:
             fill_missing_single_ims_station(da, unique_index=unique_index,
                                             clim_period=clim, savepath=path,
