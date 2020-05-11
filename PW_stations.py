@@ -2909,50 +2909,76 @@ def israeli_gnss_stations_long_term_trend_analysis(
 #    return dsr
 
 
-def run_MLR_diurnal_harmonics_GNSS(path=work_yuval, season=None, site='tela'):
-    from sklearn.linear_model import LinearRegression
-    from sklearn.metrics import explained_variance_score
-    import xarray as xr
-    harmonic = xr.load_dataset(path / 'GNSS_PW_harmonics_diurnal.nc')['{}_mean'.format(site)]
-    if season is not None:
-        harmonic = harmonic.sel(season=season)
-    else:
-        harmonic = harmonic.sel(season='ALL')
-    pw = xr.open_dataset(path / 'GNSS_PW_anom_50_removed_daily.nc')[site]
-    pw.load()
-    if season is not None:
-        pw = pw.sel(time=pw['time.season'] == season)
-    pw = pw.groupby('time.hour').mean()
-    # pre-proccess:
-    harmonic = harmonic.transpose('hour', 'cpd')
-    X = harmonic.values
-    y= pw.values.reshape(-1, 1)
-    exp_list = []
-    for cpd in harmonic['cpd'].values:
-        X = harmonic.sel(cpd=cpd).values.reshape(-1, 1)
-        lr = LinearRegression(fit_intercept=False)
-        lr.fit(X, y)
-        y_pred = lr.predict(X)
-        ex_var = explained_variance_score(y, y_pred)
-        exp_list.append(ex_var)
-    explained = np.array(exp_list) * 100.0
-    exp_dict = dict(zip([x for x in harmonic['cpd'].values], explained))
-    exp_dict['total'] = np.sum(explained)
-    exp_dict['season'] = season
-    exp_dict['site'] = site
-    return exp_dict
+#def run_MLR_diurnal_harmonics_GNSS(path=work_yuval, season=None, site='tela',
+#                                   n_max=4, plot=True, ax=None):
+#    from sklearn.linear_model import LinearRegression
+#    from sklearn.metrics import explained_variance_score
+#    import xarray as xr
+#    import matplotlib.pyplot as plt
+#    harmonic = xr.load_dataset(path / 'GNSS_PW_harmonics_diurnal.nc')['{}_mean'.format(site)]
+#    if season is not None:
+#        harmonic = harmonic.sel(season=season)
+#    else:
+#        harmonic = harmonic.sel(season='ALL')
+#    pw = xr.open_dataset(path / 'GNSS_PW_anom_50_removed_daily.nc')[site]
+#    pw.load()
+#    if season is not None:
+#        pw = pw.sel(time=pw['time.season'] == season)
+#    pw = pw.groupby('time.hour').mean()
+#    # pre-proccess:
+#    harmonic = harmonic.transpose('hour', 'cpd')
+#    harmonic = harmonic.sel(cpd=slice(1, n_max))
+#    X = harmonic.values
+#    y = pw.values.reshape(-1, 1)
+#    exp_list = []
+#    for cpd in harmonic['cpd'].values:
+#        X = harmonic.sel(cpd=cpd).values.reshape(-1, 1)
+#        lr = LinearRegression(fit_intercept=False)
+#        lr.fit(X, y)
+#        y_pred = lr.predict(X)
+#        ex_var = explained_variance_score(y, y_pred)
+#        exp_list.append(ex_var)
+#    explained = np.array(exp_list) * 100.0
+#    exp_dict = dict(zip([x for x in harmonic['cpd'].values], explained))
+#    exp_dict['total'] = np.cumsum(explained)
+#    exp_dict['season'] = season
+#    exp_dict['site'] = site
+#    if plot:
+#        if ax is None:
+#            fig, ax = plt.subplots(figsize=(8, 6))
+#        markers = ['s', 'x', '^', '>', '<', 'X']
+#        for i, cpd in enumerate(harmonic['cpd'].values):
+#            harmonic.sel(cpd=cpd).plot(ax=ax, marker=markers[i])
+#        harmonic.sum('cpd').plot(ax=ax, marker='.')
+#        pw.plot(ax=ax, marker='o')
+#        S = ['S{}'.format(x) for x in harmonic['cpd'].values]
+#        S_total = ['+'.join(S)]
+#        S = ['S{} ({:.0f}%)'.format(x, exp_dict[int(x)]) for x in harmonic['cpd'].values]
+#        ax.legend(S+S_total+['PW'])
+#        ax.grid()
+#        ax.set_xlabel('Time of day [UTC]')
+#        ax.set_ylabel('PW anomalies [mm]')
+#        if season is None:
+#            ax.set_title('Annual PW diurnal cycle for {} site'.format(site.upper()))
+#        else:
+#            ax.set_title('PW diurnal cycle for {} site in {}'.format(site.upper(), season))
+#    return exp_dict
 
 
 def perform_harmonic_analysis_all_GNSS(path=work_yuval, n=6,
                                        savepath=work_yuval):
     import xarray as xr
+    from aux_gps import harmonic_analysis_xr
     pw = xr.load_dataset(path / 'GNSS_PW_anom_50_removed_daily.nc')
     dss_list = []
     for site in pw:
         print('performing harmonic analysis for GNSS {} site:'.format(site))
-        dss = harmonic_analysis_GNSS(pw[site], n=n)
+        dss = harmonic_analysis_xr(pw[site], n=n, anomalize=False, normalize=False,
+                                   user_field_name=None)
         dss_list.append(dss)
     dss_all = xr.merge(dss_list)
+    dss_all.attrs['field'] = 'PW'
+    dss_all.attrs['units'] = 'mm'
     if savepath is not None:
         filename = 'GNSS_PW_harmonics_diurnal.nc'
         comp = dict(zlib=True, complevel=9)  # best compression
@@ -2960,65 +2986,6 @@ def perform_harmonic_analysis_all_GNSS(path=work_yuval, n=6,
         dss_all.to_netcdf(savepath / filename, 'w', encoding=encoding)
         print('Done!')
     return dss_all
-
-
-def harmonic_analysis_GNSS(da, n=6):
-    import xarray as xr
-    from aux_gps import fit_da_to_model
-    time_dim = list(set(da.dims))[0]
-    harmonics = [x + 1 for x in range(n)]
-    seasons = ['JJA', 'SON', 'DJF', 'MAM', 'ALL']
-    print('perdorming harmonic analysis with 1 to {} cycles per day.'.format(n))
-    season_list = []
-    for season in seasons:
-        if season != 'ALL':
-            print('analysing season {}.'.format(season))
-            das = da.sel({time_dim: da['{}.season'.format(time_dim)] == season})
-        else:
-            print('analysing ALL seasons.')
-            das = da
-        params_list = []
-        di_mean_list = []
-        di_std_list = []
-        for cpd in harmonics:
-            print('fitting harmonic #{}'.format(cpd))
-            params = dict(
-                sin_freq={
-                    'value': cpd}, sin_amp={
-                    'value': 1.0}, sin_phase={
-                    'value': 0})
-            res = fit_da_to_model(
-                das,
-                modelname='sin',
-                params=params,
-                plot=False,
-                verbose=False)
-            name = da.name.split('_')[0]
-            params_da = xr.DataArray([x for x in res.attrs.values()],
-                                      dims=['params'])
-            params_da['params'] = [x for x in res.attrs.keys()]
-            params_da.name = name + '_params'
-            name = res.name.split('_')[0]
-            diurnal_mean = res.groupby('{}.hour'.format(time_dim)).mean()
-            diurnal_std = res.groupby('{}.hour'.format(time_dim)).std()
-            # diurnal_mean.attrs.update(attrs)
-            # diurnal_std.attrs.update(attrs)
-            diurnal_mean.name = name + '_mean'
-            diurnal_std.name = name + '_std'
-            params_list.append(params_da)
-            di_mean_list.append(diurnal_mean)
-            di_std_list.append(diurnal_std)
-        da_mean = xr.concat(di_mean_list, 'cpd')
-        da_std = xr.concat(di_std_list, 'cpd')
-        da_params = xr.concat(params_list, 'cpd')
-        ds = da_mean.to_dataset(name=da_mean.name)
-        ds[da_std.name] = da_std
-        ds['cpd'] = harmonics
-        ds[da_params.name] = da_params
-        season_list.append(ds)
-    dss = xr.concat(season_list, 'season')
-    dss['season'] = seasons
-    return dss
 
 
 def extract_diurnal_freq_GNSS(path=work_yuval, eps=0.001, n=6):
