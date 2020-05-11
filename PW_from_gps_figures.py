@@ -103,6 +103,45 @@ def caption(text, color='blue', **kwargs):
     return
 
 
+def plot_MLR_GNSS_PW_harmonics_facetgrid(path=work_yuval, season=None,
+                                         n_max=3):
+    import xarray as xr
+    from aux_gps import run_MLR_diurnal_harmonics
+    harmonics = xr.load_dataset(path / 'GNSS_PW_harmonics_diurnal.nc')
+    sites = list(set([x.split('_')[0] for x in harmonics]))
+    da = xr.DataArray([x for x in range(len(sites))], dims='GNSS')
+    da['GNSS'] = sites
+    fg = xr.plot.FacetGrid(
+        da,
+        col='GNSS',
+        col_wrap=4,
+        sharex=False,
+        sharey=False, figsize=(20, 20))
+    for i, (site, ax) in enumerate(zip(da['GNSS'].values, fg.axes.flatten())):
+        harm_site = harmonics[[x for x in harmonics if sites[i] in x]]
+        if site in ['elat', 'slom']:
+            loc = 'lower left'
+            text = 0.5
+        elif site in ['elro', 'yrcm', 'ramo']:
+            loc = 'upper right'
+            text = 0.1
+        else:
+            loc = None
+            text = 0.1
+        ax = run_MLR_diurnal_harmonics(harm_site, season=season, n_max=n_max, plot=True, ax=ax, legend_loc=loc)
+        ax.set_title('')
+        ax.set_ylabel('PW anomalies [mm]')
+        ax.text(text, .85, site.upper(),
+                horizontalalignment='center', fontweight='bold',
+                transform=ax.transAxes)
+    for i, ax in enumerate(fg.axes.flatten()):
+        if i > (da.GNSS.size-1):
+            ax.set_axis_off()
+            pass
+    fg.fig.tight_layout()
+    return fg
+
+
 def plot_gustiness(path=work_yuval, site='tela', season='JJA', ax=None):
     import xarray as xr
     from aux_gps import groupby_date_xr
