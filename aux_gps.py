@@ -12,6 +12,162 @@ from PW_paths import work_yuval
 # TODO: if not, build func to replace datetimeindex to numbers and vise versa
 
 
+def run_MLR_diurnal_harmonics(harmonic_dss, season=None, n_max=4, plot=True,
+                              ax=None, legend_loc=None):
+    from sklearn.linear_model import LinearRegression
+    from sklearn.metrics import explained_variance_score
+    import matplotlib.pyplot as plt
+    import numpy as np
+    if n_max > harmonic_dss.cpd.max().values.item():
+        n_max = harmonic_dss.cpd.max().values.item()
+    try:
+        field = harmonic_dss.attrs['field']
+    except KeyError:
+        field = 'no name'
+    name = [x for x in harmonic_dss][0].split('_')[0]
+    if season is not None:
+        harmonic = harmonic_dss.sel(season=season)
+    else:
+        harmonic = harmonic_dss.sel(season='ALL')
+    # pre-proccess:
+    harmonic = harmonic.transpose('hour', 'cpd', ...)
+    harmonic = harmonic.sel(cpd=slice(1, n_max))
+    # X = harmonic[name + '_mean'].values
+    y = harmonic[name].values.reshape(-1, 1)
+    exp_list = []
+    for cpd in harmonic['cpd'].values:
+        X = harmonic[name + '_mean'].sel(cpd=cpd).values.reshape(-1, 1)
+        lr = LinearRegression(fit_intercept=False)
+        lr.fit(X, y)
+        y_pred = lr.predict(X)
+        ex_var = explained_variance_score(y, y_pred)
+        exp_list.append(ex_var)
+    explained = np.array(exp_list) * 100.0
+    exp_dict = dict(zip([x for x in harmonic['cpd'].values], explained))
+    exp_dict['total'] = np.cumsum(explained)
+    exp_dict['season'] = season
+    exp_dict['name'] = name
+    if plot:
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(8, 6))
+        markers = ['s', 'x', '^', '>', '<', 'X']
+        for i, cpd in enumerate(harmonic['cpd'].values):
+            harmonic[name + '_mean'].sel(cpd=cpd).plot(ax=ax, marker=markers[i])
+        harmonic[name + '_mean'].sum('cpd').plot(ax=ax, marker='.')
+        harmonic[name].plot(ax=ax, marker='o')
+        S = ['S{}'.format(x) for x in harmonic['cpd'].values]
+        S_total = ['+'.join(S)]
+        S = ['S{} ({:.0f}%)'.format(x, exp_dict[int(x)]) for x in harmonic['cpd'].values]
+        ax.legend(
+            S + S_total + [field],
+            prop={
+                'size': 8},
+            framealpha=0.5,
+            fancybox=True,
+            loc=legend_loc)
+        ax.grid()
+        ax.set_xlabel('Time of day [UTC]')
+        # ax.set_ylabel('{} anomalies [mm]'.format(field))
+        if season is None:
+            ax.set_title('Annual {} diurnal cycle for {} station'.format(field, name.upper()))
+        else:
+            ax.set_title('{} diurnal cycle for {} station in {}'.format(field, name.upper(), season))
+        return ax
+    else:
+        return exp_dict
+
+
+def harmonic_analysis_xr(da, n=6, normalize=False, anomalize=False, freq='D',
+                         user_field_name=None):
+    import xarray as xr
+    from aux_gps import fit_da_to_model
+    from aux_gps import normalize_xr
+    from aux_gps import anomalize_xr
+    try:
+        field = da.attrs['channel_name']
+    except KeyError:
+        field = user_field_name
+    if normalize:
+        da = normalize_xr(da, norm=1)
+    time_dim = list(set(da.dims))[0]
+    if anomalize:
+        da = anomalize_xr(da, freq=freq)
+    harmonics = [x + 1 for x in range(n)]
+    init_values = [1.0/float(x) for x in harmonics]
+    seasons = ['JJA', 'SON', 'DJF', 'MAM', 'ALL']
+    print('station name: {}'.format(da.name))
+    print('performing harmonic analysis with 1 to {} cycles per day.'.format(n))
+    season_list = []
+    for season in seasons:
+        if season != 'ALL':
+            print('analysing season {}.'.format(season))
+            das = da.sel({time_dim: da['{}.season'.format(time_dim)] == season})
+        else:
+            print('analysing ALL seasons.')
+            das = da
+        params_list = []
+        di_mean_list = []
+        di_std_list = []
+        for cpd, init_val in zip(harmonics, init_values):
+            print('fitting harmonic #{}'.format(cpd))
+            params = dict(
+                sin_freq={
+                    'value': cpd}, sin_amp={
+                    'value': init_val}, sin_phase={
+                    'value': 0})
+            res = fit_da_to_model(
+                das,
+                modelname='sin',
+                params=params,
+                plot=False,
+                verbose=False)
+            name = da.name.split('_')[0]
+            params_da = xr.DataArray([x for x in res.attrs.values()],
+                                      dims=['params'])
+            params_da['params'] = [x for x in res.attrs.keys()]
+            params_da.name = name + '_params'
+            name = res.name.split('_')[0]
+            diurnal_mean = res.groupby('{}.hour'.format(time_dim)).mean()
+            diurnal_std = res.groupby('{}.hour'.format(time_dim)).std()
+            # diurnal_mean.attrs.update(attrs)
+            # diurnal_std.attrs.update(attrs)
+            diurnal_mean.name = name + '_mean'
+            diurnal_std.name = name + '_std'
+            params_list.append(params_da)
+            di_mean_list.append(diurnal_mean)
+            di_std_list.append(diurnal_std)
+        da_mean = xr.concat(di_mean_list, 'cpd')
+        da_std = xr.concat(di_std_list, 'cpd')
+        da_params = xr.concat(params_list, 'cpd')
+        ds = da_mean.to_dataset(name=da_mean.name)
+        ds[da_std.name] = da_std
+        ds['cpd'] = harmonics
+        ds[da_params.name] = da_params
+        ds[das.name] = das.groupby('{}.hour'.format(time_dim)).mean()
+        season_list.append(ds)
+    dss = xr.concat(season_list, 'season')
+    dss['season'] = seasons
+    dss.attrs['field'] = field
+    return dss
+
+
+def anomalize_xr(da_ts, freq='D'):  # i.e., like deseason
+    time_dim = list(set(da_ts.dims))[0]
+    attrs = da_ts.attrs
+    name = da_ts.name
+    if freq == 'D':
+        print('removing daily means from {}'.format(name))
+        date = groupby_date_xr(da_ts)
+        da_anoms = da_ts.groupby(date) - da_ts.groupby(date).mean()
+    elif freq == 'MS':
+        print('removing monthly means from {}'.format(name))
+        da_anoms = da_ts.groupby('{}.month'.format(
+            time_dim)) - da_ts.groupby('{}.month'.format(time_dim)).mean()
+    da_anoms = da_anoms.reset_coords(drop=True)
+    da_anoms.attrs.update(attrs)
+    return da_anoms
+
+
 def grab_n_consecutive_epochs_from_ts(da_ts, sep='nan', n=10):
     """grabs n consecutive epochs from time series (xarray dataarrays)
     and return list of either dataarrays"""
@@ -731,7 +887,10 @@ def fft_xr(xarray, method='fft', units='cpy', nan_fill='mean', user_freq='MS',
                 if not mul:
                     mul = 1
                 else:
-                    mul = int(mul[0])
+                    if len(mul) > 1:
+                        mul = int(''.join(mul))
+                    else:
+                        mul = int(mul[0])
                 period = sp_str
             elif len(sp_str) == 1:
                 mul = 1
