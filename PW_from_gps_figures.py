@@ -103,12 +103,65 @@ def caption(text, color='blue', **kwargs):
     return
 
 
+def plot_diurnal_wind_hodograph(path=ims_path, station='TEL-AVIV-COAST',
+                                season=None, cmax=None, ax=None):
+    import xarray as xr
+    from metpy.plots import Hodograph
+    # import matplotlib
+    import numpy as np
+    colorbar=False
+    # from_list = matplotlib.colors.LinearSegmentedColormap.from_list
+    cmap = plt.cm.get_cmap('hsv', 24)
+    # cmap = from_list(None, plt.cm.jet(range(0,24)), 24)
+    U = xr.open_dataset(path / 'IMS_U_israeli_10mins.nc')
+    V = xr.open_dataset(path / 'IMS_V_israeli_10mins.nc')
+    u_sta = U[station]
+    v_sta = V[station]
+    u_sta.load()
+    v_sta.load()
+    if season is not None:
+        print('{} season selected'.format(season))
+        u_sta = u_sta.sel(time=u_sta['time.season'] == season)
+        v_sta = v_sta.sel(time=v_sta['time.season'] == season)
+    u = u_sta.groupby('time.hour').mean()
+    v = v_sta.groupby('time.hour').mean()
+    if ax is None:
+        colorbar = True
+        fig, ax = plt.subplots()
+    max_uv = max(max(u.values), max(v.values)) + 1
+    if cmax is None:
+        max_uv = max(max(u.values), max(v.values)) + 1
+    else:
+        max_uv = cmax
+    h = Hodograph(component_range=max_uv, ax=ax)
+    h.add_grid(increment=0.5)
+    # hours = np.arange(0, 25)
+    lc = h.plot_colormapped(u, v, u.hour,cmap=cmap, linestyle='-', linewidth=2)
+    #ticks = np.arange(np.min(hours), np.max(hours))
+    # cb = fig.colorbar(lc, ticks=range(0,24), label='Time of Day [UTC]')
+    if colorbar:
+        cb = ax.figure.colorbar(lc, ticks=range(0,24), label='Time of Day [UTC]')
+    # cb.ax.tick_params(length=0)
+    if season is None:
+        ax.figure.suptitle('{} diurnal wind Hodograph'.format(station))
+    else:
+        ax.figure.suptitle('{} diurnal wind Hodograph {}'.format(station, season))
+    ax.set_xlabel('North')
+    ax.set_ylabel('East')
+    ax.set_title('South')
+    ax2 = ax.twinx()
+    ax2.tick_params(axis='y', right=False, labelright=False)
+    ax2.set_ylabel('West')
+    # axcb = fig.colorbar(lc)
+    return ax
+
+
 def plot_MLR_GNSS_PW_harmonics_facetgrid(path=work_yuval, season=None,
-                                         n_max=3):
+                                         n_max=3, ylim=None):
     import xarray as xr
     from aux_gps import run_MLR_diurnal_harmonics
     harmonics = xr.load_dataset(path / 'GNSS_PW_harmonics_diurnal.nc')
-    sites = list(set([x.split('_')[0] for x in harmonics]))
+    sites = sorted(list(set([x.split('_')[0] for x in harmonics])))
     da = xr.DataArray([x for x in range(len(sites))], dims='GNSS')
     da['GNSS'] = sites
     fg = xr.plot.FacetGrid(
@@ -119,10 +172,10 @@ def plot_MLR_GNSS_PW_harmonics_facetgrid(path=work_yuval, season=None,
         sharey=False, figsize=(20, 20))
     for i, (site, ax) in enumerate(zip(da['GNSS'].values, fg.axes.flatten())):
         harm_site = harmonics[[x for x in harmonics if sites[i] in x]]
-        if site in ['elat', 'slom']:
-            loc = 'lower left'
-            text = 0.5
-        elif site in ['elro', 'yrcm', 'ramo']:
+        if site in ['elat', 'nrif']:
+            loc = 'upper center'
+            text = 0.1
+        elif site in ['elro', 'yrcm', 'ramo', 'slom', 'jslm']:
             loc = 'upper right'
             text = 0.1
         else:
@@ -131,6 +184,8 @@ def plot_MLR_GNSS_PW_harmonics_facetgrid(path=work_yuval, season=None,
         ax = run_MLR_diurnal_harmonics(harm_site, season=season, n_max=n_max, plot=True, ax=ax, legend_loc=loc)
         ax.set_title('')
         ax.set_ylabel('PW anomalies [mm]')
+        if ylim is not None:
+            ax.set_ylim(ylim[0], ylim[1])
         ax.text(text, .85, site.upper(),
                 horizontalalignment='center', fontweight='bold',
                 transform=ax.transAxes)
