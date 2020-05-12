@@ -39,7 +39,39 @@ ims_units_dict = {
     'TD': 'deg_C',
     'WD': 'deg',
     'WS': 'm/s',
+    'U' : 'm/s',
+    'V' : 'm/s',
     'G': ''}
+
+
+def transform_wind_speed_direction_to_u_v(path=ims_path, savepath=ims_path):
+    import xarray as xr
+    import numpy as np
+    WS = xr.load_dataset(path / 'IMS_WS_israeli_10mins.nc')
+    WD = xr.load_dataset(path / 'IMS_WD_israeli_10mins.nc')
+    # change angles to math:
+    WD = 270 - WD
+    U = WS * np.cos(np.deg2rad(WD))
+    V = WS * np.sin(np.deg2rad(WD))
+    print('updating attrs...')
+    for station in WS:
+        attrs = WS[station].attrs
+        attrs.update(channel_name='U')
+        attrs.update(units='m/s')
+        U[station].attrs = attrs
+        attrs.update(channel_name='V')
+        V[station].attrs = attrs
+    if savepath is not None:
+        filename = 'IMS_U_israeli_10mins.nc'
+        comp = dict(zlib=True, complevel=9)  # best compression
+        encoding = {var: comp for var in U.data_vars}
+        U.to_netcdf(savepath / filename, 'w', encoding=encoding)
+        filename = 'IMS_V_israeli_10mins.nc'
+        comp = dict(zlib=True, complevel=9)  # best compression
+        encoding = {var: comp for var in V.data_vars}
+        V.to_netcdf(savepath / filename, 'w', encoding=encoding)
+        print('Done!')
+    return
 
 
 def perform_harmonic_analysis_all_IMS(path=ims_path, var='BP', n=4,
