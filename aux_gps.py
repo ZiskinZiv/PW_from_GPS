@@ -74,10 +74,12 @@ def run_MLR_diurnal_harmonics(harmonic_dss, season=None, n_max=4, plot=True,
         if ax is None:
             fig, ax = plt.subplots(figsize=(8, 6))
         markers = ['s', 'x', '^', '>', '<', 'X']
+        colors = ['tab:blue', 'tab:red', 'tab:orange', 'tab:green', 'tab:purple']
+        styles = ['-', '--', '-.', ':']
         for i, cpd in enumerate(harmonic['cpd'].values):
-            harmonic[name + '_mean'].sel(cpd=cpd).plot(ax=ax, marker=markers[i])
-        harmonic[name + '_mean'].sum('cpd').plot(ax=ax, marker='.')
-        harmonic[name].plot(ax=ax, marker='o')
+            harmonic[name + '_mean'].sel(cpd=cpd).plot(ax=ax, linestyle=styles[i], color=colors[i]) # marker=markers[i])
+        harmonic[name + '_mean'].sum('cpd').plot(ax=ax, marker=None, color='k', alpha=0.7)
+        harmonic[name].plot(ax=ax, marker='o', linewidth=0., color='k', alpha=0.7)
         S = ['S{}'.format(x) for x in harmonic['cpd'].values]
         S_total = ['+'.join(S)]
         S = ['S{} ({:.0f}%)'.format(x, exp_dict[int(x)]) for x in harmonic['cpd'].values]
