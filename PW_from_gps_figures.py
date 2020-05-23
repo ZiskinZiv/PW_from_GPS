@@ -157,50 +157,89 @@ def plot_diurnal_wind_hodograph(path=ims_path, station='TEL-AVIV-COAST',
 
 
 def plot_MLR_GNSS_PW_harmonics_facetgrid(path=work_yuval, season=None,
-                                         n_max=3, ylim=None):
+                                         n_max=3, ylim=None, save=True):
     import xarray as xr
     from aux_gps import run_MLR_diurnal_harmonics
     harmonics = xr.load_dataset(path / 'GNSS_PW_harmonics_diurnal.nc')
-    sites = sorted(list(set([x.split('_')[0] for x in harmonics])))
-    da = xr.DataArray([x for x in range(len(sites))], dims='GNSS')
-    da['GNSS'] = sites
+#    sites = sorted(list(set([x.split('_')[0] for x in harmonics])))
+#    da = xr.DataArray([x for x in range(len(sites))], dims='GNSS')
+#    da['GNSS'] = sites
+    sites = group_sites_to_xarray(upper=False)
+    sites_flat = [x for x in sites.values.flatten()]
+    da = xr.DataArray([x for x in range(len(sites_flat))], dims='GNSS')
+    da['GNSS'] = [x for x in range(len(da))]
     fg = xr.plot.FacetGrid(
         da,
         col='GNSS',
-        col_wrap=4,
+        col_wrap=3,
         sharex=False,
         sharey=False, figsize=(20, 20))
-    for i, (site, ax) in enumerate(zip(da['GNSS'].values, fg.axes.flatten())):
-        harm_site = harmonics[[x for x in harmonics if sites[i] in x]]
-        if site in ['elat', 'nrif']:
-            loc = 'upper center'
-            text = 0.1
-        elif site in ['elro', 'yrcm', 'ramo', 'slom', 'jslm']:
-            loc = 'upper right'
-            text = 0.1
-        else:
-            loc = None
-            text = 0.1
-        ax = run_MLR_diurnal_harmonics(harm_site, season=season, n_max=n_max, plot=True, ax=ax, legend_loc=loc)
-        ax.set_title('')
-        ax.set_ylabel('PW anomalies [mm]')
-        if ylim is not None:
-            ax.set_ylim(ylim[0], ylim[1])
-        ax.text(text, .85, site.upper(),
-                horizontalalignment='center', fontweight='bold',
-                transform=ax.transAxes)
-    for i, ax in enumerate(fg.axes.flatten()):
-        if i > (da.GNSS.size-1):
-            ax.set_axis_off()
-            pass
+    
+    for i in range(fg.axes.shape[0]):  # i is rows
+        for j in range(fg.axes.shape[1]):  # j is cols
+            site = sites.values[i, j]
+            ax = fg.axes[i, j]
+            try:
+                harm_site = harmonics[[x for x in harmonics if site in x]]
+                if site in ['nrif']:
+                    leg_loc = 'upper center'
+                elif site in ['yrcm', 'ramo']:
+                    leg_loc = 'lower center'
+                else:
+                    leg_loc = None
+                ax = run_MLR_diurnal_harmonics(harm_site, season=season, n_max=n_max, plot=True, ax=ax, legend_loc=leg_loc, ncol=2, legsize=10)
+                ax.set_xlabel('Hour of day [UTC]')
+                ax.yaxis.tick_left()
+                ax.grid()
+                ax.set_title('')
+                ax.set_ylabel('')
+                ax.text(0.1, .85, site.upper(),
+                        horizontalalignment='center', fontweight='bold',
+                        transform=ax.transAxes)
+                if j == 0:
+                    ax.set_ylabel('PW anomalies [mm]', fontsize=12)
+                elif j == 1:
+                    if i>5:
+                        ax.set_ylabel('PW anomalies [mm]', fontsize=12)
+            except TypeError:
+                ax.set_axis_off()
+                
+#    for i, (site, ax) in enumerate(zip(da['GNSS'].values, fg.axes.flatten())):
+#        harm_site = harmonics[[x for x in harmonics if sites[i] in x]]
+#        if site in ['elat', 'nrif']:
+#            loc = 'upper center'
+#            text = 0.1
+#        elif site in ['elro', 'yrcm', 'ramo', 'slom', 'jslm']:
+#            loc = 'upper right'
+#            text = 0.1
+#        else:
+#            loc = None
+#            text = 0.1
+#        ax = run_MLR_diurnal_harmonics(harm_site, season=season, n_max=n_max, plot=True, ax=ax, legend_loc=loc)
+#        ax.set_title('')
+#        ax.set_ylabel('PW anomalies [mm]')
+#        if ylim is not None:
+#            ax.set_ylim(ylim[0], ylim[1])
+#        ax.text(text, .85, site.upper(),
+#                horizontalalignment='center', fontweight='bold',
+#                transform=ax.transAxes)
+#    for i, ax in enumerate(fg.axes.flatten()):
+#        if i > (da.GNSS.size-1):
+#            ax.set_axis_off()
+#            pass
     fg.fig.tight_layout()
+    if save:
+        filename = 'pw_diurnal_harmonics_{}_{}.png'.format(n_max, season)
+#        plt.savefig(savefig_path / filename, bbox_inches='tight')
+        plt.savefig(savefig_path / filename, orientation='landscape')
     return fg
 
 
-def plot_gustiness(path=work_yuval, site='tela', season='JJA', ax=None):
+def plot_gustiness(path=work_yuval, ims_path=ims_path, site='tela',
+                   ims_site='HAIFA-TECHNION', season='JJA', pts=7, ax=None):
     import xarray as xr
-    from aux_gps import groupby_date_xr
-    g = xr.open_dataset(path / 'GNSS_IMS_G_israeli_10mins_anoms.nc')[site]
+    import numpy as np
+    g = xr.open_dataset(ims_path / 'IMS_G{}_anoms_israeli_10mins.nc'.format(pts))[ims_site]
     g.load()
     g = g.sel(time=g['time.season'] == season)
 #    date = groupby_date_xr(g)
@@ -220,6 +259,7 @@ def plot_gustiness(path=work_yuval, site='tela', season='JJA', ax=None):
     # ax.set_xticks(np.arange(0, 24, step=1))
     ax.yaxis.label.set_color('b')
     ax.tick_params(axis='y', colors='b')
+    ax.xaxis.set_ticks(np.arange(0, 23, 3))
     ax.grid()
     pw = xr.open_dataset(
         work_yuval /
@@ -231,7 +271,7 @@ def plot_gustiness(path=work_yuval, site='tela', season='JJA', ax=None):
 #    pw = pw.reset_coords(drop=True)
     pw = pw.groupby('time.hour').mean()
     axpw = ax.twinx()
-    PWline = pw.plot.line(ax=axpw, color='k', marker='s', label='PW')
+    PWline = pw.plot.line(ax=axpw, color='tab:green', marker='s', label='PW ({})'.format(season))
     axpw.axhline(0, color='k', linestyle='--')
     lns = Gline + PWline
     axpw.set_ylabel('PW anomalies [mm]')
@@ -239,7 +279,8 @@ def plot_gustiness(path=work_yuval, site='tela', season='JJA', ax=None):
     return lns
 
 
-def plot_gustiness_facetgrid(path=work_yuval, season='JJA', save=True):
+def plot_gustiness_facetgrid(path=work_yuval, ims_path=ims_path,
+                             season='JJA', save=True):
     import xarray as xr
     gnss_ims_dict = {
         'alon': 'ASHQELON-PORT', 'bshm': 'HAIFA-TECHNION', 'csar': 'HADERA-PORT',
@@ -254,6 +295,10 @@ def plot_gustiness_facetgrid(path=work_yuval, season='JJA', save=True):
     to_remove = ['kabr', 'nzrt', 'katz', 'elro', 'klhv', 'yrcm', 'slom']
     sites = [x for x in da['GNSS'].values if x not in to_remove]
     da = da.sel(GNSS=sites)
+    gnss_order=['bshm', 'mrav', 'drag', 'csar', 'yosh', 'dsea', 'tela', 'jslm',
+                'nrif', 'alon', 'ramo', 'elat']
+    df = da.to_dataframe('gnss')
+    da = df.reindex(gnss_order).to_xarray()['gnss']
     fg = xr.plot.FacetGrid(
         da,
         col='GNSS',
@@ -261,7 +306,9 @@ def plot_gustiness_facetgrid(path=work_yuval, season='JJA', save=True):
         sharex=False,
         sharey=False, figsize=(20, 20))
     for i, (site, ax) in enumerate(zip(da['GNSS'].values, fg.axes.flatten())):
-        lns = plot_gustiness(path=path, site=site, season=season, ax=ax)
+        lns = plot_gustiness(path=path, ims_path=ims_path,
+                             ims_site=gnss_ims_dict[site],
+                             site=site, season=season, ax=ax)
         labs = [l.get_label() for l in lns]
         if site in ['tela', 'alon', 'dsea', 'csar', 'elat', 'nrif']:
             ax.legend(lns, labs, loc='upper center',prop={'size':8}, framealpha=0.5, fancybox=True, title=site.upper())
@@ -695,7 +742,7 @@ def plot_box_df(df, x='month', title='TELA', marker='o',
         ax.set_ylim(*ylimits)
         if twin_attrs is not None:
             twinx.set_ylim(*twin_attrs['ylimits'])
-            align_yaxis(ax, 0, twinx, 0)
+            align_yaxis(ax, 0, twinxplot_mea, 0)
     if xlimits is not None:
         ax.set_xlim(*xlimits)
     return ax
@@ -1211,8 +1258,8 @@ def plot_israel_map(gis_path=gis_path, rc=rc, ax=None):
 
 
 def plot_israel_with_stations(gis_path=gis_path, dem_path=dem_path, ims=True,
-                              gps=True, radio=True, terrain=True,
-                              ims_names=False, save=True):
+                              gps=True, radio=True, terrain=True, alt=False,
+                              ims_names=False, gps_final=False, save=True):
     from PW_stations import produce_geo_gnss_solved_stations
     from aux_gps import geo_annotate
     from ims_procedures import produce_geo_ims
@@ -1236,19 +1283,27 @@ def plot_israel_with_stations(gis_path=gis_path, dem_path=dem_path, ims=True,
     # ims, gps = produce_geo_df(gis_path=gis_path, plot=False)
     if gps:
         print('getting solved GNSS israeli stations metadata...')
-        gps = produce_geo_gnss_solved_stations(path=gis_path, plot=False)
+        gps_df = produce_geo_gnss_solved_stations(path=gis_path, plot=False)
+        if gps_final:
+            to_drop = ['gilb', 'lhav', 'hrmn', 'nizn', 'spir']
+            gps_final_stations = [x for x in gps_df.index if x not in to_drop]
+            gps = gps_df.loc[gps_final_stations,:]
         gps.plot(ax=ax, color='k', edgecolor='black', marker='s')
         gps_stations = [x for x in gps.index]
-        to_plot_offset = ['mrav', 'klhv']
-        [gps_stations.remove(x) for x in to_plot_offset]
+        to_plot_offset = ['gilb', 'lhav']
+        # [gps_stations.remove(x) for x in to_plot_offset]
         gps_normal_anno = gps.loc[gps_stations, :]
-        gps_offset_anno = gps.loc[to_plot_offset, :]
+        # gps_offset_anno = gps.loc[to_plot_offset, :]
         geo_annotate(ax, gps_normal_anno.lon, gps_normal_anno.lat,
                      gps_normal_anno.index.str.upper(), xytext=(3, 3), fmt=None,
                      c='k', fw='bold', fs=10, colorupdown=False)
-        geo_annotate(ax, gps_offset_anno.lon, gps_offset_anno.lat,
-                     gps_offset_anno.index.str.upper(), xytext=(4, -6), fmt=None,
-                     c='k', fw='bold', fs=10, colorupdown=False)
+        if alt:
+            geo_annotate(ax, gps_normal_anno.lon, gps_normal_anno.lat,
+                         gps_normal_anno.alt, xytext=(4, -6), fmt='{:.0f}',
+                         c='k', fw='bold', fs=9, colorupdown=False)
+#        geo_annotate(ax, gps_offset_anno.lon, gps_offset_anno.lat,
+#                     gps_offset_anno.index.str.upper(), xytext=(4, -6), fmt=None,
+#                     c='k', fw='bold', fs=10, colorupdown=False)
         station_names.append('gps')
         legend.append('GNSS stations')
     if terrain:
@@ -1517,7 +1572,8 @@ def produce_table_mann_kendall(thresh=50):
 
 
 def plot_monthly_means_anomalies_with_station_mean(load_path=work_yuval,
-                                                   thresh=50, save=True):
+                                                   thresh=50, save=True,
+                                                   anoms=None):
     import xarray as xr
     import seaborn as sns
     from palettable.scientific import diverging as divsci
@@ -1525,9 +1581,10 @@ def plot_monthly_means_anomalies_with_station_mean(load_path=work_yuval,
     import matplotlib.dates as mdates
     import pandas as pd
     div_cmap = divsci.Vik_20.mpl_colormap
-    anoms = xr.load_dataset(
-            load_path /
-             'GNSS_PW_monthly_anoms_thresh_{:.0f}.nc'.format(thresh))
+    if anoms is None:
+        anoms = xr.load_dataset(
+                load_path /
+                'GNSS_PW_monthly_anoms_thresh_{:.0f}_homogenized.nc'.format(thresh))
     df = anoms.to_dataframe()
     df.columns = [x.upper() for x in df.columns]
     fig = plt.figure(figsize=(20, 10))
@@ -1954,9 +2011,193 @@ def plot_hist_with_seasons(da_ts):
     import seaborn as sns
     fig, ax = plt.subplots(figsize=(10, 7))
     sns.kdeplot(da_ts.dropna('time'), ax=ax, color='k')
-    sns.kdeplot(da_ts.sel(time=da_ts['time.season']=='DJF').dropna('time'), legend=False, ax=ax, shade=True)
-    sns.kdeplot(da_ts.sel(time=da_ts['time.season']=='MAM').dropna('time'),  legend=False,ax=ax, shade=True)
-    sns.kdeplot(da_ts.sel(time=da_ts['time.season']=='JJA').dropna('time'), legend=False ,ax=ax, shade=True)
-    sns.kdeplot(da_ts.sel(time=da_ts['time.season']=='SON').dropna('time'), legend=False, ax=ax, shade=True)
-    plt.legend(['ALL','MAM', 'DJF', 'SON', 'JJA'])
+    sns.kdeplot(
+        da_ts.sel(
+            time=da_ts['time.season'] == 'DJF').dropna('time'),
+        legend=False,
+        ax=ax,
+        shade=True)
+    sns.kdeplot(
+        da_ts.sel(
+            time=da_ts['time.season'] == 'MAM').dropna('time'),
+        legend=False,
+        ax=ax,
+        shade=True)
+    sns.kdeplot(
+        da_ts.sel(
+            time=da_ts['time.season'] == 'JJA').dropna('time'),
+        legend=False,
+        ax=ax,
+        shade=True)
+    sns.kdeplot(
+        da_ts.sel(
+            time=da_ts['time.season'] == 'SON').dropna('time'),
+        legend=False,
+        ax=ax,
+        shade=True)
+    plt.legend(['ALL', 'MAM', 'DJF', 'SON', 'JJA'])
     return
+
+
+def plot_diurnal_pw_all_seasons(path=work_yuval, season='ALL', ylim=[-2.7, 3.25
+                                                                     ], save=True):
+    import xarray as xr
+    pw = xr.load_dataset(path / 'GNSS_PW_anom_50_removed_daily.nc')
+    df_annual = pw.groupby('time.hour').mean().to_dataframe()
+    df_jja = pw.sel(time=pw['time.season']=='JJA').groupby('time.hour').mean().to_dataframe()
+    df_son = pw.sel(time=pw['time.season']=='SON').groupby('time.hour').mean().to_dataframe()
+    df_djf = pw.sel(time=pw['time.season']=='DJF').groupby('time.hour').mean().to_dataframe()
+    df_mam = pw.sel(time=pw['time.season']=='MAM').groupby('time.hour').mean().to_dataframe()
+    if season is None:
+        # plot annual diurnal cycle only:
+        fg = plot_diurnal_pw_geographical_segments(df_annual, fg=None, marker='o', color='b',
+                                                   ylim=ylim)
+    elif season == 'ALL':
+        fg = plot_diurnal_pw_geographical_segments(df_jja, fg=None, marker='s', color='tab:green', ylim=ylim)
+        fg = plot_diurnal_pw_geographical_segments(df_son, fg=fg, marker='^', color='tab:red', ylim=ylim)
+        fg = plot_diurnal_pw_geographical_segments(df_djf, fg=fg, marker='x', color='tab:blue')
+        fg = plot_diurnal_pw_geographical_segments(df_mam, fg=fg, marker='+', color='tab:orange',ylim=ylim)
+        fg = plot_diurnal_pw_geographical_segments(df_annual, fg=fg, marker='d', color='tab:purple',
+                                                   ylim=ylim)
+        sites = group_sites_to_xarray(False)
+        for i, (ax, site) in enumerate(zip(fg.axes.flatten(), sites.values.flatten())):
+            lns = ax.get_lines()
+            if site in ['yrcm', 'ramo']:
+                leg_loc = 'upper right'
+            elif site in ['nrif', 'elat']:
+                leg_loc = 'upper center'
+            else:
+                leg_loc = None
+            ax.legend(lns, ['JJA', 'SON', 'DJF', 'MAM', 'Annual'],prop={'size':10}, framealpha=0.5, fancybox=True,ncol=2, loc=leg_loc)
+    fg.fig.subplots_adjust(
+        top=0.993,
+        bottom=0.029,
+        left=0.034,
+        right=0.993,
+        hspace=0.259,
+        wspace=0.069)
+    if save:
+        filename = 'pw_diurnal_geo_{}.png'.format(season)    
+#        plt.savefig(savefig_path / filename, bbox_inches='tight')
+        plt.savefig(savefig_path / filename, orientation='landscape')
+    return fg
+
+
+def group_sites_to_xarray(upper=False):
+    import xarray as xr
+    import numpy as np
+    group1 = ['KABR', 'BSHM', 'CSAR', 'TELA', 'ALON', 'SLOM']
+    group2 = ['NZRT', 'MRAV', 'YOSH', 'JSLM', 'KLHV', 'YRCM', 'RAMO']
+    group3 = ['ELRO', 'KATZ', 'DRAG', 'DSEA', 'NRIF', 'ELAT']
+    if not upper:
+        group1 = [x.lower() for x in group1]
+        group2 = [x.lower() for x in group2]
+        group3 = [x.lower() for x in group3]
+    gr1 = xr.DataArray(group1, dims='GNSS')
+    gr2 = xr.DataArray(group2, dims='GNSS')
+    gr3 = xr.DataArray(group3, dims='GNSS')
+    gr1['GNSS'] = np.arange(0, len(gr1))
+    gr2['GNSS'] = np.arange(0, len(gr2))
+    gr3['GNSS'] = np.arange(0, len(gr3))
+    sites = xr.concat([gr1, gr2, gr3], 'group').T
+    return sites
+
+
+def plot_diurnal_pw_geographical_segments(df, fg=None, marker='o', color='b',
+                                          ylim=[-2, 3]):
+    import xarray as xr
+    import numpy as np
+    from matplotlib.ticker import MultipleLocator
+    from PW_stations import produce_geo_gnss_solved_stations
+    geo = produce_geo_gnss_solved_stations(plot=False)
+    sites = group_sites_to_xarray(upper=False)
+    sites_flat = [x for x in sites.values.flatten()]
+    da = xr.DataArray([x for x in range(len(sites_flat))], dims='GNSS')
+    da['GNSS'] = [x for x in range(len(da))]
+    if fg is None:
+        fg = xr.plot.FacetGrid(
+            da,
+            col='GNSS',
+            col_wrap=3,
+            sharex=False,
+            sharey=False, figsize=(20, 20))
+    for i in range(fg.axes.shape[0]):  # i is rows
+        for j in range(fg.axes.shape[1]):  # j is cols
+            try:
+                site = sites.values[i, j]
+                ax = fg.axes[i, j]
+                df.loc[:, site].plot(ax=ax, marker=marker, color=color)
+                ax.set_xlabel('Hour of day [UTC]')
+                ax.yaxis.tick_left()
+                ax.grid()
+#                ax.spines["top"].set_visible(False)
+#                ax.spines["right"].set_visible(False)
+#                ax.spines["bottom"].set_visible(False)
+                ax.xaxis.set_ticks(np.arange(0, 23, 3))
+                if j == 0:
+                    ax.set_ylabel('PW anomalies [mm]', fontsize=12)
+                elif j == 1:
+                    if i>5:
+                        ax.set_ylabel('PW anomalies [mm]', fontsize=12)
+                site_label = '{} ({:.0f})'.format(site.upper(), geo.loc[site].alt)
+                ax.text(.12, .85, site_label,
+                        horizontalalignment='center', fontweight='bold',
+                        transform=ax.transAxes)
+#                ax.yaxis.set_minor_locator(MultipleLocator(3))
+#                ax.yaxis.grid(
+#                    True,
+#                    which='minor',
+#                    linestyle='--',
+#                    linewidth=1,
+#                    alpha=0.7)
+#                ax.yaxis.grid(True, linestyle='--', linewidth=1, alpha=0.7)
+                if ylim is not None:
+                    ax.set_ylim(*ylim)
+            except KeyError:
+                ax.set_axis_off()
+#    for i, ax in enumerate(fg.axes[:, 0]):
+#        try:
+#            df[gr1].iloc[:, i].plot(ax=ax)
+#        except IndexError:
+#            ax.set_axis_off()
+#    for i, ax in enumerate(fg.axes[:, 1]):
+#        try:
+#            df[gr2].iloc[:, i].plot(ax=ax)
+#        except IndexError:
+#            ax.set_axis_off()
+#    for i, ax in enumerate(fg.axes[:, 2]):
+#        try:
+#            df[gr3].iloc[:, i].plot(ax=ax)
+#        except IndexError:
+#            ax.set_axis_off()
+
+    fg.fig.tight_layout()
+    fg.fig.subplots_adjust()
+    return fg
+
+
+def plot_october_2015(path=work_yuval):
+    import xarray as xr
+    pw_daily = xr.load_dataset(work_yuval /
+                               'GNSS_PW_daily_thresh_50_homogenized.nc')
+    pw = xr.load_dataset(work_yuval / 'GNSS_PW_thresh_50_homogenized.nc')
+    pw = pw[[x for x in pw if '_error' not in x]]
+    pw_daily = pw_daily[[x for x in pw if '_error' not in x]]
+    fig, ax = plt.subplots(figsize=(20,12))
+    ln1 = pw['tela'].sel(time=slice('2015-07','2015-12')).plot(linewidth=0.5, ax=ax)
+    ln2 = pw['jslm'].sel(time=slice('2015-07','2015-12')).plot(linewidth=0.5, ax=ax)
+    ln3 = pw_daily['tela'].sel(time=slice('2015-07','2015-12')).plot(color=ln1[0].get_color(), linewidth=2.0, ax=ax)
+    ln4 = pw_daily['jslm'].sel(time=slice('2015-07','2015-12')).plot(color=ln2[0].get_color(), linewidth=2.0, ax=ax)
+    ax.grid()
+    ax.legend(ln1+ln2+ln3+ln4, ['TELA-5mins', 'JSLM-5mins', 'TELA-daily', 'JSLM-daily'])
+    fig, ax = plt.subplots(figsize=(20,12))
+    ln1 = pw['tela'].sel(time='2015-10').plot(ax=ax)
+    ln2 = pw['jslm'].sel(time='2015-10').plot(ax=ax)
+    ax.grid()
+    ax.legend(ln1+ln2, ['TELA-5mins', 'JSLM-5mins'])
+    fig, ax = plt.subplots(figsize=(20,12))
+    ln1 = pw['tela'].sel(time=slice('2015-10-22', '2015-10-27')).plot(ax=ax)
+    ln2 = pw['jslm'].sel(time=slice('2015-10-22', '2015-10-27')).plot(ax=ax)
+    ax.grid()
+    ax.legend(ln1+ln2, ['TELA-5mins', 'JSLM-5mins'])
+    return ax
