@@ -36,7 +36,7 @@ def select_months(da_ts, months, remove=False, reindex=True):
 
 
 def run_MLR_diurnal_harmonics(harmonic_dss, season=None, n_max=4, plot=True,
-                              ax=None, legend_loc=None):
+                              ax=None, legend_loc=None, ncol=1, legsize=8):
     from sklearn.linear_model import LinearRegression
     from sklearn.metrics import explained_variance_score
     import matplotlib.pyplot as plt
@@ -48,10 +48,12 @@ def run_MLR_diurnal_harmonics(harmonic_dss, season=None, n_max=4, plot=True,
     except KeyError:
         field = 'no name'
     name = [x for x in harmonic_dss][0].split('_')[0]
-    if season is not None:
-        harmonic = harmonic_dss.sel(season=season)
-    else:
+    if season is None and 'season' not in harmonic_dss.dims:
         harmonic = harmonic_dss # .sel(season='ALL')
+    elif season is None and 'season' in harmonic_dss.dims:
+        harmonic = harmonic_dss.sel(season='ALL')
+    elif season is not None:
+        harmonic = harmonic_dss.sel(season=season)
     # pre-proccess:
     harmonic = harmonic.transpose('hour', 'cpd', ...)
     harmonic = harmonic.sel(cpd=slice(1, n_max))
@@ -86,10 +88,10 @@ def run_MLR_diurnal_harmonics(harmonic_dss, season=None, n_max=4, plot=True,
         ax.legend(
             S + S_total + [field],
             prop={
-                'size': 8},
+                'size': legsize},
             framealpha=0.5,
             fancybox=True,
-            loc=legend_loc)
+            loc=legend_loc, ncol=ncol)
         ax.grid()
         ax.set_xlabel('Time of day [UTC]')
         # ax.set_ylabel('{} anomalies [mm]'.format(field))
@@ -164,8 +166,9 @@ def harmonic_da(da_ts, n=3, field=None, init=None):
             verbose=False)
         name = da_ts.name.split('_')[0]
         params_da = xr.DataArray([x for x in res.attrs.values()],
-                                  dims=['params'])
+                                  dims=['params', 'val/err'])
         params_da['params'] = [x for x in res.attrs.keys()]
+        params_da['val/err'] = ['value', 'stderr']
         params_da.name = name + '_params'
         name = res.name.split('_')[0]
         diurnal_mean = res.groupby('{}.hour'.format(time_dim)).mean()
@@ -193,7 +196,10 @@ def harmonic_da(da_ts, n=3, field=None, init=None):
 def anomalize_xr(da_ts, freq='D'):  # i.e., like deseason
     time_dim = list(set(da_ts.dims))[0]
     attrs = da_ts.attrs
-    name = da_ts.name
+    try:
+        name = da_ts.name
+    except AttributeError:
+        name = ''
     if freq == 'D':
         print('removing daily means from {}'.format(name))
         date = groupby_date_xr(da_ts)
@@ -827,11 +833,16 @@ def fit_da_to_model(da, params=None, modelname='sin', method='leastsq', times=No
     jul, jul_no_nans = get_julian_dates_from_da(da)
     y = da.dropna(time_dim).values
     result = model.fit(**params, data=y, time=jul_no_nans, method=method)
+    if not result.success:
+        raise ValueError('model not fitted properly...')
     fit_y = result.eval(**result.best_values, time=jul)
     fit = xr.DataArray(fit_y, dims=time_dim)
     fit[time_dim] = da[time_dim]
     fit.name = da.name + '_fit'
-    fit.attrs.update(**result.best_values)
+    p = {}
+    for name, param in result.params.items():
+        p[name] = [param.value, param.stderr]
+    fit.attrs.update(**p)
     # return fit
     if verbose:
         print(result.best_values)
