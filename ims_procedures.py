@@ -106,7 +106,7 @@ def perform_harmonic_analysis_all_IMS(path=ims_path, var='BP', n=4,
     return dss_all
 
 
-def align_10mins_ims_to_gnss_and_save(ims_path=ims_path, field='G',
+def align_10mins_ims_to_gnss_and_save(ims_path=ims_path, field='G7',
                                       gnss_ims_dict=gnss_ims_dict,
                                       savepath=work_yuval):
     import xarray as xr
@@ -133,19 +133,21 @@ def align_10mins_ims_to_gnss_and_save(ims_path=ims_path, field='G',
 def produce_10mins_gustiness(path=ims_path, rolling=5):
     import xarray as xr
     from aux_gps import keep_iqr
+    from aux_gps import xr_reindex_with_date_range
     ws = xr.load_dataset(path / 'IMS_WS_israeli_10mins.nc')
     stations = [x for x in ws.data_vars]
     g_list = []
     for station in stations:
         print('proccesing station {}'.format(station))
         attrs = ws[station].attrs
-        g = ws[station].rolling(time=rolling).std() / ws[station].rolling(time=rolling).mean()
+        g = ws[station].rolling(time=rolling, center=True).std() / ws[station].rolling(time=rolling, center=True).mean()
         g = keep_iqr(g)
+        g = xr_reindex_with_date_range(g, freq='10min')
         g.name = station
         g.attrs = attrs
         g_list.append(g)
     G = xr.merge(g_list)
-    filename = 'IMS_G_israeli_10mins.nc'
+    filename = 'IMS_G{}_israeli_10mins.nc'.format(rolling)
     print('saving {} to {}'.format(filename, path))
     comp = dict(zlib=True, complevel=9)  # best compression
     encoding = {var: comp for var in G.data_vars}
