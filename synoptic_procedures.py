@@ -10,6 +10,11 @@ from pathlib import Path
 cwd = Path().cwd()
 
 
+def slice_da_with_synoptic_class(da_ts, syn_class=None, syn_upper='PT'):
+    """infer freq for da_ts, then try where """
+    return
+
+
 def read_synoptic_classification(
         path=cwd,
         filename='synoptic_classification_1948-8_May_2020.xls', report=True):
@@ -53,6 +58,7 @@ def read_synoptic_classification(
     df.loc[(df['class'] <= 10) & (df['class'] >= 7), 'upper_class'] = 'H'
     df.loc[(df['class'] <= 15) & (df['class'] >= 12), 'upper_class'] = 'CL'
     df['upper_class'] = df['upper_class'].fillna('Other')
+    df.index.name = 'time'
     if report:
         for code in sorted(df['class'].unique()):
             percent = 100 * (df['class'] == code).sum() / df['class'].size
