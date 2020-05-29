@@ -2039,36 +2039,59 @@ def plot_hist_with_seasons(da_ts):
     return
 
 
-def plot_diurnal_pw_all_seasons(path=work_yuval, season='ALL', ylim=[-2.7, 3.25
-                                                                     ], save=True):
+def plot_diurnal_pw_all_seasons(path=work_yuval, season='ALL', synoptic=None,
+                                ylim=[-2.7, 3.25], save=True):
     import xarray as xr
+    from synoptic_procedures import slice_xr_with_synoptic_class
     pw = xr.load_dataset(path / 'GNSS_PW_anom_50_removed_daily.nc')
     df_annual = pw.groupby('time.hour').mean().to_dataframe()
-    df_jja = pw.sel(time=pw['time.season']=='JJA').groupby('time.hour').mean().to_dataframe()
-    df_son = pw.sel(time=pw['time.season']=='SON').groupby('time.hour').mean().to_dataframe()
-    df_djf = pw.sel(time=pw['time.season']=='DJF').groupby('time.hour').mean().to_dataframe()
-    df_mam = pw.sel(time=pw['time.season']=='MAM').groupby('time.hour').mean().to_dataframe()
-    if season is None:
+    if season is None and synoptic is None:
         # plot annual diurnal cycle only:
         fg = plot_diurnal_pw_geographical_segments(df_annual, fg=None, marker='o', color='b',
                                                    ylim=ylim)
-    elif season == 'ALL':
+        legend = ['Annual']
+    elif season == 'ALL' and synoptic is None:
+        df_jja = pw.sel(time=pw['time.season']=='JJA').groupby('time.hour').mean().to_dataframe()
+        df_son = pw.sel(time=pw['time.season']=='SON').groupby('time.hour').mean().to_dataframe()
+        df_djf = pw.sel(time=pw['time.season']=='DJF').groupby('time.hour').mean().to_dataframe()
+        df_mam = pw.sel(time=pw['time.season']=='MAM').groupby('time.hour').mean().to_dataframe()
         fg = plot_diurnal_pw_geographical_segments(df_jja, fg=None, marker='s', color='tab:green', ylim=ylim)
         fg = plot_diurnal_pw_geographical_segments(df_son, fg=fg, marker='^', color='tab:red', ylim=ylim)
         fg = plot_diurnal_pw_geographical_segments(df_djf, fg=fg, marker='x', color='tab:blue')
         fg = plot_diurnal_pw_geographical_segments(df_mam, fg=fg, marker='+', color='tab:orange',ylim=ylim)
         fg = plot_diurnal_pw_geographical_segments(df_annual, fg=fg, marker='d', color='tab:purple',
                                                    ylim=ylim)
-        sites = group_sites_to_xarray(False)
-        for i, (ax, site) in enumerate(zip(fg.axes.flatten(), sites.values.flatten())):
-            lns = ax.get_lines()
-            if site in ['yrcm', 'ramo']:
-                leg_loc = 'upper right'
-            elif site in ['nrif', 'elat']:
-                leg_loc = 'upper center'
-            else:
-                leg_loc = None
-            ax.legend(lns, ['JJA', 'SON', 'DJF', 'MAM', 'Annual'],prop={'size':10}, framealpha=0.5, fancybox=True,ncol=2, loc=leg_loc)
+        legend = ['JJA', 'SON', 'DJF', 'MAM', 'Annual']
+    elif season is None and synoptic == 'ALL':
+        df_pt = slice_xr_with_synoptic_class(pw, path=path, syn_class='PT').groupby('time.hour').mean().to_dataframe()
+        df_rst = slice_xr_with_synoptic_class(pw, path=path, syn_class='RST').groupby('time.hour').mean().to_dataframe()
+        df_cl = slice_xr_with_synoptic_class(pw, path=path, syn_class='CL').groupby('time.hour').mean().to_dataframe()
+        df_h = slice_xr_with_synoptic_class(pw, path=path, syn_class='H').groupby('time.hour').mean().to_dataframe()
+        fg = plot_diurnal_pw_geographical_segments(df_pt, fg=None, marker='s', color='tab:green', ylim=ylim)
+        fg = plot_diurnal_pw_geographical_segments(df_rst, fg=fg, marker='^', color='tab:red', ylim=ylim)
+        fg = plot_diurnal_pw_geographical_segments(df_cl, fg=fg, marker='x', color='tab:blue')
+        fg = plot_diurnal_pw_geographical_segments(df_h, fg=fg, marker='+', color='tab:orange',ylim=ylim)
+        fg = plot_diurnal_pw_geographical_segments(df_annual, fg=fg, marker='d', color='tab:purple',
+                                                   ylim=ylim)
+        legend = ['PT', 'RST', 'CL', 'H', 'Annual']
+    sites = group_sites_to_xarray(False)
+    for i, (ax, site) in enumerate(zip(fg.axes.flatten(), sites.values.flatten())):
+        lns = ax.get_lines()
+        if site in ['yrcm', 'ramo']:
+            leg_loc = 'upper right'
+        elif site in ['nrif', 'elat']:
+            leg_loc = 'upper center'
+        else:
+            leg_loc = None
+        ax.legend(
+            lns,
+            legend,
+            prop={
+                'size': 10},
+            framealpha=0.5,
+            fancybox=True,
+            ncol=2,
+            loc=leg_loc)
     fg.fig.subplots_adjust(
         top=0.993,
         bottom=0.029,
