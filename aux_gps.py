@@ -359,7 +359,10 @@ def rename_data_vars(ds, suffix='_error', remove_suffix=False, verbose=False):
     if not isinstance(ds, xr.Dataset):
         raise ValueError('input must be an xarray dataset object!')
     vnames = [x for x in ds.data_vars]
-    new_names = [x + suffix for x in ds.data_vars]
+    if remove_suffix:
+        new_names = [x.replace(suffix, '') for x in ds.data_vars]
+    else:
+        new_names = [x + suffix for x in ds.data_vars]
     name_dict = dict(zip(vnames, new_names))
     ds = ds.rename_vars(name_dict)
     if verbose:
@@ -373,15 +376,16 @@ def remove_duplicate_spaces_in_string(line):
     return line_removed
 
 
-def save_ncfile(xarray, savepath, filename='temp.nc'):
+def save_ncfile(xarray, savepath, filename='temp.nc', engine=None, dtype=None,
+                fillvalue=None):
     import xarray as xr
     print('saving {} to {}'.format(filename, savepath))
-    comp = dict(zlib=True, complevel=9)  # best compression
+    comp = dict(zlib=True, complevel=9, dtype=dtype, _FillValue=fillvalue)  # best compression
     if isinstance(xarray, xr.Dataset):
         encoding = {var: comp for var in xarray}
     elif isinstance(xarray, xr.DataArray):
         encoding = {var: comp for var in xarray.to_dataset()}
-    xarray.to_netcdf(savepath / filename, 'w', encoding=encoding)
+    xarray.to_netcdf(savepath / filename, 'w', encoding=encoding, engine=engine)
     print('File saved!')
     return
 
