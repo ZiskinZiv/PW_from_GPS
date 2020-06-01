@@ -87,15 +87,22 @@ def download_ims_single_station(stationid, savepath=None,
         """gets ims station raw data, i.e., r.json()['data'] and returns
         a pandas dataframe"""
         import pandas as pd
+        from pytz import timezone
         if ch_name is not None:
             datetimes = [x['datetime'] for x in raw_data]
+            # Local datetimes:
+            dts = [x.split('+')[0] for x in datetimes]
+            # bool mask for DST:
+            dts_dst = [x.split('+')[-1] for x in datetimes]
+            dst_bool = [True if x == '03:00' else False for x in dts_dst]
+            jer = timezone('Asia/Jerusalem')
             data = [x['channels'][0] for x in raw_data]
-            df = pd.DataFrame.from_records(data,
-                                           index=pd.to_datetime(datetimes,
-                                                                utc=True))
+            df = pd.DataFrame.from_records(data, index=pd.to_datetime(dts))
             df.drop(['alias', 'description'], axis=1, inplace=True)
             cols = [ch_name + '_' + x for x in df.columns]
             df.columns = cols
+            df = df.tz_localize(jer, ambiguous=dst_bool, nonexistent='shift_forward')
+            df = df.tz_convert('UTC')
         elif ch_name is None:
             # add all channels d/l here:
             datetimes = [x['datetime'] for x in raw_data]
