@@ -224,7 +224,7 @@ def plot_MLR_GNSS_PW_harmonics_facetgrid(path=work_yuval, season=None,
 #                horizontalalignment='center', fontweight='bold',
 #                transform=ax.transAxes)
 #    for i, ax in enumerate(fg.axes.flatten()):
-#        if i > (da.GNSS.size-1):
+#        if i > (da.GNSS.telasize-1):
 #            ax.set_axis_off()
 #            pass
     fg.fig.tight_layout()
@@ -236,12 +236,22 @@ def plot_MLR_GNSS_PW_harmonics_facetgrid(path=work_yuval, season=None,
 
 
 def plot_gustiness(path=work_yuval, ims_path=ims_path, site='tela',
-                   ims_site='HAIFA-TECHNION', season='JJA', pts=7, ax=None):
+                   ims_site='HAIFA-TECHNION', season='JJA', month=None, pts=7,
+                   ax=None):
     import xarray as xr
     import numpy as np
     g = xr.open_dataset(ims_path / 'IMS_G{}_anoms_israeli_10mins.nc'.format(pts))[ims_site]
     g.load()
-    g = g.sel(time=g['time.season'] == season)
+    if season is not None:
+        g = g.sel(time=g['time.season'] == season)
+        label = 'Gustiness {} IMS station in {} season'.format(
+            site, season)
+    elif month is not None:
+        g = g.sel(time=g['time.month'] == month)
+        label = 'Gustiness {} IMS station in {} month'.format(
+            site, month)
+    elif season is not None and month is not None:
+        raise('pls pick either season or month...')
 #    date = groupby_date_xr(g)
 #    # g_anoms = g.groupby('time.month') - g.groupby('time.month').mean('time')
 #    g_anoms = g.groupby(date) - g.groupby(date).mean('time')
@@ -250,9 +260,7 @@ def plot_gustiness(path=work_yuval, ims_path=ims_path, site='tela',
     if ax is None:
         fig, ax = plt.subplots(figsize=(16, 8))
     Gline = G.plot(ax=ax, color='b', marker='o', label='Gustiness')
-    ax.set_title(
-        'Gustiness {} IMS station in {} season'.format(
-            site, season))
+    ax.set_title(label)
     ax.axhline(0, color='b', linestyle='--')
     ax.set_ylabel('Gustiness anomalies [dimensionless]', color='b')
     ax.set_xlabel('Time of day [UTC]')
@@ -261,11 +269,14 @@ def plot_gustiness(path=work_yuval, ims_path=ims_path, site='tela',
     ax.tick_params(axis='y', colors='b')
     ax.xaxis.set_ticks(np.arange(0, 23, 3))
     ax.grid()
-    pw = xr.open_dataset(
+    pw = xr.open_dataset(tela
         work_yuval /
         'GNSS_PW_hourly_anoms_thresh_50_homogenized.nc')[site]
     pw.load().dropna('time')
-    pw = pw.sel(time=pw['time.season'] == season)
+    if season is not None:
+        pw = pw.sel(time=pw['time.season'] == season)
+    elif month is not None:
+        pw = pw.sel(time=pw['time.month'] == month)
 #    date = groupby_date_xr(pw)
 #    pw = pw.groupby(date) - pw.groupby(date).mean('time')
 #    pw = pw.reset_coords(drop=True)
@@ -280,7 +291,7 @@ def plot_gustiness(path=work_yuval, ims_path=ims_path, site='tela',
 
 
 def plot_gustiness_facetgrid(path=work_yuval, ims_path=ims_path,
-                             season='JJA', save=True):
+                             season='JJA', month=None, save=True):
     import xarray as xr
     gnss_ims_dict = {
         'alon': 'ASHQELON-PORT', 'bshm': 'HAIFA-TECHNION', 'csar': 'HADERA-PORT',
@@ -308,7 +319,7 @@ def plot_gustiness_facetgrid(path=work_yuval, ims_path=ims_path,
     for i, (site, ax) in enumerate(zip(da['GNSS'].values, fg.axes.flatten())):
         lns = plot_gustiness(path=path, ims_path=ims_path,
                              ims_site=gnss_ims_dict[site],
-                             site=site, season=season, ax=ax)
+                             site=site, season=season, month=month, ax=ax)
         labs = [l.get_label() for l in lns]
         if site in ['tela', 'alon', 'dsea', 'csar', 'elat', 'nrif']:
             ax.legend(lns, labs, loc='upper center',prop={'size':8}, framealpha=0.5, fancybox=True, title=site.upper())
