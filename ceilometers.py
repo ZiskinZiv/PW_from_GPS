@@ -15,7 +15,7 @@ stations_dict = {
     'Jerusalem': ['JR', 35.2, 31.8, 830]}
 
 
-def plot_pw_mlh(path=work_yuval, ceil_path=ceil_path, kind='scatter'):
+def plot_pw_mlh(path=work_yuval, ceil_path=ceil_path, kind='scatter', month=None):
     import xarray as xr
     import matplotlib.pyplot as plt
     mlh = xr.load_dataset(ceil_path / 'MLH_from_ceilometers.nc')
@@ -36,11 +36,12 @@ def plot_pw_mlh(path=work_yuval, ceil_path=ceil_path, kind='scatter'):
                 20, 15))
         for i, ax in enumerate(axes[:, 0].flatten()):
             ax = twin_hourly_mean_plot(
-                pw[couples[i][0]], mlh[couples[i][1]], month=None, ax=ax, title=False)
+                pw[couples[i][0]], mlh[couples[i][1]], month=month, ax=ax, title=False)
         for i, ax in enumerate(axes[:, 1].flatten()):
             ax = scatter_plot_pw_mlh(pw[couples[i][0]],
                                      mlh[couples[i][1]],
                                      diurnal=True,
+                                     month=month,
                                      ax=ax,
                                      title=False,
                                      leg_loc='lower right')
@@ -49,7 +50,7 @@ def plot_pw_mlh(path=work_yuval, ceil_path=ceil_path, kind='scatter'):
 
 
 def scatter_plot_pw_mlh(pw, mlh, diurnal=False, ax=None, title=True,
-                        leg_loc='best'):
+                        leg_loc='best', month=None):
     from aux_gps import dim_intersection
     import xarray as xr
     import numpy as np
@@ -58,16 +59,23 @@ def scatter_plot_pw_mlh(pw, mlh, diurnal=False, ax=None, title=True,
     from PW_stations import produce_geo_gnss_solved_stations
     df = produce_geo_gnss_solved_stations(plot=False)
     pw_alt = df.loc[pw.name, 'alt']
-    newtime = dim_intersection([pw, mlh], 'time')
-    pw = pw.sel(time=newtime)
     pw_attrs = pw.attrs
-    mlh = mlh.sel(time=newtime)
     mlh_attrs = mlh.attrs
     if diurnal:
+        if month is not None:
+            pw = pw.sel(time=pw['time.month'] == month)
+        else:
+            newtime = dim_intersection([pw, mlh], 'time')
+            pw = pw.sel(time=newtime)
+            mlh = mlh.sel(time=newtime)
         pw = pw.groupby('time.hour').mean()
         pw.attrs = pw_attrs
         mlh = mlh.groupby('time.hour').mean()
         mlh.attrs = mlh_attrs
+    else:
+        newtime = dim_intersection([pw, mlh], 'time')
+        pw = pw.sel(time=newtime)
+        mlh = mlh.sel(time=newtime)
     ds = xr.merge([pw, mlh])
     if ax is None:
         fig, ax = plt.subplots(figsize=(10, 10))
@@ -106,19 +114,15 @@ def twin_hourly_mean_plot(pw, mlh, month=8, ax=None, title=True,
     from aux_gps import dim_intersection
     import matplotlib.pyplot as plt
     from calendar import month_abbr
-    from PW_stations import produce_geo_gnss_solved_stations
-    df = produce_geo_gnss_solved_stations(plot=False)
-    pw_alt = df.loc[pw.name, 'alt']
+#    from PW_stations import produce_geo_gnss_solved_stations
+#    df = produce_geo_gnss_solved_stations(plot=False)
     # first run multi-year month mean:
     if month is not None:
-        pw_month = pw.sel(time=pw['time.month'] == month)
-        pw_years = [
-            pw_month.dropna('time').time.dt.year.min().item(),
-            pw_month.dropna('time').time.dt.year.max().item()]
-        pw_m_hour = pw_month.groupby('time.hour').mean()
-    newtime = dim_intersection([pw, mlh], 'time')
-    pw = pw.sel(time=newtime)
-    mlh = mlh.sel(time=newtime)
+        pw = pw.sel(time=pw['time.month'] == month).dropna('time')
+    else:
+        newtime = dim_intersection([pw, mlh], 'time')
+        pw = pw.sel(time=newtime)
+        mlh = mlh.sel(time=newtime)
     pw_hour = pw.groupby('time.hour').mean()
     pw_std = pw.groupby('time.hour').std()
     pw_hour_plus = (pw_hour + pw_std).values
@@ -127,7 +131,8 @@ def twin_hourly_mean_plot(pw, mlh, month=8, ax=None, title=True,
     mlh_std = mlh.groupby('time.hour').std()
     mlh_hour_minus = (mlh_hour - mlh_std).values
     mlh_hour_plus = (mlh_hour + mlh_std).values
-    years = [mlh.time.dt.year.min().item(), mlh.time.dt.year.max().item()]
+    mlhyears = [mlh.time.dt.year.min().item(), mlh.time.dt.year.max().item()]
+    pwyears = [pw.time.dt.year.min().item(), pw.time.dt.year.max().item()]
     mlh_month = mlh.time.dt.month.to_dataframe()['month'].value_counts().index[0]
     if ax is None:
         fig, ax = plt.subplots(figsize=(10, 8))
@@ -150,14 +155,14 @@ def twin_hourly_mean_plot(pw, mlh, month=8, ax=None, title=True,
 #        handles1 = [h[0] for h in handles1]
 #        hand = handles + handles1
 #        labs = labels + labels1
-    pw_label = 'PW: {}-{}, {} ({} pts)'.format(years[0], years[1], month_abbr[mlh_month], mlh.size)
-    mlh_label = 'MLH: {}-{}, {} ({} pts)'.format(years[0], years[1], month_abbr[mlh_month], mlh.size)
-    if month is not None:
-        pwmln = pw_m_hour.plot(color='tab:orange', marker='^', ax=ax)
-        pwm_label = 'PW: {}-{}, {} ({} pts)'.format(pw_years[0], pw_years[1], month_abbr[month], pw_month.dropna('time').size)
-        ax.legend(pwln + mlhln + pwmln, [pw_label, mlh_label, pwm_label], loc=leg_loc)
-    else:
-        ax.legend(pwln + mlhln, [pw_label, mlh_label], loc=leg_loc)
+    pw_label = 'PW: {}-{}, {} ({} pts)'.format(pwyears[0], pwyears[1], month_abbr[mlh_month], pw.size)
+    mlh_label = 'MLH: {}-{}, {} ({} pts)'.format(mlhyears[0], mlhyears[1], month_abbr[mlh_month], mlh.size)
+#    if month is not None:
+#        pwmln = pw_m_hour.plot(color='tab:orange', marker='^', ax=ax)
+#        pwm_label = 'PW: {}-{}, {} ({} pts)'.format(pw_years[0], pw_years[1], month_abbr[month], pw_month.dropna('time').size)
+#        ax.legend(pwln + mlhln + pwmln, [pw_label, mlh_label, pwm_label], loc=leg_loc)
+#    else:
+    ax.legend(pwln + mlhln, [pw_label, mlh_label], loc=leg_loc)
     ax.tick_params(axis='y', colors=blue)
     twin.tick_params(axis='y', colors=red)
     ax.set_ylabel('PW [mm]', color=blue)

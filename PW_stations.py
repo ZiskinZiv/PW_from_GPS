@@ -3421,10 +3421,11 @@ def calculate_zwd_altitude_fit(path=work_yuval, model='TSEN', plot=True):
 def select_PPP_field_thresh_and_combine_save_all(
         path=work_yuval, thresh=None, to_drop=['hrmn', 'nizn', 'spir'],
         combine_dict={'klhv': ['klhv', 'lhav'], 'mrav': ['gilb', 'mrav']},
-        field='ZWD'):
+        field='ZWD', extra_name=None):
     import xarray as xr
     import numpy as np
     from aux_gps import path_glob
+    df = produce_geo_gnss_solved_stations(plot=False)
     file = path_glob(path, '{}_unselected*.nc'.format(field.upper()))[0]
     ds = xr.load_dataset(file)
     zwd_thresh = ds.map(
@@ -3474,7 +3475,13 @@ def select_PPP_field_thresh_and_combine_save_all(
     zwd_thresh.attrs['mean_days_dropped_percent'] = '{:.2f}'.format(mean_days_dropped_percent)
     zwd_thresh.attrs['mean_months_dropped_percent'] = '{:.2f}'.format(mean_months_dropped_percent)
     zwd_thresh = zwd_thresh[sorted(zwd_thresh)]
-    filename = '{}_thresh_{:.0f}.nc'.format(field.upper(), thresh)
+    # update attrs:
+    for zwd in [x for x in zwd_thresh if '_error' not in x]:
+        zwd_thresh[zwd].attrs.update(df.loc[zwd, ['lat', 'lon', 'alt', 'name']].to_dict())
+    if extra_name is not None:
+        filename = '{}_thresh_{:.0f}_{}.nc'.format(field.upper(), thresh, extra_name)
+    else:
+        filename = '{}_thresh_{:.0f}.nc'.format(field.upper(), thresh)
     comp = dict(zlib=True, complevel=9)  # best compression
     encoding = {var: comp for var in zwd_thresh.data_vars}
     zwd_thresh.to_netcdf(path / filename, 'w', encoding=encoding)
