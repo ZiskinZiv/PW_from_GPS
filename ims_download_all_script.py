@@ -82,6 +82,7 @@ def download_ims_single_station(stationid, savepath=None,
     import requests
     import pandas as pd
     import logging
+    from requests.exceptions import SSLError
 
     def parse_ims_to_df(raw_data, ch_name):
         """gets ims station raw data, i.e., r.json()['data'] and returns
@@ -201,7 +202,11 @@ def download_ims_single_station(stationid, savepath=None,
                 dl_command = ('https://api.ims.gov.il/v1/envista/stations/' +
                               str(stationid) + '/data/' + str(ch_id) +
                               '?from=' + first_date + '&to=' + last_date)
-                r = requests.get(dl_command, headers=headers)
+                try:
+                    r = requests.get(dl_command, headers=headers)
+                except SSLError:
+                    logger.warning('SSLError')
+                    r = requests.get(dl_command, headers=headers)
                 if r.status_code == 204:  # i.e., no content:
                     logger.warning('no content for this search, skipping...')
                     continue
