@@ -114,6 +114,8 @@ def harmonic_analysis_xr(da, n=6, normalize=False, anomalize=False, freq='D',
         field = da.attrs['channel_name']
     except KeyError:
         field = user_field_name
+    if field is None:
+        field = ''
     if normalize:
         da = normalize_xr(da, norm=1)
     time_dim = list(set(da.dims))[0]
@@ -166,9 +168,9 @@ def harmonic_da(da_ts, n=3, field=None, init=None):
             verbose=False)
         name = da_ts.name.split('_')[0]
         params_da = xr.DataArray([x for x in res.attrs.values()],
-                                  dims=['params', 'val/err'])
+                                  dims=['params', 'val_err'])
         params_da['params'] = [x for x in res.attrs.keys()]
-        params_da['val/err'] = ['value', 'stderr']
+        params_da['val_err'] = ['value', 'stderr']
         params_da.name = name + '_params'
         name = res.name.split('_')[0]
         diurnal_mean = res.groupby('{}.hour'.format(time_dim)).mean()
@@ -194,22 +196,35 @@ def harmonic_da(da_ts, n=3, field=None, init=None):
 
 
 def anomalize_xr(da_ts, freq='D'):  # i.e., like deseason
+    import xarray as xr
     time_dim = list(set(da_ts.dims))[0]
     attrs = da_ts.attrs
+    if isinstance(da_ts, xr.Dataset):
+        da_attrs = dict(zip([x for x in da_ts],[da_ts[x].attrs for x in da_ts]))
     try:
         name = da_ts.name
     except AttributeError:
         name = ''
+    if isinstance(da_ts, xr.Dataset):
+        name = [x for x in da_ts]
     if freq == 'D':
         print('removing daily means from {}'.format(name))
+        frq = 'daily'
         date = groupby_date_xr(da_ts)
         da_anoms = da_ts.groupby(date) - da_ts.groupby(date).mean()
     elif freq == 'MS':
         print('removing monthly means from {}'.format(name))
+        frq = 'monthly'
         da_anoms = da_ts.groupby('{}.month'.format(
             time_dim)) - da_ts.groupby('{}.month'.format(time_dim)).mean()
     da_anoms = da_anoms.reset_coords(drop=True)
     da_anoms.attrs.update(attrs)
+    da_anoms.attrs.update(action='removed {} means'.format(frq))
+    # if dataset, update attrs for each dataarray and add action='removed x means'
+    if isinstance(da_ts, xr.Dataset):
+        for x in da_ts:
+            da_anoms[x].attrs.update(da_attrs.get(x))
+            da_anoms[x].attrs.update(action='removed {} means'.format(frq))
     return da_anoms
 
 
