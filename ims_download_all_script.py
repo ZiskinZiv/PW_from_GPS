@@ -160,7 +160,7 @@ def download_ims_single_station(stationid, savepath=None,
             stations_10mins['stationId'] == stationid).dropna()
     active = stations_10mins['active'].where(
             stations_10mins['stationId'] == stationid).dropna()
-    meta['name'] = '-'.join(st_name.iloc[0].split(' '))
+    meta['name'] = '-'.join(st_name.iloc[0].split())
     meta['id'] = stationid
     meta['loc'] = location.iloc[0]
     meta['active'] = active.iloc[0]
