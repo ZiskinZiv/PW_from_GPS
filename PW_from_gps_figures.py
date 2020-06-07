@@ -240,7 +240,7 @@ def plot_gustiness(path=work_yuval, ims_path=ims_path, site='tela',
                    ax=None):
     import xarray as xr
     import numpy as np
-    g = xr.open_dataset(ims_path / 'IMS_G{}_anoms_israeli_10mins.nc'.format(pts))[ims_site]
+    g = xr.open_dataset(ims_path / 'IMS_G{}_israeli_10mins_daily_anoms.nc'.format(pts))[ims_site]
     g.load()
     if season is not None:
         g = g.sel(time=g['time.season'] == season)
@@ -269,7 +269,7 @@ def plot_gustiness(path=work_yuval, ims_path=ims_path, site='tela',
     ax.tick_params(axis='y', colors='b')
     ax.xaxis.set_ticks(np.arange(0, 23, 3))
     ax.grid()
-    pw = xr.open_dataset(tela
+    pw = xr.open_dataset(
         work_yuval /
         'GNSS_PW_hourly_anoms_thresh_50_homogenized.nc')[site]
     pw.load().dropna('time')
@@ -440,7 +440,8 @@ def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
     # ims, gps = produce_geo_df(gis_path=gis_path, plot=False)
     print('getting solved GNSS israeli stations metadata...')
     gps = produce_geo_gnss_solved_stations(path=gis_path, plot=False)
-    removed = ['hrmn', 'nizn', 'spir']
+    # removed = ['hrmn', 'nizn', 'spir']
+    removed = ['hrmn']
     merged = ['klhv', 'lhav', 'mrav', 'gilb']
     gps_list = [x for x in gps.index if x not in merged and x not in removed]
     gps.loc[gps_list, :].plot(ax=ax_map, color='black', edgecolor='black', marker='s',
@@ -2054,7 +2055,8 @@ def plot_diurnal_pw_all_seasons(path=work_yuval, season='ALL', synoptic=None,
                                 ylim=[-2.7, 3.25], save=True):
     import xarray as xr
     from synoptic_procedures import slice_xr_with_synoptic_class
-    pw = xr.load_dataset(path / 'GNSS_PW_anom_50_removed_daily.nc')
+    gnss_filename = 'GNSS_PW_anom_50_for_diurnal_analysis_removed_daily.nc'
+    pw = xr.load_dataset(path / gnss_filename)
     df_annual = pw.groupby('time.hour').mean().to_dataframe()
     if season is None and synoptic is None:
         # plot annual diurnal cycle only:
@@ -2120,9 +2122,9 @@ def plot_diurnal_pw_all_seasons(path=work_yuval, season='ALL', synoptic=None,
 def group_sites_to_xarray(upper=False):
     import xarray as xr
     import numpy as np
-    group1 = ['KABR', 'BSHM', 'CSAR', 'TELA', 'ALON', 'SLOM']
+    group1 = ['KABR', 'BSHM', 'CSAR', 'TELA', 'ALON', 'SLOM', 'NIZN']
     group2 = ['NZRT', 'MRAV', 'YOSH', 'JSLM', 'KLHV', 'YRCM', 'RAMO']
-    group3 = ['ELRO', 'KATZ', 'DRAG', 'DSEA', 'NRIF', 'ELAT']
+    group3 = ['ELRO', 'KATZ', 'DRAG', 'DSEA', 'SPIR', 'NRIF', 'ELAT']
     if not upper:
         group1 = [x.lower() for x in group1]
         group2 = [x.lower() for x in group2]
@@ -2170,9 +2172,9 @@ def plot_diurnal_pw_geographical_segments(df, fg=None, marker='o', color='b',
                 ax.xaxis.set_ticks(np.arange(0, 23, 3))
                 if j == 0:
                     ax.set_ylabel('PW anomalies [mm]', fontsize=12)
-                elif j == 1:
-                    if i>5:
-                        ax.set_ylabel('PW anomalies [mm]', fontsize=12)
+#                elif j == 1:
+#                    if i>5:
+#                        ax.set_ylabel('PW anomalies [mm]', fontsize=12)
                 site_label = '{} ({:.0f})'.format(site.upper(), geo.loc[site].alt)
                 ax.text(.12, .85, site_label,
                         horizontalalignment='center', fontweight='bold',
