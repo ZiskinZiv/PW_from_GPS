@@ -1261,10 +1261,14 @@ def produce_geo_df(gis_path=gis_path, plot=True):
 
 def save_GNSS_PW_israeli_stations(path=work_yuval, ims_path=ims_path,
                                   savepath=work_yuval, mda=None,
-                                  model_name='TSEN', thresh=50):
+                                  model_name='TSEN', thresh=50,
+                                  extra_name=None):
     import xarray as xr
     from aux_gps import path_glob
-    file = path_glob(path, 'ZWD_thresh_{:.0f}.nc'.format(thresh))[0]
+    if extra_name is not None:
+        file = path_glob(path, 'ZWD_thresh_{:.0f}_{}.nc'.format(thresh, extra_name))[0]
+    else:
+        file = path_glob(path, 'ZWD_thresh_{:.0f}.nc'.format(thresh))[0]
     zwd = xr.load_dataset(file)
     print('loaded {} file as ZWD.'.format(file.as_posix().split('/')[-1]))
     file = sorted(path_glob(ims_path, 'GNSS_5mins_TD_ALL_*.nc'))[-1]
@@ -1281,7 +1285,10 @@ def save_GNSS_PW_israeli_stations(path=work_yuval, ims_path=ims_path,
     ds = xr.merge(ds_list)
     ds.attrs.update(zwd.attrs)
     if savepath is not None:
-        filename = 'GNSS_PW_thresh_{:.0f}.nc'.format(thresh)
+        if extra_name is not None:
+            filename = 'GNSS_PW_thresh_{:.0f}_{}.nc'.format(thresh, extra_name)
+        else:
+            filename = 'GNSS_PW_thresh_{:.0f}.nc'.format(thresh)
         print('saving {} to {}'.format(filename, savepath))
         comp = dict(zlib=True, complevel=9)  # best compression
         encoding = {var: comp for var in ds.data_vars}
@@ -2969,7 +2976,8 @@ def perform_harmonic_analysis_all_GNSS(path=work_yuval, n=6,
                                        savepath=work_yuval):
     import xarray as xr
     from aux_gps import harmonic_analysis_xr
-    pw = xr.load_dataset(path / 'GNSS_PW_anom_50_removed_daily.nc')
+    from aux_gps import save_ncfile
+    pw = xr.load_dataset(path / 'GNSS_PW_anom_50_for_diurnal_analysis_removed_daily.nc')
     dss_list = []
     for site in pw:
         print('performing harmonic analysis for GNSS {} site:'.format(site))
@@ -2981,10 +2989,7 @@ def perform_harmonic_analysis_all_GNSS(path=work_yuval, n=6,
     dss_all.attrs['units'] = 'mm'
     if savepath is not None:
         filename = 'GNSS_PW_harmonics_diurnal.nc'
-        comp = dict(zlib=True, complevel=9)  # best compression
-        encoding = {var: comp for var in dss_all.data_vars}
-        dss_all.to_netcdf(savepath / filename, 'w', encoding=encoding)
-        print('Done!')
+        save_ncfile(dss_all, savepath, filename)
     return dss_all
 
 
@@ -3099,26 +3104,31 @@ def GNSS_pw_to_X_using_window(gnss_path=work_yuval, hydro_path=hydro_path,
 def produce_all_GNSS_PW_anomalies(load_path=work_yuval, thresh=50,
                                   grp1='hour', grp2='dayofyear',
                                   remove_daily_only=False,
-                                  savepath=work_yuval):
+                                  savepath=work_yuval, extra_name=None):
     import xarray as xr
-    from aux_gps import groupby_date_xr
-    GNSS_pw = xr.open_dataset(load_path / 'GNSS_PW_thresh_{:.0f}_homogenized.nc'.format(thresh))
+    from aux_gps import anomalize_xr
+    if extra_name is not None:
+        GNSS_pw = xr.open_dataset(load_path / 'GNSS_PW_thresh_{:.0f}_{}.nc'.format(thresh, extra_name))
+    else:
+        GNSS_pw = xr.open_dataset(load_path / 'GNSS_PW_thresh_{:.0f}_homogenized.nc'.format(thresh))
     anom_list = []
     stations_only = [x for x in GNSS_pw.data_vars if '_error' not in x]
     for station in stations_only:
         pw = GNSS_pw[station]
         if remove_daily_only:
             print('{}'.format(station))
-            date = groupby_date_xr(pw)
-            pw_anom = pw.groupby(date) - pw.groupby(date).mean('time')
-            pw_anom = pw_anom.reset_coords(drop=True)
+            pw_anom = anomalize_xr(pw, 'D')
         else:
             pw_anom = produce_PW_anomalies(pw, grp1, grp2, False)
         anom_list.append(pw_anom)
     GNSS_pw_anom = xr.merge(anom_list)
     if savepath is not None:
         if remove_daily_only:
-            filename = 'GNSS_PW_anom_{:.0f}_removed_daily.nc'.format(thresh)
+            if extra_name is not None:
+                filename = 'GNSS_PW_anom_{:.0f}_{}_removed_daily.nc'.format(thresh, extra_name)
+            else:
+                filename = 'GNSS_PW_anom_{:.0f}_removed_daily.nc'.format(thresh)
+            GNSS_pw_anom.attrs['action'] = 'removed daily means'
         else:
             filename = 'GNSS_PW_anom_{:.0f}_{}_{}.nc'.format(thresh, grp1, grp2)
         comp = dict(zlib=True, complevel=9)  # best compression
