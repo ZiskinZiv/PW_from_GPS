@@ -58,8 +58,10 @@ def transform_wind_speed_direction_to_u_v(path=ims_path, savepath=ims_path):
         attrs = WS[station].attrs
         attrs.update(channel_name='U')
         attrs.update(units='m/s')
+        attrs.update(field_name='zonal velocity')
         U[station].attrs = attrs
         attrs.update(channel_name='V')
+        attrs.update(field_name='meridional velocity')
         V[station].attrs = attrs
     if savepath is not None:
         filename = 'IMS_U_israeli_10mins.nc'
@@ -589,8 +591,13 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
         # Tloc_df = Tloc_df.dropna(axis=0)
         ts_vs_alt = pd.Series(ts.values, index=T_alts)
         ts_vs_alt_for_fit = ts_vs_alt.dropna()
+#        try:
         [a, b] = np.polyfit(ts_vs_alt_for_fit.index.values,
                             ts_vs_alt_for_fit.values, 1)
+#        except TypeError as e:
+#            print('{}, dt: {}'.format(e, dt))
+#            print(ts_vs_alt)
+#            return 
         if lapse_rate == 'auto':
             lapse_rate = np.abs(a) * 1000
             if lapse_rate < 5.0:
@@ -1606,6 +1613,7 @@ def fill_fix_all_10mins_IMS_stations(path=ims_10mins_path,
     use specific station names to slice irrelevant data"""
     import xarray as xr
     from aux_gps import path_glob
+    from aux_gps import get_unique_index
     # TODO: redo this analysis with adding the hourly TD data
     meta = read_ims_metadata_from_files(freq='10mins')
     files = path_glob(path, '*{}_10mins.nc'.format(field))
@@ -1691,8 +1699,18 @@ def fill_fix_all_10mins_IMS_stations(path=ims_10mins_path,
                                             clim_period=clim, savepath=path,
                                             verbose=False)
         elif field == 'TD' and fix_only:
+            if unique_index:
+                ind_diff = da.size - get_unique_index(da).size
+                da = get_unique_index(da)
+                if ind_diff > 0:
+                    print('dropped {} non-unique datetime index.'.format(ind_diff))
             da_list.append(da)
         else:
+            if unique_index:
+                ind_diff = da.size - get_unique_index(da).size
+                da = get_unique_index(da)
+                if ind_diff > 0:
+                    print('dropped {} non-unique datetime index.'.format(ind_diff))
             da_list.append(da)
         cnt += 1
     if field == 'TD' and not fix_only:
@@ -1704,6 +1722,7 @@ def fill_fix_all_10mins_IMS_stations(path=ims_10mins_path,
     else:
         dsl = da_list
     print('merging all files...')
+    dsl = [x.dropna('time') for x in dsl]
     ds = xr.merge(dsl)
     if savepath is not None:
         if field == 'TD' and not fix_only:
