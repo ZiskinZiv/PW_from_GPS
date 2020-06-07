@@ -14,15 +14,130 @@ stations_dict = {
     'Ramat_David': ['RD', 35.2, 32.7, 50],
     'Jerusalem': ['JR', 35.2, 31.8, 830]}
 
+pw_mlh_dict = {'tela': 'TLV', 'yrcm': 'NV', 'jslm': 'JR'}
 
-def plot_pw_mlh(path=work_yuval, ceil_path=ceil_path, kind='scatter', month=None):
+
+def read_all_one_half_hours_csvs(path=ceil_path, plot=True):
+    import pandas as pd
+    from aux_gps import path_glob
+    files = path_glob(path, '*_Check_Avg_high_peak.csv')
+    df_list = []
+    for file in files:
+        df = read_one_half_hour_csv(file)
+        df_list.append(df)
+    df = pd.concat(df_list, axis=0)
+    df = df.sort_index()
+    if plot:
+         ax = df['MLH'].plot(style='b-', marker='o', ms=5)
+    return df
+
+
+def read_one_half_hour_csv(file):
+    import pandas as pd
+    date = file.as_posix().split('/')[-1].split('_')[0]
+    dt = pd.to_datetime(date, format='%d-%m-%Y')
+    df = pd.read_csv(file, header=None)
+    df = df.T
+    df.columns = ['MLH']
+    dts = pd.date_range(start=dt, periods=48, freq='30T')
+    df.set_index(dts, inplace=True)
+    return df
+
+
+def align_pw_mlh(path=work_yuval, ceil_path=ceil_path, site='tela',
+                 interpolate=None, plot=True, dt_range_str='2015'):
+    import xarray as xr
+    from aux_gps import dim_intersection
+    from aux_gps import xr_reindex_with_date_range
+    import pandas as pd
+    import matplotlib.pyplot as plt
+
+    def pw_mlh_to_df(pw_new, mlh_site):
+        newtime = dim_intersection([pw_new, mlh_site])
+        MLH = mlh_site.sel(time=newtime)
+        PW = pw_new.sel(time=newtime)
+        df = PW.to_dataframe()
+        df[MLH.name] = MLH.to_dataframe()
+        new_time = pd.date_range(df.index.min(), df.index.max(), freq='1H')
+        df = df.reindex(new_time)
+        df.index.name = 'time'
+        return df
+
+    mlh = xr.load_dataset(ceil_path / 'MLH_from_ceilometers.nc')
+    mlh_site = xr_reindex_with_date_range(mlh[pw_mlh_dict.get(site)], freq='1H')
+    if interpolate is not None:
+        print('interpolating ceil-site {} with max-gap of {}.'.format(pw_mlh_dict.get(site), interpolate))
+        attrs = mlh_site.attrs
+        mlh_site_inter = mlh_site.interpolate_na('time', max_gap=interpolate,
+                                                     method='cubic')
+        mlh_site_inter.attrs = attrs
+    pw = xr.open_dataset(work_yuval / 'GNSS_PW_hourly_thresh_50_homogenized.nc')
+    pw = pw[['tela', 'klhv', 'jslm', 'nzrt', 'yrcm']]
+    pw.load()
+    pw_new = pw[site]
+    pw_new = xr_reindex_with_date_range(pw_new, freq='1H')
+    if interpolate is not None:
+        print('interpolating pw-site {} with max-gap of {}.'.format(site, interpolate))
+        attrs = pw_new.attrs
+        pw_new_inter = pw_new.interpolate_na('time', max_gap=interpolate, method='cubic')
+        pw_new_inter.attrs = attrs
+    df = pw_mlh_to_df(pw_new, mlh_site)
+    if interpolate is not None:
+        df_inter = pw_mlh_to_df(pw_new_inter, mlh_site_inter)
+    if dt_range_str is not None:
+        df = df.loc[dt_range_str, :]
+    if plot:
+        fig, ax = plt.subplots(figsize=(18,5))
+        if interpolate is not None:
+            df_inter[pw_new.name].plot(style='b--', ax=ax)
+            # same ax as above since it's automatically added on the right
+            df_inter[mlh_site.name].plot(style='r--', secondary_y=True, ax=ax)
+        ax = df[pw_new.name].plot(style='b-', marker='o', ax=ax, ms=5)
+        # same ax as above since it's automatically added on the right
+        ax_twin = df[mlh_site.name].plot(style='r-', marker='s', secondary_y=True, ax=ax, ms=5)
+        if interpolate is not None:
+            ax.legend(*[ax.get_lines() + ax.right_ax.get_lines()],
+                       ['PW {} max interpolation'.format(interpolate), 'PW',
+                        'MLH {} max interpolation'.format(interpolate), 'MLH'])
+        else:
+            ax.legend([ax.get_lines()[0], ax.right_ax.get_lines()[0]],
+                       ['PW','MLH'])
+        ax.set_title('MLH {} site and PW {} site'.format(pw_mlh_dict.get(site),site))
+        ax.set_xlim(df.dropna().index.min(), df.dropna().index.max())
+        ax.set_ylabel('PW [mm]')
+        ax_twin.set_ylabel('MLH [m]')
+        ax.grid(True, which='both', axis='x')
+        fig.tight_layout()
+    if interpolate is not None:
+        ds = df_inter.to_xarray()
+        ds[pw_new.name].attrs.update(pw_new.attrs)
+        ds[mlh_site.name].attrs.update(mlh_site.attrs)
+        return ds
+    else:
+        ds = df.to_xarray()
+        ds[pw_new.name].attrs.update(pw_new.attrs)
+        ds[mlh_site.name].attrs.update(mlh_site.attrs)
+        return ds
+
+
+def plot_pw_mlh(path=work_yuval, ceil_path=ceil_path, kind='scatter', month=None,
+                ceil_interpolate=None):
+    """use ceil_interpolate as  {'TLV': '6H'}, 6H being the map_gap overwhich
+    to interpolate"""
     import xarray as xr
     import matplotlib.pyplot as plt
     mlh = xr.load_dataset(ceil_path / 'MLH_from_ceilometers.nc')
+    if ceil_interpolate is not None:
+        for site, max_gap in ceil_interpolate.items():
+            print('interpolating ceil-site {} with max-gap of {}.'.format(site, max_gap))
+            attrs = mlh[site].attrs
+            mlh[site] = mlh[site].interpolate_na('time', max_gap=max_gap,
+                                                 method='cubic')
+            mlh[site].attrs = attrs
     pw = xr.load_dataset(work_yuval / 'GNSS_PW_thresh_50_homogenized.nc')
     pw = pw[[x for x in pw if '_error' not in x]]
     pw = pw[['tela', 'klhv', 'jslm', 'nzrt', 'yrcm']]
-    couples = [['tela', 'TLV'], ['klhv', 'NV'], ['jslm', 'JR']]
+    couples = [['tela', 'TLV'], ['yrcm', 'NV'], ['jslm', 'JR']]
     if kind == 'scatter':
         fig, axes = plt.subplots(
             1, len(couples), sharey=True, sharex=True, figsize=(
@@ -156,7 +271,7 @@ def twin_hourly_mean_plot(pw, mlh, month=8, ax=None, title=True,
 #        hand = handles + handles1
 #        labs = labels + labels1
     pw_label = 'PW: {}-{}, {} ({} pts)'.format(pwyears[0], pwyears[1], month_abbr[mlh_month], pw.size)
-    mlh_label = 'MLH: {}-{}, {} ({} pts)'.format(mlhyears[0], mlhyears[1], month_abbr[mlh_month], mlh.size)
+    mlh_label = 'MLH: {}-{}, {} ({} pts)'.format(mlhyears[0], mlhyears[1], month_abbr[mlh_month], mlh.dropna('time').size)
 #    if month is not None:
 #        pwmln = pw_m_hour.plot(color='tab:orange', marker='^', ax=ax)
 #        pwm_label = 'PW: {}-{}, {} ({} pts)'.format(pw_years[0], pw_years[1], month_abbr[month], pw_month.dropna('time').size)
