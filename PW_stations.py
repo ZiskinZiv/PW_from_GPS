@@ -2972,6 +2972,28 @@ def israeli_gnss_stations_long_term_trend_analysis(
 #    return exp_dict
 
 
+def calculate_diurnal_variability(path=work_yuval):
+    import xarray as xr
+    import pandas as pd
+    import numpy as np
+    pw_anoms = xr.load_dataset(work_yuval/'GNSS_PW_thresh_50_for_diurnal_analysis_removed_daily.nc')
+    pw = xr.load_dataset(work_yuval/'GNSS_PW_thresh_50_for_diurnal_analysis.nc')
+    pw_anoms = pw_anoms[[x for x in pw_anoms if '_error' not in x]]
+    pw = pw[[x for x in pw if '_error' not in x]]
+    diff = np.abs(pw_anoms.groupby('time.hour').mean()).max()
+    pd.options.display.float_format = '{:.1f}'.format
+    df = 100.0* (diff / pw.mean()).to_array('station').to_dataframe('relative_to_mean')
+    df['mean_difference'] = diff.to_array('station').to_dataframe('mean_difference')
+    seasons = ['JJA', 'SON', 'DJF', 'MAM']
+    for season in seasons:
+        season_mean = pw.sel(time=pw['time.season']==season).mean()
+        season_anoms = pw_anoms.sel(time=pw_anoms['time.season']==season)
+        diff_season = np.abs(season_anoms.groupby('time.hour').mean()).max()
+        df['relative_to_mean_{}'.format(season)] = 100.0* (diff_season / season_mean).to_array('station').to_dataframe('relative_to_mean_{}'.format(season))
+        df['mean_difference_{}'.format(season)] = diff_season.to_array('station').to_dataframe('mean_difference_{}'.format(season))
+    return df
+
+
 def perform_harmonic_analysis_all_GNSS(path=work_yuval, n=6,
                                        savepath=work_yuval):
     import xarray as xr
@@ -3021,7 +3043,8 @@ def produce_GNSS_fft_diurnal(path=work_yuval, savepath=work_yuval, plot=False):
     diurnal and sub-diurnal harmonics, and save them"""
     from aux_gps import fft_xr
     import xarray as xr
-    pw = xr.load_dataset(path / 'GNSS_PW_anom_50_removed_daily.nc')
+    pw = xr.load_dataset(path / 'GNSS_PW_thresh_50_for_diurnal_analysis.nc')
+    pw = pw[[x for x in pw if '_error' not in x]]
     fft_list = []
     for station in pw:
         da = fft_xr(pw[station], nan_fill='zero', user_freq=None, units='cpd',
@@ -3125,9 +3148,9 @@ def produce_all_GNSS_PW_anomalies(load_path=work_yuval, thresh=50,
     if savepath is not None:
         if remove_daily_only:
             if extra_name is not None:
-                filename = 'GNSS_PW_anom_{:.0f}_{}_removed_daily.nc'.format(thresh, extra_name)
+                filename = 'GNSS_PW_thresh_{:.0f}_{}_removed_daily.nc'.format(thresh, extra_name)
             else:
-                filename = 'GNSS_PW_anom_{:.0f}_removed_daily.nc'.format(thresh)
+                filename = 'GNSS_PW_thresh_{:.0f}_removed_daily.nc'.format(thresh)
             GNSS_pw_anom.attrs['action'] = 'removed daily means'
         else:
             filename = 'GNSS_PW_anom_{:.0f}_{}_{}.nc'.format(thresh, grp1, grp2)
