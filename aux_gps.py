@@ -76,8 +76,9 @@ def run_MLR_diurnal_harmonics(harmonic_dss, season=None, n_max=4, plot=True,
         if ax is None:
             fig, ax = plt.subplots(figsize=(8, 6))
         markers = ['s', 'x', '^', '>', '<', 'X']
-        colors = ['tab:blue', 'tab:red', 'tab:orange', 'tab:green', 'tab:purple']
-        styles = ['-', '--', '-.', ':']
+        colors = ['tab:blue', 'tab:red', 'tab:orange', 'tab:green',
+                  'tab:purple', 'tab:yellow']
+        styles = ['-', '--', '-.', ':', 'None', ' ']
         for i, cpd in enumerate(harmonic['cpd'].values):
             harmonic[name + '_mean'].sel(cpd=cpd).plot(ax=ax, linestyle=styles[i], color=colors[i]) # marker=markers[i])
         harmonic[name + '_mean'].sum('cpd').plot(ax=ax, marker=None, color='k', alpha=0.7)
@@ -92,7 +93,7 @@ def run_MLR_diurnal_harmonics(harmonic_dss, season=None, n_max=4, plot=True,
             framealpha=0.5,
             fancybox=True,
             loc=legend_loc, ncol=ncol)
-        ax.grid()
+#        ax.grid()
         ax.set_xlabel('Time of day [UTC]')
         # ax.set_ylabel('{} anomalies [mm]'.format(field))
         if season is None:
