@@ -30,6 +30,71 @@ for key, val in rc.items():
 # sns.set(rc=rc, style='white')
 
 
+def utm_from_lon(lon):
+    """
+    utm_from_lon - UTM zone for a longitude
+
+    Not right for some polar regions (Norway, Svalbard, Antartica)
+
+    :param float lon: longitude
+    :return: UTM zone number
+    :rtype: int
+    """
+    from math import floor
+    return floor( ( lon + 180 ) / 6) + 1
+
+
+def scale_bar(ax, proj, length, location=(0.5, 0.05), linewidth=3,
+              units='km', m_per_unit=1000, bounds=None):
+    """
+
+    http://stackoverflow.com/a/35705477/1072212
+    ax is the axes to draw the scalebar on.
+    proj is the projection the axes are in
+    location is center of the scalebar in axis coordinates ie. 0.5 is the middle of the plot
+    length is the length of the scalebar in km.
+    linewidth is the thickness of the scalebar.
+    units is the name of the unit
+    m_per_unit is the number of meters in a unit
+    """
+    import cartopy.crs as ccrs
+    from matplotlib import patheffects
+    # find lat/lon center to find best UTM zone
+    try:
+        x0, x1, y0, y1 = ax.get_extent(proj.as_geodetic())
+    except AttributeError:
+        if bounds is not None:
+            x0, x1, y0, y1 = bounds
+    # Projection in metres
+    utm = ccrs.UTM(utm_from_lon((x0+x1)/2))
+    # Get the extent of the plotted area in coordinates in metres
+    x0, x1, y0, y1 = ax.get_extent(utm)
+    # Turn the specified scalebar location into coordinates in metres
+    sbcx, sbcy = x0 + (x1 - x0) * location[0], y0 + (y1 - y0) * location[1]
+    # Generate the x coordinate for the ends of the scalebar
+    bar_xs = [sbcx - length * m_per_unit/2, sbcx + length * m_per_unit/2]
+    # buffer for scalebar
+    buffer = [patheffects.withStroke(linewidth=5, foreground="w")]
+    # Plot the scalebar with buffer
+    ax.plot(bar_xs, [sbcy, sbcy], transform=utm, color='k',
+        linewidth=linewidth, path_effects=buffer)
+    # buffer for text
+    buffer = [patheffects.withStroke(linewidth=3, foreground="w")]
+    # Plot the scalebar label
+    t0 = ax.text(sbcx, sbcy, str(length) + ' ' + units, transform=utm,
+        horizontalalignment='center', verticalalignment='bottom',
+        path_effects=buffer, zorder=2)
+    left = x0+(x1-x0)*0.05
+    # Plot the N arrow
+    t1 = ax.text(left, sbcy, u'\u25B2\nN', transform=utm,
+        horizontalalignment='center', verticalalignment='bottom',
+        path_effects=buffer, zorder=2)
+    # Plot the scalebar without buffer, in case covered by text buffer
+    ax.plot(bar_xs, [sbcy, sbcy], transform=utm, color='k',
+        linewidth=linewidth, zorder=3)
+    return
+
+
 @ticker.FuncFormatter
 def lon_formatter(x, pos):
     if x < 0:
@@ -160,6 +225,7 @@ def plot_MLR_GNSS_PW_harmonics_facetgrid(path=work_yuval, season=None,
                                          n_max=3, ylim=None, save=True):
     import xarray as xr
     from aux_gps import run_MLR_diurnal_harmonics
+    import numpy as np
     harmonics = xr.load_dataset(path / 'GNSS_PW_harmonics_diurnal.nc')
 #    sites = sorted(list(set([x.split('_')[0] for x in harmonics])))
 #    da = xr.DataArray([x for x in range(len(sites))], dims='GNSS')
@@ -190,17 +256,19 @@ def plot_MLR_GNSS_PW_harmonics_facetgrid(path=work_yuval, season=None,
                 ax = run_MLR_diurnal_harmonics(harm_site, season=season, n_max=n_max, plot=True, ax=ax, legend_loc=leg_loc, ncol=2, legsize=10)
                 ax.set_xlabel('Hour of day [UTC]')
                 ax.yaxis.tick_left()
+                ax.xaxis.set_ticks(np.arange(0, 23, 3))
                 ax.grid()
                 ax.set_title('')
                 ax.set_ylabel('')
                 ax.text(0.1, .85, site.upper(),
                         horizontalalignment='center', fontweight='bold',
                         transform=ax.transAxes)
-                if j == 0:
-                    ax.set_ylabel('PW anomalies [mm]', fontsize=12)
-                elif j == 1:
-                    if i>5:
-                        ax.set_ylabel('PW anomalies [mm]', fontsize=12)
+                ax.set_ylabel('PW anomalies [mm]', fontsize=12)
+#                if j == 0:
+#                    ax.set_ylabel('PW anomalies [mm]', fontsize=12)
+#                elif j == 1:
+#                    if i>5:
+#                        ax.set_ylabel('PW anomalies [mm]', fontsize=12)
             except TypeError:
                 ax.set_axis_off()
                 
@@ -406,7 +474,7 @@ def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
     ax_map = fig.add_subplot(grid[0, 1])  # plt.subplot(122)
 #    fig, ax = plt.subplots(1, 2, sharex=False, sharey=False, figsize=(20, 6))
     # RINEX gantt chart:
-    file = path_glob(path, 'ZWD_unselected_israel_*.nc')[-1]
+    file = path_glob(path, 'GNSS_PW_thresh_50_for_diurnal_analysis.nc')[-1]
     ds = xr.open_dataset(file)
     just_pw = [x for x in ds if 'error' not in x]
     ds = ds[just_pw]
@@ -428,6 +496,7 @@ def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
     # dem = xr.open_dataarray(dem_path / 'israel_dem_500_1000.nc')
     fg = dem.plot.imshow(ax=ax_map, alpha=0.5, cmap=cmap,
                          vmin=dem.min(), vmax=dem.max(), add_colorbar=False)
+#    scale_bar(ax_map, 50)
     cbar_kwargs = {'fraction': 0.1, 'aspect': 50, 'pad': 0.03}
     cb = plt.colorbar(fg, **cbar_kwargs)
     cb.set_label(label='meters above sea level', size=8, weight='normal')
@@ -441,20 +510,21 @@ def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
     print('getting solved GNSS israeli stations metadata...')
     gps = produce_geo_gnss_solved_stations(path=gis_path, plot=False)
     # removed = ['hrmn', 'nizn', 'spir']
-    removed = ['hrmn']
-    merged = ['klhv', 'lhav', 'mrav', 'gilb']
+#    removed = ['hrmn']
+    removed = ['hrmn', 'gilb', 'lhav']
+#    merged = ['klhv', 'lhav', 'mrav', 'gilb']
+    merged = []
     gps_list = [x for x in gps.index if x not in merged and x not in removed]
-    gps.loc[gps_list, :].plot(ax=ax_map, color='black', edgecolor='black', marker='s',
-             alpha=0.7, markersize=25)
-    gps.loc[removed, :].plot(ax=ax_map, color='black', edgecolor='black', marker='s',
-            alpha=1.0, markersize=25, facecolor='white')
-    gps.loc[merged, :].plot(ax=ax_map, color='black', edgecolor='r', marker='s',
-            alpha=0.7, markersize=25)
-    gps_stations = [x for x in gps.index]
-    to_plot_offset = ['mrav', 'klhv', 'nzrt', 'katz', 'elro']
-#    [gps_stations.remove(x) for x in to_plot_offset]
-#    gps_normal_anno = gps.loc[gps_stations, :]
-#    gps_offset_anno = gps.loc[to_plot_offset, :]
+    gps.loc[gps_list, :].plot(ax=ax_map, edgecolor='black', marker='s',
+             alpha=1.0, markersize=25, facecolor="None")
+#    gps.loc[removed, :].plot(ax=ax_map, color='black', edgecolor='black', marker='s',
+#            alpha=1.0, markersize=25, facecolor='white')
+#    gps.loc[merged, :].plot(ax=ax_map, color='black', edgecolor='r', marker='s',
+#            alpha=0.7, markersize=25)
+    gps_stations = gps_list  # [x for x in gps.index]
+#    to_plot_offset = ['mrav', 'klhv', 'nzrt', 'katz', 'elro']
+    to_plot_offset = []
+
 
     for x, y, label in zip(gps.loc[gps_stations, :].lon, gps.loc[gps_stations,
                                                                  :].lat, gps.loc[gps_stations, :].index.str.upper()):
@@ -484,12 +554,16 @@ def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
     geo_annotate(ax_map, bet_dagan.lon, bet_dagan.lat,
                  bet_dagan.index, xytext=(4, -6), fmt=None,
                  c='k', fw='normal', fs=10, colorupdown=False)
-    plt.legend(['GNSS \nreceiver sites',
-                'removed \nGNSS sites',
-                'merged \nGNSS sites',
+#    plt.legend(['GNSS \nreceiver sites',
+#                'removed \nGNSS sites',
+#                'merged \nGNSS sites',
+#                'radiosonde\nstation'],
+#               loc='upper left', framealpha=0.7, fancybox=True,
+#               handletextpad=0.2, handlelength=1.5)
+    plt.legend(['GNSS \nreceiver stations',
                 'radiosonde\nstation'],
-               loc='upper left', framealpha=0.7, fancybox=True,
-               handletextpad=0.2, handlelength=1.5)
+           loc='upper left', framealpha=0.7, fancybox=True,
+           handletextpad=0.2, handlelength=1.5)
     fig.subplots_adjust(top=0.95,
                         bottom=0.11,
                         left=0.05,
@@ -1248,24 +1322,33 @@ def plot_israel_map(gis_path=gis_path, rc=rc, ax=None):
     import geopandas as gpd
     import contextily as ctx
     import seaborn as sns
+    import cartopy.crs as ccrs
     sns.set_style("ticks", rc=rc)
     isr_with_yosh = gpd.read_file(gis_path / 'Israel_and_Yosh.shp')
     isr_with_yosh.crs = {'init': 'epsg:4326'}
-    # isr_with_yosh = isr_with_yosh.to_crs(epsg=3857)
+#    isr_with_yosh = isr_with_yosh.to_crs(epsg=3857)
+    crs_epsg = ccrs.epsg('3857')
+#    crs_epsg = ccrs.epsg('2039')
     if ax is None:
+#        fig, ax = plt.subplots(subplot_kw={'projection': crs_epsg},
+#                               figsize=(6, 15))
+        bounds = isr_with_yosh.geometry.total_bounds
+        extent = [bounds[0], bounds[2], bounds[1], bounds[3]]
+        # ax.set_extent([bounds[0], bounds[2], bounds[1], bounds[3]], crs=crs_epsg)
+        # ax.add_geometries(isr_with_yosh.geometry, crs=crs_epsg)
         ax = isr_with_yosh.plot(alpha=0.0, figsize=(6, 15))
     else:
         isr_with_yosh.plot(alpha=0.0, ax=ax)
     ctx.add_basemap(
             ax,
             url=ctx.sources.ST_TERRAIN_BACKGROUND,
-            crs={
-                    'init': 'epsg:4326'})
+            crs='epsg:4326')
     ax.xaxis.set_major_locator(ticker.MaxNLocator(5))
     ax.yaxis.set_major_formatter(lat_formatter)
     ax.xaxis.set_major_formatter(lon_formatter)
     ax.tick_params(top=True, bottom=True, left=True, right=True,
                    direction='out', labelsize=10)
+#    scale_bar(ax, ccrs.Mercator(), 50, bounds=bounds)
     return ax
 
 
@@ -2210,6 +2293,37 @@ def plot_diurnal_pw_geographical_segments(df, fg=None, marker='o', color='b',
     fg.fig.tight_layout()
     fg.fig.subplots_adjust()
     return fg
+
+
+def prepare_harmonics_table(path=work_yuval, season='ALL'):
+    import xarray as xr
+    from aux_gps import run_MLR_diurnal_harmonics
+    import pandas as pd
+    ds = xr.load_dataset(work_yuval / 'GNSS_PW_harmonics_diurnal.nc')
+    stations = list(set([x.split('_')[0] for x in ds]))
+    records = []
+    for station in stations:
+        diu_ph = ds[station + '_mean'].sel(season=season, cpd=1).argmax()
+        diu_amp = ds[station + '_mean'].sel(season=season, cpd=1).max()
+        semidiu_ph = ds[station + '_mean'].sel(season=season, cpd=2, hour=slice(0, 12)).argmax()
+        semidiu_amp = ds[station + '_mean'].sel(season=season, cpd=2, hour=slice(0, 12)).max()
+        ds_for_MLR = ds[['{}'.format(station), '{}_mean'.format(station)]]
+        harm_di = run_MLR_diurnal_harmonics(ds_for_MLR, plot=False)
+        record = [station, diu_amp.item(), diu_ph.item(), harm_di[1],
+                  semidiu_amp.item(), semidiu_ph.item(), harm_di[2],
+                  harm_di[1] + harm_di[2]]
+        records.append(record)
+    df = pd.DataFrame(records)
+    df.columns = ['Station', 'S1A [mm]', 'S1P [UTC]', 'S1V [%]', 'S2A [mm]',
+                  'S2P [UTC]', 'S2V [%]', 'VT [%]']
+    df = df.set_index('Station')
+    gr = group_sites_to_xarray()
+    new = gr.T.values.ravel()
+    df = df.reindex(new)
+    df.index = df.index.str.upper()
+    df = df[['S1A [mm]', 'S2A [mm]', 'S1P [UTC]', 'S2P [UTC]', 'S1V [%]', 'S2V [%]', 'VT [%]']]
+    print(df.to_latex())
+    return df
 
 
 def plot_october_2015(path=work_yuval):
