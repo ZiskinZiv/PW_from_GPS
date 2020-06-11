@@ -2972,7 +2972,7 @@ def israeli_gnss_stations_long_term_trend_analysis(
 #    return exp_dict
 
 
-def calculate_diurnal_variability(path=work_yuval):
+def calculate_diurnal_variability(path=work_yuval, with_amp=False):
     import xarray as xr
     import pandas as pd
     import numpy as np
@@ -2980,17 +2980,19 @@ def calculate_diurnal_variability(path=work_yuval):
     pw = xr.load_dataset(work_yuval/'GNSS_PW_thresh_50_for_diurnal_analysis.nc')
     pw_anoms = pw_anoms[[x for x in pw_anoms if '_error' not in x]]
     pw = pw[[x for x in pw if '_error' not in x]]
-    diff = np.abs(pw_anoms.groupby('time.hour').mean()).max()
+    amp = np.abs(pw_anoms.groupby('time.hour').mean()).max()
     pd.options.display.float_format = '{:.1f}'.format
-    df = 100.0* (diff / pw.mean()).to_array('station').to_dataframe('relative_to_mean')
-    df['mean_difference'] = diff.to_array('station').to_dataframe('mean_difference')
+    df = 100.0* (amp / pw.mean()).to_array('station').to_dataframe('amplitude_to_mean_ratio')
+    if with_amp:
+        df['amplitude'] = amp.to_array('station').to_dataframe('amplitude')
     seasons = ['JJA', 'SON', 'DJF', 'MAM']
     for season in seasons:
         season_mean = pw.sel(time=pw['time.season']==season).mean()
         season_anoms = pw_anoms.sel(time=pw_anoms['time.season']==season)
         diff_season = np.abs(season_anoms.groupby('time.hour').mean()).max()
-        df['relative_to_mean_{}'.format(season)] = 100.0* (diff_season / season_mean).to_array('station').to_dataframe('relative_to_mean_{}'.format(season))
-        df['mean_difference_{}'.format(season)] = diff_season.to_array('station').to_dataframe('mean_difference_{}'.format(season))
+        df['amplitude_to_mean_ratio{}'.format(season)] = 100.0* (diff_season / season_mean).to_array('station').to_dataframe('amplitude_to_mean_ratio_{}'.format(season))
+        if with_amp:
+            df['amplitude_{}'.format(season)] = diff_season.to_array('station').to_dataframe('amplitude_{}'.format(season))
     return df
 
 

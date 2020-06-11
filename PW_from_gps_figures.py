@@ -20,6 +20,8 @@ ims_path = work_yuval / 'IMS_T'
 gis_path = work_yuval / 'gis'
 dem_path = work_yuval / 'AW3D30'
 hydro_path = work_yuval / 'hydro'
+ceil_path = work_yuval / 'ceilometers'
+
 
 rc = {
     'font.family': 'serif',
@@ -2102,6 +2104,40 @@ def plot_tide_pw_lags(path=hydro_path, pw_anom=False, rolling='1H', save=True):
     return
 
 
+def plot_ceilometers(path=work_yuval, ceil_path=ceil_path, interpolate='6H',
+                     save=True):
+    import xarray as xr
+    from ceilometers import twin_hourly_mean_plot
+    from ceilometers import read_all_ceilometer_stations
+    import numpy as np
+    pw = xr.open_dataset(path / 'GNSS_PW_thresh_50_for_diurnal_analysis.nc')
+    pw = pw[['tela', 'jslm', 'yrcm', 'nzrt', 'klhv']]
+    pw.load()
+    ds = read_all_ceilometer_stations(path=ceil_path)
+    if interpolate is not None:
+        attrs = [x.attrs for x in ds.data_vars.values()]
+        ds = ds.interpolate_na('time', max_gap=interpolate, method='cubic')
+        for i, da in enumerate(ds):
+            ds[da].attrs.update(attrs[i])
+    fig, axes = plt.subplots(1, 2, sharex=True, sharey=True, figsize=(15,6))
+    couples = [['tela', 'TLV'], ['jslm', 'JR']]
+    for i, ax in enumerate(axes.flatten()):
+        ax = twin_hourly_mean_plot(pw[couples[i][0]],
+                                   ds[couples[i][1]],
+                                   month=None,
+                                   ax=ax,
+                                   title=False,
+                                   leg_loc='best')
+        ax.xaxis.set_ticks(np.arange(0, 23, 3))
+        ax.grid()
+    fig.tight_layout()
+    filename = 'PW_diurnal_with_MLH_tela_jslm.png'
+    if save:
+        #        plt.savefig(savefig_path / filename, bbox_inches='tight')
+        plt.savefig(savefig_path / filename, orientation='landscape')
+    return fig
+
+
 def plot_hist_with_seasons(da_ts):
     import seaborn as sns
     fig, ax = plt.subplots(figsize=(10, 7))
@@ -2293,6 +2329,17 @@ def plot_diurnal_pw_geographical_segments(df, fg=None, marker='o', color='b',
     fg.fig.tight_layout()
     fg.fig.subplots_adjust()
     return fg
+
+
+def prepare_diurnal_variability_table(path=work_yuval):
+    from PW_stations import calculate_diurnal_variability
+    df = calculate_diurnal_variability()
+    gr = group_sites_to_xarray()
+    new = gr.T.values.ravel()
+    df = df.reindex(new)
+    df.index = df.index.str.upper()
+    print(df.to_latex())
+    return df
 
 
 def prepare_harmonics_table(path=work_yuval, season='ALL'):
