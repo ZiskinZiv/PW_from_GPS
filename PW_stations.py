@@ -3946,7 +3946,32 @@ def get_p_values(X, y):
     pval = np.empty((X.shape))
     f, pval[:] = f_regression(X, y)
     return pval
-#def analyze_sounding_and_formulate(sound_path=sound_path,
+
+
+def read_gps_axis_xlsx(path=work_yuval, field='ZWD'):
+    import pandas as pd
+    import xarray as xr
+    tlv = pd.read_excel(path/'IPWV-SHLOMI.XLSX', sheet_name='TLV')
+    tlv.set_index('EventTime', inplace=True)
+    tlv.index.name = 'time'
+    tlv_da = tlv.to_xarray()[field] * 100.0
+    tlv_da.name = 'tela_axis'
+    jrslm = pd.read_excel(path/'IPWV-SHLOMI.XLSX', sheet_name='JRSLM')
+    jrslm.set_index('EventTime', inplace=True)
+    jrslm.index.name = 'time'
+    jrslm_da = jrslm.to_xarray()[field] * 100.0
+    jrslm_da.name = 'jslm_axis'
+    eilat = pd.read_excel(path/'IPWV-SHLOMI.XLSX', sheet_name='Eilat')
+    eilat.set_index('EventTime', inplace=True)
+    eilat.index.name = 'time'
+    eilat_da = eilat.to_xarray()[field] * 100.0
+    eilat_da.name = 'elat_axis'
+    ds = xr.merge([tlv_da, jrslm_da, eilat_da])
+    return ds
+
+
+#def analyze_sounding_and_formulatxe(sound_path=sound_path,
+    
 #                                   model_names = ['TSEN', 'LR'],
 #                                   res_save='LR'):
 #    import xarray as xr
