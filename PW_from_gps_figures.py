@@ -1576,15 +1576,20 @@ def produce_table_1(removed=['hrmn'], merged={'klhv': ['klhv', 'lhav'],
                     'mrav': ['gilb', 'mrav']}):
     from PW_stations import produce_geo_gnss_solved_stations
     import pandas as pd
-    df_gnss = produce_geo_gnss_solved_stations(plot=False)
+    sites = group_sites_to_xarray(upper=False) 
+    df_gnss = produce_geo_gnss_solved_stations(plot=False,
+                                               add_distance_to_coast=True)
+    new = sites.T.values.ravel()
+    df_gnss = df_gnss.reindex(new)
     df_gnss['ID'] = df_gnss.index.str.upper()
     pd.options.display.float_format = '{:.2f}'.format
-    df = df_gnss[['name', 'ID', 'lat', 'lon', 'alt']]
+    df = df_gnss[['name', 'ID', 'lat', 'lon', 'alt', 'distance']]
     df['alt'] = df['alt'].astype(int)
-    cols = ['GNSS Sites', 'Site ID', 'Latitude [N]',
-            'Longitude [W]', 'Altitude [m a.s.l]']
+    df['distance'] = df['distance'].astype(int)
+    cols = ['GNSS Station name', 'Station ID', 'Latitude [N]',
+            'Longitude [W]', 'Altitude [m a.s.l]', 'Distance from shore [km]']
     df.columns = cols
-    df.loc['spir', 'GNSS Sites'] = 'Sapir'
+    df.loc['spir', 'GNSS Station name'] = 'Sapir'
     if removed is not None:
         df = df.loc[[x for x in df.index if x not in removed], :]
     if merged is not None:
@@ -1666,6 +1671,109 @@ def produce_table_mann_kendall(thresh=50):
 #    df = df[['Sen\'s slope', '95% confidence intervals']]
     print(df_anoms.to_latex(index=False))
     return df_anoms, df_mm
+
+
+def plot_peak_hour_distance(path=work_yuval, season='JJA',
+                            remove_station='dsea', save=True):
+    from PW_stations import produce_geo_gnss_solved_stations
+    from aux_gps import groupby_half_hour_xr
+    import xarray as xr
+    import pandas as pd
+    import seaborn as sns
+    import numpy as np
+    from sklearn.metrics import r2_score
+    pw = xr.open_dataset(path / 'GNSS_PW_thresh_50_for_diurnal_analysis.nc')
+    pw = pw[[x for x in pw if '_error' not in x]]
+    pw.load()
+    pw = pw.sel(time=pw['time.season'] == season)
+    df = groupby_half_hour_xr(pw)
+    halfs = [df.isel(half_hour=x)['half_hour'] for x in df.argmax().values()]
+    names = [x for x in df]
+    dfh = pd.DataFrame(halfs, index=names)
+    geo = produce_geo_gnss_solved_stations(
+        add_distance_to_coast=True, plot=False)
+    geo['phase'] = dfh
+    geo = geo.dropna()
+    groups = group_sites_to_xarray(upper=False)
+    geo.loc[groups.sel(group=0).values, 'group'] = 'coastal'
+    geo.loc[groups.sel(group=1).values, 'group'] = 'highland'
+    geo.loc[groups.sel(group=2).values, 'group'] = 'eastern'
+    fig, ax = plt.subplots(figsize=(14, 10))
+    ax.grid()
+    if remove_station is not None:
+        removed = geo.loc[remove_station].to_frame().T
+        geo = geo.drop(remove_station, axis=0)
+#     lnall = sns.scatterplot(data=geo.loc[only], x='distance', y='phase', ax=ax, hue='group', s=100)
+    coast = geo[geo['group'] == 'coastal']
+    yerr = 1.0
+    lncoast = ax.errorbar(x=coast.loc[:,
+                                      'distance'],
+                          y=coast.loc[:,
+                                      'phase'],
+                          yerr=yerr,
+                          marker='o',
+                          ls='',
+                          capsize=2.5,
+                          elinewidth=2.5,
+                          markeredgewidth=2.5,
+                          color='b')
+    # lncoast = ax.scatter(coast.loc[:, 'distance'], coast.loc[:, 'phase'], color='b', s=50)
+    highland = geo[geo['group'] == 'highland']
+#    lnhighland = ax.scatter(highland.loc[:, 'distance'], highland.loc[:, 'phase'], color='brown', s=50)
+    lnhighland = ax.errorbar(x=highland.loc[:,
+                                            'distance'],
+                             y=highland.loc[:,
+                                            'phase'],
+                             yerr=yerr,
+                             marker='o',
+                             ls='',
+                             capsize=2.5,
+                             elinewidth=2.5,
+                             markeredgewidth=2.5,
+                             color='brown')
+    eastern = geo[geo['group'] == 'eastern']
+#    lneastern = ax.scatter(eastern.loc[:, 'distance'], eastern.loc[:, 'phase'], color='green', s=50)
+    lneastern = ax.errorbar(x=eastern.loc[:,
+                                          'distance'],
+                            y=eastern.loc[:,
+                                          'phase'],
+                            yerr=yerr,
+                            marker='o',
+                            ls='',
+                            capsize=2.5,
+                            elinewidth=2.5,
+                            markeredgewidth=2.5,
+                            color='green')
+    lnremove = ax.scatter(
+        removed.loc[:, 'distance'], removed.loc[:, 'phase'], marker='x', color='k', s=50)
+    ax.legend([lncoast,
+               lnhighland,
+               lneastern,
+               lnremove],
+              ['Coastal stations',
+               'Highland stations',
+               'Eastern stations',
+               'DSEA station'],
+              fontsize=16)
+    params = np.polyfit(geo['distance'].values, geo.phase.values, 1)
+    params2 = np.polyfit(geo['distance'].values, geo.phase.values, 2)
+    x = np.linspace(0, 210, 100)
+    y = np.polyval(params, x)
+    y2 = np.polyval(params2, x)
+    r2 = r2_score(geo.phase.values, np.polyval(params, geo['distance'].values))
+    ax.plot(x, y, color='k')
+    textstr = '\n'.join([r'R$^2$: {:.2f}'.format(r2)])
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+    ax.text(0.5, 0.95, textstr, transform=ax.transAxes, fontsize=18,
+            verticalalignment='top', bbox=props)
+    # ax.plot(x,y2, color='green')
+    ax.tick_params(axis='both', which='major', labelsize=16)
+    ax.set_xlabel('Distance from shore [km]', fontsize=16)
+    ax.set_ylabel('Peak hour [UTC]', fontsize=16)
+    if save:
+        filename = 'pw_peak_distance_shore.png'
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
+    return ax
 
 
 def plot_monthly_means_anomalies_with_station_mean(load_path=work_yuval,

@@ -1056,10 +1056,12 @@ def produce_pw_statistics(path=work_yuval, resample_to_mm=True, thresh=50,
 
 def produce_geo_gnss_solved_stations(path=gis_path,
                                      file='israeli_gnss_coords.txt',
+                                     add_distance_to_coast=False,
                                      plot=True):
     import geopandas as gpd
     import pandas as pd
     from pathlib import Path
+    from ims_procedures import get_israeli_coast_line
     cwd = Path().cwd()
     df = pd.read_csv(cwd / file, delim_whitespace=True)
     df = df[['lat', 'lon', 'alt', 'name']]
@@ -1068,6 +1070,12 @@ def produce_geo_gnss_solved_stations(path=gis_path,
     stations = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.lon,
                                                                 df.lat),
                                 crs=isr.crs)
+    if add_distance_to_coast:
+        isr_coast = get_israeli_coast_line(path=path)
+        coast_lines = [isr_coast.to_crs('epsg:2039').loc[x].geometry for x in isr_coast.index]
+        for station in stations.index:
+            point = stations.to_crs('epsg:2039').loc[station, 'geometry']
+            stations.loc[station, 'distance'] = min([x.distance(point) for x in coast_lines]) / 1000.0
     if plot:
         ax = isr.plot()
         stations.plot(ax=ax, column='alt', cmap='Greens',

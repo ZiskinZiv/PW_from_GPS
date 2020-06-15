@@ -19,10 +19,14 @@ def select_months(da_ts, months, remove=False, reindex=True):
     import numpy as np
     time_dim = list(set(da_ts.dims))[0]
     attrs = da_ts.attrs
+    try:
+        name = da_ts.name
+    except AttributeError:
+        name = ''
     if remove:
         all_months = np.arange(1, 13)
         months = list(set(all_months).difference(set(months)))
-    print('selecting months #{} from {}'.format(', #'.join([str(x) for x in months]), da_ts.name))
+    print('selecting months #{} from {}'.format(', #'.join([str(x) for x in months]), name))
     to_add = []
     for month in months:
         sliced = da_ts.sel({time_dim: da_ts['{}.month'.format(time_dim)] == int(month)})
@@ -312,6 +316,21 @@ def grab_n_consecutive_epochs_from_ts(da_ts, sep='nan', n=10):
 #        df['hour'] = df['hour'].replace(rpld)
 #        hour = df['hour'].to_xarray()
 #        return hour
+
+
+def groupby_half_hour_xr(da_ts):
+    import pandas as pd
+    import numpy as np
+    df = da_ts.to_dataframe()
+    df = df.groupby([df.index.hour, df.index.minute]).mean()
+    time = pd.date_range(start='1900-01-01', periods=df.index.size, freq='5T')
+    df = df.set_index(time)
+    df = df.resample('30T').mean()
+    half_hours = np.arange(0, 24, 0.5)
+    df.index = half_hours
+    df.index.name = 'half_hour'
+    ds = df.to_xarray()
+    return ds
 
 
 def groupby_date_xr(da_ts):

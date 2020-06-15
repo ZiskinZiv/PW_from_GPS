@@ -427,6 +427,19 @@ def produce_relative_frequency_wind_direction(path=ims_path,
     return Q_freq
 
 
+def get_israeli_coast_line(path=gis_path, minx=34.0, miny=30.0, maxx=36.0,
+                           maxy=34.0):
+    from shapely.geometry import box
+    import geopandas as gpd
+    # create bounding box using shapely:
+    bbox = box(minx, miny, maxx, maxy)
+    # read world coast lines:
+    coast = gpd.read_file(gis_path / 'ne_10m_coastline.shp')
+    # clip:
+    gdf = gpd.clip(coast, bbox)
+    return gdf
+
+
 def clip_raster(fp=awd_path/'Israel_Area.tif',
                 out_tif=awd_path/'israel_dem.tif',
                 minx=34.0, miny=29.0, maxx=36.5, maxy=34.0):
