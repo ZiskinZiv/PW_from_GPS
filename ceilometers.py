@@ -291,7 +291,7 @@ def twin_hourly_mean_plot(pw, mlh, month=8, ax=None, title=True,
                verticalalignment='top', bbox=props)
     if title:
         ax.set_title('The diurnal cycle of {} Mixing Layer Height and {} GNSS site PW'.format(mlh_name, pw.name.upper()))
-    return ax
+    return ax, twin
 
 
 def read_all_ceilometer_stations(path=ceil_path):
