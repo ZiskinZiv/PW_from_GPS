@@ -2121,15 +2121,21 @@ def plot_ceilometers(path=work_yuval, ceil_path=ceil_path, interpolate='6H',
             ds[da].attrs.update(attrs[i])
     fig, axes = plt.subplots(1, 2, sharex=True, sharey=True, figsize=(15,6))
     couples = [['tela', 'TLV'], ['jslm', 'JR']]
+    twins = []
     for i, ax in enumerate(axes.flatten()):
-        ax = twin_hourly_mean_plot(pw[couples[i][0]],
-                                   ds[couples[i][1]],
-                                   month=None,
-                                   ax=ax,
-                                   title=False,
-                                   leg_loc='best')
+        ax, twin = twin_hourly_mean_plot(pw[couples[i][0]],
+                                         ds[couples[i][1]],
+                                         month=None,
+                                         ax=ax,
+                                         title=False,
+                                         leg_loc='best')
+        twins.append(twin)
         ax.xaxis.set_ticks(np.arange(0, 23, 3))
         ax.grid()
+    twin_ylim_min = min(min([x.get_ylim() for x in twins]))
+    twin_ylim_max = max(max([x.get_ylim() for x in twins]))
+    for twin in twins:
+        twin.set_ylim(twin_ylim_min, twin_ylim_max)
     fig.tight_layout()
     filename = 'PW_diurnal_with_MLH_tela_jslm.png'
     if save:
