@@ -357,3 +357,43 @@ def read_one_matfile_ceilometers(file):
         df_list.append(df1)
     s = pd.concat(df_list)[0]
     return s
+
+
+def shift_half_hour_lst(hours_back=3):
+    import numpy as np
+    hour1 = np.arange(24 - hours_back, 24, 0.5)
+    hour2 = np.arange(0, 24-hours_back, 0.5)
+    hour = np.append(hour1, hour2)
+    return hour
+
+
+def read_coastal_BL_levi_2011(path=ceil_path):
+    import pandas as pd
+    """Attached profiler data for the average diurnal boundary layers height 3
+    km form the coast of Hadera for the 3 summers of 1997-1997.
+    The data for July is in the tab  hour_july where MAX SNR is the height of
+    the wind profiler signal-to-noise ratio peak. The wind profiler high
+    signal-to-noise ratio is obtained near the BL top at the entrainment zone
+    where inhomogeneities  due mixing of dry and humid air produce high values
+    radar reflectivity.
+    The Tv inversion is the inversion height of the virtual
+    temperature profile measure by the wind profiler radio acoustic sounding
+    system (RASS).
+    The tab SNR JJAS has the diurnal boundary height at June, July, August and
+    September as measured by the MAX SNR."""
+    # read july 1997-1999 data:
+    df_july = pd.read_excel(path/'coastal_BL_levi_2011.xls', sheet_name='hour_july')
+    hour = shift_half_hour_lst(3)
+    df_july.set_index(hour, inplace=True)
+    df_july = df_july.sort_index()
+    df_july.drop('hour', axis=1, inplace=True)
+    df_july.columns = ['n_maxsnr', 'maxsnr', 'std_maxsnr', 'stderror_maxsnr', 'tv_inversion', 'std_tv200']
+    # read 4 months data:
+    df_JJAS = pd.read_excel(path/'coastal_BL_levi_2011.xls', sheet_name='SNR JJAS')
+    df_JJAS.set_index(hour, inplace=True)
+    df_JJAS = df_JJAS.sort_index()
+    df_JJAS.drop('hour', axis=1, inplace=True)
+    df = pd.concat([df_july, df_JJAS], axis=1)
+    return df
+
+    
