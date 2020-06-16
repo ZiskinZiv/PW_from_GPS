@@ -1770,6 +1770,8 @@ def plot_peak_hour_distance(path=work_yuval, season='JJA',
     ax.tick_params(axis='both', which='major', labelsize=16)
     ax.set_xlabel('Distance from shore [km]', fontsize=16)
     ax.set_ylabel('Peak hour [UTC]', fontsize=16)
+    # add sunrise UTC hour
+    ax.axhline(16.66)
     if save:
         filename = 'pw_peak_distance_shore.png'
         plt.savefig(savefig_path / filename, bbox_inches='tight')
