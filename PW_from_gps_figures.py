@@ -2538,20 +2538,21 @@ def prepare_harmonics_table(path=work_yuval, season='ALL'):
         semidiu_ph = ds[station + '_mean'].sel(season=season, cpd=2, hour=slice(0, 12)).argmax()
         semidiu_amp = ds[station + '_mean'].sel(season=season, cpd=2, hour=slice(0, 12)).max()
         ds_for_MLR = ds[['{}'.format(station), '{}_mean'.format(station)]]
-        harm_di = run_MLR_diurnal_harmonics(ds_for_MLR, plot=False)
+        harm_di = run_MLR_diurnal_harmonics(ds_for_MLR, season=season, plot=False)
         record = [station, diu_amp.item(), diu_ph.item(), harm_di[1],
                   semidiu_amp.item(), semidiu_ph.item(), harm_di[2],
                   harm_di[1] + harm_di[2]]
         records.append(record)
     df = pd.DataFrame(records)
-    df.columns = ['Station', 'S1A [mm]', 'S1P [UTC]', 'S1V [%]', 'S2A [mm]',
-                  'S2P [UTC]', 'S2V [%]', 'VT [%]']
+    df.columns = ['Station', 'A1 [mm]', 'P1 [UTC]', 'V1 [%]', 'A2 [mm]',
+                  'P2 [UTC]', 'V2 [%]', 'VT [%]']
     df = df.set_index('Station')
     gr = group_sites_to_xarray()
     new = gr.T.values.ravel()
     df = df.reindex(new)
     df.index = df.index.str.upper()
-    df = df[['S1A [mm]', 'S2A [mm]', 'S1P [UTC]', 'S2P [UTC]', 'S1V [%]', 'S2V [%]', 'VT [%]']]
+    pd.options.display.float_format = '{:.1f}'.format
+    df = df[['A1 [mm]', 'A2 [mm]', 'P1 [UTC]', 'P2 [UTC]', 'V1 [%]', 'V2 [%]', 'VT [%]']]
     print(df.to_latex())
     return df
 
