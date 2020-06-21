@@ -1771,7 +1771,7 @@ def plot_peak_hour_distance(path=work_yuval, season='JJA',
     ax.set_xlabel('Distance from shore [km]', fontsize=16)
     ax.set_ylabel('Peak hour [UTC]', fontsize=16)
     # add sunrise UTC hour
-    ax.axhline(16.66)
+    ax.axhline(16.66, color='tab:orange', linewidth=2)
     if save:
         filename = 'pw_peak_distance_shore.png'
         plt.savefig(savefig_path / filename, bbox_inches='tight')
@@ -2214,6 +2214,73 @@ def plot_tide_pw_lags(path=hydro_path, pw_anom=False, rolling='1H', save=True):
     return
 
 
+def plot_profiler(path=work_yuval, ceil_path=ceil_path, title=False,
+                  field='maxsnr', save=True):
+    import xarray as xr
+    from ceilometers import read_coastal_BL_levi_2011
+    from aux_gps import groupby_half_hour_xr
+    from calendar import month_abbr
+    df = read_coastal_BL_levi_2011(path=ceil_path)
+    ds = df.to_xarray()
+    pw = xr.open_dataset(path / 'GNSS_PW_thresh_50_for_diurnal_analysis.nc')
+    pw = pw['csar']
+    pw.load()
+    pw = pw.sel(time=pw['time.month']==7).dropna('time')
+    pw_size = pw.size
+    pwyears = [pw.time.dt.year.min().item(), pw.time.dt.year.max().item()]
+    pw_std = groupby_half_hour_xr(pw, reduce='std')['csar']
+    pw_hour = groupby_half_hour_xr(pw, reduce='mean')['csar']
+    pw_hour_plus = (pw_hour + pw_std).values
+    pw_hour_minus = (pw_hour - pw_std).values
+    if field == 'maxsnr':
+        mlh_hour = ds['maxsnr']
+        mlh_std = ds['std_maxsnr']
+        label = 'Max SNR'
+    elif field == 'tv_inversion':
+        mlh_hour = ds['tv_inversion']
+        mlh_std = ds['std_tv200']
+        label = 'Tv inversion'
+    mlh_hour_minus = (mlh_hour - mlh_std).values
+    mlh_hour_plus = (mlh_hour + mlh_std).values
+    half_hours = pw_hour.half_hour.values
+    fig, ax = plt.subplots(figsize=(10, 8))
+    red = 'tab:red'
+    blue = 'tab:blue'
+    pwln = pw_hour.plot(color=blue, marker='s', ax=ax)
+    ax.fill_between(half_hours, pw_hour_minus, pw_hour_plus, color=blue, alpha=0.5)
+    twin = ax.twinx()
+    mlhln = mlh_hour.plot(color=red, marker='o', ax=twin)
+    twin.fill_between(half_hours, mlh_hour_minus, mlh_hour_plus, color=red, alpha=0.5)
+    pw_label = 'PW: {}-{}, {} ({} pts)'.format(pwyears[0], pwyears[1], month_abbr[7], pw_size)
+    mlh_label = 'MLH: {}-{}, {} ({} pts)'.format(1997,1999, month_abbr[7], 90)
+#    if month is not None:
+#        pwmln = pw_m_hour.plot(color='tab:orange', marker='^', ax=ax)
+#        pwm_label = 'PW: {}-{}, {} ({} pts)'.format(pw_years[0], pw_years[1], month_abbr[month], pw_month.dropna('time').size)
+#        ax.legend(pwln + mlhln + pwmln, [pw_label, mlh_label, pwm_label], loc=leg_loc)
+#    else:
+    ax.legend([pwln[0] , mlhln[0]], [pw_label, mlh_label], loc='best')
+#    plt.legend([pw_label, mlh_label])
+    ax.tick_params(axis='y', colors=blue)
+    twin.tick_params(axis='y', colors=red)
+    ax.set_ylabel('PW [mm]', color=blue)
+    twin.set_ylabel('MLH [m]', color=red)
+    ax.set_xticks([x for x in range(24)])
+    ax.set_xlabel('Hour of day [UTC]')
+    ax.grid()
+    mlh_name = 'Hadera'
+    textstr = '{}, {}'.format(mlh_name, pw.name.upper())
+    props = dict(boxstyle='round', facecolor='white', alpha=0.5)
+    ax.text(0.05, 0.95, textstr, transform=ax.transAxes, fontsize=10,
+               verticalalignment='top', bbox=props)
+    if title:
+        ax.set_title('The diurnal cycle of {} Mixing Layer Height ({}) and {} GNSS site PW'.format(mlh_name, label, pw.name.upper()))
+    fig.tight_layout()
+    if save:
+        filename = 'PW_diurnal_with_MLH_csar_{}.png'.format(field)
+        plt.savefig(savefig_path / filename, orientation='landscape')
+    return ax
+
+
 def plot_ceilometers(path=work_yuval, ceil_path=ceil_path, interpolate='6H',
                      save=True):
     import xarray as xr
@@ -2221,7 +2288,7 @@ def plot_ceilometers(path=work_yuval, ceil_path=ceil_path, interpolate='6H',
     from ceilometers import read_all_ceilometer_stations
     import numpy as np
     pw = xr.open_dataset(path / 'GNSS_PW_thresh_50_for_diurnal_analysis.nc')
-    pw = pw[['tela', 'jslm', 'yrcm', 'nzrt', 'klhv']]
+    pw = pw[['tela', 'jslm', 'yrcm', 'nzrt', 'klhv', 'csar']]
     pw.load()
     ds = read_all_ceilometer_stations(path=ceil_path)
     if interpolate is not None:
@@ -2229,7 +2296,7 @@ def plot_ceilometers(path=work_yuval, ceil_path=ceil_path, interpolate='6H',
         ds = ds.interpolate_na('time', max_gap=interpolate, method='cubic')
         for i, da in enumerate(ds):
             ds[da].attrs.update(attrs[i])
-    fig, axes = plt.subplots(1, 2, sharex=True, sharey=True, figsize=(15,6))
+    fig, axes = plt.subplots(1, 2, sharex=True, sharey=True, figsize=(15, 6))
     couples = [['tela', 'TLV'], ['jslm', 'JR']]
     twins = []
     for i, ax in enumerate(axes.flatten()):

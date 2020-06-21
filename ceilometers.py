@@ -383,7 +383,7 @@ def read_coastal_BL_levi_2011(path=ceil_path):
     September as measured by the MAX SNR."""
     # read july 1997-1999 data:
     df_july = pd.read_excel(path/'coastal_BL_levi_2011.xls', sheet_name='hour_july')
-    hour = shift_half_hour_lst(3)
+    hour = shift_half_hour_lst(2)
     df_july.set_index(hour, inplace=True)
     df_july = df_july.sort_index()
     df_july.drop('hour', axis=1, inplace=True)
