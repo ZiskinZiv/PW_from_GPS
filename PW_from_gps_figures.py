@@ -2226,7 +2226,7 @@ def plot_profiler(path=work_yuval, ceil_path=ceil_path, title=False,
     pw = pw['csar']
     pw.load()
     pw = pw.sel(time=pw['time.month']==7).dropna('time')
-    pw_size = pw.size
+    pw_size = pw.dropna('time').size
     pwyears = [pw.time.dt.year.min().item(), pw.time.dt.year.max().item()]
     pw_std = groupby_half_hour_xr(pw, reduce='std')['csar']
     pw_hour = groupby_half_hour_xr(pw, reduce='mean')['csar']
@@ -2264,6 +2264,7 @@ def plot_profiler(path=work_yuval, ceil_path=ceil_path, title=False,
     twin.tick_params(axis='y', colors=red)
     ax.set_ylabel('PW [mm]', color=blue)
     twin.set_ylabel('MLH [m]', color=red)
+    twin.set_ylim(400, 1250)
     ax.set_xticks([x for x in range(24)])
     ax.set_xlabel('Hour of day [UTC]')
     ax.grid()

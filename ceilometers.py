@@ -270,7 +270,7 @@ def twin_hourly_mean_plot(pw, mlh, month=8, ax=None, title=True,
 #        handles1 = [h[0] for h in handles1]
 #        hand = handles + handles1
 #        labs = labels + labels1
-    pw_label = 'PW: {}-{}, {} ({} pts)'.format(pwyears[0], pwyears[1], month_abbr[mlh_month], pw.size)
+    pw_label = 'PW: {}-{}, {} ({} pts)'.format(pwyears[0], pwyears[1], month_abbr[mlh_month], pw.dropna('time').size)
     mlh_label = 'MLH: {}-{}, {} ({} pts)'.format(mlhyears[0], mlhyears[1], month_abbr[mlh_month], mlh.dropna('time').size)
 #    if month is not None:
 #        pwmln = pw_m_hour.plot(color='tab:orange', marker='^', ax=ax)
