@@ -144,6 +144,46 @@ def read_synoptic_classification(
     return df
 
 
+def find_consecutive_classes(df):
+    from aux_gps import find_consecutive_vals_df
+    import numpy as np
+    import pandas as pd
+    classes = np.arange(1, 20, 1)
+    sums = []
+    for clas in classes:
+        df_con = find_consecutive_vals_df(df, col='class', val=clas)
+        if df_con.empty:
+            sums.append(0)
+        else:
+            sums.append(df_con['2'][df_con['2'] > 1].sum())
+    df_clas = pd.DataFrame(sums, index=classes)
+    df_clas.columns = ['consecutive_class_days']
+    return df_clas
+
+
+def agg_month_consecutive_syn_class(path=cwd):
+    import numpy as np
+    import pandas as pd
+    from aux_gps import save_ncfile
+    df = read_synoptic_classification(path=path)
+    df['month'] = df.index.month
+    df['year'] = df.index.year
+    df['months'] = df['year'].astype(str) + '-' + df['month'].astype(str)
+    new_df = df.groupby(df['months']).apply(find_consecutive_classes)
+    new_df.columns = ['class_sum']
+    new_df = new_df.unstack()
+    new_df.columns = np.arange(1, 20, 1)
+    dt = pd.to_datetime(new_df.index)
+    new_df.set_index(dt, inplace=True)
+    new_df = new_df.sort_index()
+    new_df.index.name = 'time'
+    da = new_df.to_xarray().to_array('class')
+    ds = da.to_dataset(name='consecutive')
+    filename = 'GNSS_synoptic_class_consecutive.nc'
+    save_ncfile(ds, work_yuval, filename)
+    return da
+
+
 def agg_month_count_syn_class(path=cwd):
     # df.loc['2015-09']['Name-EN'].value_counts()
     import pandas as pd
@@ -158,5 +198,8 @@ def agg_month_count_syn_class(path=cwd):
     dfmm = dfmm.fillna(0)
     dfmm = dfmm.astype(int)
     dfmm.columns = [x + 1 for x in range(19)]
-    return dfmm
+    dfmm.index.name = 'time'
+    da = dfmm.to_xarray().to_array('class')
+    da = da.sortby('time')
+    return da
     
