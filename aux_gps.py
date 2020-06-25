@@ -544,6 +544,13 @@ def calculate_g(lat):
     return g
 
 
+def find_consecutive_vals_df(df, col='class', val=7):
+    import numpy as np
+    bool_vals = np.where(df[col] == val, 1, 0)
+    con_df = consecutive_runs(bool_vals, num=0)
+    return con_df
+
+
 def consecutive_runs(arr, num=False):
     import numpy as np
     import pandas as pd
@@ -570,10 +577,8 @@ def consecutive_runs(arr, num=False):
     if isinstance(arr, pd.DataFrame):
         if isinstance(num, bool):
             notnum = not num
-        elif num == 1:
-            notnum = 0
-        elif num == 0:
-            notnum = 1
+        elif isinstance(num, int):
+            notnum = 'not-{}'.format(num)
         elif num == 'nan':
             notnum = 'not-nan'
         A.columns = [
