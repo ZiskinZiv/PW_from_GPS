@@ -254,8 +254,8 @@ def scikit_fit_predict(X, y, seed=42, plot=True):
             X_tt, y_tt, shuffle=True, test_size=0.5, random_state=i)
         clf.fit(X_train, y_train)
         viz = plot_roc_curve(clf, X_val, y_val,
-             name='ROC run {}'.format(i),
-             alpha=0.3, lw=1, ax=ax)
+                             name='ROC run {}'.format(i),
+                             alpha=0.3, lw=1, ax=ax)
         interp_tpr = interp(mean_fpr, viz.fpr, viz.tpr)
         interp_tpr[0] = 0.0
         tprs.append(interp_tpr)
@@ -663,6 +663,7 @@ def get_hydro_near_GNSS(radius=5, n=5, hydro_path=hydro_path,
     import pandas as pd
     import geopandas as gpd
     from pathlib import Path
+    import xarray as xr
     import matplotlib.pyplot as plt
     df = pd.read_csv(Path().cwd() / 'israeli_gnss_coords.txt',
                      delim_whitespace=True)
@@ -681,6 +682,17 @@ def get_hydro_near_GNSS(radius=5, n=5, hydro_path=hydro_path,
     # get only stations within desired radius
     mask = ~hydro_meta.loc[:, gnss_list].isnull().all(axis=1)
     sel_hydro = hydro_meta.copy()[mask]  # pd.concat(hydro_list)
+    # filter unexisting stations:
+    tides = xr.load_dataset(hydro_path / 'hydro_tides.nc')
+    to_remove = []
+    for index, row in sel_hydro.iterrows():
+        sid = row['id']
+        try:
+            tides['TS_{}_max_flow'.format(sid)]
+        except KeyError:
+            print('{} hydro station non-existant in database'.format(sid))
+            to_remove.append(index)
+    sel_hydro.drop(to_remove, axis=0, inplace=True)
     if plot:
         isr = gpd.read_file(gis_path / 'Israel_and_Yosh.shp')
         isr.crs = {'init': 'epsg:4326'}
