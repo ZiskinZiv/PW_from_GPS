@@ -396,4 +396,39 @@ def read_coastal_BL_levi_2011(path=ceil_path):
     df = pd.concat([df_july, df_JJAS], axis=1)
     return df
 
-    
+
+def convert_to_numeric(large_string):
+    import numpy as np
+    s = large_string.strip()
+    ss = [s[i:i + 5] for i in range(0, len(s), 5)]
+    sint = [int(x, 16) for x in ss]
+    sint = np.array(sint, dtype=np.int32)
+    # correction:
+    corr = sint > 2**19
+    if corr.any():
+        sint[corr] = -(2 ** 20 - sint[corr])
+    return sint
+
+
+def read_his_file(hfile):
+    import pandas as pd
+    import xarray as xr
+    import numpy as np
+    df = pd.read_csv(hfile, header=1)
+    df.columns = [x.strip() for x in df.columns]
+    df['profile'] = df['BS_PROFILE'].apply(convert_to_numeric)
+    df.set_index(pd.to_datetime(df['CREATEDATE']), inplace=True)
+    df.drop(['CREATEDATE', 'UNIXTIME', 'CEILOMETER', 'BS_PROFILE', 'PERIOD'],
+            axis=1, inplace=True)
+    df.index.name = 'time'
+    vals = [df.values[x][0] for x in range(df.size)]
+    da = xr.DataArray(vals, dims=['time', 'range'])
+    da['time'] = df.index
+    da['range'] = np.arange(10, 4510, 10)
+    da = da.astype(np.float32)
+    ds = da.to_dataset(name='rcs_0')
+    ds['rcs_0'].attrs['long_name'] = 'normalized range corrected signal'
+    ds['rcs_0'].attrs['units'] = '1e-8 sr^-1.m^-1'
+    ds['range'].attrs['long_name'] = 'range'
+    ds['range'].attrs['units'] = 'm'
+    return ds
