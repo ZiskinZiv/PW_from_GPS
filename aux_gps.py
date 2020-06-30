@@ -217,6 +217,11 @@ def anomalize_xr(da_ts, freq='D'):  # i.e., like deseason
         frq = 'daily'
         date = groupby_date_xr(da_ts)
         da_anoms = da_ts.groupby(date) - da_ts.groupby(date).mean()
+    elif freq == 'H':
+        print('removing hourly means from {}'.format(name))
+        frq = 'hourly'
+        da_anoms = da_ts.groupby('{}.hour'.format(
+            time_dim)) - da_ts.groupby('{}.hour'.format(time_dim)).mean()
     elif freq == 'MS':
         print('removing monthly means from {}'.format(name))
         frq = 'monthly'
