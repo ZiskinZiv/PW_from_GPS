@@ -551,6 +551,28 @@ def find_consecutive_vals_df(df, col='class', val=7):
     return con_df
 
 
+def lat_mean(xarray, method='cos', dim='lat', copy_attrs=True):
+    import numpy as np
+    import xarray as xr
+
+    def mean_single_da(da, dim=dim, method=method):
+        if dim not in da.dims:
+            return da
+        if method == 'cos':
+            weights = np.cos(np.deg2rad(da[dim].values))
+            da_mean = (weights * da).sum(dim) / sum(weights)
+        if copy_attrs:
+            da_mean.attrs = da.attrs
+        return da_mean
+
+    xarray = xarray.transpose(..., 'lat')
+    if isinstance(xarray, xr.DataArray):
+        xarray = mean_single_da(xarray)
+    elif isinstance(xarray, xr.Dataset):
+        xarray = xarray.map(mean_single_da, keep_attrs=copy_attrs)
+    return xarray
+
+
 def consecutive_runs(arr, num=False):
     import numpy as np
     import pandas as pd
