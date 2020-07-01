@@ -353,14 +353,15 @@ def produce_X_y(station='drag', hs_id=48125, lag=25, anoms=True,
         cnt += 1
     # lastly, assemble for X, y using np.columnstack:
     y = np.concatenate([y_pos_arr, y_neg_arr])
-    X = np.stack([[x.values for x in pw_pos_list] + 
+    X = np.stack([[x.values for x in pw_pos_list] +
                         [x.values for x in pw_neg_list]])
     X = X.squeeze()
     return X, y
 
 
 def preprocess_hydro_pw(pw_station='drag', hs_id=48125, path=work_yuval,
-                        anoms=True, hydro_path=hydro_path, with_ends=False):
+                        anoms=True, hydro_path=hydro_path, max_flow=0,
+                        with_tide_ends=False):
     import xarray as xr
     import pandas as pd
     import numpy as np
@@ -371,22 +372,29 @@ def preprocess_hydro_pw(pw_station='drag', hs_id=48125, path=work_yuval,
     if not sta_slice:
         raise KeyError('hydro station {} not found in database'.format(hs_id))
     tides = all_tides[sta_slice].dropna('tide_start')
+    max_flow_tide = tides['TS_{}_max_flow'.format(hs_id)]
     tide_starts = tides['tide_start'].where(
-        ~tides.isnull()).dropna('tide_start')['tide_start']
+        ~tides.isnull()).where(max_flow_tide > max_flow).dropna('tide_start')['tide_start']
     tide_ends = tides['TS_{}_tide_end'.format(hs_id)].where(
-        ~tides.isnull()).dropna('tide_start')['TS_{}_tide_end'.format(hs_id)]
+        ~tides.isnull()).where(max_flow_tide > max_flow).dropna('tide_start')['TS_{}_tide_end'.format(hs_id)]
+    max_flows = max_flow_tide.where(max_flow_tide > max_flow).dropna('tide_start')
     # round all tide_starts to hourly:
     ts = tide_starts.dt.round('1H')
+    max_flows = max_flows.sel(tide_start=ts, method='nearest')
+    max_flows['tide_start'] = ts
     ts_end = tide_ends.dt.round('1H')
     time_dt = pd.date_range(
         start=ts.min().values,
         end=ts_end.max().values,
         freq='1H')
     df = pd.DataFrame(data=np.zeros(time_dt.shape), index=time_dt)
-    df.loc[ts.values, :] = 1
-    if with_ends:
+    df.loc[ts.values, 0] = 1
+    df.loc[ts.values, 1] = max_flows.loc[ts.values]
+    df.columns = ['tides', 'max_flow']
+    df = df.fillna(0)
+    if with_tide_ends:
         df.loc[ts_end.values, :] = 2
-    df.columns = ['tides']
+    # df.columns = ['tides']
     # now load pw:
     if anoms:
         pw = xr.load_dataset(path / 'GNSS_PW_anom_hourly_50_hour_dayofyear.nc')[pw_station]
@@ -395,7 +403,8 @@ def preprocess_hydro_pw(pw_station='drag', hs_id=48125, path=work_yuval,
     pw_df = pw.dropna('time').to_dataframe()
     # now align the both dataframes:
     pw_df['tides'] = df['tides']
-    pw_df['tides'] = pw_df['tides'].fillna(0)
+    pw_df['max_flow'] = df['max_flow']
+    pw_df = pw_df.fillna(0)
     return pw_df
 
 
