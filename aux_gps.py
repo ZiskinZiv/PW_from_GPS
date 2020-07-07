@@ -12,6 +12,16 @@ from PW_paths import work_yuval
 # TODO: if not, build func to replace datetimeindex to numbers and vise versa
 
 
+def decimal_year_to_datetime(decimalyear):
+    from datetime import datetime, timedelta
+    import pandas as pd
+    year = int(decimalyear)
+    rem = decimalyear - year
+    base = datetime(year, 1, 1)
+    result = base + timedelta(seconds=(base.replace(year=base.year + 1) - base).total_seconds() * rem)
+    return pd.to_datetime(result)
+
+
 def select_months(da_ts, months, remove=False, reindex=True):
     import xarray as xr
     from aux_gps import xr_reindex_with_date_range
