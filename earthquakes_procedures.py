@@ -24,7 +24,10 @@ def filter_distance_of_earthquake_events(edf, sta_pos, tol_distance=50, plot=Fal
     from shapely.geometry import Point
     from pyproj import Proj
     import geopandas as gpd
-    from PW_from_gps_figures import plot_israel_map
+    import contextily as ctx
+    import matplotlib.ticker as ticker
+    from PW_from_gps_figures import lon_formatter
+    from PW_from_gps_figures import lat_formatter
     # use Israel new network in meters for distance calculation:
     isr_proj = Proj(init='EPSG:2039')
     # convert the lat/lon point in sta_pos to shapely point with projection:
@@ -39,12 +42,23 @@ def filter_distance_of_earthquake_events(edf, sta_pos, tol_distance=50, plot=Fal
     gdf['distance'] = gdf.geometry.distance(p_proj_point) / 1000.0 # in km
     # filter close earthquake sources:
     gdf = gdf[gdf['distance'] <= tol_distance]
+    if gdf.empty:
+        raise KeyError('No Earthquakes in the range of {} found'.format(tol_distance))
     # convert back to WGS84:
     gdf = gdf.to_crs({'init': 'epsg:4326'})
     if plot:
-        ax = plot_israel_map(gis_path, rc, ax=None)
-        gdf.plot(ax=ax)
-        ax.plot(p)
+        ax = gdf.plot(column='Md', legend=True)
+        d = {'geometry': [Point(sta_pos[1], sta_pos[0])]}
+        station = gpd.GeoDataFrame(d, crs="EPSG:4326")
+        station.plot(ax=ax, marker='s', color='k')
+        ctx.add_basemap(ax,
+                        url=ctx.sources.ST_TERRAIN_BACKGROUND,
+                        crs='epsg:4326')
+        ax.xaxis.set_major_locator(ticker.MaxNLocator(5))
+        ax.yaxis.set_major_formatter(lat_formatter)
+        ax.xaxis.set_major_formatter(lon_formatter)
+        ax.tick_params(top=True, bottom=True, left=True, right=True,
+                       direction='out', labelsize=10)
     return gdf
 
 
