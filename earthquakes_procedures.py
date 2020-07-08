@@ -7,9 +7,57 @@ Created on Tue Jul  7 17:11:38 2020
 """
 
 from pathlib import Path
+from PW_paths import work_yuval
 cwd = Path().cwd()
+gis_path = work_yuval /'gis'
+rc = {
+    'font.family': 'serif',
+    'xtick.labelsize': 'medium',
+    'ytick.labelsize': 'medium'}
 # TODO: Build mask = (e.index > st) & (e.index <= ed) for dates, choose dates:
 # st=df.index[0]-np.timedelta64(1,'M') month each date or half month
+
+
+def filter_distance_of_earthquake_events(edf, sta_pos, tol_distance=50, plot=False):
+    """given a station position (lat, lon), search the erathquake database for
+    data with the tolarnace distance of tol_distance km around the sta_pos"""
+    from shapely.geometry import Point
+    from pyproj import Proj
+    import geopandas as gpd
+    from PW_from_gps_figures import plot_israel_map
+    # use Israel new network in meters for distance calculation:
+    isr_proj = Proj(init='EPSG:2039')
+    # convert the lat/lon point in sta_pos to shapely point with projection:
+    p = Point(sta_pos[0], sta_pos[1])
+    p_proj_point = Point(isr_proj(p.y, p.x))
+    # create a geodataframe init in WGS84:
+    gdf = gpd.GeoDataFrame(edf, geometry=gpd.points_from_xy(edf.lon, edf.lat),
+                           crs={'init': 'epsg:4326'})
+    # convert to Israel new network:
+    gdf = gdf.to_crs({'init': 'epsg:2039'})
+    # calculate distance to station position in km:
+    gdf['distance'] = gdf.geometry.distance(p_proj_point) / 1000.0 # in km
+    # filter close earthquake sources:
+    gdf = gdf[gdf['distance'] <= tol_distance]
+    # convert back to WGS84:
+    gdf = gdf.to_crs({'init': 'epsg:4326'})
+    if plot:
+        ax = plot_israel_map(gis_path, rc, ax=None)
+        gdf.plot(ax=ax)
+        ax.plot(p)
+    return gdf
+
+
+def filter_times_of_earthquake_events(edf, bp_dt, tol=15):
+    """given a breakpoint datetime, search the erathquake database for data
+    with the tolarnace of tol days around the bp_dt"""
+    import numpy as np
+    start = bp_dt - np.timedelta64(tol, 'D')
+    end = bp_dt + np.timedelta64(tol, 'D')
+    mask = (edf.index >= start) & (edf.index <= end)
+    df = edf[mask]
+    return df
+
 
 def read_GNSS_station_position_velocity(path=cwd, station='ALON',
                                         return_pos=False):
