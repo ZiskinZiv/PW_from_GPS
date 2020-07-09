@@ -476,7 +476,8 @@ def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
     ax_map = fig.add_subplot(grid[0, 1])  # plt.subplot(122)
 #    fig, ax = plt.subplots(1, 2, sharex=False, sharey=False, figsize=(20, 6))
     # RINEX gantt chart:
-    file = path_glob(path, 'GNSS_PW_thresh_50_for_diurnal_analysis.nc')[-1]
+    # file = path_glob(path, 'GNSS_PW_thresh_50_for_diurnal_analysis.nc')[-1]
+    file = path_glob(path, 'GNSS_PW_thresh_50_homogenized.nc')[-1]
     ds = xr.open_dataset(file)
     just_pw = [x for x in ds if 'error' not in x]
     ds = ds[just_pw]
@@ -513,7 +514,8 @@ def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
     gps = produce_geo_gnss_solved_stations(path=gis_path, plot=False)
     # removed = ['hrmn', 'nizn', 'spir']
 #    removed = ['hrmn']
-    removed = ['hrmn', 'gilb', 'lhav']
+#     removed = ['hrmn', 'gilb', 'lhav']
+    removed = ['hrmn', 'gilb', 'lhav', 'nizn', 'spir']
 #    merged = ['klhv', 'lhav', 'mrav', 'gilb']
     merged = []
     gps_list = [x for x in gps.index if x not in merged and x not in removed]

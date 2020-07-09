@@ -176,7 +176,7 @@ def produce_gnss_pw_from_era5(era5_path=era5_path,
     import xarray as xr
     filepath = path_glob(era5_path, glob_str)[0]
     era5_pw = xr.open_dataarray(filepath)
-    gps = produce_geo_gps_stations(gis_path, plot=False)
+    gps = produce_geo_gnss_solved_stations(plot=False)
     era5_pw_list = []
     for station in gps.index:
         slat = gps.loc[station, 'lat']
