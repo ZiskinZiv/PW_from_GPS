@@ -3800,11 +3800,16 @@ def normality_test_on_pw(da_ts, sample=None, alpha=0.05, test='shapiro'):
 
 
 def mann_kendall_trend_analysis(da_ts, alpha=0.05, seasonal=False, CI=False,
-                                verbose=True):
+                                season_selection=None, verbose=True):
     import pymannkendall as mk
     from scipy.stats.mstats import theilslopes
     import numpy as np
     import pandas as pd
+    if season_selection is not None:
+        print('{} season selected.'.format(season_selection))
+        da_ts = da_ts.sel(time=da_ts['time.season']==season_selection)
+    else:
+        print('No specific season is selected.')
     if seasonal:
         result = mk.seasonal_test(da_ts, alpha=alpha)
         test = 'Seasonal Mann Kendall Test'

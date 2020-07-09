@@ -232,7 +232,7 @@ def plot_MLR_GNSS_PW_harmonics_facetgrid(path=work_yuval, season=None,
 #    sites = sorted(list(set([x.split('_')[0] for x in harmonics])))
 #    da = xr.DataArray([x for x in range(len(sites))], dims='GNSS')
 #    da['GNSS'] = sites
-    sites = group_sites_to_xarray(upper=False)
+    sites = group_sites_to_xarray(upper=False, scope='diurnal')
     sites_flat = [x for x in sites.values.flatten()]
     da = xr.DataArray([x for x in range(len(sites_flat))], dims='GNSS')
     da['GNSS'] = [x for x in range(len(da))]
@@ -1578,7 +1578,7 @@ def produce_table_1(removed=['hrmn'], merged={'klhv': ['klhv', 'lhav'],
                     'mrav': ['gilb', 'mrav']}):
     from PW_stations import produce_geo_gnss_solved_stations
     import pandas as pd
-    sites = group_sites_to_xarray(upper=False) 
+    sites = group_sites_to_xarray(upper=False, scope='diurnal') 
     df_gnss = produce_geo_gnss_solved_stations(plot=False,
                                                add_distance_to_coast=True)
     new = sites.T.values.ravel()
@@ -1696,7 +1696,7 @@ def plot_peak_hour_distance(path=work_yuval, season='JJA',
         add_distance_to_coast=True, plot=False)
     geo['phase'] = dfh
     geo = geo.dropna()
-    groups = group_sites_to_xarray(upper=False)
+    groups = group_sites_to_xarray(upper=False, scope='diurnal')
     geo.loc[groups.sel(group=0).values, 'group'] = 'coastal'
     geo.loc[groups.sel(group=1).values, 'group'] = 'highland'
     geo.loc[groups.sel(group=2).values, 'group'] = 'eastern'
@@ -2392,7 +2392,7 @@ def plot_diurnal_pw_all_seasons(path=work_yuval, season='ALL', synoptic=None,
         fg = plot_diurnal_pw_geographical_segments(df_annual, fg=fg, marker='d', color='tab:purple',
                                                    ylim=ylim)
         legend = ['PT', 'RST', 'CL', 'H', 'Annual']
-    sites = group_sites_to_xarray(False)
+    sites = group_sites_to_xarray(False, scope='diurnal')
     for i, (ax, site) in enumerate(zip(fg.axes.flatten(), sites.values.flatten())):
         lns = ax.get_lines()
         if site in ['yrcm', 'ramo']:
@@ -2424,12 +2424,17 @@ def plot_diurnal_pw_all_seasons(path=work_yuval, season='ALL', synoptic=None,
     return fg
 
 
-def group_sites_to_xarray(upper=False):
+def group_sites_to_xarray(upper=False, scope='diurnal'):
     import xarray as xr
     import numpy as np
-    group1 = ['KABR', 'BSHM', 'CSAR', 'TELA', 'ALON', 'SLOM', 'NIZN']
-    group2 = ['NZRT', 'MRAV', 'YOSH', 'JSLM', 'KLHV', 'YRCM', 'RAMO']
-    group3 = ['ELRO', 'KATZ', 'DRAG', 'DSEA', 'SPIR', 'NRIF', 'ELAT']
+    if scope == 'diurnal':
+        group1 = ['KABR', 'BSHM', 'CSAR', 'TELA', 'ALON', 'SLOM', 'NIZN']
+        group2 = ['NZRT', 'MRAV', 'YOSH', 'JSLM', 'KLHV', 'YRCM', 'RAMO']
+        group3 = ['ELRO', 'KATZ', 'DRAG', 'DSEA', 'SPIR', 'NRIF', 'ELAT']
+    elif scope == 'annual':
+        group1 = ['KABR', 'BSHM', 'CSAR', 'TELA', 'ALON', 'SLOM']
+        group2 = ['NZRT', 'MRAV', 'YOSH', 'JSLM', 'KLHV', 'YRCM', 'RAMO']
+        group3 = ['ELRO', 'KATZ', 'DRAG', 'DSEA', 'NRIF', 'ELAT']
     if not upper:
         group1 = [x.lower() for x in group1]
         group2 = [x.lower() for x in group2]
@@ -2451,7 +2456,7 @@ def plot_diurnal_pw_geographical_segments(df, fg=None, marker='o', color='b',
     from matplotlib.ticker import MultipleLocator
     from PW_stations import produce_geo_gnss_solved_stations
     geo = produce_geo_gnss_solved_stations(plot=False)
-    sites = group_sites_to_xarray(upper=False)
+    sites = group_sites_to_xarray(upper=False, scope='diurnal')
     sites_flat = [x for x in sites.values.flatten()]
     da = xr.DataArray([x for x in range(len(sites_flat))], dims='GNSS')
     da['GNSS'] = [x for x in range(len(da))]
@@ -2520,7 +2525,7 @@ def plot_diurnal_pw_geographical_segments(df, fg=None, marker='o', color='b',
 def prepare_diurnal_variability_table(path=work_yuval):
     from PW_stations import calculate_diurnal_variability
     df = calculate_diurnal_variability()
-    gr = group_sites_to_xarray()
+    gr = group_sites_to_xarray(scope='diurnal')
     new = gr.T.values.ravel()
     df = df.reindex(new)
     df.index = df.index.str.upper()
@@ -2550,7 +2555,7 @@ def prepare_harmonics_table(path=work_yuval, season='ALL'):
     df.columns = ['Station', 'A1 [mm]', 'P1 [UTC]', 'V1 [%]', 'A2 [mm]',
                   'P2 [UTC]', 'V2 [%]', 'VT [%]']
     df = df.set_index('Station')
-    gr = group_sites_to_xarray()
+    gr = group_sites_to_xarray(scope='diurnal')
     new = gr.T.values.ravel()
     df = df.reindex(new)
     df.index = df.index.str.upper()
