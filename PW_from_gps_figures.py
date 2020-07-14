@@ -19,8 +19,10 @@ phys_soundings = sound_path / 'bet_dagan_phys_sounding_2007-2019.nc'
 ims_path = work_yuval / 'IMS_T'
 gis_path = work_yuval / 'gis'
 dem_path = work_yuval / 'AW3D30'
+era5_path = work_yuval / 'ERA5'
 hydro_path = work_yuval / 'hydro'
 ceil_path = work_yuval / 'ceilometers'
+aero_path = work_yuval / 'AERONET'
 
 
 rc = {
@@ -168,6 +170,22 @@ def caption(text, color='blue', **kwargs):
     print(colored('Caption:', color, attrs=['bold'], **kwargs))
     print(colored(text, color, attrs=['bold'], **kwargs))
     return
+
+
+def fix_time_axis_ticks(ax, limits=None, margin=15):
+    import pandas as pd
+    import matplotlib.dates as mdates
+    if limits is not None:
+        ax.set_xlim(*pd.to_datetime(limits))
+    years_fmt = mdates.DateFormatter('%Y')
+    ax.xaxis.set_major_locator(mdates.YearLocator())
+    ax.xaxis.set_major_formatter(years_fmt)
+    ax.xaxis.set_minor_locator(mdates.MonthLocator())
+#    locator = mdates.AutoDateLocator(minticks=3, maxticks=7)
+#    formatter = mdates.ConciseDateFormatter(locator)
+#    ax.xaxis.set_major_locator(locator)
+#    ax.xaxis.set_major_formatter(formatter)
+    return ax
 
 
 def plot_diurnal_wind_hodograph(path=ims_path, station='TEL-AVIV-COAST',
@@ -1613,17 +1631,18 @@ def produce_table_stats(thresh=50):
     return df
 
 
-def produce_table_mann_kendall(thresh=50):
+def produce_table_mann_kendall(thresh=50, season=None, with_original=False):
     from PW_stations import mann_kendall_trend_analysis
     import xarray as xr
     import pandas as pd
 
-    def process_mkt(ds_in, alpha=0.05, seasonal=False, factor=120):
+    def process_mkt(ds_in, alpha=0.05, seasonal=False, factor=120,
+                    season_selection=season):
         ds = ds_in.map(
             mann_kendall_trend_analysis,
             alpha=alpha,
             seasonal=seasonal,
-            verbose=False)
+            verbose=False, season_selection=season)
         ds = ds.rename({'dim_0': 'mkt'})
         df = ds.to_dataframe().T
         df = df.drop(['test_name', 'trend', 'h', 'z', 's', 'var_s'], axis=1)
@@ -1640,15 +1659,25 @@ def produce_table_mann_kendall(thresh=50):
         df['slope'][df['slope'] == 'nan'] = '-'
         df.columns = ['Site ID', "Kendall's Tau", 'P-value', "Sen's slope"]
         return df
-
+    
     anoms = xr.load_dataset(
             work_yuval /
              'GNSS_PW_monthly_anoms_thresh_{:.0f}_homogenized.nc'.format(thresh))
     mm = xr.load_dataset(
         work_yuval /
         'GNSS_PW_monthly_thresh_{:.0f}_homogenized.nc'.format(thresh))
+    original_anoms =  xr.load_dataset(
+            work_yuval /
+             'GNSS_PW_monthly_anoms_thresh_{:.0f}.nc'.format(thresh))
+    df_original_anoms = process_mkt(original_anoms)
     df_anoms = process_mkt(anoms)
     df_mm = process_mkt(mm, seasonal=True)
+    gr = group_sites_to_xarray(scope='annual')
+    new = [x for x in gr.T.values.ravel() if isinstance(x, str)]
+    df_original_anoms = df_original_anoms.reindex(new)
+    df_anoms = df_anoms.reindex(new)
+    df_mm = df_mm.reindex(new)
+
 #    mkt_trends = [anoms[x].attrs['mkt_trend'] for x in anoms.data_vars]
 #    mkt_bools = [anoms[x].attrs['mkt_h'] for x in anoms.data_vars]
 #    mkt_slopes = [anoms[x].attrs['mkt_slope'] for x in anoms.data_vars]
@@ -1672,6 +1701,9 @@ def produce_table_mann_kendall(thresh=50):
 #    df.loc[:, '95% confidence intervals'][~df['mkt_h']] = '-'
 #    df = df[['Sen\'s slope', '95% confidence intervals']]
     print(df_anoms.to_latex(index=False))
+    if with_original:
+        df = pd.concat([df_anoms, df_original_anoms], axis=1)
+        return df
     return df_anoms, df_mm
 
 
@@ -1795,7 +1827,9 @@ def plot_monthly_means_anomalies_with_station_mean(load_path=work_yuval,
                 load_path /
                 'GNSS_PW_monthly_anoms_thresh_{:.0f}_homogenized.nc'.format(thresh))
     df = anoms.to_dataframe()
-    df.columns = [x.upper() for x in df.columns]
+    sites = group_sites_to_xarray(upper=True, scope='annual').T
+    sites_flat = [x for x in sites.values.flatten() if isinstance(x, str)]
+    df.columns = sites_flat
     fig = plt.figure(figsize=(20, 10))
     grid = plt.GridSpec(
         2, 1, height_ratios=[
@@ -1818,7 +1852,7 @@ def plot_monthly_means_anomalies_with_station_mean(load_path=work_yuval,
     ax_heat.yaxis.set_tick_params(left='on')
     ax_heat.set_yticklabels(ax_heat.get_ymajorticklabels(),
                             fontweight='bold', fontsize=10)
-    ts = df.T.median().shift(periods=-1, freq='15D')
+    ts = df.T.mean().shift(periods=-1, freq='15D')
     ts.index.name = ''
     # dt_as_int = [x for x in range(len(ts.index))]
     # xticks_labels = ts.index.strftime('%Y-%m').values[::6]
@@ -2365,7 +2399,7 @@ def plot_diurnal_pw_all_seasons(path=work_yuval, season='ALL', synoptic=None,
     df_annual = pw.groupby('time.hour').mean().to_dataframe()
     if season is None and synoptic is None:
         # plot annual diurnal cycle only:
-        fg = plot_diurnal_pw_geographical_segments(df_annual, fg=None, marker='o', color='b',
+        fg = plot_pw_geographical_segments(df_annual, fg=None, marker='o', color='b',
                                                    ylim=ylim)
         legend = ['Annual']
     elif season == 'ALL' and synoptic is None:
@@ -2373,11 +2407,11 @@ def plot_diurnal_pw_all_seasons(path=work_yuval, season='ALL', synoptic=None,
         df_son = pw.sel(time=pw['time.season']=='SON').groupby('time.hour').mean().to_dataframe()
         df_djf = pw.sel(time=pw['time.season']=='DJF').groupby('time.hour').mean().to_dataframe()
         df_mam = pw.sel(time=pw['time.season']=='MAM').groupby('time.hour').mean().to_dataframe()
-        fg = plot_diurnal_pw_geographical_segments(df_jja, fg=None, marker='s', color='tab:green', ylim=ylim)
-        fg = plot_diurnal_pw_geographical_segments(df_son, fg=fg, marker='^', color='tab:red', ylim=ylim)
-        fg = plot_diurnal_pw_geographical_segments(df_djf, fg=fg, marker='x', color='tab:blue')
-        fg = plot_diurnal_pw_geographical_segments(df_mam, fg=fg, marker='+', color='tab:orange',ylim=ylim)
-        fg = plot_diurnal_pw_geographical_segments(df_annual, fg=fg, marker='d', color='tab:purple',
+        fg = plot_pw_geographical_segments(df_jja, fg=None, marker='s', color='tab:green', ylim=ylim)
+        fg = plot_pw_geographical_segments(df_son, fg=fg, marker='^', color='tab:red', ylim=ylim)
+        fg = plot_pw_geographical_segments(df_djf, fg=fg, marker='x', color='tab:blue')
+        fg = plot_pw_geographical_segments(df_mam, fg=fg, marker='+', color='tab:orange',ylim=ylim)
+        fg = plot_pw_geographical_segments(df_annual, fg=fg, marker='d', color='tab:purple',
                                                    ylim=ylim)
         legend = ['JJA', 'SON', 'DJF', 'MAM', 'Annual']
     elif season is None and synoptic == 'ALL':
@@ -2385,11 +2419,11 @@ def plot_diurnal_pw_all_seasons(path=work_yuval, season='ALL', synoptic=None,
         df_rst = slice_xr_with_synoptic_class(pw, path=path, syn_class='RST').groupby('time.hour').mean().to_dataframe()
         df_cl = slice_xr_with_synoptic_class(pw, path=path, syn_class='CL').groupby('time.hour').mean().to_dataframe()
         df_h = slice_xr_with_synoptic_class(pw, path=path, syn_class='H').groupby('time.hour').mean().to_dataframe()
-        fg = plot_diurnal_pw_geographical_segments(df_pt, fg=None, marker='s', color='tab:green', ylim=ylim)
-        fg = plot_diurnal_pw_geographical_segments(df_rst, fg=fg, marker='^', color='tab:red', ylim=ylim)
-        fg = plot_diurnal_pw_geographical_segments(df_cl, fg=fg, marker='x', color='tab:blue')
-        fg = plot_diurnal_pw_geographical_segments(df_h, fg=fg, marker='+', color='tab:orange',ylim=ylim)
-        fg = plot_diurnal_pw_geographical_segments(df_annual, fg=fg, marker='d', color='tab:purple',
+        fg = plot_pw_geographical_segments(df_pt, fg=None, marker='s', color='tab:green', ylim=ylim)
+        fg = plot_pw_geographical_segments(df_rst, fg=fg, marker='^', color='tab:red', ylim=ylim)
+        fg = plot_pw_geographical_segments(df_cl, fg=fg, marker='x', color='tab:blue')
+        fg = plot_pw_geographical_segments(df_h, fg=fg, marker='+', color='tab:orange',ylim=ylim)
+        fg = plot_pw_geographical_segments(df_annual, fg=fg, marker='d', color='tab:purple',
                                                    ylim=ylim)
         legend = ['PT', 'RST', 'CL', 'H', 'Annual']
     sites = group_sites_to_xarray(False, scope='diurnal')
@@ -2449,44 +2483,186 @@ def group_sites_to_xarray(upper=False, scope='diurnal'):
     return sites
 
 
-def plot_diurnal_pw_geographical_segments(df, fg=None, marker='o', color='b',
-                                          ylim=[-2, 3]):
+#def plot_diurnal_pw_geographical_segments(df, fg=None, marker='o', color='b',
+#                                          ylim=[-2, 3]):
+#    import xarray as xr
+#    import numpy as np
+#    from matplotlib.ticker import MultipleLocator
+#    from PW_stations import produce_geo_gnss_solved_stations
+#    geo = produce_geo_gnss_solved_stations(plot=False)
+#    sites = group_sites_to_xarray(upper=False, scope='diurnal')
+#    sites_flat = [x for x in sites.values.flatten() if isinstance(x, str)]
+#    da = xr.DataArray([x for x in range(len(sites_flat))], dims='GNSS')
+#    da['GNSS'] = [x for x in range(len(da))]
+#    if fg is None:
+#        fg = xr.plot.FacetGrid(
+#            da,
+#            col='GNSS',
+#            col_wrap=3,
+#            sharex=False,
+#            sharey=False, figsize=(20, 20))
+#    for i in range(fg.axes.shape[0]):  # i is rows
+#        for j in range(fg.axes.shape[1]):  # j is cols
+#            try:
+#                site = sites.values[i, j]
+#                ax = fg.axes[i, j]
+#                df.loc[:, site].plot(ax=ax, marker=marker, color=color)
+#                ax.set_xlabel('Hour of day [UTC]')
+#                ax.yaxis.tick_left()
+#                ax.grid()
+##                ax.spines["top"].set_visible(False)
+##                ax.spines["right"].set_visible(False)
+##                ax.spines["bottom"].set_visible(False)
+#                ax.xaxis.set_ticks(np.arange(0, 23, 3))
+#                if j == 0:
+#                    ax.set_ylabel('PW anomalies [mm]', fontsize=12)
+##                elif j == 1:
+##                    if i>5:
+##                        ax.set_ylabel('PW anomalies [mm]', fontsize=12)
+#                site_label = '{} ({:.0f})'.format(site.upper(), geo.loc[site].alt)
+#                ax.text(.12, .85, site_label,
+#                        horizontalalignment='center', fontweight='bold',
+#                        transform=ax.transAxes)
+##                ax.yaxis.set_minor_locator(MultipleLocator(3))
+##                ax.yaxis.grid(
+##                    True,
+##                    which='minor',
+##                    linestyle='--',
+##                    linewidth=1,
+##                    alpha=0.7)
+##                ax.yaxis.grid(True, linestyle='--', linewidth=1, alpha=0.7)
+#                if ylim is not None:
+#                    ax.set_ylim(*ylim)
+#            except KeyError:
+#                ax.set_axis_off()
+##    for i, ax in enumerate(fg.axes[:, 0]):
+##        try:
+##            df[gr1].iloc[:, i].plot(ax=ax)
+##        except IndexError:
+##            ax.set_axis_off()
+##    for i, ax in enumerate(fg.axes[:, 1]):
+##        try:
+##            df[gr2].iloc[:, i].plot(ax=ax)
+##        except IndexError:
+##            ax.set_axis_off()
+##    for i, ax in enumerate(fg.axes[:, 2]):
+##        try:
+##            df[gr3].iloc[:, i].plot(ax=ax)
+##        except IndexError:
+##            ax.set_axis_off()
+#
+#    fg.fig.tight_layout()
+#    fg.fig.subplots_adjust()
+#    return fg
+
+def plot_long_term_anomalies(path=work_yuval, era5_path=era5_path,
+                             aero_path=aero_path, save=True):
+    import xarray as xr
+    from aux_gps import anomalize_xr
+    from aeronet_analysis import prepare_station_to_pw_comparison
+    # load GNSS Israel:
+    pw = xr.load_dataset(path / 'GNSS_PW_monthly_anoms_thresh_50_homogenized.nc')
+    pw_mean = pw.to_array('station').mean('station')
+    # load ERA5:
+    era5 = xr.load_dataset(era5_path/ 'era5_TCWV_israel_1996-2019.nc')
+    era5_mean = era5.mean('lat').mean('lon')
+    era5_mean = era5_mean.resample(time='MS').mean()
+    era5_mean = anomalize_xr(era5_mean, freq='MS')
+    # load AERONET:
+    aero = prepare_station_to_pw_comparison(path=aero_path, gis_path=gis_path,
+                                            station='boker', mm_anoms=True)
+    df = pw_mean.to_dataframe(name='GNSS')
+    df['ERA5'] = era5_mean['tcwv'].to_dataframe()
+    df['AERONET'] = aero.to_dataframe()
+    fig, ax = plt.subplots(figsize=(16, 5))
+#    df['GNSS'].plot(ax=ax, color='k')
+#    df['ERA5'].plot(ax=ax, color='r')
+#    df['AERONET'].plot(ax=ax, color='b')
+    pwln = pw_mean.plot.line('k-', ax=ax, linewidth=1.5)
+    era5ln = era5_mean['tcwv'].plot.line('r--', ax=ax, alpha=0.8)
+    aeroln = aero.plot.line('b-.', ax=ax, alpha=0.8)
+    era5corr = df.corr().loc['GNSS', 'ERA5']
+    aerocorr = df.corr().loc['GNSS', 'AERONET']
+    ax.legend(pwln + era5ln + aeroln,
+              ['GNSS',
+               'ERA5, r={:.2f}'.format(era5corr),
+               'AERONET, r={:.2f}'.format(aerocorr)])
+    ax.set_ylabel('PW anomalies [mm]')
+    ax.set_xlabel('')
+    ax.grid()
+    ax = fix_time_axis_ticks(ax, limits=['1998-01', '2020-01'])
+    fig.tight_layout()
+    fig.subplots_adjust(right=0.946)
+    if save:
+        filename = 'pw_long_term_anomalies.png'
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
+    return fig
+
+
+def plot_pw_geographical_segments(df, scope='diurnal', kind=None, fg=None,
+                                  marker='o', color='b', ylim=[-2, 3],
+                                  save=False):
     import xarray as xr
     import numpy as np
     from matplotlib.ticker import MultipleLocator
     from PW_stations import produce_geo_gnss_solved_stations
+    import seaborn as sns
+    scope_dict = {'diurnal': {'xticks': np.arange(0, 23, 3),
+                              'xlabel': 'Hour of day [UTC]',
+                              'ylabel': 'PW anomalies [mm]',
+                              'colwrap': 3},
+                  'annual': {'xticks': np.arange(1, 13),
+                             'xlabel': 'month',
+                             'ylabel': 'PW [mm]',
+                             'colwrap': 7}}
     geo = produce_geo_gnss_solved_stations(plot=False)
-    sites = group_sites_to_xarray(upper=False, scope='diurnal')
-    sites_flat = [x for x in sites.values.flatten()]
+    sites = group_sites_to_xarray(upper=False, scope=scope)
+    if scope == 'annual':
+        sites = sites.T
+    sites_flat = [x for x in sites.values.flatten() if isinstance(x, str)]
     da = xr.DataArray([x for x in range(len(sites_flat))], dims='GNSS')
     da['GNSS'] = [x for x in range(len(da))]
     if fg is None:
         fg = xr.plot.FacetGrid(
             da,
             col='GNSS',
-            col_wrap=3,
+            col_wrap=scope_dict[scope]['colwrap'],
             sharex=False,
             sharey=False, figsize=(20, 20))
     for i in range(fg.axes.shape[0]):  # i is rows
         for j in range(fg.axes.shape[1]):  # j is cols
-            try:
-                site = sites.values[i, j]
-                ax = fg.axes[i, j]
-                df.loc[:, site].plot(ax=ax, marker=marker, color=color)
-                ax.set_xlabel('Hour of day [UTC]')
+            site = sites.values[i, j]
+            ax = fg.axes[i, j]
+            if not isinstance(site, str):
+                ax.set_axis_off()
+                continue
+            else:
+                if kind is None:
+                    df[site].plot(ax=ax, marker=marker, color=color)
+                    ax.xaxis.set_ticks(scope_dict[scope]['xticks'])
+                    ax.grid()
+                elif kind == 'violin':
+                    df['month'] = df.index.month
+                    pal = sns.color_palette("Paired", 12)
+                    sns.violinplot(ax=ax, data=df, fliersize=4, x='month',
+                                   y=site, palette=pal,
+                                   gridsize=250, inner='quartile',
+                                   scale='area')
+                    ax.set_ylabel('')
+                    ax.spines["top"].set_visible(False)
+                    ax.spines["right"].set_visible(False)
+                    ax.spines["bottom"].set_visible(False)
+                    ax.grid(axis='y')
+                ax.tick_params(axis='x', which='major', labelsize=8)
+                ax.set_xlabel(scope_dict[scope]['xlabel'])
                 ax.yaxis.tick_left()
-                ax.grid()
-#                ax.spines["top"].set_visible(False)
-#                ax.spines["right"].set_visible(False)
-#                ax.spines["bottom"].set_visible(False)
-                ax.xaxis.set_ticks(np.arange(0, 23, 3))
                 if j == 0:
-                    ax.set_ylabel('PW anomalies [mm]', fontsize=12)
+                    ax.set_ylabel(scope_dict[scope]['ylabel'], fontsize=12)
 #                elif j == 1:
 #                    if i>5:
-#                        ax.set_ylabel('PW anomalies [mm]', fontsize=12)
+#                        ax.set_ylabel(scope_dict[scope]['ylabel'], fontsize=12)
                 site_label = '{} ({:.0f})'.format(site.upper(), geo.loc[site].alt)
-                ax.text(.12, .85, site_label,
+                ax.text(.3, .87, site_label,
                         horizontalalignment='center', fontweight='bold',
                         transform=ax.transAxes)
 #                ax.yaxis.set_minor_locator(MultipleLocator(3))
@@ -2499,8 +2675,8 @@ def plot_diurnal_pw_geographical_segments(df, fg=None, marker='o', color='b',
 #                ax.yaxis.grid(True, linestyle='--', linewidth=1, alpha=0.7)
                 if ylim is not None:
                     ax.set_ylim(*ylim)
-            except KeyError:
-                ax.set_axis_off()
+#            except KeyError:
+#                ax.set_axis_off()
 #    for i, ax in enumerate(fg.axes[:, 0]):
 #        try:
 #            df[gr1].iloc[:, i].plot(ax=ax)
@@ -2519,6 +2695,9 @@ def plot_diurnal_pw_geographical_segments(df, fg=None, marker='o', color='b',
 
     fg.fig.tight_layout()
     fg.fig.subplots_adjust()
+    if save:
+        filename = 'pw_{}_means_{}.png'.format(scope, kind)
+        plt.savefig(savefig_path / filename, orientation='portrait')
     return fg
 
 
