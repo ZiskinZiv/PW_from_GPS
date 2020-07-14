@@ -21,6 +21,30 @@ for key, val in rc.items():
 sns.set(rc=rc, style='white')
 
 
+def prepare_station_to_pw_comparison(path=aero_path, gis_path=gis_path,
+                                     station='boker', mm_anoms=False):
+    from aux_gps import keep_iqr
+    from aux_gps import anomalize_xr
+    ds_dict = load_all_station(path=aero_path, gis_path=gis_path)
+    try:
+        da = ds_dict[station]['WV(cm)_935nm-AOD']
+    except KeyError as e:
+        print('station {} has no {} field'.format(station, e))
+        return
+    da = keep_iqr(da)
+    # convert to mm:
+    da = da * 10
+    da.name = station
+    if mm_anoms:
+        da_mm = da.resample(time='MS').mean()
+        da_mm_anoms = anomalize_xr(da_mm, freq='MS')
+        da = da_mm_anoms
+    da.attrs['data_source'] = 'AERONET'
+    da.attrs['data_field'] = 'WV(cm)_935nm-AOD'
+    da.attrs['units'] = 'mm'
+    return da
+
+    
 def load_all_station(path=aero_path, gis_path=gis_path):
     from aux_gps import path_glob
     import xarray as xr
