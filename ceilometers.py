@@ -270,7 +270,7 @@ def twin_hourly_mean_plot(pw, mlh, month=8, ax=None, title=True,
 #        handles1 = [h[0] for h in handles1]
 #        hand = handles + handles1
 #        labs = labels + labels1
-    pw_label = 'PW: {}-{}, {} ({} pts)'.format(pwyears[0], pwyears[1], month_abbr[mlh_month], pw.dropna('time').size)
+    pw_label = 'PWV: {}-{}, {} ({} pts)'.format(pwyears[0], pwyears[1], month_abbr[mlh_month], pw.dropna('time').size)
     mlh_label = 'MLH: {}-{}, {} ({} pts)'.format(mlhyears[0], mlhyears[1], month_abbr[mlh_month], mlh.dropna('time').size)
 #    if month is not None:
 #        pwmln = pw_m_hour.plot(color='tab:orange', marker='^', ax=ax)
@@ -280,7 +280,7 @@ def twin_hourly_mean_plot(pw, mlh, month=8, ax=None, title=True,
     ax.legend(pwln + mlhln, [pw_label, mlh_label], loc=leg_loc)
     ax.tick_params(axis='y', colors=blue)
     twin.tick_params(axis='y', colors=red)
-    ax.set_ylabel('PW [mm]', color=blue)
+    ax.set_ylabel('PWV [mm]', color=blue)
     twin.set_ylabel('MLH [m]', color=red)
     ax.set_xticks([x for x in range(24)])
     ax.set_xlabel('Hour of day [UTC]')

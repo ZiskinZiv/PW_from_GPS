@@ -283,7 +283,7 @@ def plot_MLR_GNSS_PW_harmonics_facetgrid(path=work_yuval, season=None,
                 ax.text(0.1, .85, site.upper(),
                         horizontalalignment='center', fontweight='bold',
                         transform=ax.transAxes)
-                ax.set_ylabel('PW anomalies [mm]', fontsize=12)
+                ax.set_ylabel('PWV anomalies [mm]', fontsize=12)
 #                if j == 0:
 #                    ax.set_ylabel('PW anomalies [mm]', fontsize=12)
 #                elif j == 1:
@@ -2394,7 +2394,7 @@ def plot_diurnal_pw_all_seasons(path=work_yuval, season='ALL', synoptic=None,
                                 ylim=[-2.7, 3.25], save=True):
     import xarray as xr
     from synoptic_procedures import slice_xr_with_synoptic_class
-    gnss_filename = 'GNSS_PW_anom_50_for_diurnal_analysis_removed_daily.nc'
+    gnss_filename = 'GNSS_PW_thresh_50_for_diurnal_analysis_removed_daily.nc'
     pw = xr.load_dataset(path / gnss_filename)
     df_annual = pw.groupby('time.hour').mean().to_dataframe()
     if season is None and synoptic is None:
@@ -2609,11 +2609,11 @@ def plot_pw_geographical_segments(df, scope='diurnal', kind=None, fg=None,
     import seaborn as sns
     scope_dict = {'diurnal': {'xticks': np.arange(0, 23, 3),
                               'xlabel': 'Hour of day [UTC]',
-                              'ylabel': 'PW anomalies [mm]',
+                              'ylabel': 'PWV anomalies [mm]',
                               'colwrap': 3},
                   'annual': {'xticks': np.arange(1, 13),
                              'xlabel': 'month',
-                             'ylabel': 'PW [mm]',
+                             'ylabel': 'PWV [mm]',
                              'colwrap': 7}}
     geo = produce_geo_gnss_solved_stations(plot=False)
     sites = group_sites_to_xarray(upper=False, scope=scope)
@@ -2662,7 +2662,7 @@ def plot_pw_geographical_segments(df, scope='diurnal', kind=None, fg=None,
 #                    if i>5:
 #                        ax.set_ylabel(scope_dict[scope]['ylabel'], fontsize=12)
                 site_label = '{} ({:.0f})'.format(site.upper(), geo.loc[site].alt)
-                ax.text(.3, .87, site_label,
+                ax.text(.15, .87, site_label,
                         horizontalalignment='center', fontweight='bold',
                         transform=ax.transAxes)
 #                ax.yaxis.set_minor_locator(MultipleLocator(3))
