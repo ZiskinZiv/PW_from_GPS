@@ -1204,8 +1204,8 @@ def plot_pw_tela_bet_dagan(path=work_yuval, sound_path=sound_path,
     ax.plot(ds[tpw], ds[tpw], c='r')
     ax.legend(['y = x'], loc='upper right')
     if wv_name == 'pw':
-        ax.set_xlabel('PW from Beit-Dagan [mm]')
-        ax.set_ylabel('PW from TELA GPS station [mm]')
+        ax.set_xlabel('PWV from Beit-Dagan [mm]')
+        ax.set_ylabel('PWV from TELA GPS station [mm]')
     elif wv_name == 'iwv':
         ax.set_xlabel(r'IWV from Beit-dagan station [kg$\cdot$m$^{-2}$]')
         ax.set_ylabel(r'IWV from TELA GPS station [kg$\cdot$m$^{-2}$]')
