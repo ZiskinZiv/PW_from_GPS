@@ -337,11 +337,13 @@ def groupby_half_hour_xr(da_ts, reduce='mean'):
     import pandas as pd
     import numpy as np
     df = da_ts.to_dataframe()
+    native_freq = pd.infer_freq(df.index)
     if reduce == 'mean':
         df = df.groupby([df.index.hour, df.index.minute]).mean()
     elif reduce == 'std':
         df = df.groupby([df.index.hour, df.index.minute]).std()
-    time = pd.date_range(start='1900-01-01', periods=df.index.size, freq='5T')
+    time = pd.date_range(start='1900-01-01', periods=df.index.size,
+                         freq=native_freq)
     df = df.set_index(time)
     df = df.resample('30T').mean()
     half_hours = np.arange(0, 24, 0.5)
