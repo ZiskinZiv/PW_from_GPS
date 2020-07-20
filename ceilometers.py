@@ -97,14 +97,14 @@ def align_pw_mlh(path=work_yuval, ceil_path=ceil_path, site='tela',
         ax_twin = df[mlh_site.name].plot(style='r-', marker='s', secondary_y=True, ax=ax, ms=5)
         if interpolate is not None:
             ax.legend(*[ax.get_lines() + ax.right_ax.get_lines()],
-                       ['PW {} max interpolation'.format(interpolate), 'PW',
+                       ['PWV {} max interpolation'.format(interpolate), 'PWV',
                         'MLH {} max interpolation'.format(interpolate), 'MLH'])
         else:
             ax.legend([ax.get_lines()[0], ax.right_ax.get_lines()[0]],
-                       ['PW','MLH'])
+                       ['PWV','MLH'])
         ax.set_title('MLH {} site and PW {} site'.format(pw_mlh_dict.get(site),site))
         ax.set_xlim(df.dropna().index.min(), df.dropna().index.max())
-        ax.set_ylabel('PW [mm]')
+        ax.set_ylabel('PWV [mm]')
         ax_twin.set_ylabel('MLH [m]')
         ax.grid(True, which='both', axis='x')
         fig.tight_layout()
@@ -270,8 +270,12 @@ def twin_hourly_mean_plot(pw, mlh, month=8, ax=None, title=True,
 #        handles1 = [h[0] for h in handles1]
 #        hand = handles + handles1
 #        labs = labels + labels1
-    pw_label = 'PWV: {}-{}, {} ({} pts)'.format(pwyears[0], pwyears[1], month_abbr[mlh_month], pw.dropna('time').size)
-    mlh_label = 'MLH: {}-{}, {} ({} pts)'.format(mlhyears[0], mlhyears[1], month_abbr[mlh_month], mlh.dropna('time').size)
+    if month is None:
+        pw_label = 'PWV: {}-{}, ({} pts)'.format(pwyears[0], pwyears[1], pw.dropna('time').size)
+        mlh_label = 'MLH: {}-{}, ({} pts)'.format(mlhyears[0], mlhyears[1], mlh.dropna('time').size)
+    else:
+        pw_label = 'PWV: {}-{}, {} ({} pts)'.format(pwyears[0], pwyears[1], month_abbr[mlh_month], pw.dropna('time').size)
+        mlh_label = 'MLH: {}-{}, {} ({} pts)'.format(mlhyears[0], mlhyears[1], month_abbr[mlh_month], mlh.dropna('time').size)
 #    if month is not None:
 #        pwmln = pw_m_hour.plot(color='tab:orange', marker='^', ax=ax)
 #        pwm_label = 'PW: {}-{}, {} ({} pts)'.format(pw_years[0], pw_years[1], month_abbr[month], pw_month.dropna('time').size)
@@ -290,7 +294,7 @@ def twin_hourly_mean_plot(pw, mlh, month=8, ax=None, title=True,
     ax.text(0.05, 0.95, textstr, transform=ax.transAxes, fontsize=10,
                verticalalignment='top', bbox=props)
     if title:
-        ax.set_title('The diurnal cycle of {} Mixing Layer Height and {} GNSS site PW'.format(mlh_name, pw.name.upper()))
+        ax.set_title('The diurnal cycle of {} Mixing Layer Height and {} GNSS site PWV'.format(mlh_name, pw.name.upper()))
     return ax, twin
 
 
@@ -330,6 +334,42 @@ def read_ceilometer_station(path=ceil_path, name='Jerusalem'):
     return da
 
 
+def read_BD_matfile(path=ceil_path):
+    from scipy.io import loadmat
+    import pandas as pd
+    from aux_gps import xr_reindex_with_date_range
+    file = path / 'PBL_BD_LST.mat'
+    mat = loadmat(file)
+    mdata = mat['pblBD4shlomi']
+    # mdata = mat['PBL_BD_LST']
+    dates = mdata[:, :3]
+    pbl = mdata[:, 3:]
+    dates = dates.astype(str)
+    dts = [pd.to_datetime(x[0] + '-' + x[1] + '-' + x[2]) for x in dates]
+    dfs = []
+    for i, dt in enumerate(dts):
+        time = dt + pd.Timedelta(0.5, unit='H')
+        times = pd.date_range(time, periods=48, freq='30T')
+        df = pd.DataFrame(pbl[i], index=times)
+        dfs.append(df)
+    df = pd.concat(dfs)
+    df.columns = ['MLH']
+    df.index.name = 'time'
+    # switch to UTC:
+    df.index = df.index - pd.Timedelta(2, unit='H')
+    da = df.to_xarray()['MLH']
+    da.name = 'BD'
+    da.attrs['full_name'] = 'Mixing Layer Height'
+    da.attrs['name'] = 'MLH'
+    da.attrs['units'] = 'm'
+    da.attrs['station_full_name'] = 'Beit Dagan'
+    da.attrs['lon'] = 34.81
+    da.attrs['lat'] = 32.00
+    da.attrs['alt'] = 34
+    da = xr_reindex_with_date_range(da, freq='30T')
+    return da
+
+    
 def read_one_matfile_ceilometers(file):
     from scipy.io import loadmat
     import pandas as pd
@@ -357,6 +397,34 @@ def read_one_matfile_ceilometers(file):
         df_list.append(df1)
     s = pd.concat(df_list)[0]
     return s
+
+
+def read_profiler_hadera(path=ceil_path):
+    import pandas as pd
+    import numpy as np
+    import xarray as xr
+
+    def read_hadera_synoptical(path, syn='Hw'):
+        df = pd.read_excel(path / 'PBL_profiler_hadera.xlsx', sheet_name=syn).T
+        df.columns = ['{}_mean'.format(syn), '{}_count'.format(syn),
+                      '{}_median'.format(syn), '{}_std'.format(syn)]
+        df.drop('Time (LST)', inplace=True)
+        df.set_index(np.arange(0, 24, 0.5), inplace=True)
+        hour = shift_half_hour_lst(2)
+        df.set_index(hour, inplace=True)
+        df = df.sort_index()
+        df.index.name = 'half_hour'
+        ds = df.to_xarray()
+        return ds
+    ds_hw = read_hadera_synoptical(path=path, syn='Hw')
+    ds_ptw = read_hadera_synoptical(path=path, syn='PTw')
+    ds_ptm = read_hadera_synoptical(path=path, syn='PTm')
+    ds = xr.merge([ds_hw, ds_ptw, ds_ptm])
+    mlh_mean = ds[['Hw_mean', 'PTw_mean', 'PTm_mean']].to_array('syn').mean('syn')
+    mlh_std = ds[['Hw_std', 'PTw_std', 'PTm_std']].to_array('syn').mean('syn')
+    ds['MLH_mean'] = mlh_mean
+    ds['MLH_std'] = mlh_std
+    return ds
 
 
 def shift_half_hour_lst(hours_back=3):
