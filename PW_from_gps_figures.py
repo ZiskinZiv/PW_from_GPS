@@ -2480,6 +2480,7 @@ def group_sites_to_xarray(upper=False, scope='diurnal'):
     gr2['GNSS'] = np.arange(0, len(gr2))
     gr3['GNSS'] = np.arange(0, len(gr3))
     sites = xr.concat([gr1, gr2, gr3], 'group').T
+    sites['group'] = ['coastal', 'highland', 'eastern']
     return sites
 
 
@@ -2701,12 +2702,21 @@ def plot_pw_geographical_segments(df, scope='diurnal', kind=None, fg=None,
     return fg
 
 
-def prepare_diurnal_variability_table(path=work_yuval):
+def prepare_diurnal_variability_table(path=work_yuval, rename_cols=True):
     from PW_stations import calculate_diurnal_variability
     df = calculate_diurnal_variability()
     gr = group_sites_to_xarray(scope='diurnal')
+    gr_df = gr.to_dataframe('sites')
     new = gr.T.values.ravel()
+    geo = [gr_df[gr_df == x].dropna().index.values.item()[1] for x in new]
+    geo = [x.title() for x in geo]
     df = df.reindex(new)
+    if rename_cols:
+        df.columns = ['Annual [%]', 'JJA [%]', 'SON [%]', 'DJF [%]', 'MAM [%]']
+    cols = [x for x in df.columns]
+    df['Location'] = geo
+    cols = ['Location'] + cols
+    df = df[cols]
     df.index = df.index.str.upper()
     print(df.to_latex())
     return df
@@ -2735,11 +2745,15 @@ def prepare_harmonics_table(path=work_yuval, season='ALL'):
                   'P2 [UTC]', 'V2 [%]', 'VT [%]']
     df = df.set_index('Station')
     gr = group_sites_to_xarray(scope='diurnal')
+    gr_df = gr.to_dataframe('sites')
     new = gr.T.values.ravel()
+    geo = [gr_df[gr_df == x].dropna().index.values.item()[1] for x in new]
+    geo = [x.title() for x in geo]
     df = df.reindex(new)
+    df['Location'] = geo
     df.index = df.index.str.upper()
     pd.options.display.float_format = '{:.1f}'.format
-    df = df[['A1 [mm]', 'A2 [mm]', 'P1 [UTC]', 'P2 [UTC]', 'V1 [%]', 'V2 [%]', 'VT [%]']]
+    df = df[['Location', 'A1 [mm]', 'A2 [mm]', 'P1 [UTC]', 'P2 [UTC]', 'V1 [%]', 'V2 [%]', 'VT [%]']]
     print(df.to_latex())
     return df
 
