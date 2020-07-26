@@ -225,7 +225,7 @@ def scatter_plot_pw_mlh(pw, mlh, diurnal=False, ax=None, title=True,
 
 
 def twin_hourly_mean_plot(pw, mlh, month=8, ax=None, title=True,
-                          leg_loc='best'):
+                          leg_loc='best', unit='pts'):
     from aux_gps import dim_intersection
     import matplotlib.pyplot as plt
     from calendar import month_abbr
@@ -234,6 +234,7 @@ def twin_hourly_mean_plot(pw, mlh, month=8, ax=None, title=True,
     # first run multi-year month mean:
     if month is not None:
         pw = pw.sel(time=pw['time.month'] == month).dropna('time')
+        mlh = mlh.sel(time=mlh['time.month'] == month).dropna('time')
     else:
         newtime = dim_intersection([pw, mlh], 'time')
         pw = pw.sel(time=newtime)
@@ -249,6 +250,12 @@ def twin_hourly_mean_plot(pw, mlh, month=8, ax=None, title=True,
     mlhyears = [mlh.time.dt.year.min().item(), mlh.time.dt.year.max().item()]
     pwyears = [pw.time.dt.year.min().item(), pw.time.dt.year.max().item()]
     mlh_month = mlh.time.dt.month.to_dataframe()['month'].value_counts().index[0]
+    if unit == 'pts':
+        pw_pts = pw.dropna('time').size
+        mlh_pts = mlh.dropna('time').size
+    elif unit == 'days':
+        pw_pts = int(pw.dropna('time').size / 48)
+        mlh_pts = int(mlh.dropna('time').size / 48)
     if ax is None:
         fig, ax = plt.subplots(figsize=(10, 8))
     red = 'tab:red'
@@ -271,11 +278,12 @@ def twin_hourly_mean_plot(pw, mlh, month=8, ax=None, title=True,
 #        hand = handles + handles1
 #        labs = labels + labels1
     if month is None:
-        pw_label = 'PWV: {}-{}, ({} pts)'.format(pwyears[0], pwyears[1], pw.dropna('time').size)
-        mlh_label = 'MLH: {}-{}, ({} pts)'.format(mlhyears[0], mlhyears[1], mlh.dropna('time').size)
+        pw_label = 'PWV: {}-{} ({} {})'.format(pwyears[0], pwyears[1], pw_pts, unit)
+        mlh_label = 'MLH: {}-{} ({} {})'.format(mlhyears[0], mlhyears[1], mlh_pts, unit)
     else:
-        pw_label = 'PWV: {}-{}, {} ({} pts)'.format(pwyears[0], pwyears[1], month_abbr[mlh_month], pw.dropna('time').size)
-        mlh_label = 'MLH: {}-{}, {} ({} pts)'.format(mlhyears[0], mlhyears[1], month_abbr[mlh_month], mlh.dropna('time').size)
+        pw_pts = int(pw.dropna('time').size / 288)
+        pw_label = 'PWV: {}-{}, {} ({} {})'.format(pwyears[0], pwyears[1], month_abbr[mlh_month], pw_pts, unit)
+        mlh_label = 'MLH: {}-{}, {} ({} {})'.format(mlhyears[0], mlhyears[1], month_abbr[mlh_month], mlh_pts, unit)
 #    if month is not None:
 #        pwmln = pw_m_hour.plot(color='tab:orange', marker='^', ax=ax)
 #        pwm_label = 'PW: {}-{}, {} ({} pts)'.format(pw_years[0], pw_years[1], month_abbr[month], pw_month.dropna('time').size)
@@ -292,7 +300,87 @@ def twin_hourly_mean_plot(pw, mlh, month=8, ax=None, title=True,
     textstr = '{}, {}'.format(mlh_name, pw.name.upper())
     props = dict(boxstyle='round', facecolor='white', alpha=0.5)
     ax.text(0.05, 0.95, textstr, transform=ax.transAxes, fontsize=10,
-               verticalalignment='top', bbox=props)
+            verticalalignment='top', bbox=props)
+    if title:
+        ax.set_title('The diurnal cycle of {} Mixing Layer Height and {} GNSS site PWV'.format(mlh_name, pw.name.upper()))
+    return ax, twin
+
+
+def twin_hourly_mean_with_diurnal_mlh_plot(pw, mlh, month=None, ax=None,
+                                           title=True, leg_loc='best',
+                                           mlh_name='MLH', unit='days',
+                                           mlh_station_name='Hadera'):
+    import matplotlib.pyplot as plt
+    from calendar import month_abbr
+    mlh_std = mlh['{}_std'.format(mlh_name)]
+    mlh_count = mlh['{}_count'.format(mlh_name)].mean().item()
+    mlh_hour = mlh['{}_mean'.format(mlh_name)]
+    pw_hour = pw.groupby('time.hour').mean()
+    pw_std = pw.groupby('time.hour').std()
+    pw_hour_plus = (pw_hour + pw_std).values
+    pw_hour_minus = (pw_hour - pw_std).values
+    if month is not None:
+        pw = pw.sel(time=pw['time.month'] == month).dropna('time')
+#    mlh_hour = mlh.groupby('time.hour').mean()
+#    mlh_std = mlh.groupby('time.hour').std()
+    mlh_hour_minus = (mlh_hour - mlh_std).values
+    mlh_hour_plus = (mlh_hour + mlh_std).values
+#    mlhyears = [mlh.time.dt.year.min().item(), mlh.time.dt.year.max().item()]
+    pwyears = [pw.time.dt.year.min().item(), pw.time.dt.year.max().item()]
+#    mlh_month = mlh.time.dt.month.to_dataframe()['month'].value_counts().index[0]
+    if unit == 'pts':
+        pw_pts = pw.dropna('time').size
+        mlh_pts = mlh_count * 48
+    elif unit == 'days':
+        pw_pts = int(pw.dropna('time').size / 288)
+        mlh_pts = int(mlh_count)
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(10, 8))
+    red = 'tab:red'
+    blue = 'tab:blue'
+    pwln = pw_hour.plot(color=blue, marker='s', ax=ax)
+#        ax.errorbar(pw_hour.hour.values, pw_hour.values, pw_std.values,
+#                    label='PW', color=blue, capsize=5, elinewidth=2,
+#                    markeredgewidth=2)
+    ax.fill_between(pw_hour.hour.values, pw_hour_minus, pw_hour_plus, color=blue, alpha=0.5)
+    twin = ax.twinx()
+#        twin.errorbar(mlh_hour.hour.values, mlh_hour.values, mlh_std.values,
+#                      color=red, label='MLH', capsize=5, elinewidth=2,
+#                      markeredgewidth=2)
+    mlhln = mlh_hour.plot(color=red, marker='o', ax=twin)
+    twin.fill_between(mlh_hour['half_hour'].values, mlh_hour_minus, mlh_hour_plus, color=red, alpha=0.5)
+#        handles, labels = ax.get_legend_handles_labels()
+#        handles = [h[0] for h in handles]
+#        handles1, labels1 = twin.get_legend_handles_labels()
+#        handles1 = [h[0] for h in handles1]
+#        hand = handles + handles1
+#        labs = labels + labels1
+    if month is None:
+        pw_label = 'PWV: {}-{}, ({} {})'.format(pwyears[0], pwyears[1], pw_pts, unit)
+        mlh_label = 'MLH: ({} {})'.format(mlh_pts, unit)
+    else:
+        pw_label = 'PWV: {}-{}, {} ({} {})'.format(pwyears[0], pwyears[1], month_abbr[month], pw_pts, unit)
+        mlh_label = 'MLH: ({} {})'.format(mlh_pts, unit)
+#    if month is not None:
+#        pwmln = pw_m_hour.plot(color='tab:orange', marker='^', ax=ax)
+#        pwm_label = 'PW: {}-{}, {} ({} pts)'.format(pw_years[0], pw_years[1], month_abbr[month], pw_month.dropna('time').size)
+#        ax.legend(pwln + mlhln + pwmln, [pw_label, mlh_label, pwm_label], loc=leg_loc)
+#    else:
+    ax.legend(pwln + mlhln, [pw_label, mlh_label], loc=leg_loc)
+    ax.tick_params(axis='y', colors=blue)
+    twin.tick_params(axis='y', colors=red)
+    ax.set_ylabel('PWV [mm]', color=blue)
+    twin.set_ylabel('MLH [m]', color=red)
+    ax.set_xticks([x for x in range(24)])
+    ax.set_xlabel('Hour of day [UTC]')
+    try:
+        mlh_name = mlh.attrs['station_full_name'].replace('_', '-')
+    except KeyError:
+        mlh_name = mlh_station_name
+    textstr = '{}, {}'.format(mlh_name, pw.name.upper())
+    props = dict(boxstyle='round', facecolor='white', alpha=0.5)
+    ax.text(0.05, 0.95, textstr, transform=ax.transAxes, fontsize=10,
+            verticalalignment='top', bbox=props)
     if title:
         ax.set_title('The diurnal cycle of {} Mixing Layer Height and {} GNSS site PWV'.format(mlh_name, pw.name.upper()))
     return ax, twin
@@ -334,10 +422,60 @@ def read_ceilometer_station(path=ceil_path, name='Jerusalem'):
     return da
 
 
-def read_BD_matfile(path=ceil_path):
+def plot_BD_pw(ceil_path=ceil_path, path=work_yuval,
+               station='tela', selection='syn'):
+    import xarray as xr
+    bd = read_BD_matfile(path=ceil_path, plot=False, add_syn=True)
+    month = None
+    if selection == 'syn':
+        # select PT's and High as synoptics:
+        bd = bd['BD'].where((bd['syn'] == 'PT-W') | (bd['syn']
+                                                     == 'PT-M') | (bd['syn'] == 'H_w'))
+        print('selected synoptics.')
+    elif isinstance(selection, int):
+        # select all data for specific month:
+        month = selection
+        bd = bd['BD']
+        print('selected month {}.'.format(selection))
+    elif isinstance(selection, str) and selection.isupper():
+        # select season:
+        bd = bd['BD'].sel(time=bd['time.season'] == selection)
+        print('selected season {}.'.format(selection))
+    else:
+        # select all data:
+        bd = bd['BD']
+    pw = xr.open_dataset(path / 'GNSS_PW_thresh_50_for_diurnal_analysis.nc')[station]
+    ax, twin = twin_hourly_mean_plot(pw, bd, month=month, title=True, unit='days')
+    ax.grid()
+    ax.vlines(2.75, ymin=20, ymax=33, color='k')
+    ax.vlines(16.75, ymin=20, ymax=33, color='k')
+    ax.text(x=1.5, y=19.5, s='mean sunrise')
+    ax.text(x=15.5, y=19.5, s='mean sunset')
+    return
+
+
+def plot_profiler_hadera_pw(ceil_path=ceil_path, path=work_yuval,
+                            station='csar', selection='mean'):
+    import xarray as xr
+    ds = read_profiler_hadera(path=ceil_path, plot=False)
+    pw = xr.open_dataset(path / 'GNSS_PW_thresh_50_for_diurnal_analysis.nc')[station]
+    pw.load()
+    ax, twin = twin_hourly_mean_with_diurnal_mlh_plot(pw, ds, month=None, title=True)
+    ax.grid()
+    ax.vlines(2.75, ymin=20, ymax=33, color='k')
+    ax.vlines(16.75, ymin=20, ymax=33, color='k')
+    ax.text(x=1.5, y=19.5, s='mean sunrise')
+    ax.text(x=15.5, y=19.5, s='mean sunset')
+    return
+
+
+def read_BD_matfile(path=ceil_path, plot=True, month=None, add_syn=True):
     from scipy.io import loadmat
     import pandas as pd
     from aux_gps import xr_reindex_with_date_range
+    import matplotlib.pyplot as plt
+    from aux_gps import dim_intersection
+    from synoptic_procedures import read_synoptic_classification
     file = path / 'PBL_BD_LST.mat'
     mat = loadmat(file)
     mdata = mat['pblBD4shlomi']
@@ -367,9 +505,56 @@ def read_BD_matfile(path=ceil_path):
     da.attrs['lat'] = 32.00
     da.attrs['alt'] = 34
     da = xr_reindex_with_date_range(da, freq='30T')
-    return da
+    # add synoptic data:
+    syn = read_synoptic_classification().to_xarray()
+    syn = syn.sel(time=slice('2015', '2016'))
+    syn = syn.resample(time='30T').ffill()
+    new_time = dim_intersection([da, syn])
+    syn_da = syn.sel(time=new_time)
+    syn_da = xr_reindex_with_date_range(syn_da, freq='30T')
+    if plot:
+        bd2015 = da.sel(time='2015').to_dataframe()
+        bd2016 = da.sel(time='2016').to_dataframe()
+        fig, axes = plt.subplots(2, 1, sharey=True, sharex=False,
+                                 figsize=(15, 10))
+        if add_syn:
+            cmap = plt.get_cmap("tab10")
+            syn_df = syn_da.to_dataframe()
+            bd2015['synoptics'] = syn_df.loc['2015', 'class_abbr']
+            groups = []
+            for i, (index, group) in enumerate(bd2015.groupby('synoptics')):
+                groups.append(index)
+                d = xr_reindex_with_date_range(group['BD'].to_xarray(),
+                                               freq='30T')
+                d.to_dataframe().plot(x_compat=True, ms=10, color=cmap(i),
+                                      ax=axes[0], xlim=['2015-06', '2015-10'])
+            axes[0].legend(groups)
+            bd2016['synoptics'] = syn_df.loc['2016', 'class_abbr']
+            groups = []
+            for i, (index, group) in enumerate(bd2016.groupby('synoptics')):
+                groups.append(index)
+                d = xr_reindex_with_date_range(group['BD'].to_xarray(),
+                                               freq='30T')
+                d.to_dataframe().plot(x_compat=True, ms=10, color=cmap(i),
+                                      ax=axes[1], xlim=['2016-06', '2016-10'])
+            axes[1].legend(groups)
+        else:
+            bd2015.plot(ax=axes[0], xlim=['2015-06', '2015-10'])
+            bd2016.plot(ax=axes[1], xlim=['2016-06', '2016-10'])
+        for ax in axes.flatten():
+            ax.set_ylabel('MLH [m]')
+            ax.set_xlabel('UTC')
+            ax.grid()
+        fig.tight_layout()
+        fig.suptitle('MLH from Beit-Dagan ceilometer for 2015 and 2016')
+    if add_syn:
+        ds = da.to_dataset(name='BD')
+        ds['syn'] = syn_da['class_abbr']
+        return ds
+    else:
+        return da
 
-    
+
 def read_one_matfile_ceilometers(file):
     from scipy.io import loadmat
     import pandas as pd
@@ -399,10 +584,11 @@ def read_one_matfile_ceilometers(file):
     return s
 
 
-def read_profiler_hadera(path=ceil_path):
+def read_profiler_hadera(path=ceil_path, plot=True):
     import pandas as pd
     import numpy as np
     import xarray as xr
+    import matplotlib.pyplot as plt
 
     def read_hadera_synoptical(path, syn='Hw'):
         df = pd.read_excel(path / 'PBL_profiler_hadera.xlsx', sheet_name=syn).T
@@ -414,6 +600,7 @@ def read_profiler_hadera(path=ceil_path):
         df.set_index(hour, inplace=True)
         df = df.sort_index()
         df.index.name = 'half_hour'
+        df = df.apply(pd.to_numeric)
         ds = df.to_xarray()
         return ds
     ds_hw = read_hadera_synoptical(path=path, syn='Hw')
@@ -422,8 +609,31 @@ def read_profiler_hadera(path=ceil_path):
     ds = xr.merge([ds_hw, ds_ptw, ds_ptm])
     mlh_mean = ds[['Hw_mean', 'PTw_mean', 'PTm_mean']].to_array('syn').mean('syn')
     mlh_std = ds[['Hw_std', 'PTw_std', 'PTm_std']].to_array('syn').mean('syn')
+    mlh_count = ds[['Hw_count', 'PTw_count', 'PTm_count']].to_array('syn').sum('syn')
     ds['MLH_mean'] = mlh_mean
     ds['MLH_std'] = mlh_std
+    ds['MLH_count'] = mlh_count
+    if plot:
+        fig, ax = plt.subplots(figsize=(12, 8))
+        means = ds[[x for x in ds if '_mean' in x]]
+        counts = ds[[x for x in ds if '_count' in x]]
+        stds = ds[[x for x in ds if '_std' in x]]
+        dfm = means.to_dataframe()
+        cmeans = [x for x in counts.mean().to_array().values]
+        cmeans.append(np.sum(cmeans))
+        dfm.plot(ax=ax, style=['rd-','bo-','gX-','ks-'], markevery=2)
+        ax.xaxis.set_ticks(np.arange(0, 24, 1))
+        ax.set_xlabel('Hour of Day [UTC]')
+        ax.grid()
+        ax.set_ylabel('PBL height AGL [m]')
+        labels = ['High-West: {:.0f} mean days'.format(cmeans[0])]
+        labels.append('PT-Weak: {:.0f} mean days'.format(cmeans[1]))
+        labels.append('PT-Medium: {:.0f} mean days'.format(cmeans[2]))
+        labels.append('Simple Mean: {:.0f} mean days'.format(cmeans[3]))
+        ax.legend(labels)
+        ax.set_title('PBL average Height from 3.5 km east of the coast of Hadera (ORPP), between June - October, 1997-1999, 2002-2005')
+        ax.fill_betweenx(y=[400, 800], x1=2.75, x2=16.75, color='y', alpha=0.5)
+        fig.tight_layout()
     return ds
 
 
@@ -438,7 +648,7 @@ def shift_half_hour_lst(hours_back=3):
 def read_coastal_BL_levi_2011(path=ceil_path):
     import pandas as pd
     """Attached profiler data for the average diurnal boundary layers height 3
-    km form the coast of Hadera for the 3 summers of 1997-1997.
+    km form the coast of Hadera for the 3 summers of 1997-1999.
     The data for July is in the tab  hour_july where MAX SNR is the height of
     the wind profiler signal-to-noise ratio peak. The wind profiler high
     signal-to-noise ratio is obtained near the BL top at the entrainment zone
