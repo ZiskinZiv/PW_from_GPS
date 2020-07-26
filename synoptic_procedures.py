@@ -92,6 +92,16 @@ def slice_xr_with_synoptic_class(pw, path=work_yuval, syn_class=1,
     return pw
 
 
+def add_class_abbr(class_num):
+    import numpy as np
+    classes = np.arange(1, 20)
+    abbrs = ['RST_e', 'RST_w', 'RST_c', 'PT-W', 'PT-M',
+             'PT-D', 'H_e', 'H_w', 'H_n', 'H_c', 'L_e-D', 'CL_s-D', 'CL_s-S',
+             'CL_n-D', 'CL_n-S', 'L_w', 'L_e-S', 'SL_w', 'SL_c']
+    class_abbr_dict = dict(zip(classes, abbrs))
+    return class_abbr_dict.get(class_num)
+
+
 def read_synoptic_classification(
         path=cwd,
         filename='synoptic_classification_1948-8_May_2020.xls', report=True):
@@ -136,6 +146,7 @@ def read_synoptic_classification(
     df.loc[(df['class'] <= 15) & (df['class'] >= 12), 'upper_class'] = 'CL'
     df['upper_class'] = df['upper_class'].fillna('Other')
     df.index.name = 'time'
+    df['class_abbr'] = df['class'].apply(add_class_abbr)
     if report:
         for code in sorted(df['class'].unique()):
             percent = 100 * (df['class'] == code).sum() / df['class'].size
