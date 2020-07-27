@@ -6,6 +6,7 @@ Created on Mon Jun  1 10:41:11 2020
 @author: shlomi
 """
 from PW_paths import work_yuval
+from PW_paths import savefig_path
 ceil_path = work_yuval / 'ceilometers'
 # available stations: Jerousalem, Nevatim, Ramat_David, Tel_Aviv
 stations_dict = {
@@ -14,7 +15,7 @@ stations_dict = {
     'Ramat_David': ['RD', 35.2, 32.7, 50],
     'Jerusalem': ['JR', 35.2, 31.8, 830]}
 
-pw_mlh_dict = {'tela': 'TLV', 'yrcm': 'NV', 'jslm': 'JR'}
+pw_mlh_dict = {'tela': 'TLV', 'yrcm': 'NV', 'jslm': 'JR', 'nzrt': 'RD'}
 
 
 def read_all_one_half_hours_csvs(path=ceil_path, plot=True):
@@ -71,10 +72,15 @@ def align_pw_mlh(path=work_yuval, ceil_path=ceil_path, site='tela',
         mlh_site_inter = mlh_site.interpolate_na('time', max_gap=interpolate,
                                                      method='cubic')
         mlh_site_inter.attrs = attrs
-    pw = xr.open_dataset(work_yuval / 'GNSS_PW_hourly_thresh_50_homogenized.nc')
+    pw = xr.open_dataset(work_yuval / 'GNSS_PW_thresh_50_homogenized.nc')
     pw = pw[['tela', 'klhv', 'jslm', 'nzrt', 'yrcm']]
     pw.load()
     pw_new = pw[site]
+    if interpolate is not None:
+        newtime = dim_intersection([pw_new, mlh_site_inter])
+    else:
+        newtime = dim_intersection([pw_new, mlh_site])
+    pw_new = pw_new.sel(time=newtime)
     pw_new = xr_reindex_with_date_range(pw_new, freq='1H')
     if interpolate is not None:
         print('interpolating pw-site {} with max-gap of {}.'.format(site, interpolate))
@@ -98,16 +104,25 @@ def align_pw_mlh(path=work_yuval, ceil_path=ceil_path, site='tela',
         if interpolate is not None:
             ax.legend(*[ax.get_lines() + ax.right_ax.get_lines()],
                        ['PWV {} max interpolation'.format(interpolate), 'PWV',
-                        'MLH {} max interpolation'.format(interpolate), 'MLH'])
+                        'MLH {} max interpolation'.format(interpolate), 'MLH'],
+                        loc='best')
         else:
             ax.legend([ax.get_lines()[0], ax.right_ax.get_lines()[0]],
-                       ['PWV','MLH'])
-        ax.set_title('MLH {} site and PW {} site'.format(pw_mlh_dict.get(site),site))
+                       ['PWV','MLH'], loc='upper center')
+        ax.set_title('MLH {} site and PWV {} site'.format(pw_mlh_dict.get(site),site))
         ax.set_xlim(df.dropna().index.min(), df.dropna().index.max())
-        ax.set_ylabel('PWV [mm]')
-        ax_twin.set_ylabel('MLH [m]')
+        ax.set_ylabel('PWV [mm]', color='b')
+        ax_twin.set_ylabel('MLH [m]', color='r')
+        ax.tick_params(axis='y', colors='b')
+        ax_twin.tick_params(axis='y', colors='r')
         ax.grid(True, which='both', axis='x')
         fig.tight_layout()
+        if interpolate is not None:
+            filename = '{}-{}_{}_time_series_{}_max_gap_interpolation.png'.format(
+                site, pw_mlh_dict.get(site), dt_range_str, interpolate)
+        else:
+            filename = '{}-{}_{}_time_series.png'.format(site, pw_mlh_dict.get(site), dt_range_str)
+        plt.savefig(savefig_path / filename, orientation='portrait')
     if interpolate is not None:
         ds = df_inter.to_xarray()
         ds[pw_new.name].attrs.update(pw_new.attrs)
@@ -137,7 +152,7 @@ def plot_pw_mlh(path=work_yuval, ceil_path=ceil_path, kind='scatter', month=None
     pw = xr.load_dataset(work_yuval / 'GNSS_PW_thresh_50_homogenized.nc')
     pw = pw[[x for x in pw if '_error' not in x]]
     pw = pw[['tela', 'klhv', 'jslm', 'nzrt', 'yrcm']]
-    couples = [['tela', 'TLV'], ['yrcm', 'NV'], ['jslm', 'JR']]
+    couples = [['tela', 'TLV'], ['yrcm', 'NV'], ['jslm', 'JR'], ['nzrt', 'RD']]
     if kind == 'scatter':
         fig, axes = plt.subplots(
             1, len(couples), sharey=True, sharex=True, figsize=(
@@ -151,7 +166,7 @@ def plot_pw_mlh(path=work_yuval, ceil_path=ceil_path, kind='scatter', month=None
                 20, 15))
         for i, ax in enumerate(axes[:, 0].flatten()):
             ax = twin_hourly_mean_plot(
-                pw[couples[i][0]], mlh[couples[i][1]], month=month, ax=ax, title=False)
+                pw[couples[i][0]], mlh[couples[i][1]], month=month, ax=ax, title=False, unit='days')
         for i, ax in enumerate(axes[:, 1].flatten()):
             ax = scatter_plot_pw_mlh(pw[couples[i][0]],
                                      mlh[couples[i][1]],
@@ -161,6 +176,11 @@ def plot_pw_mlh(path=work_yuval, ceil_path=ceil_path, kind='scatter', month=None
                                      title=False,
                                      leg_loc='lower right')
     fig.tight_layout()
+    if ceil_interpolate is not None:
+        filename = 'PW-MLH_{}_interpolate_max_gap_6H.png'.format(kind)
+    else:
+        filename = 'PW-MLH_{}.png'.format(kind)
+    plt.savefig(savefig_path / filename, orientation='portrait')
     return fig
 
 
@@ -204,7 +224,7 @@ def scatter_plot_pw_mlh(pw, mlh, diurnal=False, ax=None, title=True,
 #    r22 = r2_score(mlh.values,np.polyval(coefs2, pw.values))
     ax.plot(x, y, color='tab:red')
     # ax.plot(x, y2, color='tab:orange')
-    ax.set_xlabel('PW [mm]')
+    ax.set_xlabel('PWV [mm]')
     ax.set_ylabel('MLH [m]')
     ax.legend(['linear fit', 'data'], loc=leg_loc)
     textstr = '\n'.join(['n={}'.format(pw.size),
@@ -422,51 +442,93 @@ def read_ceilometer_station(path=ceil_path, name='Jerusalem'):
     return da
 
 
-def plot_BD_pw(ceil_path=ceil_path, path=work_yuval,
-               station='tela', selection='syn'):
+def plot_mlh_site_pw_station(ceil_path=ceil_path, path=work_yuval,
+                             station='tela', mlh_site='BD', selection='syn',
+                             max_gap_interpolate=None):
     import xarray as xr
-    bd = read_BD_matfile(path=ceil_path, plot=False, add_syn=True)
+    import numpy as np
+    import matplotlib.pyplot as plt
     month = None
-    if selection == 'syn':
-        # select PT's and High as synoptics:
-        bd = bd['BD'].where((bd['syn'] == 'PT-W') | (bd['syn']
-                                                     == 'PT-M') | (bd['syn'] == 'H_w'))
-        print('selected synoptics.')
-    elif isinstance(selection, int):
-        # select all data for specific month:
-        month = selection
-        bd = bd['BD']
-        print('selected month {}.'.format(selection))
-    elif isinstance(selection, str) and selection.isupper():
-        # select season:
-        bd = bd['BD'].sel(time=bd['time.season'] == selection)
-        print('selected season {}.'.format(selection))
+    if mlh_site == 'BD':
+        bd = read_BD_matfile(path=ceil_path, plot=False, add_syn=True)
+        if selection == 'syn':
+            # select PT's and High as synoptics:
+            bd = bd['BD'].where((bd['syn'] == 'PT-W') | (bd['syn']
+                                                         == 'PT-M') | (bd['syn'] == 'H_w'))
+            print('selected synoptics.')
+        elif isinstance(selection, int):
+            # select all data for specific month:
+            month = selection
+            bd = bd['BD']
+            print('selected month {}.'.format(selection))
+        elif isinstance(selection, str) and selection.isupper():
+            # select season:
+            bd = bd['BD'].sel(time=bd['time.season'] == selection)
+            print('selected season {}.'.format(selection))
+        else:
+            # select all data:
+            bd = bd['BD']
+        mlh = bd
     else:
-        # select all data:
-        bd = bd['BD']
+        mlh = xr.load_dataset(ceil_path / 'MLH_from_ceilometers.nc')[mlh_site]
+        if max_gap_interpolate is not None:
+            print('interpolating ceil-site {} with max-gap of {}.'.format(mlh_site, max_gap_interpolate))
+            attrs = mlh.attrs
+            mlh = mlh.interpolate_na('time', max_gap=max_gap_interpolate,
+                                     method='cubic')
+            mlh.attrs = attrs
     pw = xr.open_dataset(path / 'GNSS_PW_thresh_50_for_diurnal_analysis.nc')[station]
-    ax, twin = twin_hourly_mean_plot(pw, bd, month=month, title=True, unit='days')
+    ax, twin = twin_hourly_mean_plot(pw, mlh, month=month, title=True, unit='days')
     ax.grid()
-    ax.vlines(2.75, ymin=20, ymax=33, color='k')
-    ax.vlines(16.75, ymin=20, ymax=33, color='k')
-    ax.text(x=1.5, y=19.5, s='mean sunrise')
-    ax.text(x=15.5, y=19.5, s='mean sunset')
-    return
+    pw_data = ax.get_lines()[0].get_ydata()
+    pwc = np.mean(pw_data)
+    off = 9
+    ax.vlines(2.75, ymin=pwc-off, ymax=pwc+off, color='k')
+    ax.vlines(16.75, ymin=pwc-off, ymax=pwc+off, color='k')
+    ax.text(x=1.5, y=pwc-off-0.5, s='mean sunrise')
+    ax.text(x=15.5, y=pwc-off-0.5, s='mean sunset')
+    ax.figure.tight_layout()
+    if max_gap_interpolate is not None:
+        title = ax.get_title()
+        ax.set_title(title + '({} max gap cubic interpolation)'.format(max_gap_interpolate))
+    if selection is None:
+        filename = '{}-{}_max_gap_{}.png'.format(station, mlh_site, max_gap_interpolate)
+    else:
+        filename = '{}-{}_{}_max_gap_{}.png'.format(station, mlh_site, selection, max_gap_interpolate)
+    plt.savefig(savefig_path / filename, orientation='portrait')
+    return ax
 
 
 def plot_profiler_hadera_pw(ceil_path=ceil_path, path=work_yuval,
-                            station='csar', selection='mean'):
+                            station='csar', selection='JJA'):
     import xarray as xr
+    import numpy as np
+    import matplotlib.pyplot as plt
     ds = read_profiler_hadera(path=ceil_path, plot=False)
     pw = xr.open_dataset(path / 'GNSS_PW_thresh_50_for_diurnal_analysis.nc')[station]
     pw.load()
-    ax, twin = twin_hourly_mean_with_diurnal_mlh_plot(pw, ds, month=None, title=True)
+    month = None
+    if isinstance(selection, int):
+        month = selection
+        add_title = ''
+    elif isinstance(selection, str) and selection.isupper():
+        pw = pw.sel(time=pw['time.season'] == selection).dropna('time')
+        add_title = ' ({})'.format(selection)
+    ax, twin = twin_hourly_mean_with_diurnal_mlh_plot(pw, ds, month=month, title=True)
     ax.grid()
-    ax.vlines(2.75, ymin=20, ymax=33, color='k')
-    ax.vlines(16.75, ymin=20, ymax=33, color='k')
-    ax.text(x=1.5, y=19.5, s='mean sunrise')
-    ax.text(x=15.5, y=19.5, s='mean sunset')
-    return
+    pw_data = ax.get_lines()[0].get_ydata()
+    pwc = np.mean(pw_data)
+    off = 5
+    ax.vlines(2.75, ymin=pwc-off, ymax=pwc+off, color='k')
+    ax.vlines(16.75, ymin=pwc-off, ymax=pwc+off, color='k')
+    ax.text(x=1.5, y=pwc-off-0.5, s='mean sunrise')
+    ax.text(x=15.5, y=pwc-off-0.5, s='mean sunset')
+    title = ax.get_title()
+    ax.set_title(title + add_title)
+    ax.figure.tight_layout()
+    filename = 'csar-HD_{}.png'.format(selection)
+    plt.savefig(savefig_path / filename, orientation='portrait')
+    return ax
 
 
 def read_BD_matfile(path=ceil_path, plot=True, month=None, add_syn=True):
@@ -547,6 +609,8 @@ def read_BD_matfile(path=ceil_path, plot=True, month=None, add_syn=True):
             ax.grid()
         fig.tight_layout()
         fig.suptitle('MLH from Beit-Dagan ceilometer for 2015 and 2016')
+        filename = 'MLH-BD_syn.png'
+        plt.savefig(savefig_path / filename, orientation='portrait')
     if add_syn:
         ds = da.to_dataset(name='BD')
         ds['syn'] = syn_da['class_abbr']
@@ -634,6 +698,8 @@ def read_profiler_hadera(path=ceil_path, plot=True):
         ax.set_title('PBL average Height from 3.5 km east of the coast of Hadera (ORPP), between June - October, 1997-1999, 2002-2005')
         ax.fill_betweenx(y=[400, 800], x1=2.75, x2=16.75, color='y', alpha=0.5)
         fig.tight_layout()
+        filename = 'MLH_HD_diurnal_syn.png'
+        plt.savefig(savefig_path / filename, orientation='portrait')
     return ds
 
 

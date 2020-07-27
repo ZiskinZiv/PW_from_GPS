@@ -566,7 +566,7 @@ def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
 #                 c='k', fw='normal', fs=10, colorupdown=False)
     # plot bet-dagan:
     df = pd.Series([32.00, 34.81]).to_frame().T
-    df.index = ['Beit Dagan']
+    df.index = ['Bet-Dagan']
     df.columns = ['lat', 'lon']
     bet_dagan = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.lon,
                                                                  df.lat),
@@ -1161,7 +1161,7 @@ def plot_ts_tm(path=sound_path, model='TSEN',
     axin1.set_xlim(-15, 15)
     fig.tight_layout()
     filename = 'Bet_dagan_ts_tm_fit_{}-{}.png'.format(times[0], times[1])
-    caption('Water vapor mean temperature (Tm) vs. surface temperature (Ts) of the Bet-dagan radiosonde station. Ordinary least squares linear fit(red) yields the residual distribution with RMSE of 4 K. Bevis(1992) model is plotted(purple) for comparison.')
+    caption('Water vapor mean temperature (Tm) vs. surface temperature (Ts) of the Bet-Dagan radiosonde station. Ordinary least squares linear fit(red) yields the residual distribution with RMSE of 4 K. Bevis(1992) model is plotted(purple) for comparison.')
     if save:
         plt.savefig(savefig_path / filename, bbox_inches='tight')
     return
@@ -1171,7 +1171,7 @@ def plot_pw_tela_bet_dagan(path=work_yuval, sound_path=sound_path,
                            ims_path=ims_path, station='tela', cats=None,
                            times=['2007', '2019'], wv_name='pw', r2=False,
                            save=True):
-    """plot the PW of Bet-dagan vs. PW of gps station"""
+    """plot the PW of Bet-Dagan vs. PW of gps station"""
     from PW_stations import mean_ZWD_over_sound_time_and_fit_tstm
     from sklearn.metrics import mean_squared_error
     from sklearn.metrics import r2_score
@@ -1204,17 +1204,17 @@ def plot_pw_tela_bet_dagan(path=work_yuval, sound_path=sound_path,
     ax.plot(ds[tpw], ds[tpw], c='r')
     ax.legend(['y = x'], loc='upper right')
     if wv_name == 'pw':
-        ax.set_xlabel('PWV from Beit-Dagan [mm]')
+        ax.set_xlabel('PWV from Bet-Dagan [mm]')
         ax.set_ylabel('PWV from TELA GPS station [mm]')
     elif wv_name == 'iwv':
-        ax.set_xlabel(r'IWV from Beit-dagan station [kg$\cdot$m$^{-2}$]')
+        ax.set_xlabel(r'IWV from Bet-Dagan station [kg$\cdot$m$^{-2}$]')
         ax.set_ylabel(r'IWV from TELA GPS station [kg$\cdot$m$^{-2}$]')
     ax.grid()
     axin1 = inset_axes(ax, width="40%", height="40%", loc=2)
     resid = ds.tela_pw.values - ds[tpw].values
     sns.distplot(resid, bins=50, color='k', label='residuals', ax=axin1,
                  kde=False,
-                 hist_kws={"linewidth": 1, "alpha": 0.5, "color": "k"})
+                 hist_kws={"linewidth": 1, "alpha": 0.5, "color": "k","edgecolor": 'k'})
     axin1.yaxis.tick_right()
     rmean = np.mean(resid)
     rmse = np.sqrt(mean_squared_error(ds[tpw].values, ds.tela_pw.values))
@@ -1256,7 +1256,7 @@ def plot_pw_tela_bet_dagan(path=work_yuval, sound_path=sound_path,
 #               transform=axin1.transAxes, color='k', fontsize=10)
     # fig.suptitle('Precipitable Water comparison for the years {} to {}'.format(*times))
     fig.tight_layout()
-    caption('PW from TELA GNSS station vs. PW from Bet-dagan radiosonde station in {}-{}. A 45 degree line is plotted(red) for comparison. Note the skew in the residual distribution with an RMSE of 4.37 mm.'.format(times[0], times[1]))
+    caption('PW from TELA GNSS station vs. PW from Bet-Dagan radiosonde station in {}-{}. A 45 degree line is plotted(red) for comparison. Note the skew in the residual distribution with an RMSE of 4.37 mm.'.format(times[0], times[1]))
     # fig.subplots_adjust(top=0.95)
     filename = 'Bet_dagan_tela_pw_compare_{}-{}.png'.format(times[0], times[1])
     if save:
@@ -1291,7 +1291,7 @@ def plot_zwd_tela_bet_dagan(path=work_yuval, sound_path=sound_path,
     fig, axes = plt.subplots(2, 1, sharex=True, figsize=(12, 8))
     [x.set_xlim([pd.to_datetime(times[0]), pd.to_datetime(times[1])])
      for x in axes]
-    df.columns = ['Beit Dagan soundings', 'TELA GPS station']
+    df.columns = ['Bet-Dagan soundings', 'TELA GPS station']
     sns.scatterplot(
         data=df,
         s=20,
@@ -1438,7 +1438,7 @@ def plot_israel_with_stations(gis_path=gis_path, dem_path=dem_path, ims=True,
         ax.set_ylabel('')
     if radio:   # plot bet-dagan:
         df = pd.Series([32.00, 34.81]).to_frame().T
-        df.index = ['Beit Dagan']
+        df.index = ['Bet-Dagan']
         df.columns = ['lat', 'lon']
         bet_dagan = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.lon,
                                                                      df.lat),
@@ -2719,6 +2719,8 @@ def prepare_diurnal_variability_table(path=work_yuval, rename_cols=True):
     df = df[cols]
     df.index = df.index.str.upper()
     print(df.to_latex())
+    print('')
+    print(df.groupby('Location').mean().to_latex())
     return df
 
 
