@@ -245,7 +245,7 @@ def scatter_plot_pw_mlh(pw, mlh, diurnal=False, ax=None, title=True,
 
 
 def twin_hourly_mean_plot(pw, mlh, month=8, ax=None, title=True,
-                          leg_loc='best', unit='pts'):
+                          leg_loc='best', unit='pts', sample_rate=24):
     from aux_gps import dim_intersection
     import matplotlib.pyplot as plt
     from calendar import month_abbr
@@ -274,8 +274,8 @@ def twin_hourly_mean_plot(pw, mlh, month=8, ax=None, title=True,
         pw_pts = pw.dropna('time').size
         mlh_pts = mlh.dropna('time').size
     elif unit == 'days':
-        pw_pts = int(pw.dropna('time').size / 48)
-        mlh_pts = int(mlh.dropna('time').size / 48)
+        pw_pts = int(pw.dropna('time').size / sample_rate)
+        mlh_pts = int(mlh.dropna('time').size / sample_rate)
     if ax is None:
         fig, ax = plt.subplots(figsize=(10, 8))
     red = 'tab:red'
@@ -444,7 +444,7 @@ def read_ceilometer_station(path=ceil_path, name='Jerusalem'):
 
 def plot_mlh_site_pw_station(ceil_path=ceil_path, path=work_yuval,
                              station='tela', mlh_site='BD', selection='syn',
-                             max_gap_interpolate=None):
+                             max_gap_interpolate=None, srate=24):
     import xarray as xr
     import numpy as np
     import matplotlib.pyplot as plt
@@ -478,7 +478,7 @@ def plot_mlh_site_pw_station(ceil_path=ceil_path, path=work_yuval,
                                      method='cubic')
             mlh.attrs = attrs
     pw = xr.open_dataset(path / 'GNSS_PW_thresh_50_for_diurnal_analysis.nc')[station]
-    ax, twin = twin_hourly_mean_plot(pw, mlh, month=month, title=True, unit='days')
+    ax, twin = twin_hourly_mean_plot(pw, mlh, month=month, title=True, unit='days', sample_rate=srate)
     ax.grid()
     pw_data = ax.get_lines()[0].get_ydata()
     pwc = np.mean(pw_data)
