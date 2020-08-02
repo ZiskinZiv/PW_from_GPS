@@ -485,6 +485,112 @@ def wrap_xr_metpy_specific_humidity(MR, verbose=False):
     return da
 
 
+def convert_wind_speed_direction_to_zonal_meridional(WS, WD, verbose=False):
+    import numpy as np
+    WD = 270 - WD
+    try:
+        WS_unit = WS.attrs['units']
+        if WS_unit != 'm/s':
+            if WS_unit == 'knots':
+            # 1knots= 0.51444445m/s
+                if verbose:
+                    print('wind speed in knots, converting to m/s')
+                WS = WS * 0.51444445
+                WS.attrs.update(units='m/s')
+    except KeyError:
+        WS_unit = 'm/s'
+        if verbose:
+            print('assuming wind speed units are m/s...')
+    U = WS * np.cos(np.deg2rad(WD))
+    V = WS * np.sin(np.deg2rad(WD))
+    U.attrs['long_name'] = 'zonal_velocity'
+    U.attrs['units'] = 'm/s'
+    V.attrs['long_name'] = 'meridional_velocity'
+    V.attrs['units'] = 'm/s'
+    U.name = 'U'
+    V.name = 'V'
+    return U, V
+
+
+def calculate_bulk_richardson_from_physical_radiosonde(PT, U, V, g=9.81):
+    z = PT['Height'].values  # in meters
+    PT_0 = PT.sel(Height=0, method='nearest')
+    U2 = (U**2.0)
+    V2 = (V**2.0)
+    Rib_values = g*z*(PT - PT_0) / (PT_0*(U2 + V2))
+    Rib = PT.copy(data=Rib_values)
+    Rib.name = 'Rib'
+    Rib.attrs.update(long_name='Bulk Richardson Number')
+    Rib.attrs.update(units='dimensionless')
+    return Rib
+
+
+def wrap_xr_metpy_virtual_potential_temperature(P, T, MR, verbose=False):
+    from metpy.calc import virtual_potential_temperature
+    from metpy.units import units
+    try:
+        P_unit = P.attrs['units']
+        assert P_unit == 'hPa'
+    except KeyError:
+        P_unit = 'hPa'
+        if verbose:
+            print('assuming pressure units are hpa...')
+    P_values = P.values * units(P_unit)
+    try:
+        T_unit = T.attrs['units']
+        assert T_unit == 'degC'
+    except KeyError:
+        T_unit = 'degC'
+        if verbose:
+            print('assuming temperature units are degree celsius...')
+    # convert to Kelvin:
+    T_values = T.values + 273.15
+    T_values = T_values * units(T_unit)
+    try:
+        MR_unit = MR.attrs['units']
+        assert MR_unit == 'g/kg'
+    except KeyError:
+        MR_unit = 'g/kg'
+        if verbose:
+            print('assuming mixing ratio units are gr/kg...')
+    MR_values = MR.values * units(MR_unit)
+    Theta = virtual_potential_temperature(P_values, T_values, MR_values)
+    da = P.copy(data=Theta.magnitude) / 1000  # fixing for g/kg
+    da.name = 'VPT'
+    da.attrs['units'] = 'K'
+    da.attrs['long_name'] = 'Virtual Potential Temperature'
+    return da
+
+
+def wrap_xr_metpy_potential_temperature(P, T, verbose=False):
+    from metpy.calc import potential_temperature
+    from metpy.units import units
+    try:
+        P_unit = P.attrs['units']
+        assert P_unit == 'hPa'
+    except KeyError:
+        P_unit = 'hPa'
+        if verbose:
+            print('assuming pressure units are hpa...')
+    P_values = P.values * units(P_unit)
+    try:
+        T_unit = T.attrs['units']
+        assert T_unit == 'degC'
+    except KeyError:
+        T_unit = 'degC'
+        if verbose:
+            print('assuming temperature units are degree celsius...')
+    # convert to Kelvin:
+    T_values = T.values + 273.15
+    T_values = T_values * units(T_unit)
+    Theta = potential_temperature(P_values, T_values)
+    da = P.copy(data=Theta.magnitude)
+    da.name = 'PT'
+    da.attrs['units'] = 'K'
+    da.attrs['long_name'] = 'Potential Temperature'
+    return da
+
+
 def wrap_xr_metpy_vapor_pressure(P, MR, verbose=False):
     from metpy.calc import vapor_pressure
     from metpy.units import units
@@ -1606,12 +1712,15 @@ def read_one_physical_radiosonde_report(path_file, verbose=False):
     sound_time = check_sound_time(df)
     # now, convert Time to decimal seconds:
     df['Time'] = df['Time'] / np.timedelta64(1, 's')
-#    # finally, add time delta to inital date and index:
-#    df.Time = dt + df.Time
-#    df = df.set_index('Time')
-#    df.index.name = 'time'
-    # calculate total precipitaple water(tpw):
-#    ds_h['sound_time'] = check_sound_time(df)
+    # check for EL and AZ that are not empty and WD and WS that are NaN's are
+    # switch them:
+    WD_empty = df['WD'].isnull().all()
+    WS_empty = df['WS'].isnull().all()
+    EL_empty = df['EL'].isnull().all()
+    AZ_empty = df['AZ'].isnull().all()
+    if WD_empty and WS_empty and not EL_empty and not AZ_empty:
+        print('switching AZ, EL and WS, WD cols...')
+        df = df.rename(columns={'EL':'WD','WD':'EL', 'AZ': 'WS', 'WS': 'AZ'})
     ds = df_to_ds_and_interpolate(df)
     # add meta data:
     for name in ds.data_vars:
@@ -1636,6 +1745,12 @@ def read_one_physical_radiosonde_report(path_file, verbose=False):
     tm = calculate_tm_via_trapz_height(ds['VP'], ds['T'], ds['Height'])
 #    tm, unit = calculate_tm_via_pressure_sum(ds['VP'], ds['T'], ds['Rho'], ds['P'],
 #                                             cumulative=True, verbose=False)
+    ds['VPT'] = wrap_xr_metpy_virtual_potential_temperature(ds['P'], ds['T'],
+                                                            ds['MR'])
+    ds['PT'] = wrap_xr_metpy_potential_temperature(ds['P'], ds['T'])
+    U, V = convert_wind_speed_direction_to_zonal_meridional(ds['WS'], ds['WD'])
+    ds['U'] = U
+    ds['V'] = V
     ds['Tm'] = xr.DataArray(tm, dims=['Height'])
     ds['Tm'].attrs['units'] = 'K'
     ds['Tm'].attrs['long_name'] = 'Water vapor mean air temperature'
