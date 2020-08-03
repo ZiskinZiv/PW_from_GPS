@@ -293,15 +293,18 @@ def scikit_fit_predict(X, y, seed=42, plot=True):
 def produce_X_y(station='drag', hs_id=48125, lag=25, anoms=True,
                 neg_pos_ratio=2,
                 path=work_yuval, hydro_path=hydro_path, with_ends=False, seed=42,
-                verbose=True):
+                verbose=True, return_xarray=False, pressure_anoms=None):
     import pandas as pd
     import numpy as np
+    import xarray as xr
     df = preprocess_hydro_pw(
         pw_station=station,
         hs_id=hs_id,
         path=path,
         hydro_path=hydro_path,
-        with_ends=with_ends, anoms=anoms)
+        with_tide_ends=with_ends, anoms=anoms, pressure_anoms=pressure_anoms)
+    if pressure_anoms is not None:
+        station = pressure_anoms.name
     # first produce all the positives:
     # get the tides datetimes:
     y_pos = df[df['tides'] == 1]['tides']
@@ -336,7 +339,10 @@ def produce_X_y(station='drag', hs_id=48125, lag=25, anoms=True,
         # get a random date from df:
         r = np.random.randint(low=0, high=len(df))
         # slice -24 to 24 range with t=0 being the random date:
-        sliced = df.iloc[r - lag:r + lag]
+        # update: extend the range to -72 hours to 72 hours:
+        lag_factor = 72 / lag
+        slice_range = int(lag * lag_factor)
+        sliced = df.iloc[r - slice_range:r + slice_range]
         # if tides inside this date range, continue:
         if y_pos.iloc[ind].index in sliced.index:
             if verbose:
@@ -356,12 +362,30 @@ def produce_X_y(station='drag', hs_id=48125, lag=25, anoms=True,
     X = np.stack([[x.values for x in pw_pos_list] +
                         [x.values for x in pw_neg_list]])
     X = X.squeeze()
-    return X, y
+    if return_xarray:
+        X_pos_da = xr.DataArray(pw_pos_list, dims=['event', 'time'])
+        X_neg_da = xr.DataArray(pw_neg_list, dims=['event', 'time'])
+        return X_pos_da, X_neg_da
+    else:
+        return X, y
+
+
+def plot_Xpos_Xneg_mean_std(X_pos_da, X_neg_da):
+    import matplotlib.pyplot as plt
+    from PW_from_gps_figures import plot_field_with_fill_between
+    fig, ax = plt.subplots(figsize=(8, 6))
+    posln = plot_field_with_fill_between(X_pos_da, ax=ax, mean_dim='event',
+                                         dim='time', color='b', marker='s')
+    negln = plot_field_with_fill_between(X_neg_da, ax=ax, mean_dim='event',
+                                         dim='time', color='r', marker='o')
+    ax.legend(posln+negln, ['Positive tide events', 'Negative tide events'])
+    ax.grid()
+    return fig
 
 
 def preprocess_hydro_pw(pw_station='drag', hs_id=48125, path=work_yuval,
                         anoms=True, hydro_path=hydro_path, max_flow=0,
-                        with_tide_ends=False):
+                        with_tide_ends=False, pressure_anoms=None):
     import xarray as xr
     import pandas as pd
     import numpy as np
@@ -400,6 +424,8 @@ def preprocess_hydro_pw(pw_station='drag', hs_id=48125, path=work_yuval,
         pw = xr.load_dataset(path / 'GNSS_PW_anom_hourly_50_hour_dayofyear.nc')[pw_station]
     else:
         pw = xr.load_dataset(path / 'GNSS_PW_hourly_thresh_50.nc')[pw_station]
+    if pressure_anoms is not None:
+        pw = pressure_anoms
     pw_df = pw.dropna('time').to_dataframe()
     # now align the both dataframes:
     pw_df['tides'] = df['tides']
@@ -409,6 +435,7 @@ def preprocess_hydro_pw(pw_station='drag', hs_id=48125, path=work_yuval,
 
 
 def loop_over_gnss_hydro_and_aggregate(sel_hydro, pw_anom=False,
+                                       pressure_anoms=None,
                                        max_flow_thresh=None,
                                        hydro_path=hydro_path,
                                        work_yuval=work_yuval, ndays=5,
@@ -420,6 +447,7 @@ def loop_over_gnss_hydro_and_aggregate(sel_hydro, pw_anom=False,
     filename = 'PW_tide_sites_{}_{}.nc'.format(ndays, ndays_forward)
     if pw_anom:
         filename = 'PW_tide_sites_anom_{}_{}.nc'.format(ndays, ndays_forward)
+    gnss_stations = []
     if (hydro_path / filename).is_file():
         print('loading {}...'.format(filename))
         ds = xr.load_dataset(hydro_path / filename)
@@ -432,7 +460,7 @@ def loop_over_gnss_hydro_and_aggregate(sel_hydro, pw_anom=False,
         just_pw = [x for x in gnss_pw.data_vars if '_error' not in x]
         gnss_pw = gnss_pw[just_pw]
         da_list = []
-        for gnss_sta in just_pw:
+        for i, gnss_sta in enumerate(just_pw):
             print('proccessing station {}'.format(gnss_sta))
             sliced = sel_hydro[~sel_hydro[gnss_sta].isnull()]
             hydro_ids = [x for x in sliced.id.values]
@@ -442,12 +470,23 @@ def loop_over_gnss_hydro_and_aggregate(sel_hydro, pw_anom=False,
                 continue
             else:
                 try:
-                    dass = aggregate_get_ndays_pw_hydro(
-                        gnss_pw[gnss_sta],
-                        hydro_ids,
-                        max_flow_thresh=max_flow_thresh,
-                        ndays=ndays, ndays_forward=ndays_forward,
-                        plot=plot_all)
+                    if pressure_anoms is not None:
+                        pname = pressure_anoms.name
+                        dass = aggregate_get_ndays_pw_hydro(
+                            pressure_anoms,
+                            hydro_ids,
+                            max_flow_thresh=max_flow_thresh,
+                            ndays=ndays, ndays_forward=ndays_forward,
+                            plot=plot_all)
+                        gnss_stations.append(gnss_sta)
+                        dass.name = '{}_{}'.format(pname, i)
+                    else:
+                        dass = aggregate_get_ndays_pw_hydro(
+                            gnss_pw[gnss_sta],
+                            hydro_ids,
+                            max_flow_thresh=max_flow_thresh,
+                            ndays=ndays, ndays_forward=ndays_forward,
+                            plot=plot_all)
                     da_list.append(dass)
                 except ValueError as e:
                     print('skipping {} because {}'.format(gnss_sta, e))
@@ -460,8 +499,10 @@ def loop_over_gnss_hydro_and_aggregate(sel_hydro, pw_anom=False,
         for name in names:
             ds.mean('station').mean('tide_start')[name].plot.line(
                 marker='.', linewidth=0., ax=ax)
+        if pressure_anoms is not None:
+            names = [x.split('_')[0] for x in ds.data_vars]
+            names = [x + ' ({})'.format(y) for x, y in zip(names, gnss_stations)]
         ax.set_xlabel('Days before tide event')
-        ax.set_ylabel('PW [mm]')
         ax.grid()
         hstations = [ds[x].attrs['hydro_stations'] for x in ds.data_vars]
         events = [ds[x].attrs['total_events'] for x in ds.data_vars]
@@ -469,12 +510,18 @@ def loop_over_gnss_hydro_and_aggregate(sel_hydro, pw_anom=False,
         ax.legend(['{} with {} stations ({} total events)'.format(x, y, z)
                    for x, y, z in fmt])
         if pw_anom:
-            title = 'Mean PW anomalies for tide stations near all GNSS stations'
+            title = 'Mean PWV anomalies for tide stations near all GNSS stations'
+            ylabel = 'PWV anomalies [mm]'
         else:
-            title = 'Mean PW for tide stations near all GNSS stations'
+            title = 'Mean PWV for tide stations near all GNSS stations'
+            ylabel = 'PWV [mm]'
         if max_flow_thresh is not None:
             title += ' (max_flow > {} m^3/sec)'.format(max_flow_thresh)
+        if pressure_anoms is not None:
+            ylabel = 'Surface pressure anomalies [hPa]'
+            title = 'Mean surface pressure anomaly in {} for all tide stations near GNSS stations'.format(pname)
         ax.set_title(title)
+        ax.set_ylabel(ylabel)
     return ds
 
 
@@ -571,6 +618,9 @@ def get_n_days_pw_hydro_all(pw_da, hs_id, max_flow_thresh=None,
         if freq == '5T':
             points = int(ndays) * 24 * 12
             points_forward = int(ndays_forward) * 24 * 12
+        elif freq == '10T':
+            points = int(ndays) * 24 * 6
+            points_forward = int(ndays_forward) * 24 * 6
         elif freq == 'H':
             points = int(ndays) * 24
             points_forward = int(ndays_forward) * 24
