@@ -2358,6 +2358,23 @@ def plot_ceilometers(path=work_yuval, ceil_path=ceil_path, interpolate='6H',
     return fig
 
 
+def plot_field_with_fill_between(da, dim='hour', mean_dim=None, ax=None,
+                                 color='b', marker='s'):
+    if dim not in da.dims:
+        raise KeyError('{} not in {}'.format(dim, da.name))
+    if mean_dim is None:
+        mean_dim = [x for x in da.dims if dim not in x][0]
+    da_mean = da.mean(mean_dim)
+    da_std = da.std(mean_dim)
+    da_minus = da_mean - da_std
+    da_plus = da_mean + da_std
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 6))
+    line = da_mean.plot(color=color, marker=marker, ax=ax)
+    ax.fill_between(da_mean[dim], da_minus, da_plus, color=color, alpha=0.5)
+    return line
+
+
 def plot_hist_with_seasons(da_ts):
     import seaborn as sns
     fig, ax = plt.subplots(figsize=(10, 7))
