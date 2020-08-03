@@ -14,7 +14,7 @@ edt_path = sound_path / 'edt'
 
 def get_field_from_radiosonde(path=sound_path, field='Tm', data_type='phys',
                               reduce='min', dim='Height',
-                              times=['2007','2019'], plot=True):
+                              times=['2007', '2019'], plot=True):
     import xarray as xr
     from aux_gps import get_unique_index
     from aux_gps import keep_iqr
