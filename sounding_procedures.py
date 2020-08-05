@@ -485,7 +485,24 @@ def wrap_xr_metpy_specific_humidity(MR, verbose=False):
     return da
 
 
+def calculate_atmospheric_refractivity(P, T, VP, verbose=False):
+    try:
+        T_unit = T.attrs['units']
+        assert T_unit == 'degC'
+    except KeyError:
+        T_unit = 'degC'
+        if verbose:
+            print('assuming temperature units are degree celsius...')
+    # convert to Kelvin:
+    T_k = T + 273.15
+    N = 77.6 * P / T_k + 3.73e5 * VP / T_k**2
+    N.attrs['units'] = 'dimensionless'
+    N.attrs['long_name'] = 'Index of Refractivity'
+    return N
+
+
 def convert_wind_speed_direction_to_zonal_meridional(WS, WD, verbose=False):
+    # make sure it is right!
     import numpy as np
     WD = 270 - WD
     try:
@@ -512,17 +529,92 @@ def convert_wind_speed_direction_to_zonal_meridional(WS, WD, verbose=False):
     return U, V
 
 
-def calculate_bulk_richardson_from_physical_radiosonde(PT, U, V, g=9.81):
-    z = PT['Height'].values  # in meters
-    PT_0 = PT.sel(Height=0, method='nearest')
+def calculate_bulk_richardson_from_physical_radiosonde(VPT, U, V, g=9.81):
+    import numpy as np
+    z = VPT['Height']  # in meters
+    z0 = VPT['Height'].sel(Height=0, method='nearest')
+    VPT_0 = VPT.sel(Height=0, method='nearest')
+    VPT_mean = VPT.cumsum('Height') / (np.arange(VPT.Height.size) + 1)
+    U.loc[dict(Height=35)]=0
+    V.loc[dict(Height=35)]=0
     U2 = (U**2.0)
     V2 = (V**2.0)
-    Rib_values = g*z*(PT - PT_0) / (PT_0*(U2 + V2))
-    Rib = PT.copy(data=Rib_values)
+#     WS2 = (WS * 0.51444445)**2
+    Rib_values = g * (VPT - VPT_0) * (z) / ((VPT_mean) * (U2 + V2))
+    Rib = VPT.copy(data=Rib_values)
     Rib.name = 'Rib'
     Rib.attrs.update(long_name='Bulk Richardson Number')
     Rib.attrs.update(units='dimensionless')
     return Rib
+
+
+def calculate_MLH_from_Rib_single_profile(Rib_df, crit=0.25):
+    # drop first row:
+    df = Rib_df.drop(35)
+#    # get index position of first closest to crit:
+#    i = df['Rib'].sub(crit).abs().argmin() + 1
+#    df_c = df.iloc[i-2:i+2]
+    mlh = df['Rib'].sub(crit).abs().idxmin()
+    return mlh
+
+
+def calculate_MLH_time_series_from_all_profiles(Rib, crit=0.25, hour=12,
+                                                dim='sound_time'):
+    rib = Rib.sel(sound_time=Rib['sound_time.hour'] == hour)
+    mlhs = []
+    for time in rib[dim]:
+        #        print('proccessing MLH retreival of {} using Rib at {}'.format(
+        #            time.dt.strftime('%Y-%m-%d:%H').item(), crit))
+        df = rib.sel({dim: time}).reset_coords(drop=True).to_dataframe()
+        mlhs.append(calculate_MLH_from_Rib_single_profile(df, crit=crit))
+    da = xr.DataArray(mlhs, dims=[dim])
+    da[dim] = rib[dim]
+    return da
+
+
+def return_PWV_with_MLH_values(PW, MLH, dim='sound_time'):
+    import xarray as xr
+    pws = []
+    pw_max = []
+    for time in MLH[dim]:
+        pws.append(PW.sel({dim: time}).sel(Height=MLH.sel({dim: time})))
+        pw_max.append(PW.sel({dim: time}).max())
+    pw_da = xr.concat(pws, dim)
+    pw_da_max = xr.concat(pw_max, dim)
+    ds = xr.Dataset()
+    ds['PWV_MLH'] = pw_da
+    ds['PWV_max'] = pw_da_max
+    ds['MLH'] = MLH
+    return ds
+
+
+def wrap_xr_metpy_virtual_temperature(T, MR, verbose=False):
+    from metpy.calc import virtual_temperature
+    from metpy.units import units
+    try:
+        T_unit = T.attrs['units']
+        assert T_unit == 'degC'
+    except KeyError:
+        T_unit = 'degC'
+        if verbose:
+            print('assuming temperature units are degree celsius...')
+    # convert to Kelvin:
+    T_values = T.values + 273.15
+    T_values = T_values * units('K')
+    try:
+        MR_unit = MR.attrs['units']
+        assert MR_unit == 'g/kg'
+    except KeyError:
+        MR_unit = 'g/kg'
+        if verbose:
+            print('assuming mixing ratio units are gr/kg...')
+    MR_values = MR.values * units(MR_unit)
+    Theta = virtual_temperature(T_values, MR_values)
+    da = MR.copy(data=Theta.magnitude) / 1000  # fixing for g/kg
+    da.name = 'VPT'
+    da.attrs['units'] = 'K'
+    da.attrs['long_name'] = 'Virtual Potential Temperature'
+    return da
 
 
 def wrap_xr_metpy_virtual_potential_temperature(P, T, MR, verbose=False):
@@ -545,7 +637,7 @@ def wrap_xr_metpy_virtual_potential_temperature(P, T, MR, verbose=False):
             print('assuming temperature units are degree celsius...')
     # convert to Kelvin:
     T_values = T.values + 273.15
-    T_values = T_values * units(T_unit)
+    T_values = T_values * units('K')
     try:
         MR_unit = MR.attrs['units']
         assert MR_unit == 'g/kg'
@@ -582,7 +674,7 @@ def wrap_xr_metpy_potential_temperature(P, T, verbose=False):
             print('assuming temperature units are degree celsius...')
     # convert to Kelvin:
     T_values = T.values + 273.15
-    T_values = T_values * units(T_unit)
+    T_values = T_values * units('K')
     Theta = potential_temperature(P_values, T_values)
     da = P.copy(data=Theta.magnitude)
     da.name = 'PT'
@@ -1748,6 +1840,7 @@ def read_one_physical_radiosonde_report(path_file, verbose=False):
     ds['VPT'] = wrap_xr_metpy_virtual_potential_temperature(ds['P'], ds['T'],
                                                             ds['MR'])
     ds['PT'] = wrap_xr_metpy_potential_temperature(ds['P'], ds['T'])
+    ds['VT'] = wrap_xr_metpy_virtual_temperature(ds['T'], ds['MR'])
     U, V = convert_wind_speed_direction_to_zonal_meridional(ds['WS'], ds['WD'])
     ds['U'] = U
     ds['V'] = V
