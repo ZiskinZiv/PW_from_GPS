@@ -9,6 +9,7 @@ Created on Thu Nov 21 14:08:43 2019
 from PW_paths import work_yuval
 hydro_path = work_yuval / 'hydro'
 gis_path = work_yuval / 'gis'
+ims_path = work_yuval / 'IMS_T'
 
 # TODO: scan for seasons in the tide events and remove summer
 # TODO: prepare pw_hourly_50 so no homogenized data will enter
@@ -49,7 +50,10 @@ def plot_all_decompositions(X, y, n=2):
         method = model_str.split('-')[-1]
         if model == method:
             method = None
-        ax = scikit_decompose(X, y, model=model, n=n, method=method, ax=ax)
+        try:
+            ax = scikit_decompose(X, y, model=model, n=n, method=method, ax=ax)
+        except ValueError:
+            pass
         ax.set_title(name_dict[model_str])
         ax.set_xlabel('')
         ax.set_ylabel('')
@@ -68,7 +72,7 @@ def scikit_decompose(X, y, model='PCA', n=2, method=None, ax=None):
         X_decomp = decomposition.TruncatedSVD(n_components=n).fit_transform(X)
     elif model == 'LDA':
         X2 = X.copy()
-        X2.flat[::X.shape[1] + 1] += 0.01
+        X2.values.flat[::X.shape[1] + 1] += 0.01
         X_decomp = discriminant_analysis.LinearDiscriminantAnalysis(n_components=n
                                                                     ).fit_transform(X2, y)
     elif model == 'ISO_MAP':
@@ -240,8 +244,8 @@ def scikit_fit_predict(X, y, seed=42, plot=True):
     import matplotlib.pyplot as plt
     X_tt, X_test, y_tt, y_test = train_test_split(
         X, y, test_size=0.3, shuffle=True, random_state=seed)
-    # clf = SVC(gamma='auto')
-    clf = LinearDiscriminantAnalysis()
+    clf = SVC(gamma='auto')
+    # clf = LinearDiscriminantAnalysis()
     # clf = QuadraticDiscriminantAnalysis()
     scores = []
     fig, ax = plt.subplots()
@@ -291,18 +295,29 @@ def scikit_fit_predict(X, y, seed=42, plot=True):
 
 
 def produce_X_y(station='drag', hs_id=48125, lag=25, anoms=True,
-                neg_pos_ratio=2,
-                path=work_yuval, hydro_path=hydro_path, with_ends=False, seed=42,
+                neg_pos_ratio=2, add_pressure=False,
+                path=work_yuval, hydro_path=hydro_path, with_ends=False,
+                seed=42,
                 verbose=True, return_xarray=False, pressure_anoms=None):
     import pandas as pd
     import numpy as np
     import xarray as xr
+
+    def produce_da_from_list(event_list, feature='pwv'):
+        X_da = xr.DataArray(event_list, dims=['sample', 'feature'])
+        X_da['feature'] = ['{}_{}'.format(feature, x) for x in np.arange(0, 24, 1)]
+        X_df = pd.concat(event_list)
+        X_da['sample'] = [x for x in X_df.index[::24]]
+        return X_da
+    
     df = preprocess_hydro_pw(
         pw_station=station,
         hs_id=hs_id,
         path=path,
         hydro_path=hydro_path,
-        with_tide_ends=with_ends, anoms=anoms, pressure_anoms=pressure_anoms)
+        with_tide_ends=with_ends, anoms=anoms,
+        pressure_anoms=pressure_anoms,
+        add_pressure=add_pressure)
     if pressure_anoms is not None:
         station = pressure_anoms.name
     # first produce all the positives:
@@ -314,11 +329,13 @@ def produce_X_y(station='drag', hs_id=48125, lag=25, anoms=True,
              for start, end in zip(y_lag_pos, y_pos.index)]
     # also drop event if less than 24 hour before available:
     pw_pos_list = []
+    pressure_pos_list = []
     ind = []
     bad_ind = []
     for i, tide in enumerate(masks):
         if len(df['tides'][tide]) == (lag - 1):
             pw_pos_list.append(df[station][tide])
+            pressure_pos_list.append(df['pressure'][tide])
             ind.append(i)
         else:
             bad_ind.append(i)
@@ -334,6 +351,7 @@ def produce_X_y(station='drag', hs_id=48125, lag=25, anoms=True,
     y_neg_arr = np.zeros(y_pos_arr.shape[0] * neg_pos_ratio)
     cnt = 0
     pw_neg_list = []
+    pressure_neg_list = []
     np.random.seed(seed)
     while cnt < len(y_neg_arr):
         # get a random date from df:
@@ -356,16 +374,26 @@ def produce_X_y(station='drag', hs_id=48125, lag=25, anoms=True,
             continue
         # else, append to pw_neg_list and increase cnt
         pw_neg_list.append(negative)
+        pressure_neg_list.append(df.iloc[r - lag:r - 1]['pressure'])
         cnt += 1
     # lastly, assemble for X, y using np.columnstack:
     y = np.concatenate([y_pos_arr, y_neg_arr])
     X = np.stack([[x.values for x in pw_pos_list] +
-                        [x.values for x in pw_neg_list]])
+                  [x.values for x in pw_neg_list]])
     X = X.squeeze()
+    pw_pos_da = produce_da_from_list(pw_pos_list, feature='pwv')
+    pw_neg_da = produce_da_from_list(pw_neg_list, feature='pwv')
+    pr_pos_da = produce_da_from_list(pressure_pos_list, feature='pressure')
+    pr_neg_da = produce_da_from_list(pressure_neg_list, feature='pressure')
     if return_xarray:
-        X_pos_da = xr.DataArray(pw_pos_list, dims=['event', 'time'])
-        X_neg_da = xr.DataArray(pw_neg_list, dims=['event', 'time'])
-        return X_pos_da, X_neg_da
+        y = xr.DataArray(y, dims='sample')
+        X_pwv = xr.concat([pw_pos_da, pw_neg_da], 'sample')
+        X_pressure = xr.concat([pr_pos_da, pr_neg_da], 'sample')
+        X = xr.concat([X_pwv, X_pressure], 'feature')
+        X.name = 'X'
+        y['sample'] = X['sample']
+        y.name = 'y'
+        return X, y
     else:
         return X, y
 
@@ -384,11 +412,14 @@ def plot_Xpos_Xneg_mean_std(X_pos_da, X_neg_da):
 
 
 def preprocess_hydro_pw(pw_station='drag', hs_id=48125, path=work_yuval,
+                        ims_path=ims_path,
                         anoms=True, hydro_path=hydro_path, max_flow=0,
-                        with_tide_ends=False, pressure_anoms=None):
+                        with_tide_ends=False, pressure_anoms=None,
+                        add_pressure=False):
     import xarray as xr
     import pandas as pd
     import numpy as np
+    from aux_gps import anomalize_xr
     # first load tides data:
     all_tides = xr.open_dataset(hydro_path / 'hydro_tides.nc')
     # get all tides for specific station without nans:
@@ -430,6 +461,11 @@ def preprocess_hydro_pw(pw_station='drag', hs_id=48125, path=work_yuval,
     # now align the both dataframes:
     pw_df['tides'] = df['tides']
     pw_df['max_flow'] = df['max_flow']
+    if add_pressure:
+        pressure = xr.load_dataset(ims_path / 'IMS_BP_israeli_hourly.nc')['JERUSALEM-CENTRE']
+        pressure = anomalize_xr(pressure, freq='MS')
+        pr_df = pressure.dropna('time').to_dataframe()
+        pw_df['pressure'] = pr_df
     pw_df = pw_df.fillna(0)
     return pw_df
 
