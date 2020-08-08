@@ -572,10 +572,84 @@ def calculate_MLH_time_series_from_all_profiles(Rib, crit=0.25, hour=12,
     return da
 
 
+def solve_MLH_with_all_crits(RiB, mlh_all=None, hour=12, cutoff=200, plot=True):
+    import xarray as xr
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    from aux_gps import keep_iqr
+    if mlh_all is None:
+        mlhs = []
+        crits = [0.25, 0.33, 0.5, 0.75, 1.0]
+        for crit in crits:
+            print('solving mlh for {} critical RiB value.'.format(crit))
+            mlh = calculate_MLH_time_series_from_all_profiles(RiB, crit=crit,
+                                                              hour=hour)
+            mlh = keep_iqr(mlh, dim='sound_time')
+            mlhs.append(mlh)
+    
+        mlh_all = xr.concat(mlhs, 'crit')
+        mlh_all['crit'] = crits
+        if cutoff is not None:
+            mlh_all = mlh_all.where(mlh_all >= cutoff)
+    if plot:
+        cmap = sns.color_palette("colorblind", 5)
+        fig, ax = plt.subplots(3, 1, sharex=True, figsize=(12, 9))
+        df_mean = mlh_all.groupby('sound_time.month').mean().to_dataset('crit').to_dataframe()
+        df_mean.plot(color=cmap, style=['-+', '-.', '-', '--', '-.'], ax=ax[0])
+        ax[0].grid()
+        ax[0].set_ylabel('Mean MLH [m]')
+        ax[0].set_title(
+            'Annual mixing layer height from Bet-Dagan radiosonde profiles ({}Z) using RiB method'.format(hour))
+        df_std = mlh_all.groupby('sound_time.month').std().to_dataset('crit').to_dataframe()
+        df_std.plot(color=cmap, style=['-+', '-.', '-', '--', '-.'], ax=ax[1])
+        ax[1].grid()
+        ax[1].set_ylabel('Std MLH [m]')
+        df_count = mlh_all.groupby('sound_time.month').count().to_dataset('crit').to_dataframe()
+        df_count.plot(color=cmap, style=['-+', '-.', '-', '--', '-.'], ax=ax[2])
+        ax[2].grid()
+        ax[2].set_ylabel('Count MLH [#]')
+        fig.tight_layout()
+    return mlh_all
+
+
+def scatter_plot_MLH_PWV(ds, season='JJA', crit=0.25):
+    import matplotlib.pyplot as plt
+    if season is not None:
+        ds = ds.sel(sound_time=ds['sound_time.season'] == season)
+    ds = ds.sel(crit=crit)
+    hour = list(set(ds['sound_time'].dt.hour.values))[0]
+    days = ds['PWV_MLH'].dropna('sound_time').size
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.scatter(ds['PWV_MLH'], ds['MLH'], alpha=0.75, marker='o')
+    ax.scatter(ds['PWV_max']-ds['PWV_MLH'], ds['MLH'], alpha=0.75, marker='s')
+    ax.grid()
+    ax.set_xlabel('PWV [mm]')
+    ax.set_ylabel('MLH [m]')
+    ax.set_title(
+        'MLH from Bet_Dagan profiles (RiB={},{}Z) in {} vs. PWV ({} days)'.format(
+            crit, hour,
+            season, days))
+    ax.legend(['PWV below MLH', 'PWV above MLH'])
+    return fig
+
+
+def process_all_MLH_with_PWV(MLH_all, PWV):
+    import xarray as xr
+    mlhs = []
+    for crit in MLH_all.crit:
+        print('proccesing mlh-pwv for {} critical RiB value.'.format(crit.item()))
+        ds = return_PWV_with_MLH_values(PWV, MLH_all.sel(crit=crit))
+        mlhs.append(ds)
+    ds = xr.concat(mlhs, 'crit')
+    ds['crit'] = MLH_all.crit
+    return ds
+
+
 def return_PWV_with_MLH_values(PW, MLH, dim='sound_time'):
     import xarray as xr
     pws = []
     pw_max = []
+    MLH = MLH.dropna(dim)
     for time in MLH[dim]:
         pws.append(PW.sel({dim: time}).sel(Height=MLH.sel({dim: time})))
         pw_max.append(PW.sel({dim: time}).max())
