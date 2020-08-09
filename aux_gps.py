@@ -1773,6 +1773,14 @@ def filter_nan_errors(ds, error_str='_error', dim='time', meta='action'):
     return ds
 
 
+def smooth_xr(da, dim='time', weights=[0.25, 0.5, 0.25]):
+    import xarray as xr
+    weight = xr.DataArray(weights, dims=['window'])
+    da_roll = da.rolling({dim: 3}, center=True).construct('window').dot(weight)
+    da_roll.attrs['action'] = 'weighted rolling mean with {}'.format(weights)
+    return da_roll
+
+
 def keep_iqr(da, dim='time', qlow=0.25, qhigh=0.75, k=1.5, drop_with_freq=None,
              verbose=False):
     """return the data in a dataarray only in the k times the
