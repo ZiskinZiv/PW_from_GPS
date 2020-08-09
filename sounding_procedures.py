@@ -567,7 +567,11 @@ def calculate_MLH_from_Rib_single_profile(Rib_df, crit=0.25):
 #    df_c = df.iloc[i-2:i+2]
     indLeft = np.searchsorted(Rib_df['Rib'], crit, side='left')
     indRight = np.searchsorted(Rib_df['Rib'], crit, side='right')
-    mlh = Rib_df.iloc[indLeft]
+    if indLeft == indRight:
+        ind = indLeft
+    else:
+        ind = indLeft
+    mlh = Rib_df.index[ind]
     # mlh = df['Rib'].sub(crit).abs().idxmin()
     return mlh
 
@@ -610,7 +614,8 @@ def solve_MLH_with_all_crits(RiB, mlh_all=None, hour=12, cutoff=200, plot=True):
         for crit in crits:
             print('solving mlh for {} critical RiB value.'.format(crit))
             mlh = calculate_MLH_time_series_from_all_profiles(RiB, crit=crit,
-                                                              hour=hour)
+                                                              hour=hour,
+                                                              plot=False)
             mlh = keep_iqr(mlh, dim='sound_time')
             mlhs.append(mlh)
     
