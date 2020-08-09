@@ -548,13 +548,27 @@ def calculate_bulk_richardson_from_physical_radiosonde(VPT, U, V, g=9.81):
     return Rib
 
 
+def calculate_gradient_richardson_from_physical_radiosonde(BVF2, U, V):
+    dU = U.diff('Height') / U['Height'].diff('Height')
+    dV = V.diff('Height') / V['Height'].diff('Height')
+    Rig = BVF2 / (dU**2 + dV**2)
+    Rig.name = 'Rig'
+    Rig.attrs.update(long_name='Gradient Richardson Number')
+    Rig.attrs.update(units='dimensionless')
+    return Rig
+
+
 def calculate_MLH_from_Rib_single_profile(Rib_df, crit=0.25):
+    import numpy as np
     # drop first row:
-    df = Rib_df.drop(35)
+    # df = Rib_df.drop(35)
 #    # get index position of first closest to crit:
 #    i = df['Rib'].sub(crit).abs().argmin() + 1
 #    df_c = df.iloc[i-2:i+2]
-    mlh = df['Rib'].sub(crit).abs().idxmin()
+    indLeft = np.searchsorted(Rib_df['Rib'], crit, side='left')
+    indRight = np.searchsorted(Rib_df['Rib'], crit, side='right')
+    mlh = Rib_df.iloc[indLeft]
+    # mlh = df['Rib'].sub(crit).abs().idxmin()
     return mlh
 
 
@@ -675,6 +689,33 @@ def return_PWV_with_MLH_values(PW, MLH, dim='sound_time'):
     return ds
 
 
+def wrap_xr_metpy_brunt_vaisala_f2(Height, PT, verbose=False):
+    from metpy.calc import brunt_vaisala_frequency_squared
+    from metpy.units import units
+    try:
+        PT_unit = PT.attrs['units']
+        assert PT_unit == 'K'
+    except KeyError:
+        PT_unit = 'K'
+        if verbose:
+            print('assuming potential temperature units are degree kelvin...')
+    PT_values = PT.values * units('K')
+    try:
+        H_unit = Height.attrs['units']
+        assert H_unit == 'm'
+    except KeyError:
+        H_unit = 'm'
+        if verbose:
+            print('assuming Height units are m...')
+    H_values = Height.values * units('m')
+    bvf2 = brunt_vaisala_frequency_squared(H_values, PT_values, axis=1)
+    da = PT.copy(data=bvf2.magnitude)
+    da.name = 'BVF2'
+    da.attrs['units'] = '1/sec**2'
+    da.attrs['long_name'] = 'Brunt-Vaisala Frequency squared'
+    return da
+
+    
 def wrap_xr_metpy_virtual_temperature(T, MR, verbose=False):
     from metpy.calc import virtual_temperature
     from metpy.units import units
