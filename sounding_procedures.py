@@ -559,7 +559,9 @@ def calculate_MLH_from_Rib_single_profile(Rib_df, crit=0.25):
 
 
 def calculate_MLH_time_series_from_all_profiles(Rib, crit=0.25, hour=12,
-                                                dim='sound_time'):
+                                                dim='sound_time', plot=True):
+    from aux_gps import keep_iqr
+    import matplotlib.pyplot as plt
     rib = Rib.sel(sound_time=Rib['sound_time.hour'] == hour)
     mlhs = []
     for time in rib[dim]:
@@ -569,6 +571,17 @@ def calculate_MLH_time_series_from_all_profiles(Rib, crit=0.25, hour=12,
         mlhs.append(calculate_MLH_from_Rib_single_profile(df, crit=crit))
     da = xr.DataArray(mlhs, dims=[dim])
     da[dim] = rib[dim]
+    if plot:
+        da = keep_iqr(da, dim)
+        fig, ax = plt.subplots(figsize=(15, 6))
+        ln = da.plot(ax=ax)
+        ln200 = da.where(da>=200).plot(ax=ax)
+        lnmm = da.where(da>200).resample({dim:'MS'}).mean().plot(ax=ax, linewidth=3, color='r')
+        ax.legend(ln+ln200+lnmm, ['MLH', 'MLH above 200m', 'MLH above 200m monthly means'])
+        ax.grid()
+        ax.set_ylabel('MLH from Rib [m]')
+        ax.set_xlabel('')
+        fig.tight_layout()
     return da
 
 
