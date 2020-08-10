@@ -580,6 +580,7 @@ def calculate_MLH_time_series_from_all_profiles(Rib, crit=0.25, hour=12,
                                                 dim='sound_time', plot=True):
     from aux_gps import keep_iqr
     import matplotlib.pyplot as plt
+    import xarray as xr
     rib = Rib.sel(sound_time=Rib['sound_time.hour'] == hour)
     mlhs = []
     for time in rib[dim]:
@@ -593,9 +594,11 @@ def calculate_MLH_time_series_from_all_profiles(Rib, crit=0.25, hour=12,
         da = keep_iqr(da, dim)
         fig, ax = plt.subplots(figsize=(15, 6))
         ln = da.plot(ax=ax)
-        ln200 = da.where(da>=200).plot(ax=ax)
-        lnmm = da.where(da>200).resample({dim:'MS'}).mean().plot(ax=ax, linewidth=3, color='r')
-        ax.legend(ln+ln200+lnmm, ['MLH', 'MLH above 200m', 'MLH above 200m monthly means'])
+        ln200 = da.where(da >= 200).plot(ax=ax)
+        lnmm = da.where(da > 200).resample(
+            {dim: 'MS'}).mean().plot(ax=ax, linewidth=3, color='r')
+        ax.legend(ln + ln200 + lnmm,
+                  ['MLH', 'MLH above 200m', 'MLH above 200m monthly means'])
         ax.grid()
         ax.set_ylabel('MLH from Rib [m]')
         ax.set_xlabel('')
@@ -603,7 +606,8 @@ def calculate_MLH_time_series_from_all_profiles(Rib, crit=0.25, hour=12,
     return da
 
 
-def solve_MLH_with_all_crits(RiB, mlh_all=None, hour=12, cutoff=200, plot=True):
+def solve_MLH_with_all_crits(RiB, mlh_all=None, hour=12, cutoff=200,
+                             plot=True):
     import xarray as xr
     import matplotlib.pyplot as plt
     import seaborn as sns
@@ -618,7 +622,7 @@ def solve_MLH_with_all_crits(RiB, mlh_all=None, hour=12, cutoff=200, plot=True):
                                                               plot=False)
             mlh = keep_iqr(mlh, dim='sound_time')
             mlhs.append(mlh)
-    
+
         mlh_all = xr.concat(mlhs, 'crit')
         mlh_all['crit'] = crits
         if cutoff is not None:

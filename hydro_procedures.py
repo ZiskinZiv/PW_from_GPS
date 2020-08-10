@@ -242,9 +242,13 @@ def scikit_fit_predict(X, y, seed=42, plot=True):
     from sklearn.metrics import auc
     import numpy as np
     import matplotlib.pyplot as plt
+    from sklearn.model_selection import KFold
     X_tt, X_test, y_tt, y_test = train_test_split(
         X, y, test_size=0.3, shuffle=True, random_state=seed)
     clf = SVC(gamma='auto')
+    cv = KFold(n_splits=3, shuffle=True, random_state=seed)
+    classifier = SVC(kernel='linear', probability=True,
+                     random_state=seed)
     # clf = LinearDiscriminantAnalysis()
     # clf = QuadraticDiscriminantAnalysis()
     scores = []
@@ -252,21 +256,26 @@ def scikit_fit_predict(X, y, seed=42, plot=True):
     tprs = []
     aucs = []
     mean_fpr = np.linspace(0, 1, 100)
-    for i in range(100):
-        clf = LinearDiscriminantAnalysis()
-        X_train, X_val, y_train, y_val = train_test_split(
-            X_tt, y_tt, shuffle=True, test_size=0.5, random_state=i)
-        clf.fit(X_train, y_train)
-        viz = plot_roc_curve(clf, X_val, y_val,
-                             name='ROC run {}'.format(i),
+    for i, (train, val) in enumerate(cv.split(X_tt, y_tt)):
+#    for i in range(100):
+#        X_train, X_val, y_train, y_val = train_test_split(
+#            X_tt, y_tt, shuffle=True, test_size=0.5, random_state=i)
+#        clf.fit(X_train, y_train)
+        classifier.fit(X_tt[train], y_tt[train])
+#        viz = plot_roc_curve(clf, X_val, y_val,
+#                             name='ROC run {}'.format(i),
+#                             alpha=0.3, lw=1, ax=ax)
+        viz = plot_roc_curve(classifier, X_tt[val], y_tt[val],
+                             name='ROC fold {}'.format(i),
                              alpha=0.3, lw=1, ax=ax)
         interp_tpr = interp(mean_fpr, viz.fpr, viz.tpr)
         interp_tpr[0] = 0.0
         tprs.append(interp_tpr)
         aucs.append(viz.roc_auc)
-        y_pred = clf.predict(X_val)
+#        y_pred = clf.predict(X_val)
+        y_pred = classifier.predict(X_tt[val])
         # scores.append(clf.score(X_val, y_val))
-        scores.append(f1_score(y_val, y_pred))
+        scores.append(f1_score(y_tt[val], y_pred))
     scores = np.array(scores)
     ax.plot([0, 1], [0, 1], linestyle='--', lw=2, color='r',
             label='Chance', alpha=.8)

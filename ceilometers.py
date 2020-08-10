@@ -442,6 +442,59 @@ def read_ceilometer_station(path=ceil_path, name='Jerusalem'):
     return da
 
 
+def read_BD_ceilometer_yoav_one_year_csv(file):
+    import pandas as pd
+    feet_to_m = 0.3048
+    df = pd.read_csv(file, index_col='Date_Time[]', na_values='-999.0')
+    df.index.name = 'time'
+    octet_cols = [x for x in df.columns if 'octet' in x]
+    df[octet_cols] = df[octet_cols].fillna(0)
+    df[octet_cols] = df[octet_cols].astype(int)
+    feet_cols = [x for x in df.columns if 'feet' in x]
+    df[feet_cols] = df[feet_cols].mul(feet_to_m)
+    cols = [x for x in df.columns]
+    df.columns = [x.replace('feet', 'm') for x in cols]
+    df.index = pd.to_datetime(df.index) - pd.Timedelta(2, unit='H')
+    return df
+
+
+def read_BD_ceilometer_yoav_all_years(path=ceil_path, savepath=None):
+    from aux_gps import path_glob
+    from aux_gps import save_ncfile
+    import pandas as pd
+    files = path_glob(path, 'ceilometer_BD*.csv')
+    dfs = []
+    for file in files:
+        dfs.append(read_BD_ceilometer_yoav_one_year_csv(file))
+    df = pd.concat(dfs)
+    df = df.sort_index()
+    names = [x.split('[')[0] for x in df.columns]
+    units = [x.split('[')[1].split(']')[0] for x in df.columns]
+    long_names = [
+        'total cloud cover',
+        'cloud cover of the most cloudy layer',
+        'cloud cover of the 1st cloud layer',
+        '1st cloud base height',
+        'cloud cover of the 2nd cloud layer',
+        '2nd cloud base height',
+        'cloud cover of the 3rd cloud layer',
+        '3rd cloud base height',
+        'cloud cover of the 4th cloud layer',
+        '4th cloud base height',
+        'cloud cover of the 5th cloud layer',
+        '5th cloud base height',
+        'Mixing layer height']
+    df.columns = names
+    ds = df.to_xarray()
+    for i, da in enumerate(ds):
+        ds[da].attrs['units'] = units[i]
+        ds[da].attrs['long_name'] = long_names[i]
+    if savepath is not None:
+        filename = 'BD_clouds_and_MLH_from_ceilometers.nc'
+        save_ncfile(ds, savepath, filename)
+    return ds
+
+
 def plot_mlh_site_pw_station(ceil_path=ceil_path, path=work_yuval,
                              station='tela', mlh_site='BD', selection='syn',
                              max_gap_interpolate=None, srate=24):
