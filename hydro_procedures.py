@@ -192,11 +192,15 @@ def permutation_scikit(X, y, cv=False, plot=True):
     from sklearn.model_selection import permutation_test_score
     from sklearn.model_selection import train_test_split
     from sklearn.metrics import classification_report, confusion_matrix
+    import numpy as np
     if not cv:
-        clf = SVC(kernel='rbf')
-        clf = LinearDiscriminantAnalysis()
+        clf = SVC(C=0.01, break_ties=False, cache_size=200, class_weight=None, coef0=0.0,
+    decision_function_shape='ovr', degree=3, gamma=0.032374575428176434,
+    kernel='poly', max_iter=-1, probability=False, random_state=None,
+    shrinking=True, tol=0.001, verbose=False)
+#        clf = LinearDiscriminantAnalysis()
         # cv = StratifiedKFold(2, shuffle=True)
-        cv = KFold(2, shuffle=True)
+        cv = KFold(4, shuffle=True)
         n_classes = 2
         score, permutation_scores, pvalue = permutation_test_score(
             clf, X, y, scoring="f1", cv=cv, n_permutations=1000, n_jobs=1)
@@ -216,12 +220,10 @@ def permutation_scikit(X, y, cv=False, plot=True):
         plt.show()
     else:
         X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.3, shuffle=True, random_state=42)
+            X, y, test_size=0.2, shuffle=True, random_state=42)
         param_grid = {
-            'C': [
-                0.1, 1, 10, 100], 'gamma': [
-                1, 0.1, 0.01, 0.001], 'kernel': [
-                'rbf', 'poly', 'sigmoid']}
+            'C': np.logspace(-2, 3, 50), 'gamma': np.logspace(-2, 3, 50),
+                  'kernel': ['rbf', 'poly', 'sigmoid']}
         grid = GridSearchCV(SVC(), param_grid, refit=True, verbose=2)
         grid.fit(X_train, y_train)
         print(grid.best_estimator_)
@@ -231,7 +233,7 @@ def permutation_scikit(X, y, cv=False, plot=True):
     return
 
 
-def scikit_fit_predict(X, y, seed=42, plot=True):
+def scikit_fit_predict(X, y, seed=42, with_pressure=True, plot=True):
     # check permutations with scikit learn
     from sklearn.model_selection import train_test_split
     from sklearn.discriminant_analysis import LinearDiscriminantAnalysis, QuadraticDiscriminantAnalysis
@@ -243,13 +245,20 @@ def scikit_fit_predict(X, y, seed=42, plot=True):
     import numpy as np
     import matplotlib.pyplot as plt
     from sklearn.model_selection import KFold
+    from sklearn.model_selection import LeaveOneOut
+    from sklearn.metrics import confusion_matrix
+    if not with_pressure:
+        just_pw = [x for x in X.feature.values if 'pressure' not in x]
+        X = X.sel(feature=just_pw)
     X_tt, X_test, y_tt, y_test = train_test_split(
-        X, y, test_size=0.3, shuffle=True, random_state=seed)
-    clf = SVC(gamma='auto')
-    cv = KFold(n_splits=3, shuffle=True, random_state=seed)
-    classifier = SVC(kernel='linear', probability=True,
+        X, y, test_size=0.2, shuffle=True, random_state=seed)
+#    clf = SVC(gamma='auto')
+    n_splits = 7
+    cv = KFold(n_splits=n_splits, shuffle=True, random_state=seed)
+#    cv = LeaveOneOut()
+    classifier = SVC(kernel='rbf', probability=False,
                      random_state=seed)
-    # clf = LinearDiscriminantAnalysis()
+#    classifier = LinearDiscriminantAnalysis()
     # clf = QuadraticDiscriminantAnalysis()
     scores = []
     fig, ax = plt.subplots()
@@ -296,6 +305,12 @@ def scikit_fit_predict(X, y, seed=42, plot=True):
     ax.set(xlim=[-0.05, 1.05], ylim=[-0.05, 1.05],
            title="Receiver operating characteristic example")
     ax.legend(loc="lower right")
+    ax.set_title ('ROC curve for KFold={}, with pressure anomalies.'.format(n_splits))
+    if not with_pressure:
+        ax.set_title ('ROC curve for KFold={}, without pressure anomalies.'.format(n_splits))
+    y_test_predict = classifier.predict(X_test)
+    print('final test predict score:')
+    print(f1_score(y_test, y_test_predict))
     if plot:
         plt.figure()
         plt.hist(scores, bins=15, edgecolor='k')
