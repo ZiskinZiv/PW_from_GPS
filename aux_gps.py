@@ -1774,10 +1774,23 @@ def filter_nan_errors(ds, error_str='_error', dim='time', meta='action'):
 
 
 def smooth_xr(da, dim='time', weights=[0.25, 0.5, 0.25]):
+    # fix to accept wither da or ds:
     import xarray as xr
     weight = xr.DataArray(weights, dims=['window'])
-    da_roll = da.rolling({dim: 3}, center=True).construct('window').dot(weight)
-    da_roll.attrs['action'] = 'weighted rolling mean with {}'.format(weights)
+    if isinstance(da, xr.Dataset):
+        attrs = dict(zip(da.data_vars, [da[x].attrs for x in da]))
+        da_roll = da.to_array('dummy').rolling(
+            {dim: len(weights)}, center=True).construct('window').dot(weight)
+        da_roll = da_roll.to_dataset('dummy')
+        for das, attr in attrs.items():
+            da_roll[das].attrs = attr
+            da_roll[das].attrs['action'] = 'weighted rolling mean with {} on {}'.format(
+                weights, dim)
+    else:
+        da_roll = da.rolling({dim: len(weights)},
+                             center=True).construct('window').dot(weight)
+        da_roll.attrs['action'] = 'weighted rolling mean with {} on {}'.format(
+            weights, dim)
     return da_roll
 
 
