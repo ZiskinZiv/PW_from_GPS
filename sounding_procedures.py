@@ -529,18 +529,107 @@ def convert_wind_speed_direction_to_zonal_meridional(WS, WD, verbose=False):
     return U, V
 
 
-def calculate_bulk_richardson_from_physical_radiosonde(VPT, U, V, g=9.81):
+def calculate_Wang_and_Wang_2014_MLH_all_profiles(sound_path=sound_path,
+                                                  data_type='phys',
+                                                  hour=12, plot=True):
+    import xarray as xr
+    from aux_gps import smooth_xr
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    if data_type == 'phys':
+        bd = xr.load_dataset(sound_path / 'bet_dagan_phys_sounding_2007-2019.nc')
+    elif data_type == 'edt':
+        bd = xr.load_dataset(sound_path / 'bet_dagan_edt_sounding_2016-2019.nc')
+    # N = calculate_atmospheric_refractivity(bd['P'], bd['T'], bd['VP'])
+    # assemble all WW vars:
+    WW = bd['N'].to_dataset(name='N')
+    WW['RH'] = bd['RH']
+    WW['PT'] = bd['PT']
+    WW['MR'] = bd['MR']
+    # slice hour:
+    WW = WW.sel(sound_time=WW['sound_time.hour'] == hour)
+    # produce gradients:
+    WW_grad = WW.differentiate('Height', edge_order=2)
+    # smooth them with 1-2-1 smoother:
+    WW_grad_smoothed = smooth_xr(WW_grad, 'Height')
+#    return WW_grad_smoothed
+    mlhs = []
+    for dt in WW_grad_smoothed.sound_time:
+        df = WW_grad_smoothed.sel(sound_time=dt).reset_coords(drop=True).to_dataframe()
+        mlhs.append(calculate_Wang_and_Wang_2014_MLH_single_profile(df, plot=False))
+    MLH = xr.DataArray(mlhs, dims=['sound_time'])
+    MLH['sound_time'] = WW_grad_smoothed['sound_time']
+    if plot:
+        cmap = sns.color_palette("colorblind", 5)
+        fig, ax = plt.subplots(3, 1, sharex=True, figsize=(12, 9))
+        df_mean = MLH.groupby('sound_time.month').mean().to_dataframe('mean_MLH')
+        df_mean.plot(color=cmap, ax=ax[0])
+        ax[0].grid()
+        ax[0].set_ylabel('Mean MLH [m]')
+        ax[0].set_title(
+            'Annual mixing layer height from Bet-Dagan radiosonde profiles ({}Z) using W&W2014 method'.format(hour))
+        df_std = MLH.groupby('sound_time.month').std().to_dataframe('std_MLH')
+        df_std.plot(color=cmap, ax=ax[1])
+        ax[1].grid()
+        ax[1].set_ylabel('Std MLH [m]')
+        df_count = MLH.groupby('sound_time.month').count().to_dataframe('count_MLH')
+        df_count.plot(color=cmap, ax=ax[2])
+        ax[2].grid()
+        ax[2].set_ylabel('Count MLH [#]')
+        fig.tight_layout()
+    return MLH
+
+
+def calculate_Wang_and_Wang_2014_MLH_single_profile(df, alt_cutoff=3000,
+                                                    plot=True):
+    import pandas as pd
+    import numpy as np
+    import matplotlib.pyplot as plt
+    # first , cutoff:
+    df = df.loc[0: alt_cutoff]
+    if plot:
+#        df.plot(subplots=True)
+        fig, ax = plt.subplots(1, 4, figsize=(20, 16))
+        df.loc[0: 1200, 'PT'].reset_index().plot.line(y='Height', x='PT', ax=ax[0], legend=False)
+        df.loc[0: 1200, 'RH'].reset_index().plot.line(y='Height', x='RH', ax=ax[1], legend=False)
+        df.loc[0: 1200, 'MR'].reset_index().plot.line(y='Height', x='MR', ax=ax[2], legend=False)
+        df.loc[0: 1200, 'N'].reset_index().plot.line(y='Height', x='N', ax=ax[3], legend=False)
+        [x.grid() for x in ax]
+    ind = np.arange(1, 11)
+    pt10 = df['PT'].nlargest(n=10).index.values
+    n10 = df['N'].nsmallest(n=10).index.values
+    rh10 = df['RH'].nsmallest(n=10).index.values
+    mr10 = df['MR'].nsmallest(n=10).index.values
+    ten = pd.DataFrame([pt10, n10, rh10, mr10]).T
+    ten.columns = ['PT', 'N', 'RH', 'MR']
+    ten.index = ind
+    for i, vc_df in ten.iterrows():
+        mlh_0 = vc_df.value_counts()[vc_df.value_counts() > 2]
+        if mlh_0.empty:
+            continue
+        else:
+            mlh = mlh_0.index.item()
+            return mlh
+    print('MLH Not found using W&W!')
+    return np.nan
+
+
+def calculate_bulk_richardson_from_physical_radiosonde(VPT, U, V, g=9.79474,
+                                                       initial_height_pos=0):
     import numpy as np
     z = VPT['Height']  # in meters
-    z0 = VPT['Height'].sel(Height=0, method='nearest')
-    VPT_0 = VPT.sel(Height=0, method='nearest')
+    z0 = VPT['Height'].isel(Height=initial_height_pos)
+    U0 = U.isel(Height=int(initial_height_pos))
+    V0 = V.isel(Height=int(initial_height_pos))
+    VPT_0 = VPT.isel(Height=int(initial_height_pos))
     VPT_mean = VPT.cumsum('Height') / (np.arange(VPT.Height.size) + 1)
-    U.loc[dict(Height=35)]=0
-    V.loc[dict(Height=35)]=0
-    U2 = (U**2.0)
-    V2 = (V**2.0)
+#    U.loc[dict(Height=35)]=0
+#    V.loc[dict(Height=35)]=0
+    U2 = (U-U0)**2.0
+    V2 = (V-V0)**2.0
 #     WS2 = (WS * 0.51444445)**2
-    Rib_values = g * (VPT - VPT_0) * (z) / ((VPT_mean) * (U2 + V2))
+#    Rib_values = g * (VPT - VPT_0) * (z) / ((VPT_mean) * (U2 + V2))
+    Rib_values = g * (VPT - VPT_0) * (z - z0) / ((VPT_0) * (U2 + V2))
     Rib = VPT.copy(data=Rib_values)
     Rib.name = 'Rib'
     Rib.attrs.update(long_name='Bulk Richardson Number')
@@ -549,8 +638,8 @@ def calculate_bulk_richardson_from_physical_radiosonde(VPT, U, V, g=9.81):
 
 
 def calculate_gradient_richardson_from_physical_radiosonde(BVF2, U, V):
-    dU = U.diff('Height') / U['Height'].diff('Height')
-    dV = V.diff('Height') / V['Height'].diff('Height')
+    dU = U.differentiate('Height')
+    dV = V.differentiate('Height')
     Rig = BVF2 / (dU**2 + dV**2)
     Rig.name = 'Rig'
     Rig.attrs.update(long_name='Gradient Richardson Number')
@@ -1298,6 +1387,14 @@ def read_one_EDT_record(filepath):
         ds['VP'].bfill('Height'),
         ds['T'].bfill('Height'),
         ds['Height'])
+    ds['VPT'] = wrap_xr_metpy_virtual_potential_temperature(ds['P'], ds['T'],
+                                                            ds['MR'])
+    ds['PT'] = wrap_xr_metpy_potential_temperature(ds['P'], ds['T'])
+    ds['VT'] = wrap_xr_metpy_virtual_temperature(ds['T'], ds['MR'])
+    U, V = convert_wind_speed_direction_to_zonal_meridional(ds['WS'], ds['DD'])
+    ds['U'] = U
+    ds['V'] = V
+    ds['N'] = calculate_atmospheric_refractivity(ds['P'], ds['T'], ds['VP'])
     ds['Tm'] = xr.DataArray(tm, dims=['Height'])
     ds['Tm'].attrs['units'] = 'K'
     ds['Tm'].attrs['long_name'] = 'Water vapor mean air temperature'
@@ -1782,7 +1879,6 @@ def move_bet_dagan_physical_to_main_path(bet_dagan_path):
 
 
 def read_all_radiosonde_data(path, savepath=None, data_type='phys',
-                             concat_epoch_num=300,
                              verbose=True):
     from aux_gps import path_glob
     from aux_gps import get_unique_index
@@ -1981,6 +2077,7 @@ def read_one_physical_radiosonde_report(path_file, verbose=False):
     U, V = convert_wind_speed_direction_to_zonal_meridional(ds['WS'], ds['WD'])
     ds['U'] = U
     ds['V'] = V
+    ds['N'] = calculate_atmospheric_refractivity(ds['P'], ds['T'], ds['VP'])
     ds['Tm'] = xr.DataArray(tm, dims=['Height'])
     ds['Tm'].attrs['units'] = 'K'
     ds['Tm'].attrs['long_name'] = 'Water vapor mean air temperature'
