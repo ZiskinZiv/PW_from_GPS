@@ -529,13 +529,20 @@ def convert_wind_speed_direction_to_zonal_meridional(WS, WD, verbose=False):
     return U, V
 
 
+def compare_WW2014_to_Rib(sound_path=sound_path):
+    return    
+
+
 def calculate_Wang_and_Wang_2014_MLH_all_profiles(sound_path=sound_path,
                                                   data_type='phys',
-                                                  hour=12, plot=True):
+                                                  hour=12, plot=True,
+                                                  savepath=None):
     import xarray as xr
     from aux_gps import smooth_xr
     import matplotlib.pyplot as plt
     import seaborn as sns
+    from aux_gps import save_ncfile
+    from PW_from_gps_figures import plot_seasonal_histogram
     if data_type == 'phys':
         bd = xr.load_dataset(sound_path / 'bet_dagan_phys_sounding_2007-2019.nc')
     elif data_type == 'edt':
@@ -557,27 +564,37 @@ def calculate_Wang_and_Wang_2014_MLH_all_profiles(sound_path=sound_path,
     for dt in WW_grad_smoothed.sound_time:
         df = WW_grad_smoothed.sel(sound_time=dt).reset_coords(drop=True).to_dataframe()
         mlhs.append(calculate_Wang_and_Wang_2014_MLH_single_profile(df, plot=False))
-    MLH = xr.DataArray(mlhs, dims=['sound_time'])
-    MLH['sound_time'] = WW_grad_smoothed['sound_time']
+    mlh = xr.DataArray(mlhs, dims=['sound_time'])
+    mlh['sound_time'] = WW_grad_smoothed['sound_time']
+    mlh.name = 'MLH'
+    mlh.attrs['long_name'] = 'Mixing layer height'
+    mlh.attrs['units'] = 'm'
+    mlh.attrs['method'] = 'W&W2014 using PT, N, MR and RH'
+    if savepath is not None:
+        filename = 'MLH_WW2014_{}_{}.nc'.format(data_type, hour)
+        save_ncfile(mlh, sound_path, filename)
     if plot:
         cmap = sns.color_palette("colorblind", 5)
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(12, 9))
-        df_mean = MLH.groupby('sound_time.month').mean().to_dataframe('mean_MLH')
+        df_mean = mlh.groupby('sound_time.month').mean().to_dataframe('mean_MLH')
         df_mean.plot(color=cmap, ax=ax[0])
         ax[0].grid()
         ax[0].set_ylabel('Mean MLH [m]')
         ax[0].set_title(
             'Annual mixing layer height from Bet-Dagan radiosonde profiles ({}Z) using W&W2014 method'.format(hour))
-        df_std = MLH.groupby('sound_time.month').std().to_dataframe('std_MLH')
+        df_std = mlh.groupby('sound_time.month').std().to_dataframe('std_MLH')
         df_std.plot(color=cmap, ax=ax[1])
         ax[1].grid()
         ax[1].set_ylabel('Std MLH [m]')
-        df_count = MLH.groupby('sound_time.month').count().to_dataframe('count_MLH')
+        df_count = mlh.groupby('sound_time.month').count().to_dataframe('count_MLH')
         df_count.plot(color=cmap, ax=ax[2])
         ax[2].grid()
         ax[2].set_ylabel('Count MLH [#]')
         fig.tight_layout()
-    return MLH
+        plot_seasonal_histogram(mlh, dim='sound_time', xlim=(-100, 3000),
+                                xlabel='MLH [m]',
+                                suptitle='MLH histogram using W&W 2014 method')
+    return mlh
 
 
 def calculate_Wang_and_Wang_2014_MLH_single_profile(df, alt_cutoff=3000,
@@ -665,6 +682,34 @@ def calculate_MLH_from_Rib_single_profile(Rib_df, crit=0.25):
     return mlh
 
 
+def calculate_Rib_MLH_all_profiles(sound_path=sound_path, crit=0.25, hour=12,
+                                   data_type='phys', savepath=None):
+    from aux_gps import save_ncfile
+    import xarray as xr
+    from PW_from_gps_figures import plot_seasonal_histogram
+    if data_type == 'phys':
+        bd = xr.load_dataset(sound_path /
+                             'bet_dagan_phys_sounding_2007-2019.nc')
+        pos = 0
+    elif data_type == 'edt':
+        bd = xr.load_dataset(sound_path /
+                             'bet_dagan_edt_sounding_2016-2019.nc')
+        pos = 2
+    Rib = calculate_bulk_richardson_from_physical_radiosonde(bd['VPT'], bd['U'],
+                                                             bd['V'], g=9.79474,
+                                                             initial_height_pos=pos)
+    mlh = calculate_MLH_time_series_from_all_profiles(Rib, crit=crit,
+                                                      hour=hour, plot=False)
+    plot_seasonal_histogram(mlh, dim='sound_time', xlim=(-100, 3000),
+                            xlabel='MLH [m]',
+                            suptitle='MLH histogram using Rib method')
+    if savepath is not None:
+        filename = 'MLH_Rib_{}_{}_{}.nc'.format(
+            str(crit).replace('.', 'p'), data_type, hour)
+        save_ncfile(mlh, sound_path, filename)
+    return mlh
+
+
 def calculate_MLH_time_series_from_all_profiles(Rib, crit=0.25, hour=12,
                                                 dim='sound_time', plot=True):
     from aux_gps import keep_iqr
@@ -679,6 +724,10 @@ def calculate_MLH_time_series_from_all_profiles(Rib, crit=0.25, hour=12,
         mlhs.append(calculate_MLH_from_Rib_single_profile(df, crit=crit))
     da = xr.DataArray(mlhs, dims=[dim])
     da[dim] = rib[dim]
+    da.name = 'MLH'
+    da.attrs['long_name'] = 'Mixing layer height'
+    da.attrs['units'] = 'm'
+    da.attrs['method'] = 'Rib@{}'.format(crit)
     if plot:
         da = keep_iqr(da, dim)
         fig, ax = plt.subplots(figsize=(15, 6))
