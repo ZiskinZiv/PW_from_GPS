@@ -188,6 +188,27 @@ def fix_time_axis_ticks(ax, limits=None, margin=15):
     return ax
 
 
+def plot_seasonal_histogram(da, dim='sound_time', xlim=None, xlabel=None,
+                            suptitle=''):
+    fig_hist, axs = plt.subplots(2, 2, sharex=False, sharey=True,
+                                 figsize=(10, 8))
+    seasons = ['DJF', 'MAM', 'JJA', 'SON']
+    cmap = sns.color_palette("colorblind", 4)
+    for i, ax in enumerate(axs.flatten()):
+        da_season = da.sel({dim: da['{}.season'.format(dim)] == seasons[i]}).dropna(dim)
+        ax = sns.distplot(da_season, ax=ax, norm_hist=False,
+                          color=cmap[i], hist_kws={'edgecolor': 'k'},
+                          axlabel=xlabel,
+                          label=seasons[i])
+        ax.set_xlim(xlim)
+        ax.legend()
+    #            axes.set_xlabel('MLH [m]')
+        ax.set_ylabel('Frequency')
+    fig_hist.suptitle(suptitle)
+    fig_hist.tight_layout()
+    return axs
+
+
 def plot_diurnal_wind_hodograph(path=ims_path, station='TEL-AVIV-COAST',
                                 season=None, cmax=None, ax=None):
     import xarray as xr
