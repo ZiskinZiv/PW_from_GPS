@@ -485,6 +485,9 @@ def read_BD_ceilometer_yoav_all_years(path=ceil_path, savepath=None):
         '5th cloud base height',
         'Mixing layer height']
     df.columns = names
+    # fix cloud height to meters again for until 22-09-2013:
+    hs = [x for x in df.columns if '_H' in x]
+    df.loc[:'2013-09-22', hs] *= (1 / 0.3048)
     ds = df.to_xarray()
     for i, da in enumerate(ds):
         ds[da].attrs['units'] = units[i]
