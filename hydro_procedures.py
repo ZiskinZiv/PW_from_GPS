@@ -233,28 +233,33 @@ def permutation_scikit(X, y, cv=False, plot=True):
     return
 
 
-def scikit_fit_predict(X, y, seed=42, with_pressure=True, plot=True):
+def scikit_fit_predict(X, y, seed=42, with_pressure=True, n_splits=7,
+                       plot=True):
+    # step1: CV for train/val (80% from 80-20 test). display results with
+    # model and scores(AUC, f1), use StratifiedKFold
+    # step 2: use validated model with test (20%) and build ROC curve
+    # step 3: add features (pressure) but check for correlation
     # check permutations with scikit learn
     from sklearn.model_selection import train_test_split
     from sklearn.discriminant_analysis import LinearDiscriminantAnalysis, QuadraticDiscriminantAnalysis
     from sklearn.metrics import f1_score
     from sklearn.metrics import plot_roc_curve
     from sklearn.svm import SVC
-    from scipy import interp
+    from numpy import interp
     from sklearn.metrics import auc
     import numpy as np
     import matplotlib.pyplot as plt
     from sklearn.model_selection import KFold
     from sklearn.model_selection import LeaveOneOut
     from sklearn.metrics import confusion_matrix
+    from sklearn.metrics import roc_auc_score
+    from sklearn.model_selection import StratifiedKFold
     if not with_pressure:
         just_pw = [x for x in X.feature.values if 'pressure' not in x]
         X = X.sel(feature=just_pw)
     X_tt, X_test, y_tt, y_test = train_test_split(
         X, y, test_size=0.2, shuffle=True, random_state=seed)
-#    clf = SVC(gamma='auto')
-    n_splits = 7
-    cv = KFold(n_splits=n_splits, shuffle=True, random_state=seed)
+    cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
 #    cv = LeaveOneOut()
     classifier = SVC(kernel='rbf', probability=False,
                      random_state=seed)
@@ -280,9 +285,10 @@ def scikit_fit_predict(X, y, seed=42, with_pressure=True, plot=True):
         interp_tpr = interp(mean_fpr, viz.fpr, viz.tpr)
         interp_tpr[0] = 0.0
         tprs.append(interp_tpr)
-        aucs.append(viz.roc_auc)
+#        aucs.append(viz.roc_auc)
 #        y_pred = clf.predict(X_val)
         y_pred = classifier.predict(X_tt[val])
+        aucs.append(roc_auc_score(y_tt[val], y_pred))
         # scores.append(clf.score(X_val, y_val))
         scores.append(f1_score(y_tt[val], y_pred))
     scores = np.array(scores)
