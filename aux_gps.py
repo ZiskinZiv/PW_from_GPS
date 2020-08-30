@@ -409,15 +409,17 @@ def error_mean_rmse(y, y_pred):
     return mean, rmse
 
 
-def rename_data_vars(ds, suffix='_error', remove_suffix=False, verbose=False):
+def rename_data_vars(ds, suffix='_error', prefix=None, verbose=False):
     import xarray as xr
     if not isinstance(ds, xr.Dataset):
         raise ValueError('input must be an xarray dataset object!')
     vnames = [x for x in ds.data_vars]
-    if remove_suffix:
-        new_names = [x.replace(suffix, '') for x in ds.data_vars]
-    else:
+#    if remove_suffix:
+#        new_names = [x.replace(suffix, '') for x in ds.data_vars]
+    if suffix is not None:
         new_names = [x + suffix for x in ds.data_vars]
+    if prefix is not None:
+        new_names = [prefix + x for x in ds.data_vars]
     name_dict = dict(zip(vnames, new_names))
     ds = ds.rename_vars(name_dict)
     if verbose:
