@@ -233,6 +233,191 @@ def permutation_scikit(X, y, cv=False, plot=True):
     return
 
 
+def ML_main_procedure(X, y, estimator=None, model_name='SVC', features='pwv',
+                      val_size=0.18, n_splits=None, test_size=0.2, seed=42, best_score='f1',
+                      savepath=None, plot=True):
+    """split the X,y for train and test, either do HP tuning using HP_tuning
+    with val_size or use already tuned (or not) estimator."""
+    from sklearn.model_selection import train_test_split
+    # first slice X for features:
+    if isinstance(features, str):
+        f = [x for x in X.feature.values if features in x]
+        X = X.sel(feature=f)
+    elif isinstance(features, list):
+        fs = []
+        for f in features:
+            fs += [x for x in X.feature.values if f in x]
+        X = X.sel(feature=fs)
+    X_train, X_test, y_train, y_test = train_test_split(X, y,
+                                                        test_size=test_size,
+                                                        shuffle=True,
+                                                        random_state=seed)
+    # do HP_tuning:
+    if estimator is None:
+        cvr, model = HP_tuning(X_train, y_train, model_name=model_name, val_size=val_size,
+                        best_score=best_score, seed=seed, savepath=savepath, n_splits=n_splits)
+    else:
+        model = estimator
+    if plot:
+        ax = plot_many_ROC_curves(model, X_test, y_test, name=model_name,
+                                  ax=None)
+        return ax
+    else:
+        return model
+
+
+def load_ML_models(path=hydro_path, prefix='CVR', suffix='.pkl'):
+    from aux_gps import path_glob
+    import joblib
+    # TODO: add n_splits to filenames to load from
+    # TODO: add plot all models
+    model_files = path_glob(path, '{}_*{}'.format(prefix, suffix))
+    model_names = [x.as_posix().split('/')[-1].split('.')
+                   [0].split('_')[1] for x in model_files]
+    model_scores = [x.as_posix().split('.')[0].split('_')[-1]
+                    for x in model_files]
+    data_names = ['_'.join(x) for x in zip(model_names, model_scores)]
+    m_list = [joblib.load(x) for x in model_files]
+    model_dict = dict(zip(data_names, m_list))
+    return model_dict
+
+
+def plot_many_ROC_curves(model, X, y, name='', color='b', ax=None):
+    from sklearn.metrics import plot_roc_curve
+    import matplotlib.pyplot as plt
+    if ax is None:
+        fig, ax = plt.subplots()
+    viz = plot_roc_curve(model, X, y, color=color, ax=ax, name=name)
+    ax.plot([0, 1], [0, 1], linestyle='--', lw=2, color='r',
+            label='Chance', alpha=.8)
+    ax.set(xlim=[-0.05, 1.05], ylim=[-0.05, 1.05],
+           title="Receiver operating characteristic")
+    ax.legend(loc="lower right")
+    return ax
+
+
+def HP_tuning(X, y, model_name='SVC', val_size=0.18, n_splits=None,
+              best_score='f1', seed=42, savepath=None):
+    from sklearn.model_selection import GridSearchCV
+    from sklearn.model_selection import StratifiedKFold
+    """ do HP tuning with ML_Classfier_Switcher object and return a DataSet of
+    results. note that the X, y are already after split to val/test"""
+    ml = ML_Classifier_Switcher()
+    sk_model = ml.pick_model(model_name)
+    param_grid = ml.param_grid
+    if n_splits is None and val_size is not None:
+        n_splits = int((1 // val_size) - 1)
+    elif val_size is not None and n_splits is not None:
+        raise('Both val_size and n_splits are defined, choose either...')
+    print('StratifiedKfolds of {}.'.format(n_splits))
+    cv = StratifiedKFold(n_splits=n_splits, shuffle=True)
+    gr = GridSearchCV(estimator=sk_model, param_grid=param_grid, cv=cv,
+                      n_jobs=-1, scoring=['f1', 'roc_auc', 'accuracy'], verbose=1,
+                      refit=best_score, return_train_score=True)
+    gr.fit(X, y)
+    if best_score is not None:
+        ds, best_model= process_gridsearch_results(gr, model_name)
+    else:
+        ds = process_gridsearch_results(gr, model_name)
+        best_model = None
+    if savepath is not None:
+        save_cv_results(ds, best_model=best_model, savepath=savepath)
+    return ds, best_model
+
+
+def process_gridsearch_results(GridSearchCV, model_name):
+    import xarray as xr
+    import pandas as pd
+    """takes GridSreachCV object with cv_results and xarray it into dataarray"""
+    params = GridSearchCV.param_grid
+    scoring = GridSearchCV.scoring
+    names = [x for x in params.keys()]
+
+    # unpack param_grid vals to list of lists:
+    pro = [[y for y in x] for x in params.values()]
+    ind = pd.MultiIndex.from_product((pro), names=names)
+#        result_names = [x for x in GridSearchCV.cv_results_.keys() if 'split'
+#                        not in x and 'time' not in x and 'param' not in x and
+#                        'rank' not in x]
+    result_names = [
+        x for x in GridSearchCV.cv_results_.keys() if 'param' not in x]
+    ds = xr.Dataset()
+    for da_name in result_names:
+        da = xr.DataArray(GridSearchCV.cv_results_[da_name])
+        ds[da_name] = da
+    ds = ds.assign(dim_0=ind).unstack('dim_0')
+    for dim in ds.dims:
+        if ds[dim].dtype == 'O':
+            try:
+                ds[dim] = ds[dim].astype(str)
+            except ValueError:
+                ds = ds.assign_coords({dim: [str(x) for x in ds[dim].values]})
+        if ('True' in ds[dim]) and ('False' in ds[dim]):
+            ds[dim] = ds[dim] == 'True'
+    # get all splits data and concat them along number of splits:
+    all_splits = [x for x in ds.data_vars if 'split' in x]
+    train_splits = [x for x in all_splits if 'train' in x]
+    test_splits = [x for x in all_splits if 'test' in x]
+    # loop over scorers:
+    trains = []
+    tests = []
+    for scorer in scoring:
+        train_splits_scorer = [x for x in train_splits if scorer in x]
+        trains.append(xr.concat([ds[x] for x in train_splits_scorer], 'split'))
+        test_splits_scorer = [x for x in test_splits if scorer in x]
+        tests.append(xr.concat([ds[x] for x in test_splits_scorer], 'split'))
+        splits_scorer = [x for x in range(len(train_splits_scorer))]
+    train_splits = xr.concat(trains, 'scoring')
+    test_splits = xr.concat(tests, 'scoring')
+#    splits = [x for x in range(len(train_splits))]
+#    train_splits = xr.concat([ds[x] for x in train_splits], 'split')
+#    test_splits = xr.concat([ds[x] for x in test_splits], 'split')
+    # replace splits data vars with newly dataarrays:
+    ds = ds[[x for x in ds.data_vars if x not in all_splits]]
+    ds['split_train_score'] = train_splits
+    ds['split_test_score'] = test_splits
+    ds['split'] = splits_scorer
+    ds['scoring'] = scoring
+    ds.attrs['name'] = 'CV_results'
+    ds.attrs['param_names'] = names
+    ds.attrs['model_name'] = model_name
+    ds.attrs['n_splits'] = ds['split'].size
+    if GridSearchCV.refit:
+        ds.attrs['best_score'] = GridSearchCV.best_score_
+#        ds['best_model'] = GridSearchCV.best_estimator_
+        ds.attrs['refitted_scorer'] = GridSearchCV.refit
+        for name in names:
+            ds.attrs['best_{}'.format(name)] = GridSearchCV.best_params_[name]
+            if isinstance(ds.attrs['best_{}'.format(name)], bool):
+                ds.attrs['best_{}'.format(name)] = str(ds.attrs['best_{}'.format(name)])
+        return ds, GridSearchCV.best_estimator_
+    else:
+        return ds
+
+
+def save_cv_results(cvr, best_model=None, savepath=hydro_path):
+    import joblib
+    from aux_gps import save_ncfile
+    name = cvr.attrs['model_name']
+    params = cvr.attrs['param_names']
+    nsplits = cvr.attrs['n_splits']
+    if best_model is not None:
+        refitted_scorer = cvr.attrs['refitted_scorer']
+        filename = 'CVR_{}_{}_{}_splits_{}.nc'.format(
+                name, '_'.join(params), refitted_scorer, nsplits)
+#    cvr_to_save = cvr[[x for x in cvr if x != 'best_model']]
+        save_ncfile(cvr, savepath, filename)
+        filepath = savepath / filename.replace('.nc', '.pkl')
+        _ = joblib.dump(best_model, filepath,
+                        compress=9)
+    else:
+        filename = 'CVR_{}_{}_splits_{}.nc'.format(
+                name, '_'.join(params), nsplits)
+#    cvr_to_save = cvr[[x for x in cvr if x != 'best_model']]
+        save_ncfile(cvr, savepath, filename)
+    return
+
+
 def scikit_fit_predict(X, y, seed=42, with_pressure=True, n_splits=7,
                        plot=True):
     # step1: CV for train/val (80% from 80-20 test). display results with
@@ -423,6 +608,9 @@ def produce_X_y(station='drag', hs_id=48125, lag=25, anoms=True,
         X.name = 'X'
         y['sample'] = X['sample']
         y.name = 'y'
+        X.attrs['PWV_station'] = station
+        X.attrs['hydro_station_id'] = hs_id
+        y.attrs = X.attrs
         return X, y
     else:
         return X, y
@@ -1099,3 +1287,54 @@ def read_hydrographs(path=hydro_path):
     ds.to_netcdf(path / filename, 'w', encoding=encoding)
     print('Done!')
     return ds
+
+
+class ML_Classifier_Switcher(object):
+    def pick_model(self, model_name):
+        """Dispatch method"""
+        # from sklearn.model_selection import GridSearchCV
+        self.param_grid = None
+        method_name = str(model_name)
+        # Get the method from 'self'. Default to a lambda.
+        method = getattr(self, method_name, lambda: "Invalid ML Model")
+#        if gridsearch:
+#            return(GridSearchCV(method(), self.param_grid, n_jobs=-1,
+#                                return_train_score=True))
+#        else:
+            # Call the method as we return it
+        return method()
+
+    def SVC(self):
+        from sklearn.svm import SVC
+        import numpy as np
+        self.param_grid = {'kernel': ['rbf', 'sigmoid', 'linear', 'poly'],
+                           'C': np.logspace(-5, 2, 25),
+                           'gamma': np.logspace(-5, 2, 25),
+                           'degree': [1, 2, 3, 4 ,5],
+                           'coef0': [0, 1 , 2, 3, 4]}
+        return SVC(random_state=42)
+
+
+    def MLP(self):
+        import numpy as np
+        from sklearn.neural_network import MLPClassifier
+        self.param_grid = {'alpha': np.logspace(-5, 3, 25),
+                           'activation': ['identity', 'logistic', 'tanh', 'relu'],
+                           'hidden_layer_sizes': [(50, 50, 50), (50, 100, 50), (100,)],
+                           'learning_rate': ['constant', 'adaptive'],
+                           'solver': ['adam', 'lbfgs']}
+        # return MLPRegressor(random_state=42, solver='lbfgs')
+        return MLPClassifier(random_state=42, max_iter=500)
+    
+    def RF(self):
+        from sklearn.ensemble import RandomForestClassifier
+        import numpy as np
+        self.param_grid = {'max_depth': np.arange(10, 110, 10),
+                           'bootstrap': [True, False],
+                           'max_features': ['auto', 'sqrt'],
+                           'min_samples_leaf': [1, 2, 4],
+                           'min_samples_split': [2, 5, 10],
+                           'n_estimators': np.arange(200, 2200, 200)
+                           }
+#        self.param_grid = {'bootstrap': [True, False], 'max_features': ['auto', 'sqrt']}
+        return RandomForestClassifier(random_state=42)
