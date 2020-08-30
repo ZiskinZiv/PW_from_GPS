@@ -1389,40 +1389,78 @@ def proccess_hourly_ims_climate_database(path=ims_path, var='tas',
     return ds
 
 
-def read_hourly_ims_climate_database(path=ims_path / 'ground',
-                                     savepath=None):
+def read_all_hourly_ims_climate_database(path=ims_path / 'hourly', freq='03',
+                                         savepath=None):
     """downloaded from tau...ds is a dataset of all stations,
     times is a time period"""
-    import pandas as pd
     import xarray as xr
-    from aux_gps import print_saved_file
-    da_list = []
-    for file in sorted(path.glob('*.csv')):
-        name = file.as_posix().split('/')[-1].split('_')[0]
-        sid = file.as_posix().split('/')[-1].split('_')[1]
-        array_name = '_'.join([name, sid])
-        print('reading {} station...'.format(array_name))
-        df = pd.read_csv(file, index_col='time')
-        df.index = pd.to_datetime(df.index)
-        df.drop(labels=['Unnamed: 0', 'name'], axis=1, inplace=True)
-        lat = df.loc[:, 'lat'][0]
-        lon = df.loc[:, 'lon'][0]
-        height = df.loc[:, 'height'][0]
-        df.drop(labels=['lat', 'lon', 'height'], axis=1, inplace=True)
-        da = df.to_xarray().to_array(dim='var')
-        da.name = array_name
-        da.attrs['station_id'] = sid
-        da.attrs['lat'] = lat
-        da.attrs['lon'] = lon
-        da.attrs['height'] = height
-        da_list.append(da)
-    ds = xr.merge(da_list)
+    from aux_gps import save_ncfile
+    ds_list = []
+    for file in sorted(path.glob('*_{}hr_*.csv'.format(freq))):
+        ds = read_one_ims_hourly_station_csv(file)
+        ds_list.append(ds)
+    dss = xr.merge(ds_list)
     print('Done!')
     if savepath is not None:
-        comp = dict(zlib=True, complevel=9)  # best compression
-        encoding = {var: comp for var in ds.data_vars}
-        ds.to_netcdf(savepath / 'hourly_ims.nc', 'w', encoding=encoding)
-        print_saved_file('hourly_ims.nc', savepath)
+        save_ncfile(dss, savepath, filename='IMS_hourly_{}hr.nc'.format(freq))
+    return dss
+
+
+def read_one_ims_hourly_station_csv(file):
+    import pandas as pd
+    from aux_gps import xr_reindex_with_date_range
+    from aux_gps import rename_data_vars
+    name = file.as_posix().split('/')[-1].split('_')[0]
+    sid = file.as_posix().split('/')[-1].split('_')[1]
+    freq = file.as_posix().split('/')[-1].split('_')[2]
+    freq = ''.join([x for x in freq if x.isdigit()]) + 'H'
+    array_name = '_'.join([name, sid])
+    print('reading {} station...'.format(array_name))
+    df = pd.read_csv(file, index_col='time')
+    df.index = pd.to_datetime(df.index)
+    df.drop(labels=['Unnamed: 0', 'name'], axis=1, inplace=True)
+    lat = df.loc[:, 'lat'][0]
+    lon = df.loc[:, 'lon'][0]
+    height = df.loc[:, 'height'][0]
+    df.drop(labels=['lat', 'lon', 'height'], axis=1, inplace=True)
+    ds = df.to_xarray()
+    station_attrs = {
+        'station_id': sid,
+        'lat': lat,
+        'lon': lon,
+        'height': height}
+    names_units_attrs = {
+        'ps': {
+            'long_name': 'surface_pressure', 'units': 'hPa'},
+        'tas': {
+            'long_name': 'surface_temperature', 'units': 'degC'},
+        'rh': {
+                'long_name': 'relative_humidity', 'units': '%'},
+        'wind_dir': {
+                    'long_name': 'wind_direction', 'units': 'deg'},
+        'wind_spd': {
+                        'long_name': 'wind_speed', 'units': 'm/s'}}
+    to_drop = []
+    for da in ds:
+        # add var names and units:
+        attr = names_units_attrs.get(da, {})
+        ds[da].attrs = attr
+        # add station attrs for each var:
+        ds[da].attrs.update(station_attrs)
+#        # rename var to include station name:
+#        ds[da].name = array_name + '_' + da
+        # last, drop all NaN vars:
+        try:
+            ds[da] = xr_reindex_with_date_range(ds[da], freq=freq)
+        except ValueError:
+            to_drop.append(da)
+            continue
+#        if ds[da].size == ds[da].isnull().sum().item():
+#            to_drop.append(da)
+    ds = ds[[x for x in ds if x not in to_drop]]
+    ds = rename_data_vars(ds, suffix=None, prefix=array_name + '_', verbose=False)
+    ds = ds.sortby('time')
+#    ds = xr_reindex_with_date_range(ds, freq=freq)
     return ds
 
 
