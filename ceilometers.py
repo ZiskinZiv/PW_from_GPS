@@ -832,3 +832,27 @@ def read_his_file(hfile):
     ds['range'].attrs['long_name'] = 'range'
     ds['range'].attrs['units'] = 'm'
     return ds
+
+
+def compare_cloud_H1_to_BD_MLH_and_PW(path=ceil_path, pwv_path=work_yuval,
+                                      plot=True):
+    import xarray as xr
+    # load cloud height 1 from BD ceilometers:
+    cld = read_BD_ceilometer_yoav_all_years(path=path)['cloud_H1']
+    # load leenes MLH from BD:
+#    bd_mlh = read_BD_matfile(plot=False, add_syn=False)
+#    ds = bd_mlh.to_dataset(name='MLH')
+#    ds['cloud_H1'] = cld
+    # load PWV from TELA daily anomalies:
+    ds = cld.to_dataset(name='cloud_H1')
+    pwv = xr.open_dataset(pwv_path / 'GNSS_PW_thresh_50_for_diurnal_analysis_removed_daily.nc')['tela']
+    pwv = pwv.sel(time=slice('2015', '2016'))
+    pwv.load()
+    df = ds.to_dataframe()
+    df['PWV_TELA']  = pwv.to_dataframe()
+    df.index.name = 'time'
+    # slice for only summer 2015:
+    df = df.loc['2015-06':'2015-09']
+    if plot:
+        df.plot(ylim=(0, 2000), secondary_y='PWV_TELA')
+    return df
