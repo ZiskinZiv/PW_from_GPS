@@ -27,8 +27,8 @@ aero_path = work_yuval / 'AERONET'
 
 rc = {
     'font.family': 'serif',
-    'xtick.labelsize': 'medium',
-    'ytick.labelsize': 'medium'}
+    'xtick.labelsize': 'large',
+    'ytick.labelsize': 'large'}
 for key, val in rc.items():
     rcParams[key] = val
 # sns.set(rc=rc, style='white')
@@ -1729,9 +1729,10 @@ def produce_table_mann_kendall(thresh=50, season=None, with_original=False):
 
 
 def plot_peak_hour_distance(path=work_yuval, season='JJA',
-                            remove_station='dsea', save=True):
+                            remove_station='dsea', fontsize=22, save=True):
     from PW_stations import produce_geo_gnss_solved_stations
     from aux_gps import groupby_half_hour_xr
+    from aux_gps import xr_reindex_with_date_range
     import xarray as xr
     import pandas as pd
     import seaborn as sns
@@ -1741,6 +1742,7 @@ def plot_peak_hour_distance(path=work_yuval, season='JJA',
     pw = pw[[x for x in pw if '_error' not in x]]
     pw.load()
     pw = pw.sel(time=pw['time.season'] == season)
+    pw = pw.map(xr_reindex_with_date_range)
     df = groupby_half_hour_xr(pw)
     halfs = [df.isel(half_hour=x)['half_hour'] for x in df.argmax().values()]
     names = [x for x in df]
@@ -1750,15 +1752,16 @@ def plot_peak_hour_distance(path=work_yuval, season='JJA',
     geo['phase'] = dfh
     geo = geo.dropna()
     groups = group_sites_to_xarray(upper=False, scope='diurnal')
-    geo.loc[groups.sel(group=0).values, 'group'] = 'coastal'
-    geo.loc[groups.sel(group=1).values, 'group'] = 'highland'
-    geo.loc[groups.sel(group=2).values, 'group'] = 'eastern'
+    geo.loc[groups.sel(group='coastal').values, 'group'] = 'coastal'
+    geo.loc[groups.sel(group='highland').values, 'group'] = 'highland'
+    geo.loc[groups.sel(group='eastern').values, 'group'] = 'eastern'
     fig, ax = plt.subplots(figsize=(14, 10))
     ax.grid()
     if remove_station is not None:
         removed = geo.loc[remove_station].to_frame().T
         geo = geo.drop(remove_station, axis=0)
 #     lnall = sns.scatterplot(data=geo.loc[only], x='distance', y='phase', ax=ax, hue='group', s=100)
+#    geo['phase'] = pd.to_timedelta(geo['phase'], unit='H')
     coast = geo[geo['group'] == 'coastal']
     yerr = 1.0
     lncoast = ax.errorbar(x=coast.loc[:,
@@ -1809,7 +1812,7 @@ def plot_peak_hour_distance(path=work_yuval, season='JJA',
                'Highland stations',
                'Eastern stations',
                'DSEA station'],
-              fontsize=16)
+              fontsize=fontsize)
     params = np.polyfit(geo['distance'].values, geo.phase.values, 1)
     params2 = np.polyfit(geo['distance'].values, geo.phase.values, 2)
     x = np.linspace(0, 210, 100)
@@ -1819,14 +1822,23 @@ def plot_peak_hour_distance(path=work_yuval, season='JJA',
     ax.plot(x, y, color='k')
     textstr = '\n'.join([r'R$^2$: {:.2f}'.format(r2)])
     props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-    ax.text(0.5, 0.95, textstr, transform=ax.transAxes, fontsize=18,
+    ax.text(0.5, 0.95, textstr, transform=ax.transAxes, fontsize=fontsize,
             verticalalignment='top', bbox=props)
     # ax.plot(x,y2, color='green')
     ax.tick_params(axis='both', which='major', labelsize=16)
-    ax.set_xlabel('Distance from shore [km]', fontsize=16)
-    ax.set_ylabel('Peak hour [UTC]', fontsize=16)
+    ax.set_xlabel('Distance from shore [km]', fontsize=fontsize)
+    ax.set_ylabel('Peak hour [UTC]', fontsize=fontsize)
     # add sunrise UTC hour
     ax.axhline(16.66, color='tab:orange', linewidth=2)
+    # change yticks to hours minuets:
+    fig.canvas.draw()
+    labels = [item.get_text() for item in ax.get_yticklabels()]
+    labels = [pd.to_timedelta(float(x), unit='H') for x in labels]
+    labels = ['{}:{}'.format(x.components[1], x.components[2])
+              if x.components[2] != 0 else '{}:00'.format(x.components[1]) for x in labels]
+    ax.set_yticklabels(labels)
+    fig.canvas.draw()
+    ax.tick_params(axis='both', which='major', labelsize=fontsize)
     if save:
         filename = 'pw_peak_distance_shore.png'
         plt.savefig(savefig_path / filename, bbox_inches='tight')
