@@ -545,11 +545,6 @@ def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
     cb.ax.tick_params(labelsize=8)
     ax_map.set_xlabel('')
     ax_map.set_ylabel('')
-#    print('getting IMS temperature stations metadata...')
-#    ims = produce_geo_ims(path=gis_path, freq='10mins', plot=False)
-#    ims.plot(ax=ax_map, color='red', edgecolor='black', alpha=0.5)
-    # ims, gps = produce_geo_df(gis_path=gis_path, plot=False)
-    print('getting solved GNSS israeli stations metadata...')
     gps = produce_geo_gnss_solved_stations(path=gis_path, plot=False)
     # removed = ['hrmn', 'nizn', 'spir']
 #    removed = ['hrmn']
@@ -603,8 +598,15 @@ def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
 #                'radiosonde\nstation'],
 #               loc='upper left', framealpha=0.7, fancybox=True,
 #               handletextpad=0.2, handlelength=1.5)
+    print('getting IMS temperature stations metadata...')
+    ims = produce_geo_ims(path=gis_path, freq='10mins', plot=False)
+    ims.plot(ax=ax_map, marker='o', edgecolor='black', alpha=0.5,
+             markersize=15, facecolor="None")
+    # ims, gps = produce_geo_df(gis_path=gis_path, plot=False)
+    print('getting solved GNSS israeli stations metadata...')
+
     plt.legend(['GNSS \nreceiver stations',
-                'radiosonde\nstation'],
+                'radiosonde\nstation', 'IMS stations'],
            loc='upper left', framealpha=0.7, fancybox=True,
            handletextpad=0.2, handlelength=1.5)
     fig.subplots_adjust(top=0.95,
