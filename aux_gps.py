@@ -338,6 +338,8 @@ def groupby_half_hour_xr(da_ts, reduce='mean'):
     import numpy as np
     df = da_ts.to_dataframe()
     native_freq = pd.infer_freq(df.index)
+    if not native_freq:
+        raise('Cannot infer frequency...')
     if reduce == 'mean':
         df = df.groupby([df.index.hour, df.index.minute]).mean()
     elif reduce == 'std':
