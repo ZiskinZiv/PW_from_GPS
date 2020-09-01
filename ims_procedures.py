@@ -1464,6 +1464,38 @@ def read_one_ims_hourly_station_csv(file):
     return ds
 
 
+def interpolate_hourly_IMS(path=ims_path, freq='03', field='ps', max_gap='6H',
+                           station='JERUSALEM-CENTRE-MAN_6770', k_iqr=2,
+                           times=['1996', '2019'],
+                           plot=True):
+    from aux_gps import path_glob
+    from aux_gps import xr_reindex_with_date_range
+    from aux_gps import keep_iqr
+    import xarray as xr
+    import matplotlib.pyplot as plt
+    file = path_glob(path, 'IMS_hourly_{}hr.nc'.format(freq))[0]
+    ds = xr.open_dataset(file)
+    name = '{}_{}'.format(station, field)
+    da = ds[name]
+    da = xr_reindex_with_date_range(da, freq='1H')
+    da_inter = da.interpolate_na('time', max_gap=max_gap, method='cubic')
+    if times is not None:
+        da = da.sel(time=slice(*times))
+        da_inter = da_inter.sel(time=slice(*times))
+    if k_iqr is not None:
+        da_inter = keep_iqr(da_inter, k=k_iqr)
+    if plot:
+        fig, ax = plt.subplots(figsize=(18, 5))
+        df = da.to_dataframe()
+        df_inter = da_inter.to_dataframe()
+        df_inter.plot(style='b--', ax=ax)
+        df.plot(style='b-', marker='o', ax=ax, ms=5)
+        ax.legend(*[ax.get_lines()],
+                  ['PWV {} max interpolation'.format(max_gap), 'PWV'],
+                  loc='best')
+    return da_inter
+
+
 def read_ims_metadata_from_files(path=gis_path, freq='10mins'):
     # for longer climate archive data use filename = IMS_climate_archive_meta_data.xls
     import pandas as pd
