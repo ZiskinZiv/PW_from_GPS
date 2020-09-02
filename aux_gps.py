@@ -631,7 +631,7 @@ def consecutive_runs(arr, num=False):
     return A
 
 
-def gantt_chart(ds, fw='bold', ax=None, pe_dict=None,
+def gantt_chart(ds, fw='bold', ax=None, pe_dict=None, fontsize=14,
                 title='RINEX files availability for the Israeli GNSS stations'):
     import pandas as pd
     import matplotlib.pyplot as plt
@@ -687,7 +687,7 @@ def gantt_chart(ds, fw='bold', ax=None, pe_dict=None,
         labeltop=False,
         labelbottom=True,
         top=False,
-        bottom=True, left=True)
+        bottom=True, left=True, labelsize=fontsize)
     ax.minorticks_on()
     ax.tick_params(which='minor',
         direction='out',
@@ -698,9 +698,9 @@ def gantt_chart(ds, fw='bold', ax=None, pe_dict=None,
 #     ax.xaxis.set_minor_locator(mdates.YearLocator())
 #    ax.xaxis.set_minor_formatter(mdates.DateFormatter("\n%Y"))
     plt.setp(ax.xaxis.get_majorticklabels(), rotation=30, ha='center',
-             fontweight=fw)
+             fontweight=fw, fontsize=fontsize)
     plt.setp(ax.xaxis.get_minorticklabels(), rotation=30, ha='center',
-             fontweight=fw)
+             fontweight=fw, fontsize=fontsize)
     # grid lines:
 #    ax.grid(which='major', axis='x', linestyle='-', color='k')
 #    ax.grid(which='minor', axis='x', linestyle='-', color='k')
