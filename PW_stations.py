@@ -3405,7 +3405,8 @@ def filter_month_year_data_heatmap_plot(da_ts, freq='5T', thresh=50.0,
 #    return da
 
 
-def calculate_zwd_altitude_fit(path=work_yuval, model='TSEN', plot=True):
+def calculate_zwd_altitude_fit(path=work_yuval, model='TSEN', plot=True,
+                               fontsize=14):
     from PW_stations import produce_geo_gnss_solved_stations
     import xarray as xr
     from PW_stations import ML_Switcher
@@ -3442,13 +3443,14 @@ def calculate_zwd_altitude_fit(path=work_yuval, model='TSEN', plot=True):
     if plot:
         fig, ax_lapse = plt.subplots(figsize=(10, 6))
         sns.regplot(x=alt, y=zwd_vals, color='r',
-                    scatter_kws={'color': 'b'}, x_estimator=np.mean, ax=ax_lapse)
-        ax_lapse.set_xlabel('Altitude [m]')
-        ax_lapse.set_ylabel('Zenith Wet Delay [cm]')
+                    scatter_kws={'color': 'k'}, x_estimator=np.mean, ax=ax_lapse)
+        ax_lapse.set_xlabel('Altitude [m]', fontsize=fontsize)
+        ax_lapse.set_ylabel('Zenith Wet Delay [cm]', fontsize=fontsize)
         ax_lapse.text(0.5, 0.95, 'Lapse rate: {:.2f} cm/km'.format(zwd_lapse_rate),
                       horizontalalignment='center', verticalalignment='center',
-                      transform=ax_lapse.transAxes, fontsize=12, color='k',
+                      transform=ax_lapse.transAxes, fontsize=fontsize, color='k',
                       fontweight='bold')
+        ax_lapse.tick_params(labelsize=fontsize)
         ax_lapse.grid()
 #        fig, ax = plt.subplots(1, 1, figsize=(16, 4))
 #        ax.errorbar(x=alt, y=zwd_vals, yerr=zwd_std_vals,
