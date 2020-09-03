@@ -102,11 +102,10 @@ def run_MLR_diurnal_harmonics(harmonic_dss, season=None, n_max=4, plot=True,
         S = ['S{} ({:.0f}%)'.format(x, exp_dict[int(x)]) for x in harmonic['cpd'].values]
         ax.legend(
             S + S_total + [field],
-            prop={
-                'size': legsize},
+            prop={'size': legsize},
             framealpha=0.5,
             fancybox=True,
-            loc=legend_loc, ncol=ncol)
+            loc=legend_loc, ncol=ncol, columnspacing=0.75, handlelength=1.0)
 #        ax.grid()
         ax.set_xlabel('Time of day [UTC]')
         # ax.set_ylabel('{} anomalies [mm]'.format(field))
