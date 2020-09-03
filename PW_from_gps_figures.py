@@ -262,10 +262,11 @@ def plot_diurnal_wind_hodograph(path=ims_path, station='TEL-AVIV-COAST',
     return ax
 
 
-def plot_MLR_GNSS_PW_harmonics_facetgrid(path=work_yuval, season=None,
-                                         n_max=3, ylim=None, save=True):
+def plot_MLR_GNSS_PW_harmonics_facetgrid(path=work_yuval, season='JJA',
+                                         n_max=2, ylim=None, save=True):
     import xarray as xr
     from aux_gps import run_MLR_diurnal_harmonics
+    from matplotlib.ticker import AutoMinorLocator
     import numpy as np
     harmonics = xr.load_dataset(path / 'GNSS_PW_harmonics_diurnal.nc')
 #    sites = sorted(list(set([x.split('_')[0] for x in harmonics])))
@@ -292,19 +293,32 @@ def plot_MLR_GNSS_PW_harmonics_facetgrid(path=work_yuval, season=None,
                     leg_loc = 'upper center'
                 elif site in ['yrcm', 'ramo']:
                     leg_loc = 'lower center'
+#                elif site in ['katz']:
+#                    leg_loc = 'upper right'
                 else:
                     leg_loc = None
-                ax = run_MLR_diurnal_harmonics(harm_site, season=season, n_max=n_max, plot=True, ax=ax, legend_loc=leg_loc, ncol=2, legsize=10)
-                ax.set_xlabel('Hour of day [UTC]')
+                ax = run_MLR_diurnal_harmonics(harm_site, season=season,
+                                               n_max=n_max, plot=True, ax=ax,
+                                               legend_loc=leg_loc, ncol=2,
+                                               legsize=16)
+                ax.set_xlabel('Hour of day [UTC]', fontsize=16)
+                if ylim is not None:
+                    ax.set_ylim(*ylim)
+                ax.tick_params(axis='x', which='major', labelsize=18)
+                ax.yaxis.set_major_locator(plt.MaxNLocator(4))
+                ax.yaxis.set_minor_locator(AutoMinorLocator(2))
+                ax.tick_params(axis='y', which='major', labelsize=18)
                 ax.yaxis.tick_left()
                 ax.xaxis.set_ticks(np.arange(0, 23, 3))
                 ax.grid()
                 ax.set_title('')
                 ax.set_ylabel('')
+                ax.grid(axis='y', which='minor', linestyle='--')
                 ax.text(0.1, .85, site.upper(),
                         horizontalalignment='center', fontweight='bold',
-                        transform=ax.transAxes)
-                ax.set_ylabel('PWV anomalies [mm]', fontsize=12)
+                        transform=ax.transAxes, fontsize=20)
+                if j == 0:
+                    ax.set_ylabel('PWV anomalies [mm]', fontsize=16)
 #                if j == 0:
 #                    ax.set_ylabel('PW anomalies [mm]', fontsize=12)
 #                elif j == 1:
@@ -336,7 +350,13 @@ def plot_MLR_GNSS_PW_harmonics_facetgrid(path=work_yuval, season=None,
 #        if i > (da.GNSS.telasize-1):
 #            ax.set_axis_off()
 #            pass
-    fg.fig.tight_layout()
+    fg.fig.subplots_adjust(
+        top=0.993,
+        bottom=0.032,
+        left=0.054,
+        right=0.995,
+        hspace=0.15,
+        wspace=0.12)
     if save:
         filename = 'pw_diurnal_harmonics_{}_{}.png'.format(n_max, season)
 #        plt.savefig(savefig_path / filename, bbox_inches='tight')
@@ -496,6 +516,7 @@ def plot_fft_diurnal(path=work_yuval, save=True):
 
 
 def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
+                               scope='diurnal',
                                dem_path=dem_path, save=True):
     # TODO: add box around merged stations and removed stations
     # TODO: add color map labels to stations removed and merged
@@ -508,6 +529,7 @@ def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
     from ims_procedures import produce_geo_ims
     from matplotlib.colors import ListedColormap
     from aux_gps import path_glob
+    print('{} scope selected.'.format(scope))
     fig = plt.figure(figsize=(20, 10))
     grid = plt.GridSpec(1, 2, width_ratios=[
         5, 2], wspace=0.1)
@@ -515,8 +537,10 @@ def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
     ax_map = fig.add_subplot(grid[0, 1])  # plt.subplot(122)
 #    fig, ax = plt.subplots(1, 2, sharex=False, sharey=False, figsize=(20, 6))
     # RINEX gantt chart:
-    # file = path_glob(path, 'GNSS_PW_thresh_50_for_diurnal_analysis.nc')[-1]
-    file = path_glob(path, 'GNSS_PW_thresh_50_homogenized.nc')[-1]
+    if scope == 'diurnal':
+        file = path_glob(path, 'GNSS_PW_thresh_50_for_diurnal_analysis.nc')[-1]
+    elif scope == 'longterm':
+        file = path_glob(path, 'GNSS_PW_thresh_50_homogenized.nc')[-1]
     ds = xr.open_dataset(file)
     just_pw = [x for x in ds if 'error' not in x]
     ds = ds[just_pw]
@@ -529,9 +553,9 @@ def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
         ax=ax_gantt,
         fw='normal',
         title='',
-        pe_dict=None)
+        pe_dict=None, fontsize=16)
     # Israel gps ims map:
-    ax_map = plot_israel_map(gis_path=gis_path, ax=ax_map)
+    ax_map = plot_israel_map(gis_path=gis_path, ax=ax_map, ticklabelsize=14)
     # overlay with dem data:
     cmap = plt.get_cmap('terrain', 41)
     dem = xr.open_dataarray(dem_path / 'israel_dem_250_500.nc')
@@ -541,20 +565,23 @@ def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
 #    scale_bar(ax_map, 50)
     cbar_kwargs = {'fraction': 0.1, 'aspect': 50, 'pad': 0.03}
     cb = plt.colorbar(fg, **cbar_kwargs)
-    cb.set_label(label='meters above sea level', size=8, weight='normal')
-    cb.ax.tick_params(labelsize=8)
+    cb.set_label(label='meters above sea level', size=14, weight='normal')
+    cb.ax.tick_params(labelsize=14)
     ax_map.set_xlabel('')
     ax_map.set_ylabel('')
     gps = produce_geo_gnss_solved_stations(path=gis_path, plot=False)
     # removed = ['hrmn', 'nizn', 'spir']
 #    removed = ['hrmn']
-#     removed = ['hrmn', 'gilb', 'lhav']
-    removed = ['hrmn', 'gilb', 'lhav', 'nizn', 'spir']
+    if scope == 'diurnal':
+        removed = ['hrmn', 'gilb', 'lhav']
+    elif scope == 'longterm':
+        removed = ['hrmn', 'gilb', 'lhav', 'nizn', 'spir']
+    print('removing {} stations from map.'.format(removed))
 #    merged = ['klhv', 'lhav', 'mrav', 'gilb']
     merged = []
     gps_list = [x for x in gps.index if x not in merged and x not in removed]
     gps.loc[gps_list, :].plot(ax=ax_map, edgecolor='black', marker='s',
-             alpha=1.0, markersize=25, facecolor="None")
+             alpha=1.0, markersize=35, facecolor="None", linewidth=2, zorder=3)
 #    gps.loc[removed, :].plot(ax=ax_map, color='black', edgecolor='black', marker='s',
 #            alpha=1.0, markersize=25, facecolor='white')
 #    gps.loc[merged, :].plot(ax=ax_map, color='black', edgecolor='r', marker='s',
@@ -569,11 +596,11 @@ def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
         if label.lower() in to_plot_offset:
             ax_map.annotate(label, xy=(x, y), xytext=(4, -6),
                             textcoords="offset points", color='k',
-                            fontweight='normal', fontsize=10)
+                            fontweight='bold', fontsize=12)
         else:
             ax_map.annotate(label, xy=(x, y), xytext=(3, 3),
                             textcoords="offset points", color='k',
-                            fontweight='normal', fontsize=10)
+                            fontweight='bold', fontsize=12)
 #    geo_annotate(ax_map, gps_normal_anno.lon, gps_normal_anno.lat,
 #                 gps_normal_anno.index.str.upper(), xytext=(3, 3), fmt=None,
 #                 c='k', fw='normal', fs=10, colorupdown=False)
@@ -588,10 +615,10 @@ def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
                                                                  df.lat),
                                  crs=gps.crs)
     bet_dagan.plot(ax=ax_map, color='black', edgecolor='black',
-                   marker='+')
+                   marker='x', linewidth=2, zorder=2)
     geo_annotate(ax_map, bet_dagan.lon, bet_dagan.lat,
                  bet_dagan.index, xytext=(4, -6), fmt=None,
-                 c='k', fw='normal', fs=10, colorupdown=False)
+                 c='k', fw='bold', fs=12, colorupdown=False)
 #    plt.legend(['GNSS \nreceiver sites',
 #                'removed \nGNSS sites',
 #                'merged \nGNSS sites',
@@ -600,15 +627,14 @@ def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
 #               handletextpad=0.2, handlelength=1.5)
     print('getting IMS temperature stations metadata...')
     ims = produce_geo_ims(path=gis_path, freq='10mins', plot=False)
-    ims.plot(ax=ax_map, marker='o', edgecolor='black', alpha=0.5,
-             markersize=15, facecolor="None")
+    ims.plot(ax=ax_map, marker='o', edgecolor='tab:orange', alpha=0.65,
+             markersize=15, facecolor="tab:orange", zorder=1)
     # ims, gps = produce_geo_df(gis_path=gis_path, plot=False)
     print('getting solved GNSS israeli stations metadata...')
-
-    plt.legend(['GNSS \nreceiver stations',
+    plt.legend(['GNSS \nstations',
                 'radiosonde\nstation', 'IMS stations'],
            loc='upper left', framealpha=0.7, fancybox=True,
-           handletextpad=0.2, handlelength=1.5)
+           handletextpad=0.2, handlelength=1.5, fontsize=12)
     fig.subplots_adjust(top=0.95,
                         bottom=0.11,
                         left=0.05,
@@ -1001,7 +1027,8 @@ def plot_gnss_radiosonde_monthly_means(sound_path=sound_path, path=work_yuval,
     return ds
 
 
-def plot_figure_2(path=tela_results_path, plot='WetZ', save=True):
+def plot_wetz_example(path=tela_results_path, plot='WetZ', fontsize=16,
+                      save=True):
     from aux_gps import path_glob
     import matplotlib.pyplot as plt
     from gipsyx_post_proc import process_one_day_gipsyx_output
@@ -1023,8 +1050,9 @@ def plot_figure_2(path=tela_results_path, plot='WetZ', save=True):
     ax.grid()
 #    ax.set_title('{} from station TELA in {}'.format(
 #            desc, df.index[100].strftime('%Y-%m-%d')))
-    ax.set_ylabel('WetZ [{}]'.format(unit))
-    ax.set_xlabel('')
+    ax.set_ylabel('WetZ [{}]'.format(unit), fontsize=fontsize)
+    ax.set_xlabel('Time [UTC]', fontsize=fontsize)
+    ax.tick_params(which='both', labelsize=fontsize)
     ax.grid('on')
     fig.tight_layout()
     filename = 'wetz_tela_daily.png'
@@ -1105,7 +1133,7 @@ def plot_figure_3_1(path=work_yuval, data='zwd'):
 
 
 def plot_ts_tm(path=sound_path, model='TSEN',
-               times=['2007', '2019'], save=True):
+               times=['2007', '2019'], fontsize=14, save=True):
     """plot ts-tm relashonship"""
     import xarray as xr
     import matplotlib.pyplot as plt
@@ -1151,17 +1179,18 @@ def plot_ts_tm(path=sound_path, model='TSEN',
     bevis_tm = pds.Ts.values * 0.72 + 70.0
     ax.plot(pds.Ts.values, bevis_tm, c='purple')
     ax.legend(['{} ({:.2f}, {:.2f})'.format(models_dict.get(model),
-        coef, inter), 'Bevis 1992 et al. (0.72, 70.0)'])
+        coef, inter), 'Bevis 1992 et al. (0.72, 70.0)'], fontsize=fontsize-4)
 #    ax.set_xlabel('Surface Temperature [K]')
 #    ax.set_ylabel('Water Vapor Mean Atmospheric Temperature [K]')
-    ax.set_xlabel('Ts [K]')
-    ax.set_ylabel('Tm [K]')
+    ax.set_xlabel('Ts [K]', fontsize=fontsize)
+    ax.set_ylabel('Tm [K]', fontsize=fontsize)
     ax.set_ylim(265, 320)
+    ax.tick_params(labelsize=fontsize)
     axin1 = inset_axes(ax, width="40%", height="40%", loc=2)
     resid = predict - y
     sns.distplot(resid, bins=50, color='k', label='residuals', ax=axin1,
                  kde=False,
-                 hist_kws={"linewidth": 1, "alpha": 0.5, "color": "k"})
+                 hist_kws={"linewidth": 1, "alpha": 0.5, "color": "k", 'edgecolor':'k'})
     axin1.yaxis.tick_right()
     rmean = np.mean(resid)
     rmse = np.sqrt(mean_squared_error(y, predict))
@@ -1173,7 +1202,7 @@ def plot_ts_tm(path=sound_path, model='TSEN',
                          'RMSE: ', '{:.2f} K'.format(rmse)]) # ,
                          # r'R$^2$: {:.2f}'.format(r2)])
     props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-    axin1.text(0.05, 0.95, textstr, transform=axin1.transAxes, fontsize=10,
+    axin1.text(0.05, 0.95, textstr, transform=axin1.transAxes, fontsize=14,
                verticalalignment='top', bbox=props)
 #    axin1.text(0.2, 0.9, 'n={}'.format(pds.Ts.size),
 #               verticalalignment='top', horizontalalignment='center',
@@ -1190,10 +1219,12 @@ def plot_ts_tm(path=sound_path, model='TSEN',
     return
 
 
-def plot_pw_tela_bet_dagan(path=work_yuval, sound_path=sound_path,
-                           ims_path=ims_path, station='tela', cats=None,
-                           times=['2007', '2019'], wv_name='pw', r2=False,
-                           save=True):
+def plot_pw_tela_bet_dagan_scatterplot(path=work_yuval, sound_path=sound_path,
+                                       ims_path=ims_path, station='tela',
+                                       cats=None,
+                                       times=['2007', '2019'], wv_name='pw',
+                                       r2=False, fontsize=14,
+                                       save=True):
     """plot the PW of Bet-Dagan vs. PW of gps station"""
     from PW_stations import mean_ZWD_over_sound_time_and_fit_tstm
     from sklearn.metrics import mean_squared_error
@@ -1225,13 +1256,13 @@ def plot_pw_tela_bet_dagan(path=work_yuval, sound_path=sound_path,
                     alpha=0.5,
                     ax=ax)
     ax.plot(ds[tpw], ds[tpw], c='r')
-    ax.legend(['y = x'], loc='upper right')
+    ax.legend(['y = x'], loc='upper right', fontsize=fontsize)
     if wv_name == 'pw':
-        ax.set_xlabel('PWV from Bet-Dagan [mm]')
-        ax.set_ylabel('PWV from TELA GPS station [mm]')
+        ax.set_xlabel('PWV from Bet-Dagan [mm]', fontsize=fontsize)
+        ax.set_ylabel('PWV from TELA GPS station [mm]', fontsize=fontsize)
     elif wv_name == 'iwv':
-        ax.set_xlabel(r'IWV from Bet-Dagan station [kg$\cdot$m$^{-2}$]')
-        ax.set_ylabel(r'IWV from TELA GPS station [kg$\cdot$m$^{-2}$]')
+        ax.set_xlabel(r'IWV from Bet-Dagan station [kg$\cdot$m$^{-2}$]', fontsize=fontsize)
+        ax.set_ylabel(r'IWV from TELA GPS station [kg$\cdot$m$^{-2}$]', fontsize=fontsize)
     ax.grid()
     axin1 = inset_axes(ax, width="40%", height="40%", loc=2)
     resid = ds.tela_pw.values - ds[tpw].values
@@ -1244,6 +1275,7 @@ def plot_pw_tela_bet_dagan(path=work_yuval, sound_path=sound_path,
     r2s = r2_score(ds[tpw].values, ds.tela_pw.values)
     axin1.axvline(rmean, color='r', linestyle='dashed', linewidth=1)
     # axin1.set_xlabel('Residual distribution[mm]')
+    ax.tick_params(labelsize=fontsize)
     if wv_name == 'pw':
         if r2:
             textstr = '\n'.join(['n={}'.format(ds[tpw].size),
@@ -1265,7 +1297,7 @@ def plot_pw_tela_bet_dagan(path=work_yuval, sound_path=sound_path,
                                  r'bias: {:.2f} kg$\cdot$m$^{{-2}}$'.format(rmean),
                                  r'RMSE: {:.2f} kg$\cdot$m$^{{-2}}$'.format(rmse)])
     props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-    axin1.text(0.05, 0.95, textstr, transform=axin1.transAxes, fontsize=10,
+    axin1.text(0.05, 0.95, textstr, transform=axin1.transAxes, fontsize=14,
                verticalalignment='top', bbox=props)
 #
 #    axin1.text(0.2, 0.95, 'n={}'.format(ds[tpw].size),
@@ -1287,10 +1319,11 @@ def plot_pw_tela_bet_dagan(path=work_yuval, sound_path=sound_path,
     return ds
 
 
-def plot_zwd_tela_bet_dagan(path=work_yuval, sound_path=sound_path,
-                            ims_path=ims_path, station='tela',
-                            times=['2007', '2020'], cats=None,
-                            save=True):
+def plot_tela_bet_dagan_comparison(path=work_yuval, sound_path=sound_path,
+                                   ims_path=ims_path, station='tela',
+                                   times=['2007', '2020'], cats=None,
+                                   compare='pwv',
+                                   save=True):
     from PW_stations import mean_ZWD_over_sound_time_and_fit_tstm
     import matplotlib.pyplot as plt
     import seaborn as sns
@@ -1310,11 +1343,12 @@ def plot_zwd_tela_bet_dagan(path=work_yuval, sound_path=sound_path,
     ds = ds.rename({time_dim: 'time'})
     ds = ds.dropna('time')
     ds = ds.sel(time=slice(*times))
-    df = ds[['zwd_bet_dagan', 'tela']].to_dataframe()
+    if compare == 'zwd':
+        df = ds[['zwd_bet_dagan', 'tela']].to_dataframe()
+    elif compare == 'pwv':
+        df = ds[['tpw_bet_dagan', 'tela_pw']].to_dataframe()
     fig, axes = plt.subplots(2, 1, sharex=True, figsize=(12, 8))
-    [x.set_xlim([pd.to_datetime(times[0]), pd.to_datetime(times[1])])
-     for x in axes]
-    df.columns = ['Bet-Dagan soundings', 'TELA GPS station']
+    df.columns = ['Bet-Dagan soundings', 'TELA GNSS station']
     sns.scatterplot(
         data=df,
         s=20,
@@ -1334,8 +1368,12 @@ def plot_zwd_tela_bet_dagan(path=work_yuval, sound_path=sound_path,
         alpha=0.5)
     axes[0].grid(b=True, which='major')
     axes[1].grid(b=True, which='major')
-    axes[0].set_ylabel('Zenith Wet Delay [cm]')
-    axes[1].set_ylabel('Residuals [cm]')
+    if compare == 'zwd':
+        axes[0].set_ylabel('Zenith Wet Delay [cm]')
+        axes[1].set_ylabel('Residuals [cm]')
+    elif compare == 'pwv':
+        axes[0].set_ylabel('Precipitable Water Vapor [mm]')
+        axes[1].set_ylabel('Residuals [mm]')
     # axes[0].set_title('Zenith wet delay from Bet-Dagan radiosonde station and TELA GNSS satation')
     sonde_change_x = pd.to_datetime('2013-08-20')
     axes[1].axvline(sonde_change_x, color='red')
@@ -1352,16 +1390,18 @@ def plot_zwd_tela_bet_dagan(path=work_yuval, sound_path=sound_path,
             color='red'),
         color='red')
     # axes[1].set_aspect(3)
+    [x.set_xlim(*[pd.to_datetime(times[0]), pd.to_datetime(times[1])])
+     for x in axes]
     plt.tight_layout()
     plt.subplots_adjust(wspace=0, hspace=0.01)
-    filename = 'Bet_dagan_tela_zwd_compare.png'
+    filename = 'Bet_dagan_tela_{}_compare.png'.format(compare)
     caption('Top: zenith wet delay from Bet-dagan radiosonde station(blue circles) and from TELA GNSS station(orange x) in 2007-2019. Bottom: residuals. Note the residuals become constrained from 08-2013 probebly due to an equipment change.')
     if save:
         plt.savefig(savefig_path / filename, bbox_inches='tight')
     return df
 
 
-def plot_israel_map(gis_path=gis_path, rc=rc, ax=None):
+def plot_israel_map(gis_path=gis_path, rc=rc, ticklabelsize=12, ax=None):
     """general nice map for israel, need that to plot stations,
     and temperature field on top of it"""
     import geopandas as gpd
@@ -1392,7 +1432,7 @@ def plot_israel_map(gis_path=gis_path, rc=rc, ax=None):
     ax.yaxis.set_major_formatter(lat_formatter)
     ax.xaxis.set_major_formatter(lon_formatter)
     ax.tick_params(top=True, bottom=True, left=True, right=True,
-                   direction='out', labelsize=10)
+                   direction='out', labelsize=ticklabelsize)
 #    scale_bar(ax, ccrs.Mercator(), 50, bounds=bounds)
     return ax
 
@@ -1487,7 +1527,19 @@ def plot_israel_with_stations(gis_path=gis_path, dem_path=dem_path, ims=True,
     return ax
 
 
-def plot_figure_8(ims_path=ims_path, dt='2013-10-19T22:00:00', save=True):
+def plot_zwd_lapse_rate(path=work_yuval, fontsize=18, model='TSEN', save=True):
+    from PW_stations import calculate_zwd_altitude_fit
+    df, zwd_lapse_rate = calculate_zwd_altitude_fit(path=path, model=model,
+                                                    plot=True, fontsize=fontsize)
+    if save:
+        filename = 'zwd_lapse_rate.png'
+    if save:
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
+    return
+
+
+def plot_ims_T_lapse_rate(ims_path=ims_path, dt='2013-10-19T22:00:00',
+                          fontsize=16, save=True):
     from aux_gps import path_glob
     import xarray as xr
     import matplotlib.pyplot as plt
@@ -1537,12 +1589,14 @@ def plot_figure_8(ims_path=ims_path, dt='2013-10-19T22:00:00', save=True):
     sns.regplot(x=ts_vs_alt.index, y=ts_vs_alt.values, color='r',
                 scatter_kws={'color': 'k'}, ax=ax_lapse)
     # suptitle = dt.strftime('%Y-%m-%d %H:%M')
-    ax_lapse.set_xlabel('Altitude [m]')
-    ax_lapse.set_ylabel(r'Temperature [$\degree$C]')
+    ax_lapse.set_xlabel('Altitude [m]', fontsize=fontsize)
+    ax_lapse.set_ylabel(r'Temperature [$\degree$C]', fontsize=fontsize)
     ax_lapse.text(0.5, 0.95, r'Lapse rate: {:.2f} $\degree$C/km'.format(lapse_rate),
                   horizontalalignment='center', verticalalignment='center',
+                  fontsize=fontsize,
                   transform=ax_lapse.transAxes, color='k')
     ax_lapse.grid()
+    ax_lapse.tick_params(labelsize=fontsize)
     # ax_lapse.set_title(suptitle, fontsize=14, fontweight='bold')
     fig.tight_layout()
     filename = 'ims_lapse_rate_example.png'
@@ -1630,9 +1684,14 @@ def produce_table_1(removed=['hrmn'], merged={'klhv': ['klhv', 'lhav'],
     df['alt'] = df['alt'].astype(int)
     df['distance'] = df['distance'].astype(int)
     cols = ['GNSS Station name', 'Station ID', 'Latitude [N]',
-            'Longitude [W]', 'Altitude [m a.s.l]', 'Distance from shore [km]']
+            'Longitude [E]', 'Altitude [m a.s.l]', 'Distance from shore [km]']
     df.columns = cols
     df.loc['spir', 'GNSS Station name'] = 'Sapir'
+    groups = group_sites_to_xarray(upper=False, scope='diurnal')
+    df.loc[groups.sel(group='coastal').values, 'Location'] = 'coastal'
+    df.loc[groups.sel(group='highland').values, 'Location'] = 'highland'
+    df.loc[groups.sel(group='eastern').values, 'Location'] = 'eastern'
+    df
     if removed is not None:
         df = df.loc[[x for x in df.index if x not in removed], :]
     if merged is not None:
@@ -2354,7 +2413,7 @@ def plot_profiler(path=work_yuval, ceil_path=ceil_path, title=False,
 
 
 def plot_ceilometers(path=work_yuval, ceil_path=ceil_path, interpolate='6H',
-                     save=True):
+                     fontsize=14, save=True):
     import xarray as xr
     from ceilometers import twin_hourly_mean_plot
     from ceilometers import read_all_ceilometer_stations
@@ -2377,7 +2436,7 @@ def plot_ceilometers(path=work_yuval, ceil_path=ceil_path, interpolate='6H',
                                          month=None,
                                          ax=ax,
                                          title=False,
-                                         leg_loc='best')
+                                         leg_loc='best', fontsize=fontsize)
         twins.append(twin)
         ax.xaxis.set_ticks(np.arange(0, 23, 3))
         ax.grid()
@@ -2443,7 +2502,8 @@ def plot_hist_with_seasons(da_ts):
 
 
 def plot_diurnal_pw_all_seasons(path=work_yuval, season='ALL', synoptic=None,
-                                ylim=[-2.7, 3.25], save=True):
+                                fontsize=20, labelsize=18,
+                                ylim=[-2.7, 3.3], save=True):
     import xarray as xr
     from synoptic_procedures import slice_xr_with_synoptic_class
     gnss_filename = 'GNSS_PW_thresh_50_for_diurnal_analysis_removed_daily.nc'
@@ -2452,61 +2512,136 @@ def plot_diurnal_pw_all_seasons(path=work_yuval, season='ALL', synoptic=None,
     if season is None and synoptic is None:
         # plot annual diurnal cycle only:
         fg = plot_pw_geographical_segments(df_annual, fg=None, marker='o', color='b',
-                                                   ylim=ylim)
+                                           ylim=ylim)
         legend = ['Annual']
     elif season == 'ALL' and synoptic is None:
-        df_jja = pw.sel(time=pw['time.season']=='JJA').groupby('time.hour').mean().to_dataframe()
-        df_son = pw.sel(time=pw['time.season']=='SON').groupby('time.hour').mean().to_dataframe()
-        df_djf = pw.sel(time=pw['time.season']=='DJF').groupby('time.hour').mean().to_dataframe()
-        df_mam = pw.sel(time=pw['time.season']=='MAM').groupby('time.hour').mean().to_dataframe()
-        fg = plot_pw_geographical_segments(df_jja, fg=None, marker='s', color='tab:green', ylim=ylim)
-        fg = plot_pw_geographical_segments(df_son, fg=fg, marker='^', color='tab:red', ylim=ylim)
-        fg = plot_pw_geographical_segments(df_djf, fg=fg, marker='x', color='tab:blue')
-        fg = plot_pw_geographical_segments(df_mam, fg=fg, marker='+', color='tab:orange',ylim=ylim)
-        fg = plot_pw_geographical_segments(df_annual, fg=fg, marker='d', color='tab:purple',
-                                                   ylim=ylim)
-        legend = ['JJA', 'SON', 'DJF', 'MAM', 'Annual']
+        df_jja = pw.sel(time=pw['time.season'] == 'JJA').groupby(
+            'time.hour').mean().to_dataframe()
+        df_son = pw.sel(time=pw['time.season'] == 'SON').groupby(
+            'time.hour').mean().to_dataframe()
+        df_djf = pw.sel(time=pw['time.season'] == 'DJF').groupby(
+            'time.hour').mean().to_dataframe()
+        df_mam = pw.sel(time=pw['time.season'] == 'MAM').groupby(
+            'time.hour').mean().to_dataframe()
+        fg = plot_pw_geographical_segments(
+            df_jja,
+            fg=None,
+            marker='s',
+            color='tab:green',
+            ylim=ylim,
+            fontsize=fontsize,
+            labelsize=labelsize, zorder=0, label='JJA')
+        fg = plot_pw_geographical_segments(
+            df_son,
+            fg=fg,
+            marker='^',
+            color='tab:red',
+            ylim=ylim,
+            fontsize=fontsize,
+            labelsize=labelsize, zorder=1, label='SON')
+        fg = plot_pw_geographical_segments(
+            df_djf,
+            fg=fg,
+            marker='x',
+            color='tab:blue',
+            fontsize=fontsize,
+            labelsize=labelsize, zorder=2, label='DJF')
+        fg = plot_pw_geographical_segments(
+            df_mam,
+            fg=fg,
+            marker='+',
+            color='tab:orange',
+            ylim=ylim,
+            fontsize=fontsize,
+            labelsize=labelsize, zorder=4, label='MAM')
+        fg = plot_pw_geographical_segments(df_annual, fg=fg, marker='d',
+                                           color='tab:purple', ylim=ylim,
+                                           fontsize=fontsize,
+                                           labelsize=labelsize, zorder=3,
+                                           label='Annual')
     elif season is None and synoptic == 'ALL':
-        df_pt = slice_xr_with_synoptic_class(pw, path=path, syn_class='PT').groupby('time.hour').mean().to_dataframe()
-        df_rst = slice_xr_with_synoptic_class(pw, path=path, syn_class='RST').groupby('time.hour').mean().to_dataframe()
-        df_cl = slice_xr_with_synoptic_class(pw, path=path, syn_class='CL').groupby('time.hour').mean().to_dataframe()
-        df_h = slice_xr_with_synoptic_class(pw, path=path, syn_class='H').groupby('time.hour').mean().to_dataframe()
-        fg = plot_pw_geographical_segments(df_pt, fg=None, marker='s', color='tab:green', ylim=ylim)
-        fg = plot_pw_geographical_segments(df_rst, fg=fg, marker='^', color='tab:red', ylim=ylim)
-        fg = plot_pw_geographical_segments(df_cl, fg=fg, marker='x', color='tab:blue')
-        fg = plot_pw_geographical_segments(df_h, fg=fg, marker='+', color='tab:orange',ylim=ylim)
-        fg = plot_pw_geographical_segments(df_annual, fg=fg, marker='d', color='tab:purple',
-                                                   ylim=ylim)
-        legend = ['PT', 'RST', 'CL', 'H', 'Annual']
+        df_pt = slice_xr_with_synoptic_class(
+            pw, path=path, syn_class='PT').groupby('time.hour').mean().to_dataframe()
+        df_rst = slice_xr_with_synoptic_class(
+            pw, path=path, syn_class='RST').groupby('time.hour').mean().to_dataframe()
+        df_cl = slice_xr_with_synoptic_class(
+            pw, path=path, syn_class='CL').groupby('time.hour').mean().to_dataframe()
+        df_h = slice_xr_with_synoptic_class(
+            pw, path=path, syn_class='H').groupby('time.hour').mean().to_dataframe()
+        fg = plot_pw_geographical_segments(
+            df_pt,
+            fg=None,
+            marker='s',
+            color='tab:green',
+            ylim=ylim,
+            fontsize=fontsize,
+            labelsize=labelsize, zorder=0, label='PT')
+        fg = plot_pw_geographical_segments(
+            df_rst,
+            fg=fg,
+            marker='^',
+            color='tab:red',
+            ylim=ylim,
+            fontsize=fontsize,
+            labelsize=labelsize, zorder=1, label='RST')
+        fg = plot_pw_geographical_segments(
+            df_cl,
+            fg=fg,
+            marker='x',
+            color='tab:blue',
+            fontsize=fontsize,
+            labelsize=labelsize, zorder=2, label='CL')
+        fg = plot_pw_geographical_segments(
+            df_h,
+            fg=fg,
+            marker='+',
+            color='tab:orange',
+            ylim=ylim,
+            fontsize=fontsize,
+            labelsize=labelsize, zorder=4, label='H')
+        fg = plot_pw_geographical_segments(df_annual, fg=fg, marker='d',
+                                           color='tab:purple', ylim=ylim,
+                                           fontsize=fontsize,
+                                           labelsize=labelsize, zorder=3,
+                                           label='Annual')
     sites = group_sites_to_xarray(False, scope='diurnal')
     for i, (ax, site) in enumerate(zip(fg.axes.flatten(), sites.values.flatten())):
         lns = ax.get_lines()
-        if site in ['yrcm', 'ramo']:
+        if site in ['yrcm']:
             leg_loc = 'upper right'
         elif site in ['nrif', 'elat']:
             leg_loc = 'upper center'
+        elif site in ['ramo']:
+            leg_loc = 'lower center'
         else:
             leg_loc = None
-        ax.legend(
-            lns,
-            legend,
-            prop={
-                'size': 10},
-            framealpha=0.5,
-            fancybox=True,
-            ncol=2,
-            loc=leg_loc)
+        # do legend for each panel:
+#        ax.legend(
+#            lns,
+#            legend,
+#            prop={
+#                'size': 12},
+#            framealpha=0.5,
+#            fancybox=True,
+#            ncol=2,
+#            loc=leg_loc, fontsize=12)
+    lines_labels = [ax.get_legend_handles_labels() for ax in fg.fig.axes][0]
+#    lines, labels = [sum(lol, []) for lol in zip(*lines_labels)]
+    fg.fig.legend(lines_labels[0], lines_labels[1], prop={'size': 20},edgecolor='k',
+                  framealpha=0.5, fancybox=True, facecolor='white',
+                  ncol=5, fontsize=20, loc='upper center', bbox_to_anchor=(0.5, 1.005),
+                  bbox_transform=plt.gcf().transFigure)
     fg.fig.subplots_adjust(
-        top=0.993,
+        top=0.973,
         bottom=0.029,
-        left=0.034,
-        right=0.993,
-        hspace=0.259,
-        wspace=0.069)
+        left=0.054,
+        right=0.995,
+        hspace=0.15,
+        wspace=0.12)
     if save:
-        filename = 'pw_diurnal_geo_{}.png'.format(season)    
+        filename = 'pw_diurnal_geo_{}.png'.format(season)
 #        plt.savefig(savefig_path / filename, bbox_inches='tight')
-        plt.savefig(savefig_path / filename, orientation='landscape')
+        plt.savefig(savefig_path / filename, orientation='portrait')
     return fg
 
 
@@ -2654,11 +2789,14 @@ def plot_long_term_anomalies(path=work_yuval, era5_path=era5_path,
 
 def plot_pw_geographical_segments(df, scope='diurnal', kind=None, fg=None,
                                   marker='o', color='b', ylim=[-2, 3],
-                                  save=False):
+                                  fontsize=14, labelsize=10, zorder=0,
+                                  label=None, save=False):
     import xarray as xr
     import numpy as np
     from matplotlib.ticker import MultipleLocator
     from PW_stations import produce_geo_gnss_solved_stations
+    from matplotlib.ticker import AutoMinorLocator
+    from matplotlib.ticker import FormatStrFormatter
     import seaborn as sns
     scope_dict = {'diurnal': {'xticks': np.arange(0, 23, 3),
                               'xlabel': 'Hour of day [UTC]',
@@ -2691,9 +2829,11 @@ def plot_pw_geographical_segments(df, scope='diurnal', kind=None, fg=None,
                 continue
             else:
                 if kind is None:
-                    df[site].plot(ax=ax, marker=marker, color=color)
+                    df[site].plot(ax=ax, marker=marker, color=color,
+                      zorder=zorder, label=label)
                     ax.xaxis.set_ticks(scope_dict[scope]['xticks'])
-                    ax.grid()
+                    ax.grid(which='major')
+                    ax.grid(axis='y', which='minor', linestyle='--')
                 elif kind == 'violin':
                     df['month'] = df.index.month
                     pal = sns.color_palette("Paired", 12)
@@ -2705,20 +2845,26 @@ def plot_pw_geographical_segments(df, scope='diurnal', kind=None, fg=None,
                     ax.spines["top"].set_visible(False)
                     ax.spines["right"].set_visible(False)
                     ax.spines["bottom"].set_visible(False)
-                    ax.grid(axis='y')
-                ax.tick_params(axis='x', which='major', labelsize=8)
-                ax.set_xlabel(scope_dict[scope]['xlabel'])
+                    ax.grid(axis='y', which='major')
+                    ax.grid(axis='y', which='minor', linestyle='--')
+                ax.tick_params(axis='x', which='major', labelsize=labelsize)
+                ax.set_xlabel(scope_dict[scope]['xlabel'], fontsize=16)
+                ax.yaxis.set_major_locator(plt.MaxNLocator(4))
+                ax.yaxis.set_minor_locator(AutoMinorLocator(2))
+                ax.tick_params(axis='y', which='major', labelsize=labelsize)
+                # set minor y tick labels:
+#                ax.yaxis.set_minor_formatter(FormatStrFormatter("%.2f"))
+#                ax.tick_params(axis='y', which='minor', labelsize=labelsize-8)
                 ax.yaxis.tick_left()
                 if j == 0:
-                    ax.set_ylabel(scope_dict[scope]['ylabel'], fontsize=12)
+                    ax.set_ylabel(scope_dict[scope]['ylabel'], fontsize=16)
 #                elif j == 1:
 #                    if i>5:
 #                        ax.set_ylabel(scope_dict[scope]['ylabel'], fontsize=12)
                 site_label = '{} ({:.0f})'.format(site.upper(), geo.loc[site].alt)
-                ax.text(.15, .87, site_label,
+                ax.text(.17, .87, site_label, fontsize=fontsize,
                         horizontalalignment='center', fontweight='bold',
                         transform=ax.transAxes)
-#                ax.yaxis.set_minor_locator(MultipleLocator(3))
 #                ax.yaxis.grid(
 #                    True,
 #                    which='minor',
