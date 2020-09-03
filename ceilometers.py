@@ -245,7 +245,8 @@ def scatter_plot_pw_mlh(pw, mlh, diurnal=False, ax=None, title=True,
 
 
 def twin_hourly_mean_plot(pw, mlh, month=8, ax=None, title=True,
-                          leg_loc='best', unit='pts', sample_rate=24):
+                          leg_loc='best', unit='pts', sample_rate=24,
+                          fontsize=14):
     from aux_gps import dim_intersection
     import matplotlib.pyplot as plt
     from calendar import month_abbr
@@ -310,16 +311,16 @@ def twin_hourly_mean_plot(pw, mlh, month=8, ax=None, title=True,
 #        ax.legend(pwln + mlhln + pwmln, [pw_label, mlh_label, pwm_label], loc=leg_loc)
 #    else:
     ax.legend(pwln + mlhln, [pw_label, mlh_label], loc=leg_loc)
-    ax.tick_params(axis='y', colors=blue)
-    twin.tick_params(axis='y', colors=red)
-    ax.set_ylabel('PWV [mm]', color=blue)
-    twin.set_ylabel('MLH [m]', color=red)
+    ax.tick_params(axis='y', colors=blue, labelsize=fontsize)
+    twin.tick_params(axis='y', colors=red, labelsize=fontsize)
+    ax.set_ylabel('PWV [mm]', color=blue, fontsize=fontsize)
+    twin.set_ylabel('MLH [m]', color=red, fontsize=fontsize)
     ax.set_xticks([x for x in range(24)])
-    ax.set_xlabel('Hour of day [UTC]')
+    ax.set_xlabel('Hour of day [UTC]', fontsize=fontsize)
     mlh_name = mlh.attrs['station_full_name'].replace('_', '-')
     textstr = '{}, {}'.format(mlh_name, pw.name.upper())
     props = dict(boxstyle='round', facecolor='white', alpha=0.5)
-    ax.text(0.05, 0.95, textstr, transform=ax.transAxes, fontsize=10,
+    ax.text(0.05, 0.95, textstr, transform=ax.transAxes, fontsize=fontsize,
             verticalalignment='top', bbox=props)
     if title:
         ax.set_title('The diurnal cycle of {} Mixing Layer Height and {} GNSS site PWV'.format(mlh_name, pw.name.upper()))
