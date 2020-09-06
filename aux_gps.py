@@ -59,6 +59,8 @@ def run_MLR_diurnal_harmonics(harmonic_dss, season=None, n_max=4, plot=True,
         n_max = harmonic_dss.cpd.max().values.item()
     try:
         field = harmonic_dss.attrs['field']
+        if field == 'PW':
+            field = 'PWV'
     except KeyError:
         field = 'no name'
     name = [x for x in harmonic_dss][0].split('_')[0]
