@@ -209,6 +209,21 @@ def plot_seasonal_histogram(da, dim='sound_time', xlim=None, xlabel=None,
     return axs
 
 
+def plot_two_histograms_comparison(x, y, bins=None, labels=['x', 'y'],
+                                   ax=None, colors=['b', 'r']):
+    import numpy as np
+    import matplotlib.pyplot as plt
+    x_w = np.empty(x.shape)
+    x_w.fill(1/x.shape[0])
+    y_w = np.empty(y.shape)
+    y_w.fill(1/y.shape[0])
+    if ax is None:
+        fig, ax = plt.subplots()
+    ax.hist([x, y], bins=bins, weights=[x_w, y_w], color=colors,
+            label=labels)
+    ax.legend()
+    return ax
+
 def plot_diurnal_wind_hodograph(path=ims_path, station='TEL-AVIV-COAST',
                                 season=None, cmax=None, ax=None):
     import xarray as xr
