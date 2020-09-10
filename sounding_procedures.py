@@ -529,8 +529,45 @@ def convert_wind_speed_direction_to_zonal_meridional(WS, WD, verbose=False):
     return U, V
 
 
-def compare_WW2014_to_Rib(sound_path=sound_path):
-    return    
+def compare_WW2014_to_Rib_all_seasons():
+    return
+
+def compare_WW2014_to_Rib_single_subplot(sound_path=sound_path, season=None,
+                                         times=None,
+                                         ax=None, colors=None,
+                                         plot_type='hist'):
+    from aux_gps import path_glob
+    import xarray as xr
+    from PW_from_gps_figures import plot_two_histograms_comparison
+    ww_file = path_glob(sound_path, 'MLH_WW2014_*.nc')[-1]
+    ww = xr.load_dataarray(ww_file)
+    rib_file = path_glob(sound_path, 'MLH_Rib_*.nc')[-1]
+    rib = xr.load_dataarray(rib_file)
+    ds = ww.to_dataset(name='MLH_WW')
+    ds['MLH_Rib'] = rib
+    if season is not None:
+        ds = ds.sel(sound_time=ds['sound_time.season'] == season)
+        print('selected {} season'.format(season))
+        labels = ['MLH-Rib for {}'.format(season), 'MLH-WW for {}'.format(season)]
+    else:
+        labels = ['MLH-Rib Annual', 'MLH-WW Annual']
+    if times is not None:
+        ds = ds.sel(sound_time=slice(*times))
+        print('selected {}-{} period'.format(*times))
+        title = 'Bet-Dagan radiosonde {}-{} period'.format(*times)
+    else:
+        times = [ds.sound_time.min().dt.year.item(),
+                 ds.sound_time.max().dt.year.item()]
+        title = 'Bet-Dagan radiosonde {}-{} period'.format(*times)
+    if plot_type == 'hist':
+        ax = plot_two_histograms_comparison(ds['MLH_Rib'], ds['MLH_WW'],
+                                            ax=ax, labels=labels,
+                                            colors=colors)
+        ax.legend()
+        ax.set_ylabel('Frequency')
+        ax.set_xlabel('MLH [m]')
+        ax.set_title(title)
+    return ds
 
 
 def calculate_Wang_and_Wang_2014_MLH_all_profiles(sound_path=sound_path,
