@@ -711,11 +711,13 @@ def preprocess_hydro_station(hs_id=48125, hydro_path=hydro_path, max_flow=0,
     return df
 
 
-def add_features_to_hydro_df_produce_positive_events(hdf, fdf,
-                                                     window_size=25,
-                                                     plot=False):
-    """check that the features df (fdf) is 'H' freq and report the number of tide
-    events that fdf is NaN (window_size) hours before the tide event"""
+def add_features_and_produce_X_y(hdf, fdf, window_size=25, seed=42,
+                                 neg_pos_ratio=1, plot=False):
+    """hdf is the hydro events df and fdf is the features df in 'H' freq.
+    This function checks the fdf for window-sized data and hour before
+    each positive event.
+    returns the combined df (hdf+fdf) the positive events labels and features.
+    """
     import pandas as pd
     import numpy as np
     # first add check_window_size of 0's to hdf:
@@ -744,58 +746,79 @@ def add_features_to_hydro_df_produce_positive_events(hdf, fdf,
     adf = pd.DataFrame(avail, index=y_pos.index, columns=feature)
     if plot:
         adf.plot(kind='bar')
-    return adf, df
-    # TODO: #adf[adf.loc[:,['drag','drag1']]==24].dropna()
-    # assemble the positive events dts and their 24 hours window data,
-    # also return df so the negative procedure can continue
-    # also drop event if less than 24 hour before available:
-    feature_pos_list = []
-    ind = []
-    bad_ind = []
-    for i, tide in enumerate(masks):
-        if len(df['tides'][tide]) == (window_size - 1):
-            feature_pos_list.append(df[feature][tide])
-            ind.append(i)
-        else:
-            bad_ind.append(i)
-    # get the indices of the dropped events:
-    # ind = [x[0] for x in pw_pos_list]
-    if bad_ind:
-        if verbose:
-            print('{} are without full 24 hours before record.'.format(
-                ','.join([x for x in df.iloc[bad_ind].index.strftime('%Y-%m-%d:%H:00:00')])))
+    # produce the positive events datetimes for which all the features have
+    # window sized data and hour before the event:
+    good_dts = adf[adf.loc[:, feature] == window_size - 1].dropna().index
+    # y array of positives (1's):
+    y_pos_arr = y_pos.loc[good_dts].values
+    # now produce the feature list itself:
+    good_inds_for_masks = [adf.index.get_loc(x) for x in good_dts]
+    good_masks = [masks[x] for x in good_inds_for_masks]
+    feature_pos_list = [df[feature][x] for x in good_masks]
+    # TODO: add diagnostic mode for how and where are missing features
+    # now get the negative y's with neg_pos_ratio
+    # (set to 1 if the same pos=neg):
+    y_neg_arr = np.zeros(y_pos_arr.shape[0] * neg_pos_ratio)
+    cnt = 0
+    feature_neg_list = []
+    np.random.seed(seed)
+    while cnt < len(y_neg_arr):
+        # get a random date from df:
+        r = np.random.randint(low=0, high=len(df))
+        # slice -24 to 24 range with t=0 being the random date:
+        # update: extend the range to -72 hours to 72 hours:
+        window_factor = 72 / window_size
+        slice_range = int(window_size * window_factor)
+        sliced = df.iloc[r - slice_range:r + slice_range]
+        # if tides inside this date range, continue:
+        if y_pos.loc[good_dts].index in sliced.index:
+            # print('#')
+            continue
+        # now if no 24 items exist, also continue:
+        negative = df.iloc[r - window_size:r - 1][feature].dropna()
+        if len(negative) != (window_size - 1):
+            # print('!')
+            continue
+        # else, append to pw_neg_list and increase cnt
+        feature_neg_list.append(negative)
+        cnt += 1
+        # print(cnt)
+    # lastly, assemble for X, y using np.columnstack:
+    y = np.concatenate([y_pos_arr, y_neg_arr])
+    X = np.stack([[x.values for x in feature_pos_list] +
+                  [x.values for x in feature_neg_list]])
+    X = X.squeeze()
+    return X, y
 
-    return df
 
-
-def preprocess_hydro_pw(pw_station='drag', hs_id=48125, path=work_yuval,
-                        ims_path=ims_path,
-                        anoms=True, hydro_path=hydro_path, max_flow=0,
-                        with_tide_ends=False, pressure_anoms=None,
-                        add_pressure=False):
-    import xarray as xr
-    import pandas as pd
-    import numpy as np
-    from aux_gps import anomalize_xr
-    # df.columns = ['tides']
-    # now load pw:
-    if anoms:
-        pw = xr.load_dataset(path / 'GNSS_PW_anom_hourly_50_hour_dayofyear.nc')[pw_station]
-    else:
-        pw = xr.load_dataset(path / 'GNSS_PW_hourly_thresh_50.nc')[pw_station]
-    if pressure_anoms is not None:
-        pw = pressure_anoms
-    pw_df = pw.dropna('time').to_dataframe()
-    # now align the both dataframes:
-    pw_df['tides'] = df['tides']
-    pw_df['max_flow'] = df['max_flow']
-    if add_pressure:
-        pressure = xr.load_dataset(ims_path / 'IMS_BP_israeli_hourly.nc')['JERUSALEM-CENTRE']
-        pressure = anomalize_xr(pressure, freq='MS')
-        pr_df = pressure.dropna('time').to_dataframe()
-        pw_df['pressure'] = pr_df
-    pw_df = pw_df.fillna(0)
-    return pw_df
+#def preprocess_hydro_pw(pw_station='drag', hs_id=48125, path=work_yuval,
+#                        ims_path=ims_path,
+#                        anoms=True, hydro_path=hydro_path, max_flow=0,
+#                        with_tide_ends=False, pressure_anoms=None,
+#                        add_pressure=False):
+#    import xarray as xr
+#    import pandas as pd
+#    import numpy as np
+#    from aux_gps import anomalize_xr
+#    # df.columns = ['tides']
+#    # now load pw:
+#    if anoms:
+#        pw = xr.load_dataset(path / 'GNSS_PW_anom_hourly_50_hour_dayofyear.nc')[pw_station]
+#    else:
+#        pw = xr.load_dataset(path / 'GNSS_PW_hourly_thresh_50.nc')[pw_station]
+#    if pressure_anoms is not None:
+#        pw = pressure_anoms
+#    pw_df = pw.dropna('time').to_dataframe()
+#    # now align the both dataframes:
+#    pw_df['tides'] = df['tides']
+#    pw_df['max_flow'] = df['max_flow']
+#    if add_pressure:
+#        pressure = xr.load_dataset(ims_path / 'IMS_BP_israeli_hourly.nc')['JERUSALEM-CENTRE']
+#        pressure = anomalize_xr(pressure, freq='MS')
+#        pr_df = pressure.dropna('time').to_dataframe()
+#        pw_df['pressure'] = pr_df
+#    pw_df = pw_df.fillna(0)
+#    return pw_df
 
 
 def loop_over_gnss_hydro_and_aggregate(sel_hydro, pw_anom=False,
