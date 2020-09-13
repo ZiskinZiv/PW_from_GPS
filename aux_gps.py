@@ -633,7 +633,8 @@ def consecutive_runs(arr, num=False):
 
 
 def gantt_chart(ds, fw='bold', ax=None, pe_dict=None, fontsize=14,
-                title='RINEX files availability for the Israeli GNSS stations'):
+                title='RINEX files availability for the Israeli GNSS stations',
+                time_dim='time'):
     import pandas as pd
     import matplotlib.pyplot as plt
     import numpy as np
@@ -647,8 +648,8 @@ def gantt_chart(ds, fw='bold', ax=None, pe_dict=None, fontsize=14,
         fig, ax = plt.subplots(figsize=(20, 6))
     names = [x for x in ds]
     vals = range(1, len(ds) + 1)
-    xmin = pd.to_datetime(ds.time.min().values) - pd.Timedelta(1, unit='W')
-    xmax = pd.to_datetime(ds.time.max().values) + pd.Timedelta(1, unit='W')
+    xmin = pd.to_datetime(ds[time_dim].min().values) - pd.Timedelta(1, unit='W')
+    xmax = pd.to_datetime(ds[time_dim].max().values) + pd.Timedelta(1, unit='W')
     colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 #    dt_min_list = []
 #    dt_max_list = []
