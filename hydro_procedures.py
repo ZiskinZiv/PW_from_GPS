@@ -266,32 +266,74 @@ def ML_main_procedure(X, y, estimator=None, model_name='SVC', features='pwv',
         return model
 
 
-def load_ML_models(path=hydro_path, prefix='CVR', suffix='.pkl'):
+def load_ML_models(path=hydro_path, prefix='CVR', suffix='.pkl', plot=True):
     from aux_gps import path_glob
     import joblib
-    # TODO: add n_splits to filenames to load from
-    # TODO: add plot all models
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    import xarray as xr
+    import pandas as pd
+    cmap = sns.color_palette("colorblind", 3)
     model_files = path_glob(path, '{}_*{}'.format(prefix, suffix))
     model_names = [x.as_posix().split('/')[-1].split('.')
                    [0].split('_')[1] for x in model_files]
-    model_scores = [x.as_posix().split('.')[0].split('_')[-1]
+    model_nsplits = [x.as_posix().split('.')[0].split('_')[-1]
                     for x in model_files]
-    data_names = ['_'.join(x) for x in zip(model_names, model_scores)]
+    model_scores = [x.as_posix().split('.')[0].split('_')[-3]
+                    for x in model_files]
+    data_names = ['_'.join(x) for x in zip(model_names, model_scores, model_nsplits)]
     m_list = [joblib.load(x) for x in model_files]
     model_dict = dict(zip(data_names, m_list))
-    return model_dict
+    # transform model_dict to dataarray:
+    tups = [tuple(x) for x in zip(model_names, model_scores, model_nsplits)]
+    ind = pd.MultiIndex.from_tuples((tups), names=['model', 'scoring', 'splits'])
+    da = xr.DataArray(m_list, dims='dim_0')
+    da['dim_0'] = ind
+    da = da.unstack('dim_0')
+    da['splits'] = da['splits'].astype(int)
+    if plot:
+        X, y = produce_X_y('drag', '48125', neg_pos_ratio=1,
+                           add_pressure=True, return_xarray=True)
+        just_pw = [x for x in X.feature.values if 'pressure' not in x]
+        X_pw = X.sel(feature=just_pw)
+        fg = xr.plot.FacetGrid(
+            da,
+            col='model',
+            row='scoring',
+            sharex=True,
+            sharey=True, figsize=(20, 20))
+        for i in range(fg.axes.shape[0]):  # i is rows
+            for j in range(fg.axes.shape[1]):  # j is cols
+                ax = fg.axes[i, j]
+                modelname = da['model'].isel(model=j).item()
+                scoring = da['scoring'].isel(scoring=i).item()
+                chance_plot = [False, False, True]
+                for k, n in enumerate(da['splits'].values):
+                    name = '{}-{}-{}'.format(modelname, scoring, n)
+                    model = da.isel(model=j, scoring=i).sel(splits=n).item()
+                    title = 'ROC of {} model ({})'.format(modelname, scoring)
+                    plot_many_ROC_curves(model, X_pw, y, name=name,
+                                         color=cmap[k], ax=ax,
+                                         plot_chance=chance_plot[k],
+                                         title=title)
+        fg.fig.tight_layout()
+    return da
 
 
-def plot_many_ROC_curves(model, X, y, name='', color='b', ax=None):
+def plot_many_ROC_curves(model, X, y, name='', color='b', ax=None,
+                         plot_chance=True, title=None):
     from sklearn.metrics import plot_roc_curve
     import matplotlib.pyplot as plt
     if ax is None:
         fig, ax = plt.subplots()
+    if title is None:
+        title = "Receiver operating characteristic"
     viz = plot_roc_curve(model, X, y, color=color, ax=ax, name=name)
-    ax.plot([0, 1], [0, 1], linestyle='--', lw=2, color='r',
-            label='Chance', alpha=.8)
+    if plot_chance:
+        ax.plot([0, 1], [0, 1], linestyle='--', lw=2, color='r',
+                label='Chance', alpha=.8)
     ax.set(xlim=[-0.05, 1.05], ylim=[-0.05, 1.05],
-           title="Receiver operating characteristic")
+           title=title)
     ax.legend(loc="lower right")
     return ax
 
@@ -629,15 +671,14 @@ def plot_Xpos_Xneg_mean_std(X_pos_da, X_neg_da):
     return fig
 
 
-def preprocess_hydro_pw(pw_station='drag', hs_id=48125, path=work_yuval,
-                        ims_path=ims_path,
-                        anoms=True, hydro_path=hydro_path, max_flow=0,
-                        with_tide_ends=False, pressure_anoms=None,
-                        add_pressure=False):
+def preprocess_hydro_station(hs_id=48125, hydro_path=hydro_path, max_flow=0,
+                             with_tide_ends=False):
+    """load hydro station tide events with max_flow and round it up to
+    hourly sample rate, with_tide_ends, puts the value 2 at the datetime of
+    tide end. regardless 1 is the datetime for tide event."""
     import xarray as xr
     import pandas as pd
     import numpy as np
-    from aux_gps import anomalize_xr
     # first load tides data:
     all_tides = xr.open_dataset(hydro_path / 'hydro_tides.nc')
     # get all tides for specific station without nans:
@@ -667,6 +708,75 @@ def preprocess_hydro_pw(pw_station='drag', hs_id=48125, path=work_yuval,
     df = df.fillna(0)
     if with_tide_ends:
         df.loc[ts_end.values, :] = 2
+    return df
+
+
+def add_features_to_hydro_df_produce_positive_events(hdf, fdf,
+                                                     window_size=25,
+                                                     plot=False):
+    """check that the features df (fdf) is 'H' freq and report the number of tide
+    events that fdf is NaN (window_size) hours before the tide event"""
+    import pandas as pd
+    import numpy as np
+    # first add check_window_size of 0's to hdf:
+    st = hdf.index[0] - pd.Timedelta(window_size, unit='H')
+    en = hdf.index[0]
+    dts = pd.date_range(st, en - pd.Timedelta(1, unit='H'), freq='H')
+    mdf = pd.DataFrame(
+        np.zeros(window_size),
+        index=dts,
+        columns=['tides'])
+    hdf = pd.concat([hdf, mdf], axis=0)
+    # check for hourly sample rate and concat:
+    if not pd.infer_freq(fdf.index) == 'H':
+        raise('pls resample fdf to hourly...')
+    feature = [x for x in fdf.columns]
+    df = pd.concat([hdf, fdf], axis=1)
+    # get the tides(positive events) datetimes:
+    y_pos = df[df['tides'] == 1]['tides']
+    # get the datetimes of 24 hours before tide event (not inclusive):
+    y_lag_pos = y_pos.index - pd.Timedelta(window_size, unit='H')
+    masks = [(df.index > start) & (df.index < end)
+             for start, end in zip(y_lag_pos, y_pos.index)]
+    # first check how many full periods of data the feature has:
+    avail = [window_size - 1 - df[feature][masks[x]].isnull().sum()
+             for x in range(len(masks))]
+    adf = pd.DataFrame(avail, index=y_pos.index, columns=feature)
+    if plot:
+        adf.plot(kind='bar')
+    return adf, df
+    # TODO: #adf[adf.loc[:,['drag','drag1']]==24].dropna()
+    # assemble the positive events dts and their 24 hours window data,
+    # also return df so the negative procedure can continue
+    # also drop event if less than 24 hour before available:
+    feature_pos_list = []
+    ind = []
+    bad_ind = []
+    for i, tide in enumerate(masks):
+        if len(df['tides'][tide]) == (window_size - 1):
+            feature_pos_list.append(df[feature][tide])
+            ind.append(i)
+        else:
+            bad_ind.append(i)
+    # get the indices of the dropped events:
+    # ind = [x[0] for x in pw_pos_list]
+    if bad_ind:
+        if verbose:
+            print('{} are without full 24 hours before record.'.format(
+                ','.join([x for x in df.iloc[bad_ind].index.strftime('%Y-%m-%d:%H:00:00')])))
+
+    return df
+
+
+def preprocess_hydro_pw(pw_station='drag', hs_id=48125, path=work_yuval,
+                        ims_path=ims_path,
+                        anoms=True, hydro_path=hydro_path, max_flow=0,
+                        with_tide_ends=False, pressure_anoms=None,
+                        add_pressure=False):
+    import xarray as xr
+    import pandas as pd
+    import numpy as np
+    from aux_gps import anomalize_xr
     # df.columns = ['tides']
     # now load pw:
     if anoms:
