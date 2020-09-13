@@ -838,6 +838,8 @@ def read_his_file(hfile):
 def compare_cloud_H1_to_BD_MLH_and_PW(path=ceil_path, pwv_path=work_yuval,
                                       plot=True):
     import xarray as xr
+    import numpy as np
+    from PW_from_gps_figures import plot_mean_std_count
     # load cloud height 1 from BD ceilometers:
     cld = read_BD_ceilometer_yoav_all_years(path=path)['cloud_H1']
     # load leenes MLH from BD:
@@ -846,14 +848,29 @@ def compare_cloud_H1_to_BD_MLH_and_PW(path=ceil_path, pwv_path=work_yuval,
 #    ds['cloud_H1'] = cld
     # load PWV from TELA daily anomalies:
     ds = cld.to_dataset(name='cloud_H1')
-    pwv = xr.open_dataset(pwv_path / 'GNSS_PW_thresh_50_for_diurnal_analysis_removed_daily.nc')['tela']
+    pwv = xr.open_dataset(
+        pwv_path /
+        'GNSS_PW_thresh_50_for_diurnal_analysis_removed_daily.nc')['tela']
     pwv = pwv.sel(time=slice('2015', '2016'))
     pwv.load()
     df = ds.to_dataframe()
-    df['PWV_TELA']  = pwv.to_dataframe()
+    df['PWV_TELA'] = pwv.to_dataframe()
     df.index.name = 'time'
     # slice for only summer 2015:
     df = df.loc['2015-06':'2015-09']
     if plot:
-        df.plot(ylim=(0, 2000), secondary_y='PWV_TELA')
+        ax = df.plot(ylim=(0, 2000), secondary_y='PWV_TELA')
+        ds = df.to_xarray()
+        axes, ax2 = plot_mean_std_count(ds.dropna('time'), time_reduce='hour', reduce='mean')
+        axes[1].set_xlabel('Hour of Day [UTC]')
+        axes[1].set_ylabel('Points (10-mins sample rate) [#]')
+        axes[0].set_ylabel('Cloud first layer height [m]')
+        axes[0].set_title('June to September 2015')
+        ax2.set_ylabel('TELA PWV anomalies [mm]')
+        axes[0].figure.subplots_adjust(top=0.97,
+                                       bottom=0.056,
+                                       left=0.051,
+                                       right=0.967,
+                                       hspace=0.064,
+                                       wspace=0.2)
     return df
