@@ -188,6 +188,76 @@ def fix_time_axis_ticks(ax, limits=None, margin=15):
     return ax
 
 
+def plot_mean_std_count(da_ts, time_reduce='hour', reduce='mean',
+                        count_factor=1):
+    import xarray as xr
+    import seaborn as sns
+    """plot mean, std and count of Xarray dataarray time-series"""
+    cmap = sns.color_palette("colorblind", 2)
+    time_dim = list(set(da_ts.dims))[0]
+    grp = '{}.{}'.format(time_dim, time_reduce)
+    if reduce == 'mean':
+        mean = da_ts.groupby(grp).mean()
+    elif reduce == 'median':
+        mean = da_ts.groupby(grp).median()
+    std = da_ts.groupby(grp).std()
+    mean_plus_std = mean + std
+    mean_minus_std = mean - std
+    count = da_ts.groupby(grp).count()
+    if isinstance(da_ts, xr.Dataset):
+        dvars = [x for x in da_ts.data_vars.keys()]
+        assert len(dvars) == 2
+        secondary_y = dvars[1]
+    else:
+        secondary_y = None
+    fig, axes = plt.subplots(2, 1, sharex=True, sharey=False, figsize=(15, 15))
+    mean_df = mean.to_dataframe()
+    if secondary_y is not None:
+        axes[0] = mean_df[dvars[0]].plot(
+            ax=axes[0], linewidth=2.0, marker='o', color=cmap[0])
+        ax2mean = mean_df[secondary_y].plot(
+            ax=axes[0],
+            linewidth=2.0,
+            marker='s',
+            color=cmap[1],
+            secondary_y=True)
+        h1, l1 = axes[0].get_legend_handles_labels()
+        h2, l2 = axes[0].right_ax.get_legend_handles_labels()
+        handles = h1 + h2
+        labels = l1 + l2
+        axes[0].legend(handles, labels)
+        axes[0].fill_between(mean_df.index.values,
+                             mean_minus_std[dvars[0]].values,
+                             mean_plus_std[dvars[0]].values,
+                             color=cmap[0],
+                             alpha=0.5)
+        ax2mean.fill_between(
+            mean_df.index.values,
+            mean_minus_std[secondary_y].values,
+            mean_plus_std[secondary_y].values,
+            color=cmap[1],
+            alpha=0.5)
+        ax2mean.tick_params(axis='y', colors=cmap[1])
+    else:
+        mean_df.plot(ax=axes[0], linewidth=2.0, marker='o', color=cmap[0])
+        axes[0].fill_between(
+            mean_df.index.values,
+            mean_minus_std.values,
+            mean_plus_std.values,
+            color=cmap[0],
+            alpha=0.5)
+    axes[0].grid()
+    count_df = count.to_dataframe() / count_factor
+    count_df.plot.bar(ax=axes[1], rot=0)
+    axes[0].xaxis.set_tick_params(labelbottom=True)
+    axes[0].tick_params(axis='y', colors=cmap[0])
+    fig.tight_layout()
+    if secondary_y is not None:
+        return axes, ax2mean
+    else:
+        return axes
+
+
 def plot_seasonal_histogram(da, dim='sound_time', xlim=None, xlabel=None,
                             suptitle=''):
     fig_hist, axs = plt.subplots(2, 2, sharex=False, sharey=True,
