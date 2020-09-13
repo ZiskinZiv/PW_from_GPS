@@ -529,11 +529,29 @@ def convert_wind_speed_direction_to_zonal_meridional(WS, WD, verbose=False):
     return U, V
 
 
-def compare_WW2014_to_Rib_all_seasons():
+def compare_WW2014_to_Rib_all_seasons(path=sound_path, times=None,
+                                      plot_type='hist', bins=25):
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    if plot_type == 'hist' or plot_type == 'scatter':
+        fig_hist, axs = plt.subplots(2, 2, sharex=False, sharey=True,
+                                     figsize=(10, 8))
+        seasons = ['DJF', 'MAM', 'JJA', 'SON']
+        cmap = sns.color_palette("colorblind", 2)
+        for i, ax in enumerate(axs.flatten()):
+            ax = compare_WW2014_to_Rib_single_subplot(sound_path=path,
+                                                      season=seasons[i],
+                                                      times=times, ax=ax,
+                                                      colors=[cmap[0],
+                                                              cmap[1]],
+                                                      plot_type=plot_type,
+                                                      bins=bins)
+        fig_hist.tight_layout()
     return
 
+
 def compare_WW2014_to_Rib_single_subplot(sound_path=sound_path, season=None,
-                                         times=None,
+                                         times=None, bins=None,
                                          ax=None, colors=None,
                                          plot_type='hist'):
     from aux_gps import path_glob
@@ -562,12 +580,22 @@ def compare_WW2014_to_Rib_single_subplot(sound_path=sound_path, season=None,
     if plot_type == 'hist':
         ax = plot_two_histograms_comparison(ds['MLH_Rib'], ds['MLH_WW'],
                                             ax=ax, labels=labels,
-                                            colors=colors)
+                                            colors=colors, bins=bins)
         ax.legend()
         ax.set_ylabel('Frequency')
         ax.set_xlabel('MLH [m]')
         ax.set_title(title)
-    return ds
+    elif plot_type == 'scatter':
+        if ax is None:
+            fig, ax = plt.subplots()
+        ax.scatter(ds['MLH_Rib'].values, ds['MLH_WW'].values)
+        ax.set_xlabel(labels[0].split(' ')[0] + ' [m]')
+        ax.set_ylabel(labels[1].split(' ')[0] + ' [m]')
+        season_label = labels[0].split(' ')[-1]
+        ax.plot(ds['MLH_Rib'], ds['MLH_Rib'], c='r')
+        ax.legend(['y = x', season_label], loc='upper right')
+        ax.set_title(title)
+    return ax
 
 
 def calculate_Wang_and_Wang_2014_MLH_all_profiles(sound_path=sound_path,
