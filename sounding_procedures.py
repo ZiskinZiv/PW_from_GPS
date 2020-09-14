@@ -1247,13 +1247,29 @@ class WaterVapor:
             raise Exception('{} is needed to perform conversion'.format(from_))
         return self
 
+
+def check_sound_time_datetime(dt):
+    import pandas as pd
+    if dt.hour >= 21 and dt.hour <= 23:
+        sound_time = (dt + pd.Timedelta(1, unit='d')).replace(hour=0, minute=0)
+    elif dt.hour >= 0 and dt.hour <= 2:
+        sound_time = dt.replace(hour=0, minute=0)
+    elif dt.hour >= 10 and dt.hour <= 14:
+        sound_time = dt.replace(hour=12, minute=0)
+    else:
+        raise ValueError('{} time is not midnight nor noon'.format(dt))
+    return sound_time
+
+
 def check_sound_time(df):
     import pandas as pd
     # check for validity of radiosonde air time, needs to be
     # in noon or midnight:
     if not df.between_time('22:00', '02:00').empty:
-        sound_time = pd.to_datetime(
-            df.index[0].strftime('%Y-%m-%d')).replace(hour=0, minute=0)
+        if df.index[0].hour <= 23 and df.index[0].hour >= 21:
+            sound_time = pd.to_datetime((df.index[0] + pd.Timedelta(1, unit='d')).strftime('%Y-%m-%d')).replace(hour=0, minute=0)
+        else:
+            sound_time = pd.to_datetime(df.index[0].strftime('%Y-%m-%d')).replace(hour=0, minute=0)
     elif not df.between_time('10:00', '14:00').empty:
         sound_time = pd.to_datetime(
             df.index[0].strftime('%Y-%m-%d')).replace(hour=12, minute=0)
@@ -1998,6 +2014,7 @@ def read_all_radiosonde_data(path, savepath=None, data_type='phys',
     from aux_gps import get_unique_index
     from aux_gps import keep_iqr
     import xarray as xr
+    import pandas as pd
     from aux_gps import save_ncfile
     ds_list = []
     cnt = 0
@@ -2005,44 +2022,41 @@ def read_all_radiosonde_data(path, savepath=None, data_type='phys',
         glob = '*/'
     elif data_type == 'edt':
         glob = '*EDT'
+    elif data_type == 'PTU':
+        glob = '*PTULevels'
+    elif data_type == 'Wind':
+        glob = '*WindLevels'
     for path_file in sorted(path_glob(path, glob)):
         cnt += 1
         if path_file.is_file():
             if data_type == 'phys':
+                date_ff = path_file.as_posix().split('/')[-1].split('_')[-1]
+                date_ff = pd.to_datetime(date_ff, format='%Y%m%d%H')
                 ds = read_one_physical_radiosonde_report(path_file)
             elif data_type == 'edt':
+                date_ff = path_file.as_posix().split('/')[-1].split('_')[0]
+                date_ff = pd.to_datetime(date_ff, format='%Y%m%d%H')
                 ds = read_one_EDT_record(path_file)
+            elif data_type == 'PTU' or data_type == 'Wind':
+                date_ff = path_file.as_posix().split('/')[-1].split('_')[0]
+                date_ff = pd.to_datetime(date_ff, format='%Y%m%d%H')
+                ds = read_one_PTU_Wind_levels_radiosonde_report(path_file)
             if ds is None:
                 print('{} is corrupted...'.format(
                     path_file.as_posix().split('/')[-1]))
                 continue
-            date = ds['sound_time'].dt.strftime('%Y-%m-%d %H:%M').values.item()
+            date = pd.to_datetime(ds['sound_time'].item())
             if verbose:
-                print('reading {} {} radiosonde report'.format(date, data_type))
+                print('reading {} {} radiosonde report'.format(date.strftime('%Y-%m-%d %H:%M'), data_type))
+            try:
+                assert date == date_ff
+            except AssertionError:
+                print('date read: {}'.format(date_ff.strftime('%Y-%m-%d %H:%M')))
             ds_list.append(ds)
-#            # every 600 iters, concat:
-#            if cnt % concat_epoch_num == 0:
-#                cnt_save += 1
-#                print('concatating and saving every {} points'.format(concat_epoch_num))
-#                temp = xr.concat(ds_list, 'sound_time')
-#                save_ncfile(temp, savepath, filename='bet_dagan_temp_{}.nc'.format(cnt_save))
-#                del temp
-#                ds_list = []
-#                print("Collecting...")
-#                n = gc.collect()
-#                print("Number of unreachable objects collected by GC:", n)
-#                print("Uncollectable garbage:", gc.garbage)
-#            if cnt == len(path_glob(path, '*/')):
-#                temp = xr.concat(ds_list, 'sound_time')
-#                save_ncfile(temp, savepath, filename='bet_dagan_temp_{}.nc'.format(cnt_save))
-#                ds_list = []
     dss = xr.concat(ds_list, 'sound_time')
     print('concatenating...')
-#    tempfiles = path_glob(savepath, 'bet_dagan_temp*.nc')
-#    temp_list = [xr.open_dataset(x) for x in tempfiles]
-#    dss = xr.concat(temp_list, 'sound_time')
     dss = dss.sortby('sound_time')
-    dss = get_unique_index(dss, 'sound_time', verbose=True)
+#     dss = get_unique_index(dss, 'sound_time', verbose=True)
     # filter iqr:
     da_list = []
     for da in dss.data_vars.values():
@@ -2065,6 +2079,134 @@ def read_all_radiosonde_data(path, savepath=None, data_type='phys',
 #        [x.unlink() for x in tempfiles]
     print('Done!')
     return dss
+
+
+def read_one_PTU_Wind_levels_radiosonde_report(path_file, verbose=False):
+    """read one (12 or 00) PTU levels bet dagan radiosonde reports and return a df
+    containing time series, PW for the whole sounding and time span of the
+    sounding"""
+    # if we save the index with datetimes , when we concatenate on sound_time
+    # the memory crashes, so we save the index with seconds from launch
+    import pandas as pd
+    from aux_gps import line_and_num_for_phrase_in_file
+    from aux_gps import remove_duplicate_spaces_in_string
+    from scipy.integrate import cumtrapz
+    import xarray as xr
+    # first determine if PTU or Wind:
+    _, type_str = line_and_num_for_phrase_in_file('Levels', path_file)
+    if 'PTULevels' in type_str:
+        report_type = 'ptu'
+        cols = [
+            'min',
+            'sec',
+            'Pressure',
+            'Height',
+            'Temperature',
+            'RH',
+            'Dewpt',
+            'Significance',
+            'flags']
+    elif 'WindLevels' in type_str:
+        report_type = 'wind'
+        cols = [
+            'min',
+            'sec',
+            'Pressure',
+            'Height',
+            'dum',
+            'Speed',
+            'Direction',
+            'Significance',
+            'flags']
+    else:
+        raise('Could not determine if PTU or Wind')
+    # then, read to df:
+    skip_to_line, _ = line_and_num_for_phrase_in_file(
+        'min  s', path_file)
+    skip_to_line += 2
+    df = pd.read_csv(
+        path_file,
+        skiprows=skip_to_line,
+        encoding="windows-1252",
+        delim_whitespace=True, names=cols, na_values=['///', '//////'])
+    # get cloud code:
+    _, cld_str = line_and_num_for_phrase_in_file('Clouds', path_file)
+    cld_code = cld_str.split(':')[-1].split(' ')[-1].split('\n')[0]
+    # get sounding_type:
+    _, snd_str = line_and_num_for_phrase_in_file('Sounding type ', path_file)
+    if snd_str is None:
+        _, snd_str = line_and_num_for_phrase_in_file('RS type ', path_file)
+    snd_type = snd_str.rstrip().split(':')[-1].lstrip()
+    # get datetime:
+    _, dt_str = line_and_num_for_phrase_in_file('Started', path_file)
+    dt_str = remove_duplicate_spaces_in_string(dt_str).rstrip().split(' ')
+    dt = '{}-{}-{} {}'.format(dt_str[-5], dt_str[-4], dt_str[-3], dt_str[-2])
+    dt = pd.to_datetime(dt, format='%d-%B-%Y %H:%M')
+    # validate sound_time:
+    sound_time = check_sound_time_datetime(dt)
+    dt_col = pd.to_timedelta(df['min'], unit='min') + pd.to_timedelta(df['sec'], unit='s')
+    df['time'] = dt_col.dt.total_seconds()
+    df = df.set_index('time')
+#    # validate sound_time:
+#    sound_time = check_sound_time(df)
+    if report_type == 'ptu':
+        df = df[['Pressure', 'Height', 'Temperature', 'RH', 'Dewpt']]
+        units = ['hPa', 'm', 'degC', '%', 'degC']
+        df.columns = ['P', 'Height', 'T', 'RH', 'Dewpt']
+    elif report_type == 'wind':
+        df = df[['Pressure', 'Height', 'Speed', 'Direction']]
+        units = ['hpa', 'm', 'm/s', 'deg']
+        df.columns = ['P', 'Height', 'WS', 'WD']
+    # check for duplicate index entries (warning: could be bad profile):
+    n_dup = df.index.duplicated().sum()
+    if n_dup > 0:
+        df = df[~df.index.duplicated(keep='last')]
+        print('found {} duplicate times in {}'.format(n_dup, sound_time.strftime('%Y-%m-%d %H:%M')))
+    # convert to dataset, add units and attrs:
+    ds = df.to_xarray()
+    for i, da in enumerate(ds):
+        ds[da].attrs['units'] = units[i]
+    ds['sound_time'] = sound_time
+    ds['cloud_code'] = cld_code
+    ds['sonde_type'] = snd_type
+    # get the minimum and maximum times:
+    ds['min_time'] = dt + pd.Timedelta(df.index[0], unit='s')
+    ds['max_time'] = ds['min_time'] + pd.Timedelta(df.index[-1], unit='s')
+    # caclculate different variables:
+    if report_type == 'ptu':
+        ds['MR'] = wrap_xr_metpy_mixing_ratio(ds['P'], ds['T'], ds['RH'])
+        ds['MR'].attrs['long_name'] = 'Water vapor mass mixing ratio'
+        ds['Rho'] = wrap_xr_metpy_density(ds['P'], ds['T'], ds['MR'])
+        ds['Rho'].attrs['long_name'] = 'Air density'
+        ds['Q'] = wrap_xr_metpy_specific_humidity(ds['MR'])
+        ds['Q'].attrs['long_name'] = 'Specific humidity'
+        ds['VP'] = wrap_xr_metpy_vapor_pressure(ds['P'], ds['MR'])
+        ds['VP'].attrs['long_name'] = 'Water vapor partial pressure'
+        ds['Rho_wv'] = calculate_absolute_humidity_from_partial_pressure(
+            ds['VP'], ds['T'])
+        pw = cumtrapz(ds['Q']*ds['Rho'], ds['Height'], initial=0)
+        ds['PW'] = xr.DataArray(pw, dims=['time'])
+        ds['PW'].attrs['units'] = 'mm'
+        ds['PW'].attrs['long_name'] = 'Precipitable water'
+        tm = calculate_tm_via_trapz_height(ds['VP'], ds['T'], ds['Height'])
+    #    tm, unit = calculate_tm_via_pressure_sum(ds['VP'], ds['T'], ds['Rho'], ds['P'],
+    #                                             cumulative=True, verbose=False)
+        ds['VPT'] = wrap_xr_metpy_virtual_potential_temperature(ds['P'], ds['T'],
+                                                                ds['MR'])
+        ds['PT'] = wrap_xr_metpy_potential_temperature(ds['P'], ds['T'])
+        ds['VT'] = wrap_xr_metpy_virtual_temperature(ds['T'], ds['MR'])
+        ds['N'] = calculate_atmospheric_refractivity(ds['P'], ds['T'], ds['VP'])
+        ds['Tm'] = xr.DataArray(tm, dims=['time'])
+        ds['Tm'].attrs['units'] = 'K'
+        ds['Tm'].attrs['long_name'] = 'Water vapor mean air temperature'
+        ds['Ts'] = ds['T'].dropna('time').values[0] + 273.15
+        ds['Ts'].attrs['units'] = 'K'
+        ds['Ts'].attrs['long_name'] = 'Surface temperature'
+    elif report_type == 'wind':
+        U, V = convert_wind_speed_direction_to_zonal_meridional(ds['WS'], ds['WD'])
+        ds['U'] = U
+        ds['V'] = V
+    return ds
 
 
 def read_one_physical_radiosonde_report(path_file, verbose=False):
