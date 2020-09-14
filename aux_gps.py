@@ -249,6 +249,14 @@ def anomalize_xr(da_ts, freq='D'):  # i.e., like deseason
     return da_anoms
 
 
+def line_and_num_for_phrase_in_file(phrase='the dog barked', filename='file.txt'):
+    with open(filename, 'r') as f:
+        for (i, line) in enumerate(f):
+            if phrase in line:
+                return i, line
+    return None, None
+
+
 def grab_n_consecutive_epochs_from_ts(da_ts, sep='nan', n=10):
     """grabs n consecutive epochs from time series (xarray dataarrays)
     and return list of either dataarrays"""
