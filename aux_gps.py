@@ -448,7 +448,10 @@ def save_ncfile(xarray, savepath, filename='temp.nc', engine=None, dtype=None,
                 fillvalue=None):
     import xarray as xr
     print('saving {} to {}'.format(filename, savepath))
-    comp = dict(zlib=True, complevel=9, dtype=dtype, _FillValue=fillvalue)  # best compression
+    if dtype is None:
+        comp = dict(zlib=True, complevel=9, _FillValue=fillvalue)  # best compression
+    else:
+        comp = dict(zlib=True, complevel=9, dtype=dtype, _FillValue=fillvalue)  # best compression
     if isinstance(xarray, xr.Dataset):
         encoding = {var: comp for var in xarray}
     elif isinstance(xarray, xr.DataArray):
