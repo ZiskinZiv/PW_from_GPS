@@ -12,8 +12,27 @@ era5_path = work_yuval / 'ERA5'
 edt_path = sound_path / 'edt'
 
 
+def load_field_1d_from_radiosonde(
+        path=sound_path, field='Tm', data_type='phys', reduce='min', dim='time', plot=True):
+    from aux_gps import plot_tmseries_xarray
+    from aux_gps import path_glob
+    import xarray as xr
+    file = path_glob(path, 'bet_dagan_{}_sounding_*.nc'.format(data_type))[-1]
+    ds = xr.open_dataset(file)
+    da = ds[field]
+    if reduce is not None:
+        if reduce == 'min':
+            da = da.min(dim)
+        elif reduce == 'max':
+            da = da.max(dim)
+    da = da.reset_coords(drop=True)
+    if plot:
+        plot_tmseries_xarray(da)
+    return da
+
+
 def get_field_from_radiosonde(path=sound_path, field='Tm', data_type='phys',
-                              reduce='min', dim='Height',
+                              reduce='min', dim='time',
                               times=['2007', '2019'], plot=True):
     import xarray as xr
     from aux_gps import get_unique_index
@@ -504,6 +523,15 @@ def calculate_atmospheric_refractivity(P, T, VP, verbose=False):
 def convert_wind_speed_direction_to_zonal_meridional(WS, WD, verbose=False):
     # make sure it is right!
     import numpy as np
+    # drop nans from WS and WD:
+    dim = list(set(WS.dims))[0]
+    assert dim == list(set(WD.dims))[0]
+    DS = WS.to_dataset(name='WS')
+    DS['WD'] = WD
+    DS = DS.dropna(dim)
+    WS = DS['WS']
+    WD = DS['WD']
+    assert WS.size == WD.size
     WD = 270 - WD
     try:
         WS_unit = WS.attrs['units']
@@ -1251,11 +1279,18 @@ class WaterVapor:
 def check_sound_time_datetime(dt):
     import pandas as pd
     if dt.hour >= 21 and dt.hour <= 23:
-        sound_time = (dt + pd.Timedelta(1, unit='d')).replace(hour=0, minute=0)
+        sound_time = (
+            dt +
+            pd.Timedelta(
+                1,
+                unit='d')).replace(
+            hour=0,
+            minute=0,
+            second=0)
     elif dt.hour >= 0 and dt.hour <= 2:
-        sound_time = dt.replace(hour=0, minute=0)
-    elif dt.hour >= 10 and dt.hour <= 14:
-        sound_time = dt.replace(hour=12, minute=0)
+        sound_time = dt.replace(hour=0, minute=0, second=0)
+    elif dt.hour >= 9 and dt.hour <= 14:
+        sound_time = dt.replace(hour=12, minute=0, second=0)
     else:
         raise ValueError('{} time is not midnight nor noon'.format(dt))
     return sound_time
@@ -1381,7 +1416,7 @@ def read_one_EDT_record(filepath):
     import pandas as pd
     import numpy as np
     import xarray as xr
-    from aux_gps import get_unique_index
+#    from aux_gps import get_unique_index
     from aux_gps import remove_duplicate_spaces_in_string
     from scipy.integrate import cumtrapz
     with open(filepath) as f:
@@ -1440,37 +1475,41 @@ def read_one_EDT_record(filepath):
     # datetime index:
     # Time = data['time'].copy(deep=True)
     data['time'] = pd.to_timedelta(data['time'], errors='coerce', unit='sec')
-    data['time'] += meta['launch_time']
+#    data['time'] += meta['launch_time']
+    data['time'] = data['time'].dt.total_seconds()
     data.set_index('time', inplace=True)
-    sound_time = check_sound_time(data)
-    # now index as height:
-    data.set_index('Height', inplace=True)
+#    sound_time = check_sound_time(data)
+    sound_time = check_sound_time_datetime(meta['launch_time'])
+#    # now index as height:
+#    data.set_index('Height', inplace=True)
     # data['Time'] = Time
     data = data.astype('float')
     data.index = data.index.astype('float')
     # to xarray:
     ds = data.to_xarray()
-    ds = ds.dropna('Height')
-    ds = ds.sortby('Height')
-    ds = get_unique_index(ds, 'Height')
+#    return ds
+#    ds = ds.dropna('Height')
+    ds = ds.sortby('time')
+#    ds = get_unique_index(ds, 'Height')
     # interpolate:
-    h = np.linspace(31, 25000, 5000)
+    new_time = np.arange(0, float(int(ds.time.max())))
     ds_list = []
     for da in ds.data_vars.values():
         # dropna in all vars:
-        dropped = da.dropna('Height')
+        dropped = da.dropna('time')
         # if some data remain, interpolate:
         if dropped.size > 0:
-            interpolated = dropped.interp(coords={'Height': h}, method='cubic',
+            interpolated = dropped.interp(coords={'time': new_time}, method='cubic',
                                           kwargs={'fill_value': np.nan})
             ds_list.append(interpolated)
         # if nothing left, create new ones with nans:
         else:
-            nan_da = np.nan * ds['Height']
+            nan_da = np.nan * ds['time']
             nan_da.name = dropped.name
             ds_list.append(dropped)
     ds = xr.merge(ds_list)
     ds['Height'].attrs['units'] = 'm'
+    ds['time'].attrs['units'] = 'sec'
     ds.attrs['station'] = meta['station']
     # copy unit attrs:
     for key, val in units_dict.items():
@@ -1495,10 +1534,6 @@ def read_one_EDT_record(filepath):
                   'WS': 'Wind speed', 'lon': 'Longitude', 'lat': 'Latitude'}
     for var, long_name in long_names.items():
         ds[var].attrs['long_name'] = long_name
-    # ds['Dewpt'] = wrap_xr_metpy_dewpoint(ds['T'], ds['RH'])
-    # ds['Dewpt'].attrs['long_name'] = 'Dew point'
-    # ds['MR'] = wrap_xr_metpy_mixing_ratio(ds['P'], ds['T'], ds['RH'])
-    # ds['MR'].attrs['long_name'] = 'Water vapor mass mixing ratio'
     # fix MR:
     ds['MR'] /= 1000.0
     ds['Rho'] = wrap_xr_metpy_density(ds['P'], ds['T'], ds['MR'])
@@ -1510,12 +1545,12 @@ def read_one_EDT_record(filepath):
     ds['Rho_wv'] = calculate_absolute_humidity_from_partial_pressure(
         ds['VP'], ds['T'])
     pw = cumtrapz((ds['Q']*ds['Rho']).fillna(0), ds['Height'], initial=0)
-    ds['PW'] = xr.DataArray(pw, dims=['Height'])
+    ds['PW'] = xr.DataArray(pw, dims=['time'])
     ds['PW'].attrs['units'] = 'mm'
     ds['PW'].attrs['long_name'] = 'Precipitable water'
     tm = calculate_tm_via_trapz_height(
-        ds['VP'].bfill('Height'),
-        ds['T'].bfill('Height'),
+        ds['VP'],
+        ds['T'],
         ds['Height'])
     ds['VPT'] = wrap_xr_metpy_virtual_potential_temperature(ds['P'], ds['T'],
                                                             ds['MR'])
@@ -1525,10 +1560,10 @@ def read_one_EDT_record(filepath):
     ds['U'] = U
     ds['V'] = V
     ds['N'] = calculate_atmospheric_refractivity(ds['P'], ds['T'], ds['VP'])
-    ds['Tm'] = xr.DataArray(tm, dims=['Height'])
+    ds['Tm'] = xr.DataArray(tm, dims=['time'])
     ds['Tm'].attrs['units'] = 'K'
     ds['Tm'].attrs['long_name'] = 'Water vapor mean air temperature'
-    ds['Ts'] = ds['T'].dropna('Height').values[0] + 273.15
+    ds['Ts'] = ds['T'].dropna('time').values[0] + 273.15
     ds['Ts'].attrs['units'] = 'K'
     ds['Ts'].attrs['long_name'] = 'Surface temperature'
     ds['sound_time'] = sound_time
@@ -2042,22 +2077,20 @@ def read_all_radiosonde_data(path, savepath=None, data_type='phys',
                 date_ff = pd.to_datetime(date_ff, format='%Y%m%d%H')
                 ds = read_one_PTU_Wind_levels_radiosonde_report(path_file)
             if ds is None:
-                print('{} is corrupted...'.format(
+                print('{} is corrupted or skipped...'.format(
                     path_file.as_posix().split('/')[-1]))
                 continue
             date = pd.to_datetime(ds['sound_time'].item())
             if verbose:
                 print('reading {} {} radiosonde report'.format(date.strftime('%Y-%m-%d %H:%M'), data_type))
-            try:
-                assert date == date_ff
-            except AssertionError:
-                print('date read: {}'.format(date_ff.strftime('%Y-%m-%d %H:%M')))
+            assert date == date_ff
             ds_list.append(ds)
     dss = xr.concat(ds_list, 'sound_time')
     print('concatenating...')
     dss = dss.sortby('sound_time')
 #     dss = get_unique_index(dss, 'sound_time', verbose=True)
     # filter iqr:
+    print('filetring...')
     da_list = []
     for da in dss.data_vars.values():
         if len(da.dims) == 1:
@@ -2071,14 +2104,49 @@ def read_all_radiosonde_data(path, savepath=None, data_type='phys',
         yr_min = dss.sound_time.min().dt.year.item()
         yr_max = dss.sound_time.max().dt.year.item()
         filename = 'bet_dagan_{}_sounding_{}-{}.nc'.format(data_type, yr_min, yr_max)
-        print('saving {} to {}'.format(filename, savepath))
-        comp = dict(zlib=True, complevel=9)  # best compression
-        encoding = {var: comp for var in dss}
-        dss.to_netcdf(savepath / filename, 'w', encoding=encoding)
+        save_ncfile(dss, savepath, filename)
 #        print('clearing temp files...')
 #        [x.unlink() for x in tempfiles]
     print('Done!')
     return dss
+
+
+def combine_PTU_and_Wind_levels_radiosonde(sound_path=sound_path,
+                                           savepath=None,
+                                           drop_period=['2016-11-17',
+                                                        '2016-12-31']):
+    from aux_gps import path_glob
+    from aux_gps import save_ncfile
+    import xarray as xr
+    import pandas as pd
+    ptu_file = path_glob(sound_path, 'bet_dagan_PTU_sounding*.nc')[-1]
+    wind_file = path_glob(sound_path, 'bet_dagan_Wind_sounding*.nc')[-1]
+    ptu = xr.load_dataset(ptu_file)
+    wind = xr.load_dataset(wind_file)
+    ptu['WS'] = wind['WS']
+    ptu['WD'] = wind['WD']
+    ptu['U'] = wind['U']
+    ptu['V'] = wind['V']
+    ptu['time'].attrs['units'] = 'sec'
+    ptu.attrs['lat'] = 32.01
+    ptu.attrs['lon'] = 34.81
+    if drop_period is not None:
+        first_date = pd.to_datetime(drop_period[0])
+        last_date = pd.to_datetime(drop_period[1])
+        mask = ~(pd.to_datetime(ptu['sound_time'].values) >= first_date) & (
+            pd.to_datetime(ptu['sound_time'].values) <= last_date)
+        ptu = ptu.loc[{'sound_time': mask}]
+        msg = 'dropped datetimes {} to {}'.format(
+                drop_period[0],
+                drop_period[1])
+        print(msg)
+        ptu.attrs['operation'] = msg
+    if savepath is not None:
+        yr_min = ptu.sound_time.min().dt.year.item()
+        yr_max = ptu.sound_time.max().dt.year.item()
+        save_ncfile(
+            ptu, savepath, 'bet_dagan_PTU_Wind_sounding_{}-{}.nc'.format(yr_min, yr_max))
+    return ptu
 
 
 def read_one_PTU_Wind_levels_radiosonde_report(path_file, verbose=False):
@@ -2128,7 +2196,8 @@ def read_one_PTU_Wind_levels_radiosonde_report(path_file, verbose=False):
         path_file,
         skiprows=skip_to_line,
         encoding="windows-1252",
-        delim_whitespace=True, names=cols, na_values=['///', '//////'])
+        delim_whitespace=True, names=cols, na_values=['///', '/////',
+                                                      '//////', 'dfv'])
     # get cloud code:
     _, cld_str = line_and_num_for_phrase_in_file('Clouds', path_file)
     cld_code = cld_str.split(':')[-1].split(' ')[-1].split('\n')[0]
@@ -2157,6 +2226,8 @@ def read_one_PTU_Wind_levels_radiosonde_report(path_file, verbose=False):
         df = df[['Pressure', 'Height', 'Speed', 'Direction']]
         units = ['hpa', 'm', 'm/s', 'deg']
         df.columns = ['P', 'Height', 'WS', 'WD']
+        df['WD'] = df['WD'].astype(float)
+        df = df[df['WS'] >= 0]
     # check for duplicate index entries (warning: could be bad profile):
     n_dup = df.index.duplicated().sum()
     if n_dup > 0:
@@ -2209,42 +2280,42 @@ def read_one_PTU_Wind_levels_radiosonde_report(path_file, verbose=False):
     return ds
 
 
-def read_one_physical_radiosonde_report(path_file, verbose=False):
+def read_one_physical_radiosonde_report(path_file, skip_from_year=2014,
+                                        verbose=False):
     """read one(12 or 00) physical bet dagan radiosonde reports and return a df
     containing time series, PW for the whole sounding and time span of the
     sounding"""
-    import numpy as np
-    from aux_gps import get_unique_index
+#    import numpy as np
+#    from aux_gps import get_unique_index
     import pandas as pd
     import xarray as xr
     from scipy.integrate import cumtrapz
 
-    def df_to_ds_and_interpolate(df, h='Height'):
-        import numpy as np
-        # set index the height, and transform to xarray:
-        df = df.set_index(h).squeeze()
-        ds = df.to_xarray()
-        ds = ds.sortby(h)
-        ds = get_unique_index(ds, dim=h)
-        # do cubic interpolation:
-        height = np.linspace(35, 25000, 500)
-        ds_list = []
-        for da in ds.data_vars.values():
-            # dropna in all vars:
-            dropped = da.dropna(h)
-            # if some data remain, interpolate:
-            if dropped.size > 0:
-                ds_list.append(dropped.interp({h: height}, method='cubic'))
-            # if nothing left, create new ones with nans:
-            else:
-                nan_da = np.nan * ds[h]
-                nan_da.name = dropped.name
-                ds_list.append(dropped)
-        ds = xr.merge(ds_list)
-        ds.attrs['operation'] = 'all physical fields were cubic interpolated to {}'.format(h)
-        return ds
+#    def df_to_ds_and_interpolate(df, h='Height'):
+#        import numpy as np
+#        # set index the height, and transform to xarray:
+#        df = df.set_index(h).squeeze()
+#        ds = df.to_xarray()
+#        ds = ds.sortby(h)
+#        ds = get_unique_index(ds, dim=h)
+#        # do cubic interpolation:
+#        height = np.linspace(35, 25000, 500)
+#        ds_list = []
+#        for da in ds.data_vars.values():
+#            # dropna in all vars:
+#            dropped = da.dropna(h)
+#            # if some data remain, interpolate:
+#            if dropped.size > 0:
+#                ds_list.append(dropped.interp({h: height}, method='cubic'))
+#            # if nothing left, create new ones with nans:
+#            else:
+#                nan_da = np.nan * ds[h]
+#                nan_da.name = dropped.name
+#                ds_list.append(dropped)
+#        ds = xr.merge(ds_list)
+#        ds.attrs['operation'] = 'all physical fields were cubic interpolated to {}'.format(h)
+#        return ds
 
-    # TODO: recheck units, add to df and to units_dict
     df = pd.read_csv(
          path_file,
          header=None,
@@ -2285,14 +2356,17 @@ def read_one_physical_radiosonde_report(path_file, verbose=False):
     # filter all entries that the first col is not null:
     df = df[~df.loc[:, 'Time'].isnull()]
     # get the minimum and maximum times:
-    min_time = dt
     max_time = dt + df['Time'].iloc[-1]
-    # reindex with datetime:
-    df['datetime_index'] = df['Time'] + dt
-    df = df.set_index('datetime_index')
-    sound_time = check_sound_time(df)
-    # now, convert Time to decimal seconds:
-    df['Time'] = df['Time'] / np.timedelta64(1, 's')
+    # reindex with total_seconds:
+    total_sec = df['Time'].dt.total_seconds()
+#    df['datetime_index'] = df['Time'] + dt
+    df = df.set_index(total_sec)
+    df.index.name = 'time'
+    sound_time = check_sound_time_datetime(dt)
+    if sound_time.year >= skip_from_year:
+        return None
+#    # now, convert Time to decimal seconds:
+#    df['Time'] = df['Time'] / np.timedelta64(1, 's')
     # check for EL and AZ that are not empty and WD and WS that are NaN's are
     # switch them:
     WD_empty = df['WD'].isnull().all()
@@ -2302,7 +2376,10 @@ def read_one_physical_radiosonde_report(path_file, verbose=False):
     if WD_empty and WS_empty and not EL_empty and not AZ_empty:
         print('switching AZ, EL and WS, WD cols...')
         df = df.rename(columns={'EL':'WD','WD':'EL', 'AZ': 'WS', 'WS': 'AZ'})
-    ds = df_to_ds_and_interpolate(df)
+    df.drop('Time', axis=1, inplace=True)
+    ds = df.to_xarray()
+    ds['time'].attrs['units'] = 'sec'
+#    ds = df_to_ds_and_interpolate(df)
     # add meta data:
     for name in ds.data_vars:
         ds[name].attrs['units'] = radio_units[name]
@@ -2320,7 +2397,7 @@ def read_one_physical_radiosonde_report(path_file, verbose=False):
     ds['Rho_wv'] = calculate_absolute_humidity_from_partial_pressure(
         ds['VP'], ds['T'])
     pw = cumtrapz(ds['Q']*ds['Rho'], ds['Height'], initial=0)
-    ds['PW'] = xr.DataArray(pw, dims=['Height'])
+    ds['PW'] = xr.DataArray(pw, dims=['time'])
     ds['PW'].attrs['units'] = 'mm'
     ds['PW'].attrs['long_name'] = 'Precipitable water'
     tm = calculate_tm_via_trapz_height(ds['VP'], ds['T'], ds['Height'])
@@ -2334,30 +2411,21 @@ def read_one_physical_radiosonde_report(path_file, verbose=False):
     ds['U'] = U
     ds['V'] = V
     ds['N'] = calculate_atmospheric_refractivity(ds['P'], ds['T'], ds['VP'])
-    ds['Tm'] = xr.DataArray(tm, dims=['Height'])
+    ds['Tm'] = xr.DataArray(tm, dims=['time'])
     ds['Tm'].attrs['units'] = 'K'
     ds['Tm'].attrs['long_name'] = 'Water vapor mean air temperature'
-    ds['Ts'] = ds['T'].dropna('Height').values[0] + 273.15
+    ds['Ts'] = ds['T'].dropna('time').values[0] + 273.15
     ds['Ts'].attrs['units'] = 'K'
     ds['Ts'].attrs['long_name'] = 'Surface temperature'
-#        df_extra['sound_time'] = sound_time
     ds['sound_time'] = sound_time
-    ds['min_time'] = min_time
+    ds['min_time'] = dt
     ds['max_time'] = max_time
     ds['cloud_code'] = cloud_code
     ds['sonde_type'] = sonde_type
-#        df_extra = df_extra.set_index('sound_time')
-#        ds_extra = df_extra.to_xarray()
-#        # add meta date to new fields:
-#        for name in ds_extra.data_vars:
-#            if 'time' not in name:
-#                ds_extra[name].attrs['units'] = meta['units_extra'][name]
-    # finally, merge all ds:
-#        ds = xr.merge([ds, ds_extra])
     ds.attrs['station_number'] = station_num
     ds.attrs['lat'] = 32.01
-    ds.attrs['lat'] = 34.81
-    ds.attrs['alt'] = 31.0
+    ds.attrs['lon'] = 34.81
+#    ds.attrs['alt'] = 31.0
     ds['Height'].attrs['units'] = 'm'
     return ds
 
