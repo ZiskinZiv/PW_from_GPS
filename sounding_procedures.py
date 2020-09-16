@@ -17,15 +17,28 @@ def load_field_1d_from_radiosonde(
     from aux_gps import plot_tmseries_xarray
     from aux_gps import path_glob
     import xarray as xr
-    file = path_glob(path, 'bet_dagan_{}_sounding_*.nc'.format(data_type))[-1]
-    ds = xr.open_dataset(file)
-    da = ds[field]
-    if reduce is not None:
-        if reduce == 'min':
-            da = da.min(dim)
-        elif reduce == 'max':
-            da = da.max(dim)
-    da = da.reset_coords(drop=True)
+
+    def reduce_da(da):
+        if reduce is not None:
+            if reduce == 'min':
+                da = da.min(dim)
+            elif reduce == 'max':
+                da = da.max(dim)
+        da = da.reset_coords(drop=True)
+        return da
+
+    if data_type is not None:
+        file = path_glob(
+            path, 'bet_dagan_{}_sounding_*.nc'.format(data_type))[-1]
+        da = xr.open_dataset(file)[field]
+        da = reduce_da(da)
+    else:
+        files = path_glob(path, 'bet_dagan_*_sounding_*.nc')
+        assert len(files) == 3
+        ds = [xr.open_dataset(x)[field] for x in files]
+        da = xr.concat(ds, 'sound_time')
+        da = da.sortby('sound_time')
+        da = reduce_da(da)
     if plot:
         plot_tmseries_xarray(da)
     return da
@@ -1412,7 +1425,7 @@ def check_sound_time(df):
 #    return tpw, chosen_method
 
 
-def read_one_EDT_record(filepath):
+def read_one_EDT_record(filepath, year=None):
     import pandas as pd
     import numpy as np
     import xarray as xr
@@ -1449,6 +1462,11 @@ def read_one_EDT_record(filepath):
             meta_header[-1] = meta_header[-1].split(':')[0]
         if i >42:
             break
+    sound_time = check_sound_time_datetime(meta['launch_time'])
+    # select only one year:
+    if year is not None:
+        if sound_time.year != year:
+            return None
     # read units table:        global mixratio, rho, rho_wv, height, press, g
 
     table = pd.read_fwf(
@@ -1479,7 +1497,6 @@ def read_one_EDT_record(filepath):
     data['time'] = data['time'].dt.total_seconds()
     data.set_index('time', inplace=True)
 #    sound_time = check_sound_time(data)
-    sound_time = check_sound_time_datetime(meta['launch_time'])
 #    # now index as height:
 #    data.set_index('Height', inplace=True)
     # data['Time'] = Time
@@ -1567,8 +1584,9 @@ def read_one_EDT_record(filepath):
     ds['Ts'].attrs['units'] = 'K'
     ds['Ts'].attrs['long_name'] = 'Surface temperature'
     ds['sound_time'] = sound_time
-    ds['launch_time'] = meta['launch_time']
-    ds['RS_type'] = meta['RS_type']
+    ds['min_time'] = meta['launch_time']
+    ds['max_time'] = ds['min_time'] + pd.Timedelta(ds['time'][-1].item(), unit='s')
+    ds['sonde_type'] = meta['RS_type']
     ds['RS_number'] = meta['RS_number']
     ds['termination_reason'] = meta['termination_reason']
     return ds
@@ -2044,9 +2062,9 @@ def move_bet_dagan_physical_to_main_path(bet_dagan_path):
 
 
 def read_all_radiosonde_data(path, savepath=None, data_type='phys',
-                             verbose=True):
+                             verbose=True, year=None):
     from aux_gps import path_glob
-    from aux_gps import get_unique_index
+#    from aux_gps import get_unique_index
     from aux_gps import keep_iqr
     import xarray as xr
     import pandas as pd
@@ -2071,7 +2089,7 @@ def read_all_radiosonde_data(path, savepath=None, data_type='phys',
             elif data_type == 'edt':
                 date_ff = path_file.as_posix().split('/')[-1].split('_')[0]
                 date_ff = pd.to_datetime(date_ff, format='%Y%m%d%H')
-                ds = read_one_EDT_record(path_file)
+                ds = read_one_EDT_record(path_file, year=year)
             elif data_type == 'PTU' or data_type == 'Wind':
                 date_ff = path_file.as_posix().split('/')[-1].split('_')[0]
                 date_ff = pd.to_datetime(date_ff, format='%Y%m%d%H')
