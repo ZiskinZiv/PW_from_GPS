@@ -600,9 +600,9 @@ def plot_fft_diurnal(path=work_yuval, save=True):
     return fg
 
 
-def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
-                               scope='diurnal',
-                               dem_path=dem_path, save=True):
+def plot_rinex_availability_with_map(path=work_yuval, gis_path=gis_path,
+                                     scope='diurnal',
+                                     dem_path=dem_path, save=True):
     # TODO: add box around merged stations and removed stations
     # TODO: add color map labels to stations removed and merged
     from aux_gps import gantt_chart
@@ -640,7 +640,7 @@ def plot_figure_rinex_with_map(path=work_yuval, gis_path=gis_path,
         title='',
         pe_dict=None, fontsize=16)
     # Israel gps ims map:
-    ax_map = plot_israel_map(gis_path=gis_path, ax=ax_map, ticklabelsize=14)
+    ax_map = plot_israel_map(gis_path=gis_path, ax=ax_map, ticklabelsize=16)
     # overlay with dem data:
     cmap = plt.get_cmap('terrain', 41)
     dem = xr.open_dataarray(dem_path / 'israel_dem_250_500.nc')
@@ -819,6 +819,36 @@ def plot_means_box_plots(path=work_yuval, thresh=50, kind='box',
         filename = 'pw_{}ly_means_{}.png'.format(x, kind)
     if save:
         plt.savefig(savefig_path / filename, bbox_inches='tight')
+    return fg
+
+
+def plot_annual_pw(path=work_yuval, fontsize=20, labelsize=18,
+                   ylim=[7.5, 40], save=True, kind='violin', bins=None):
+    """kind can be violin or hist, for violin choose ylim=7.5,40 and for hist
+    choose ylim=0,0.3"""
+    import xarray as xr
+    from synoptic_procedures import slice_xr_with_synoptic_class
+    gnss_filename = 'GNSS_PW_monthly_thresh_50_homogenized.nc'
+    pw = xr.load_dataset(path / gnss_filename)
+    df_annual = pw.to_dataframe()
+    fg = plot_pw_geographical_segments(
+        df_annual, scope='annual',
+        kind=kind,
+        fg=None,
+        ylim=ylim,
+        fontsize=fontsize,
+        labelsize=labelsize,
+        save=False, bins=bins)
+    fg.fig.subplots_adjust(
+            top=0.973,
+            bottom=0.029,
+            left=0.054,
+            right=0.995,
+            hspace=0.15,
+            wspace=0.12)
+    if save:
+        filename = 'pw_annual_means_{}.png'.format(kind)
+        plt.savefig(savefig_path / filename, orientation='portrait')
     return fg
 
 
@@ -1513,7 +1543,8 @@ def plot_israel_map(gis_path=gis_path, rc=rc, ticklabelsize=12, ax=None):
             ax,
             url=ctx.sources.ST_TERRAIN_BACKGROUND,
             crs='epsg:4326')
-    ax.xaxis.set_major_locator(ticker.MaxNLocator(5))
+    ax.xaxis.set_major_locator(ticker.MaxNLocator(2))
+    ax.yaxis.set_major_locator(ticker.MaxNLocator(5))
     ax.yaxis.set_major_formatter(lat_formatter)
     ax.xaxis.set_major_formatter(lon_formatter)
     ax.tick_params(top=True, bottom=True, left=True, right=True,
@@ -1754,31 +1785,38 @@ def plot_figure_9(hydro_path=hydro_path, gis_path=gis_path, pw_anom=False,
     return ax
 
 
-def produce_table_1(removed=['hrmn'], merged={'klhv': ['klhv', 'lhav'],
-                    'mrav': ['gilb', 'mrav']}):
+def produce_table_1(removed=['hrmn', 'nizn', 'spir'], merged={'klhv': ['klhv', 'lhav'],
+                    'mrav': ['gilb', 'mrav']}, add_loaction=False,
+                    scope='annual', remove_distance=True):
+    """for scope='diurnal' use removed=['hrmn'], add_location=True
+    and remove_distance=False"""
     from PW_stations import produce_geo_gnss_solved_stations
     import pandas as pd
-    sites = group_sites_to_xarray(upper=False, scope='diurnal') 
+    sites = group_sites_to_xarray(upper=False, scope=scope) 
     df_gnss = produce_geo_gnss_solved_stations(plot=False,
                                                add_distance_to_coast=True)
     new = sites.T.values.ravel()
+    if scope == 'annual':
+            new = [x for x in new.astype(str) if x != 'nan']
     df_gnss = df_gnss.reindex(new)
     df_gnss['ID'] = df_gnss.index.str.upper()
     pd.options.display.float_format = '{:.2f}'.format
     df = df_gnss[['name', 'ID', 'lat', 'lon', 'alt', 'distance']]
-    df['alt'] = df['alt'].astype(int)
+    df['alt'] = df['alt'].map('{:,.0f}'.format)
     df['distance'] = df['distance'].astype(int)
     cols = ['GNSS Station name', 'Station ID', 'Latitude [N]',
             'Longitude [E]', 'Altitude [m a.s.l]', 'Distance from shore [km]']
     df.columns = cols
     df.loc['spir', 'GNSS Station name'] = 'Sapir'
-    groups = group_sites_to_xarray(upper=False, scope='diurnal')
-    df.loc[groups.sel(group='coastal').values, 'Location'] = 'coastal'
-    df.loc[groups.sel(group='highland').values, 'Location'] = 'highland'
-    df.loc[groups.sel(group='eastern').values, 'Location'] = 'eastern'
-    df
+    if add_loaction:
+        groups = group_sites_to_xarray(upper=False, scope=scope)
+        df.loc[groups.sel(group='coastal').values, 'Location'] = 'coastal'
+        df.loc[groups.sel(group='highland').values, 'Location'] = 'highland'
+        df.loc[groups.sel(group='eastern').values, 'Location'] = 'eastern'
     if removed is not None:
         df = df.loc[[x for x in df.index if x not in removed], :]
+    if remove_distance:
+        df = df.iloc[:, 0:-1]
     if merged is not None:
         return df
     print(df.to_latex(index=False))
@@ -1788,10 +1826,15 @@ def produce_table_1(removed=['hrmn'], merged={'klhv': ['klhv', 'lhav'],
 def produce_table_stats(thresh=50):
     from PW_stations import produce_pw_statistics
     import xarray as xr
+    sites = group_sites_to_xarray(upper=False, scope='annual') 
+    new = sites.T.values.ravel()
+    sites = group_sites_to_xarray(upper=False, scope='annual')
+    new = [x for x in new.astype(str) if x != 'nan']
     pw_mm = xr.load_dataset(
             work_yuval /
              'GNSS_PW_monthly_thresh_{:.0f}_homogenized.nc'.format(thresh))
-
+    
+    pw_mm = pw_mm[new]
     df = produce_pw_statistics(thresh=thresh, resample_to_mm=False
                                , pw_input=pw_mm)
     print(df.to_latex(index=False))
@@ -1993,7 +2036,7 @@ def plot_peak_hour_distance(path=work_yuval, season='JJA',
 
 def plot_monthly_means_anomalies_with_station_mean(load_path=work_yuval,
                                                    thresh=50, save=True,
-                                                   anoms=None):
+                                                   anoms=None, agg='mean', fontsize=16):
     import xarray as xr
     import seaborn as sns
     from palettable.scientific import diverging as divsci
@@ -2012,10 +2055,10 @@ def plot_monthly_means_anomalies_with_station_mean(load_path=work_yuval,
     fig = plt.figure(figsize=(20, 10))
     grid = plt.GridSpec(
         2, 1, height_ratios=[
-            4, 1], hspace=0)
+            2, 1], hspace=0)
     ax_heat = fig.add_subplot(grid[0, 0])  # plt.subplot(221)
     ax_group = fig.add_subplot(grid[1, 0])  # plt.subplot(223)
-    cbar_ax = fig.add_axes([0.95, 0.24, 0.01, 0.745])  #[left, bottom, width,
+    cbar_ax = fig.add_axes([0.95, 0.37, 0.01, 0.62])  #[left, bottom, width,
     # height]
     ax_heat = sns.heatmap(
             df.T,
@@ -2024,25 +2067,30 @@ def plot_monthly_means_anomalies_with_station_mean(load_path=work_yuval,
             yticklabels=True,
             ax=ax_heat,
             cbar_ax=cbar_ax,
-            cbar_kws={'label': '[mm]'}, xticklabels=False)
+            cbar_kws={'label': 'PWV anomalies [mm]'}, xticklabels=False)
+    cbar_ax.set_ylabel('PWV anomalies [mm]', fontsize=fontsize)
+    cbar_ax.tick_params(labelsize=fontsize)
     # activate top ticks and tickslabales:
-    ax_heat.xaxis.set_tick_params(bottom='off', labelbottom='off')
+    ax_heat.xaxis.set_tick_params(bottom='off', labelbottom='off', labelsize=fontsize)
     # emphasize the yticklabels (stations):
     ax_heat.yaxis.set_tick_params(left='on')
     ax_heat.set_yticklabels(ax_heat.get_ymajorticklabels(),
-                            fontweight='bold', fontsize=10)
-    ts = df.T.mean().shift(periods=-1, freq='15D')
+                            fontweight='bold', fontsize=fontsize)
+    if agg == 'mean':
+        ts = df.T.mean().shift(periods=-1, freq='15D')
+    elif agg == 'median':
+        ts = df.T.median().shift(periods=-1, freq='15D')
     ts.index.name = ''
     # dt_as_int = [x for x in range(len(ts.index))]
     # xticks_labels = ts.index.strftime('%Y-%m').values[::6]
     # xticks = dt_as_int[::6]
     # xticks = ts.index
     # ts.index = dt_as_int
-    ts.plot(ax=ax_group, color='k')
+    ts.plot(ax=ax_group, color='k', fontsize=fontsize)
     # group_limit = ax_heat.get_xlim()
     ax_group.set_xlim(ts.index.min(), ts.index.max() +
                       pd.Timedelta(15, unit='D'))
-    ax_group.set_ylabel('[mm]')
+    ax_group.set_ylabel('PWV {} anomalies [mm]'.format(agg), fontsize=fontsize)
     # set ticks and align with heatmap axis (move by 0.5):
     # ax_group.set_xticks(dt_as_int)
     # offset = 1
@@ -2875,9 +2923,11 @@ def plot_long_term_anomalies(path=work_yuval, era5_path=era5_path,
 def plot_pw_geographical_segments(df, scope='diurnal', kind=None, fg=None,
                                   marker='o', color='b', ylim=[-2, 3],
                                   fontsize=14, labelsize=10, zorder=0,
-                                  label=None, save=False):
+                                  label=None, save=False, bins=None):
     import xarray as xr
     import numpy as np
+    from scipy.stats import kurtosis
+    from scipy.stats import skew
     from matplotlib.ticker import MultipleLocator
     from PW_stations import produce_geo_gnss_solved_stations
     from matplotlib.ticker import AutoMinorLocator
@@ -2890,11 +2940,12 @@ def plot_pw_geographical_segments(df, scope='diurnal', kind=None, fg=None,
                   'annual': {'xticks': np.arange(1, 13),
                              'xlabel': 'month',
                              'ylabel': 'PWV [mm]',
-                             'colwrap': 7}}
+                             'colwrap': 3}
+                  }
     geo = produce_geo_gnss_solved_stations(plot=False)
     sites = group_sites_to_xarray(upper=False, scope=scope)
-    if scope == 'annual':
-        sites = sites.T
+#    if scope == 'annual':
+#        sites = sites.T
     sites_flat = [x for x in sites.values.flatten() if isinstance(x, str)]
     da = xr.DataArray([x for x in range(len(sites_flat))], dims='GNSS')
     da['GNSS'] = [x for x in range(len(da))]
@@ -2932,8 +2983,32 @@ def plot_pw_geographical_segments(df, scope='diurnal', kind=None, fg=None,
                     ax.spines["bottom"].set_visible(False)
                     ax.grid(axis='y', which='major')
                     ax.grid(axis='y', which='minor', linestyle='--')
+                elif kind == 'hist':
+                    if bins is None:
+                        bins = 15
+                    sns.histplot(ax=ax, data=df[site].dropna(),
+                                 line_kws={'linewidth':3}, stat='density', kde=True, bins=bins)
+                    ax.set_xlabel('PWV [mm]', fontsize=fontsize)
+                    ax.grid()
+                    ax.set_ylabel('')
+                    xmean = df[site].mean()
+                    xmedian = df[site].median()
+                    std = df[site].std()
+                    sk = skew(df[site].dropna().values)
+                    kurt = kurtosis(df[site].dropna().values)
+                    # xmode = df[y].mode().median()
+                    data_x, data_y = ax.lines[0].get_data()
+                    ymean = np.interp(xmean, data_x, data_y)
+                    ymed = np.interp(xmedian, data_x, data_y)
+                    # ymode = np.interp(xmode, data_x, data_y)
+                    ax.vlines(x=xmean, ymin=0, ymax=ymean, color='r', linestyle='--', linewidth=3)
+                    ax.vlines(x=xmedian, ymin=0, ymax=ymed, color='g', linestyle='-', linewidth=3)
+                    # ax.vlines(x=xmode, ymin=0, ymax=ymode, color='k', linestyle='-')
+                    ax.legend(['Mean: {:.1f}'.format(xmean),'Median: {:.1f}'.format(xmedian)], fontsize=fontsize)
+#                    ax.text(0.55, 0.45, "Std-Dev:    {:.1f}\nSkewness: {:.1f}\nKurtosis:   {:.1f}".format(std, sk, kurt),transform=ax.transAxes, fontsize=fontsize)
                 ax.tick_params(axis='x', which='major', labelsize=labelsize)
-                ax.set_xlabel(scope_dict[scope]['xlabel'], fontsize=16)
+                if kind != 'hist':
+                    ax.set_xlabel(scope_dict[scope]['xlabel'], fontsize=16)
                 ax.yaxis.set_major_locator(plt.MaxNLocator(4))
                 ax.yaxis.set_minor_locator(AutoMinorLocator(2))
                 ax.tick_params(axis='y', which='major', labelsize=labelsize)
@@ -2942,7 +3017,10 @@ def plot_pw_geographical_segments(df, scope='diurnal', kind=None, fg=None,
 #                ax.tick_params(axis='y', which='minor', labelsize=labelsize-8)
                 ax.yaxis.tick_left()
                 if j == 0:
-                    ax.set_ylabel(scope_dict[scope]['ylabel'], fontsize=16)
+                    if kind != 'hist':
+                        ax.set_ylabel(scope_dict[scope]['ylabel'], fontsize=16)
+                    else:
+                        ax.set_ylabel('Frequency', fontsize=16)
 #                elif j == 1:
 #                    if i>5:
 #                        ax.set_ylabel(scope_dict[scope]['ylabel'], fontsize=12)
@@ -2982,6 +3060,7 @@ def plot_pw_geographical_segments(df, scope='diurnal', kind=None, fg=None,
     if save:
         filename = 'pw_{}_means_{}.png'.format(scope, kind)
         plt.savefig(savefig_path / filename, orientation='portrait')
+#        plt.savefig(savefig_path / filename, orientation='landscape')
     return fg
 
 
