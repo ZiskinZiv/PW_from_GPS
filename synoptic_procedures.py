@@ -67,24 +67,25 @@ def slice_xr_with_synoptic_class(pw, path=work_yuval, syn_class=1,
     import xarray as xr
     import matplotlib.pyplot as plt
     from aux_gps import rename_data_vars
+    name = pw.name
     syn = xr.load_dataset(path / 'GNSS_synoptic_class.nc')
     if isinstance(syn_class, int):
         if isinstance(pw, xr.DataArray):
-            syn = syn['{}_class'.format(pw.name)]
+            syn = syn['{}_class'.format(name)]
         elif isinstance(pw, xr.Dataset):
             syn = rename_data_vars(syn, suffix='_class', remove_suffix=True)
-        syn = syn.to_dataframe()
+        syn = syn.to_dataframe()['{}_class'.format(name)]
         pw = pw.to_dataframe()
         pw = pw[syn==syn_class]
     elif isinstance(syn_class, str):
         if isinstance(pw, xr.DataArray):
-            syn = syn['{}_class'.format(pw.name)]
+            syn = syn['{}_class'.format(name)]
         elif isinstance(pw, xr.Dataset):
             syn = rename_data_vars(syn, suffix='_class', remove_suffix=True)
-        syn = syn.to_dataframe()
+        syn = syn.to_dataframe()['{}_class'.format(name)]
         pw = pw.to_dataframe()
         pw = pw[syn.isin(upper_class_dict.get(syn_class))]
-    pw = pw.to_xarray()
+    pw = pw.to_xarray()[name]
     if plot:
         pw.plot()
         ax = plt.gca()
