@@ -3147,3 +3147,43 @@ def plot_october_2015(path=work_yuval):
     ax.grid()
     ax.legend(ln1+ln2, ['TELA-5mins', 'JSLM-5mins'])
     return ax
+
+
+def plot_pwv_anomalies_histogram(path=work_yuval):
+    import xarray as xr
+    import numpy as np
+    import seaborn as sns
+    from scipy.stats import norm
+    pw = xr.load_dataset(
+        path / 'GNSS_PW_monthly_anoms_thresh_50_homogenized.nc')
+    arr = pw.to_array('station').to_dataframe('pw').values.ravel()
+    arr_no_nans = arr[~np.isnan(arr)]
+    mu, std = norm.fit(arr_no_nans)
+    ax = sns.histplot(
+        arr_no_nans,
+        stat='density',
+        color='tab:orange',
+        alpha=0.5)
+    xmin, xmax = plt.xlim()
+    x = np.linspace(xmin, xmax, 100)
+    p = norm.pdf(x, mu, std)
+    ln = ax.plot(x, p, 'k', linewidth=2)
+#    x_std = x[(x>=-std) & (x<=std)]
+#    y_std = norm.pdf(x_std, mu, std)
+#    x_std2 = x[(x>=-2*std) & (x<=-std) | (x>=std) & (x<=2*std)]
+#    y_std2 = norm.pdf(x_std2, mu, std)
+#    ax.fill_between(x_std,y_std,0, alpha=0.7, color='b')
+#    ax.fill_between(x_std2,y_std2,0, alpha=0.7, color='r')
+    y_std = [norm.pdf(std, mu, std), norm.pdf(-std, mu, std)]
+    y_std2 = [norm.pdf(std * 2, mu, std), norm.pdf(-std * 2, mu, std)]
+    ln_std = ax.vlines([-std, std], ymin=[0, 0], ymax=y_std,
+                       color='tab:blue', linewidth=2)
+    ln_std2 = ax.vlines([-std * 2, std * 2], ymin=[0, 0],
+                        ymax=y_std2, color='tab:red', linewidth=2)
+    leg_labels = ['Normal distribution fit',
+                  '1-Sigma: {:.2f} mm'.format(std),
+                  '2-Sigma: {:.2f} mm'.format(2 * std)]
+    ax.legend([ln[0], ln_std, ln_std2], leg_labels)
+    ax.set_xlabel('PWV anomalies [mm]')
+    return ax
+
