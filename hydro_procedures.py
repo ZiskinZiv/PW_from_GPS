@@ -551,111 +551,126 @@ def scikit_fit_predict(X, y, seed=42, with_pressure=True, n_splits=7,
     # clf.fit(X,y)
 
 
-def produce_X_y(station='drag', hs_id=48125, lag=25, anoms=True,
-                neg_pos_ratio=2, add_pressure=False,
-                path=work_yuval, hydro_path=hydro_path, with_ends=False,
-                seed=42,
-                verbose=True, return_xarray=False, pressure_anoms=None):
-    import pandas as pd
-    import numpy as np
+def produce_X_y(pw_station='drag', hs_id=48125, window=25, seed=42,
+                max_flow=0, neg_pos_ratio=1, path=work_yuval,
+                ims_path=ims_path, hydro_path=hydro_path):
     import xarray as xr
+    # call preprocess_hydro_station
+    hdf = preprocess_hydro_station(hs_id, hydro_path, max_flow=max_flow)
+    # load PWV and other features and combine them to fdf:
+    pw = xr.open_dataset(path / 'GNSS_PW_anom_hourly_50_hour_dayofyear.nc')
+    fdf = pw[pw_station].to_dataframe(name='pwv_{}'.format(pw_station))
+    # finally, call add_features_and_produce_X_y
+    X, y = add_features_and_produce_X_y(hdf, fdf, window_size=window,
+                                        seed=seed,
+                                        neg_pos_ratio=neg_pos_ratio)
+    return X, y
 
-    def produce_da_from_list(event_list, feature='pwv'):
-        X_da = xr.DataArray(event_list, dims=['sample', 'feature'])
-        X_da['feature'] = ['{}_{}'.format(feature, x) for x in np.arange(0, 24, 1)]
-        X_df = pd.concat(event_list)
-        X_da['sample'] = [x for x in X_df.index[::24]]
-        return X_da
-    
-    df = preprocess_hydro_pw(
-        pw_station=station,
-        hs_id=hs_id,
-        path=path,
-        hydro_path=hydro_path,
-        with_tide_ends=with_ends, anoms=anoms,
-        pressure_anoms=pressure_anoms,
-        add_pressure=add_pressure)
-    if pressure_anoms is not None:
-        station = pressure_anoms.name
-    # first produce all the positives:
-    # get the tides datetimes:
-    y_pos = df[df['tides'] == 1]['tides']
-    # get the datetimes of 24 hours before tide event (not inclusive):
-    y_lag_pos = y_pos.index - pd.Timedelta(lag, unit='H')
-    masks = [(df.index > start) & (df.index < end)
-             for start, end in zip(y_lag_pos, y_pos.index)]
-    # also drop event if less than 24 hour before available:
-    pw_pos_list = []
-    pressure_pos_list = []
-    ind = []
-    bad_ind = []
-    for i, tide in enumerate(masks):
-        if len(df['tides'][tide]) == (lag - 1):
-            pw_pos_list.append(df[station][tide])
-            pressure_pos_list.append(df['pressure'][tide])
-            ind.append(i)
-        else:
-            bad_ind.append(i)
-    # get the indices of the dropped events:
-    # ind = [x[0] for x in pw_pos_list]
-    if bad_ind:
-        if verbose:
-            print('{} are without full 24 hours before record.'.format(
-                ','.join([x for x in df.iloc[bad_ind].index.strftime('%Y-%m-%d:%H:00:00')])))
-    # drop the events in y so len(y) == in each x from tides_list:
-    y_pos_arr = y_pos.iloc[ind].values
-    # now get the negative y's with neg_pos_ratio (set to 1 if the same pos=neg):
-    y_neg_arr = np.zeros(y_pos_arr.shape[0] * neg_pos_ratio)
-    cnt = 0
-    pw_neg_list = []
-    pressure_neg_list = []
-    np.random.seed(seed)
-    while cnt < len(y_neg_arr):
-        # get a random date from df:
-        r = np.random.randint(low=0, high=len(df))
-        # slice -24 to 24 range with t=0 being the random date:
-        # update: extend the range to -72 hours to 72 hours:
-        lag_factor = 72 / lag
-        slice_range = int(lag * lag_factor)
-        sliced = df.iloc[r - slice_range:r + slice_range]
-        # if tides inside this date range, continue:
-        if y_pos.iloc[ind].index in sliced.index:
-            if verbose:
-                print('found positive tide in randomly sliced 48 window')
-            continue
-        # now if no 24 items exist, also continue:
-        negative = df.iloc[r - lag:r - 1][station]
-        if len(negative) != (lag-1):
-            if verbose:
-                print('didnt find full {} hours sliced negative'.format(lag-1))
-            continue
-        # else, append to pw_neg_list and increase cnt
-        pw_neg_list.append(negative)
-        pressure_neg_list.append(df.iloc[r - lag:r - 1]['pressure'])
-        cnt += 1
-    # lastly, assemble for X, y using np.columnstack:
-    y = np.concatenate([y_pos_arr, y_neg_arr])
-    X = np.stack([[x.values for x in pw_pos_list] +
-                  [x.values for x in pw_neg_list]])
-    X = X.squeeze()
-    pw_pos_da = produce_da_from_list(pw_pos_list, feature='pwv')
-    pw_neg_da = produce_da_from_list(pw_neg_list, feature='pwv')
-    pr_pos_da = produce_da_from_list(pressure_pos_list, feature='pressure')
-    pr_neg_da = produce_da_from_list(pressure_neg_list, feature='pressure')
-    if return_xarray:
-        y = xr.DataArray(y, dims='sample')
-        X_pwv = xr.concat([pw_pos_da, pw_neg_da], 'sample')
-        X_pressure = xr.concat([pr_pos_da, pr_neg_da], 'sample')
-        X = xr.concat([X_pwv, X_pressure], 'feature')
-        X.name = 'X'
-        y['sample'] = X['sample']
-        y.name = 'y'
-        X.attrs['PWV_station'] = station
-        X.attrs['hydro_station_id'] = hs_id
-        y.attrs = X.attrs
-        return X, y
-    else:
-        return X, y
+#def produce_X_y(station='drag', hs_id=48125, lag=25, anoms=True,
+#                neg_pos_ratio=2, add_pressure=False,
+#                path=work_yuval, hydro_path=hydro_path, with_ends=False,
+#                seed=42,
+#                verbose=True, return_xarray=False, pressure_anoms=None):
+#    import pandas as pd
+#    import numpy as np
+#    import xarray as xr
+#
+#    def produce_da_from_list(event_list, feature='pwv'):
+#        X_da = xr.DataArray(event_list, dims=['sample', 'feature'])
+#        X_da['feature'] = ['{}_{}'.format(feature, x) for x in np.arange(0, 24, 1)]
+#        X_df = pd.concat(event_list)
+#        X_da['sample'] = [x for x in X_df.index[::24]]
+#        return X_da
+#    
+#    df = preprocess_hydro_pw(
+#        pw_station=station,
+#        hs_id=hs_id,
+#        path=path,
+#        hydro_path=hydro_path,
+#        with_tide_ends=with_ends, anoms=anoms,
+#        pressure_anoms=pressure_anoms,
+#        add_pressure=add_pressure)
+#    if pressure_anoms is not None:
+#        station = pressure_anoms.name
+#    # first produce all the positives:
+#    # get the tides datetimes:
+#    y_pos = df[df['tides'] == 1]['tides']
+#    # get the datetimes of 24 hours before tide event (not inclusive):
+#    y_lag_pos = y_pos.index - pd.Timedelta(lag, unit='H')
+#    masks = [(df.index > start) & (df.index < end)
+#             for start, end in zip(y_lag_pos, y_pos.index)]
+#    # also drop event if less than 24 hour before available:
+#    pw_pos_list = []
+#    pressure_pos_list = []
+#    ind = []
+#    bad_ind = []
+#    for i, tide in enumerate(masks):
+#        if len(df['tides'][tide]) == (lag - 1):
+#            pw_pos_list.append(df[station][tide])
+#            pressure_pos_list.append(df['pressure'][tide])
+#            ind.append(i)
+#        else:
+#            bad_ind.append(i)
+#    # get the indices of the dropped events:
+#    # ind = [x[0] for x in pw_pos_list]
+#    if bad_ind:
+#        if verbose:
+#            print('{} are without full 24 hours before record.'.format(
+#                ','.join([x for x in df.iloc[bad_ind].index.strftime('%Y-%m-%d:%H:00:00')])))
+#    # drop the events in y so len(y) == in each x from tides_list:
+#    y_pos_arr = y_pos.iloc[ind].values
+#    # now get the negative y's with neg_pos_ratio (set to 1 if the same pos=neg):
+#    y_neg_arr = np.zeros(y_pos_arr.shape[0] * neg_pos_ratio)
+#    cnt = 0
+#    pw_neg_list = []
+#    pressure_neg_list = []
+#    np.random.seed(seed)
+#    while cnt < len(y_neg_arr):
+#        # get a random date from df:
+#        r = np.random.randint(low=0, high=len(df))
+#        # slice -24 to 24 range with t=0 being the random date:
+#        # update: extend the range to -72 hours to 72 hours:
+#        lag_factor = 72 / lag
+#        slice_range = int(lag * lag_factor)
+#        sliced = df.iloc[r - slice_range:r + slice_range]
+#        # if tides inside this date range, continue:
+#        if y_pos.iloc[ind].index in sliced.index:
+#            if verbose:
+#                print('found positive tide in randomly sliced 48 window')
+#            continue
+#        # now if no 24 items exist, also continue:
+#        negative = df.iloc[r - lag:r - 1][station]
+#        if len(negative) != (lag-1):
+#            if verbose:
+#                print('didnt find full {} hours sliced negative'.format(lag-1))
+#            continue
+#        # else, append to pw_neg_list and increase cnt
+#        pw_neg_list.append(negative)
+#        pressure_neg_list.append(df.iloc[r - lag:r - 1]['pressure'])
+#        cnt += 1
+#    # lastly, assemble for X, y using np.columnstack:
+#    y = np.concatenate([y_pos_arr, y_neg_arr])
+#    X = np.stack([[x.values for x in pw_pos_list] +
+#                  [x.values for x in pw_neg_list]])
+#    X = X.squeeze()
+#    pw_pos_da = produce_da_from_list(pw_pos_list, feature='pwv')
+#    pw_neg_da = produce_da_from_list(pw_neg_list, feature='pwv')
+#    pr_pos_da = produce_da_from_list(pressure_pos_list, feature='pressure')
+#    pr_neg_da = produce_da_from_list(pressure_neg_list, feature='pressure')
+#    if return_xarray:
+#        y = xr.DataArray(y, dims='sample')
+#        X_pwv = xr.concat([pw_pos_da, pw_neg_da], 'sample')
+#        X_pressure = xr.concat([pr_pos_da, pr_neg_da], 'sample')
+#        X = xr.concat([X_pwv, X_pressure], 'feature')
+#        X.name = 'X'
+#        y['sample'] = X['sample']
+#        y.name = 'y'
+#        X.attrs['PWV_station'] = station
+#        X.attrs['hydro_station_id'] = hs_id
+#        y.attrs = X.attrs
+#        return X, y
+#    else:
+#        return X, y
 
 
 def plot_Xpos_Xneg_mean_std(X_pos_da, X_neg_da):
@@ -720,6 +735,7 @@ def add_features_and_produce_X_y(hdf, fdf, window_size=25, seed=42,
     """
     import pandas as pd
     import numpy as np
+    import xarray as xr
     # first add check_window_size of 0's to hdf:
     st = hdf.index[0] - pd.Timedelta(window_size, unit='H')
     en = hdf.index[0]
@@ -755,12 +771,14 @@ def add_features_and_produce_X_y(hdf, fdf, window_size=25, seed=42,
     good_inds_for_masks = [adf.index.get_loc(x) for x in good_dts]
     good_masks = [masks[x] for x in good_inds_for_masks]
     feature_pos_list = [df[feature][x] for x in good_masks]
+    dts_pos_list = [df[feature][x].index[-1] + pd.Timedelta(1, unit='H') for x in good_masks]
     # TODO: add diagnostic mode for how and where are missing features
     # now get the negative y's with neg_pos_ratio
     # (set to 1 if the same pos=neg):
     y_neg_arr = np.zeros(y_pos_arr.shape[0] * neg_pos_ratio)
     cnt = 0
     feature_neg_list = []
+    dts_neg_list = []
     np.random.seed(seed)
     while cnt < len(y_neg_arr):
         # get a random date from df:
@@ -779,16 +797,30 @@ def add_features_and_produce_X_y(hdf, fdf, window_size=25, seed=42,
         if len(negative) != (window_size - 1):
             # print('!')
             continue
+        # get the negative datetimes (last record)
+        neg_dts = df.iloc[r - window_size:r - 1][feature].dropna().index[-1] + pd.Timedelta(1, unit='H')
         # else, append to pw_neg_list and increase cnt
         feature_neg_list.append(negative)
+        dts_neg_list.append(neg_dts)
         cnt += 1
         # print(cnt)
     # lastly, assemble for X, y using np.columnstack:
     y = np.concatenate([y_pos_arr, y_neg_arr])
     X = np.stack([[x.values for x in feature_pos_list] +
                   [x.values for x in feature_neg_list]])
+    y_dts = np.stack([[x for x in dts_pos_list]+[x for x in dts_neg_list]])
+    y_dts = y_dts.squeeze()
     X = X.squeeze()
-    return X, y
+    X_da = xr.DataArray(X, dims=['sample', 'feature'])
+    X_da['sample'] = y_dts
+    y_da = xr.DataArray(y, dims=['sample'])
+    y_da['sample'] = y_dts
+    X_da['sample'] = y_dts
+    for f in feature:
+        X_da['feature'] = ['{}_{}'.format(f, x) for x in np.arange(0,
+                                                                   window_size
+                                                                   - 1, 1)]
+    return X_da, y_da
 
 
 #def preprocess_hydro_pw(pw_station='drag', hs_id=48125, path=work_yuval,
@@ -891,6 +923,7 @@ def loop_over_gnss_hydro_and_aggregate(sel_hydro, pw_anom=False,
             names = [x + ' ({})'.format(y) for x, y in zip(names, gnss_stations)]
         ax.set_xlabel('Days before tide event')
         ax.grid()
+
         hstations = [ds[x].attrs['hydro_stations'] for x in ds.data_vars]
         events = [ds[x].attrs['total_events'] for x in ds.data_vars]
         fmt = list(zip(names, hstations, events))
@@ -1191,6 +1224,7 @@ def read_hydro_metadata(path=hydro_path, gis_path=gis_path, plot=True):
     geo_df = geo_df.to_crs({'init': 'epsg:4326'})
     isr_dem = xr.open_rasterio(gis_path / 'israel_dem.tif')
     alt_list = []
+
     for index, row in geo_df.iterrows():
         lat = row.geometry.y
         lon = row.geometry.x
