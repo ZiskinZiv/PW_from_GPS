@@ -2050,8 +2050,9 @@ def plot_monthly_means_anomalies_with_station_mean(load_path=work_yuval,
                 'GNSS_PW_monthly_anoms_thresh_{:.0f}_homogenized.nc'.format(thresh))
     df = anoms.to_dataframe()
     sites = group_sites_to_xarray(upper=True, scope='annual').T
-    sites_flat = [x for x in sites.values.flatten() if isinstance(x, str)]
-    df.columns = sites_flat
+    sites_flat = [x.lower() for x in sites.values.flatten() if isinstance(x, str)]
+    df = df[sites_flat]
+    df.columns = [x.upper() for x in df.columns]
     fig = plt.figure(figsize=(20, 10))
     grid = plt.GridSpec(
         2, 1, height_ratios=[
