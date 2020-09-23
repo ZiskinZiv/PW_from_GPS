@@ -1848,6 +1848,8 @@ def produce_table_mann_kendall(thresh=50, season=None, with_original=False):
 
     def process_mkt(ds_in, alpha=0.05, seasonal=False, factor=120,
                     season_selection=season):
+        """because the data is in monthly means and the output is #/decade,
+        the factor is 12 months a year and 10 years in a decade yielding 120"""
         ds = ds_in.map(
             mann_kendall_trend_analysis,
             alpha=alpha,
@@ -1860,6 +1862,7 @@ def produce_table_mann_kendall(thresh=50, season=None, with_original=False):
         df = df[['id', 'Tau', 'p', 'slope']]
         df.index.name = ''
         df['slope'] = df['slope'] * factor
+        numeric_slope_per_factor = df['slope'].copy()
         df['slope'] = df['slope'][df['p'] < 0.05]
         df.loc[:, 'p'][df['p'] < 0.0001] = '<0.0001'
         df['p'][df['p'] != '<0.0001'] = df['p'][df['p'] !=
@@ -1868,7 +1871,7 @@ def produce_table_mann_kendall(thresh=50, season=None, with_original=False):
         df['slope'] = df['slope'].map('{:,.2f}'.format)
         df['slope'][df['slope'] == 'nan'] = '-'
         df.columns = ['Site ID', "Kendall's Tau", 'P-value', "Sen's slope"]
-        return df
+        return df, numeric_slope_per_factor
     
     anoms = xr.load_dataset(
             work_yuval /
@@ -1879,15 +1882,18 @@ def produce_table_mann_kendall(thresh=50, season=None, with_original=False):
     original_anoms =  xr.load_dataset(
             work_yuval /
              'GNSS_PW_monthly_anoms_thresh_{:.0f}.nc'.format(thresh))
-    df_original_anoms = process_mkt(original_anoms)
-    df_anoms = process_mkt(anoms)
-    df_mm = process_mkt(mm, seasonal=True)
+    df_original_anoms, _ = process_mkt(original_anoms)
+    df_anoms, slope = process_mkt(anoms)
+    df_mm, _ = process_mkt(mm, seasonal=True)
     gr = group_sites_to_xarray(scope='annual')
     new = [x for x in gr.T.values.ravel() if isinstance(x, str)]
     df_original_anoms = df_original_anoms.reindex(new)
     df_anoms = df_anoms.reindex(new)
     df_mm = df_mm.reindex(new)
-
+    df_anoms['Percent change'] = 100 * slope / mm.to_dataframe().mean()
+    df_anoms['Percent change'] = df_anoms['Percent change'].map('{:,.1f}'.format)
+    df_anoms['Percent change'] = df_anoms[df_anoms["Sen's slope"] != '-']['Percent change']
+    df_anoms['Percent change'] = df_anoms['Percent change'].fillna('-')
 #    mkt_trends = [anoms[x].attrs['mkt_trend'] for x in anoms.data_vars]
 #    mkt_bools = [anoms[x].attrs['mkt_h'] for x in anoms.data_vars]
 #    mkt_slopes = [anoms[x].attrs['mkt_slope'] for x in anoms.data_vars]
