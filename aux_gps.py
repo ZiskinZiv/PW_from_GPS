@@ -12,6 +12,25 @@ from PW_paths import work_yuval
 # TODO: if not, build func to replace datetimeindex to numbers and vise versa
 
 
+def reduce_tail_xr(xarray, reduce='mean', time_dim='time', records=120,
+                   return_df=False):
+    import xarray as xr
+
+    def reduce_tail_da(da, reduce=reduce, time_dim=time_dim, records=records):
+        if reduce == 'mean':
+            da = da.dropna(time_dim).tail(records).mean(time_dim)
+        return da
+    if isinstance(xarray, xr.DataArray):
+        xarray = reduce_tail_da(xarray, reduce, time_dim, records)
+    elif isinstance(xarray, xr.Dataset):
+        xarray = xarray.map(reduce_tail_da, args=(reduce, time_dim, records))
+        if return_df:
+            df = xarray.to_array('dum').to_dataframe(reduce)
+            df.index.name = ''
+            return df
+    return xarray
+
+
 def decimal_year_to_datetime(decimalyear):
     from datetime import datetime, timedelta
     import pandas as pd
@@ -211,7 +230,7 @@ def harmonic_da(da_ts, n=3, field=None, init=None):
     return ds
 
 
-def anomalize_xr(da_ts, freq='D'):  # i.e., like deseason
+def anomalize_xr(da_ts, freq='D', verbose=True):  # i.e., like deseason
     import xarray as xr
     time_dim = list(set(da_ts.dims))[0]
     attrs = da_ts.attrs
@@ -224,17 +243,20 @@ def anomalize_xr(da_ts, freq='D'):  # i.e., like deseason
     if isinstance(da_ts, xr.Dataset):
         name = [x for x in da_ts]
     if freq == 'D':
-        print('removing daily means from {}'.format(name))
+        if verbose:
+            print('removing daily means from {}'.format(name))
         frq = 'daily'
         date = groupby_date_xr(da_ts)
         da_anoms = da_ts.groupby(date) - da_ts.groupby(date).mean()
     elif freq == 'H':
-        print('removing hourly means from {}'.format(name))
+        if verbose:
+            print('removing hourly means from {}'.format(name))
         frq = 'hourly'
         da_anoms = da_ts.groupby('{}.hour'.format(
             time_dim)) - da_ts.groupby('{}.hour'.format(time_dim)).mean()
     elif freq == 'MS':
-        print('removing monthly means from {}'.format(name))
+        if verbose:
+            print('removing monthly means from {}'.format(name))
         frq = 'monthly'
         da_anoms = da_ts.groupby('{}.month'.format(
             time_dim)) - da_ts.groupby('{}.month'.format(time_dim)).mean()
