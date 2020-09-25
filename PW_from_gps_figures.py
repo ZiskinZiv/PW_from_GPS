@@ -1841,86 +1841,66 @@ def produce_table_stats(thresh=50):
     return df
 
 
-def produce_table_mann_kendall(thresh=50, season=None, with_original=False):
-    from PW_stations import mann_kendall_trend_analysis
+def produce_table_mann_kendall(thresh=50, alpha=0.05, load_data='pwv-homo'):
+    from PW_stations import process_mkt_from_dataset
+    from aux_gps import reduce_tail_xr
     import xarray as xr
-    import pandas as pd
 
-    def process_mkt(ds_in, alpha=0.05, seasonal=False, factor=120,
-                    season_selection=season):
-        """because the data is in monthly means and the output is #/decade,
-        the factor is 12 months a year and 10 years in a decade yielding 120"""
-        ds = ds_in.map(
-            mann_kendall_trend_analysis,
-            alpha=alpha,
-            seasonal=seasonal,
-            verbose=False, season_selection=season)
-        ds = ds.rename({'dim_0': 'mkt'})
-        df = ds.to_dataframe().T
-        df = df.drop(['test_name', 'trend', 'h', 'z', 's', 'var_s'], axis=1)
+    def table_process_df(df, means):
+        # calculate percent changes from last decade means:
+        df['Percent change'] = means
+        df['Percent change'] = 100 * df['slope'] / df['Percent change']
+        df['Temperature change'] = df['Percent change'] / 7.0
+        # station id is big:
         df['id'] = df.index.str.upper()
-        df = df[['id', 'Tau', 'p', 'slope']]
-        df.index.name = ''
-        df['slope'] = df['slope'] * factor
-        numeric_slope_per_factor = df['slope'].copy()
+        df = df[['id', 'Tau', 'p', 'slope', 'Percent change', 'Temperature change']]
+        # filter for non significant trends:
         df['slope'] = df['slope'][df['p'] < 0.05]
+        # higher and better results:
         df.loc[:, 'p'][df['p'] < 0.0001] = '<0.0001'
         df['p'][df['p'] != '<0.0001'] = df['p'][df['p'] !=
                                                 '<0.0001'].astype(float).map('{:,.4f}'.format)
         df['Tau'] = df['Tau'].map('{:,.4f}'.format)
         df['slope'] = df['slope'].map('{:,.2f}'.format)
         df['slope'][df['slope'] == 'nan'] = '-'
-        df.columns = ['Site ID', "Kendall's Tau", 'P-value', "Sen's slope"]
-        return df, numeric_slope_per_factor
-    
-    anoms = xr.load_dataset(
-            work_yuval /
-             'GNSS_PW_monthly_anoms_thresh_{:.0f}_homogenized.nc'.format(thresh))
-    mm = xr.load_dataset(
-        work_yuval /
-        'GNSS_PW_monthly_thresh_{:.0f}_homogenized.nc'.format(thresh))
-    original_anoms =  xr.load_dataset(
-            work_yuval /
-             'GNSS_PW_monthly_anoms_thresh_{:.0f}.nc'.format(thresh))
-    df_original_anoms, _ = process_mkt(original_anoms)
-    df_anoms, slope = process_mkt(anoms)
-    df_mm, _ = process_mkt(mm, seasonal=True)
-    gr = group_sites_to_xarray(scope='annual')
-    new = [x for x in gr.T.values.ravel() if isinstance(x, str)]
-    df_original_anoms = df_original_anoms.reindex(new)
-    df_anoms = df_anoms.reindex(new)
-    df_mm = df_mm.reindex(new)
-    df_anoms['Percent change'] = 100 * slope / mm.to_dataframe().mean()
-    df_anoms['Percent change'] = df_anoms['Percent change'].map('{:,.1f}'.format)
-    df_anoms['Percent change'] = df_anoms[df_anoms["Sen's slope"] != '-']['Percent change']
-    df_anoms['Percent change'] = df_anoms['Percent change'].fillna('-')
-#    mkt_trends = [anoms[x].attrs['mkt_trend'] for x in anoms.data_vars]
-#    mkt_bools = [anoms[x].attrs['mkt_h'] for x in anoms.data_vars]
-#    mkt_slopes = [anoms[x].attrs['mkt_slope'] for x in anoms.data_vars]
-#    mkt_pvalue = [anoms[x].attrs['mkt_p'] for x in anoms.data_vars]
-#    mkt_95_lo = [anoms[x].attrs['mkt_trend_95'][0] for x in anoms.data_vars]
-#    mkt_95_up = [anoms[x].attrs['mkt_trend_95'][1] for x in anoms.data_vars]
-#    df = pd.DataFrame(mkt_trends, index=[x for x in anoms.data_vars], columns=['mkt_trend'])
-#    df['mkt_h'] = mkt_bools
-#    # transform into per decade:
-#    df['mkt_slope'] = mkt_slopes
-#    df['mkt_pvalue'] = mkt_pvalue
-#    df['mkt_95_lo'] = mkt_95_lo
-#    df['mkt_95_up'] = mkt_95_up
-#    df[['mkt_slope', 'mkt_95_lo', 'mkt_95_up']] *= 120
-#    df.index = df.index.str.upper()
-#    df['Sen\'s slope'] = df['mkt_slope'].map('{:,.2f}'.format)
-#    df.loc[:, 'Sen\'s slope'][~df['mkt_h']] = 'No trend'
-#    con = ['({:.2f}, {:.2f})'.format(x, y) for (x, y) in list(
-#        zip(df['mkt_95_lo'].values, df['mkt_95_up'].values))]
-#    df['95% confidence intervals'] = con
-#    df.loc[:, '95% confidence intervals'][~df['mkt_h']] = '-'
-#    df = df[['Sen\'s slope', '95% confidence intervals']]
-    print(df_anoms.to_latex(index=False))
-    if with_original:
-        df = pd.concat([df_anoms, df_original_anoms], axis=1)
+        df.columns = [
+            'Site ID',
+            "Kendall's Tau",
+            'P-value',
+            "Sen's slope",
+            'Percent change', 'Temperature change']
+        df['Percent change'] = df['Percent change'].map('{:,.1f}'.format)
+        df['Percent change'] = df[df["Sen's slope"] != '-']['Percent change']
+        df['Percent change'] = df['Percent change'].fillna('-')
+        df['Temperature change'] = df['Temperature change'].map('{:,.1f}'.format)
+        df['Temperature change'] = df[df["Sen's slope"] != '-']['Temperature change']
+        df['Temperature change'] = df['Temperature change'].fillna('-')
+        # last, reindex according to geography:
+        gr = group_sites_to_xarray(scope='annual')
+        new = [x for x in gr.T.values.ravel() if isinstance(x, str)]
+        df = df.reindex(new)
         return df
-    return df_anoms, df_mm
+
+    if load_data == 'pwv-homo':
+        data = xr.load_dataset(work_yuval /
+                               'GNSS_PW_monthly_thresh_{:.0f}_homogenized.nc'.format(thresh))
+    elif load_data == 'pwv-orig':
+        data = xr.load_dataset(work_yuval /
+                               'GNSS_PW_monthly_thresh_{:.0f}.nc'.format(thresh))
+    elif load_data == 'pwv-era5':
+        data = xr.load_dataset(work_yuval / 'GNSS_era5_monthly_PW.nc')
+    df = process_mkt_from_dataset(
+        data,
+        alpha=alpha,
+        season_selection=None,
+        seasonal=False,
+        factor=120,
+        anomalize=True)
+    df_mean = reduce_tail_xr(data, reduce='mean', records=120,
+                             return_df=True)
+    table = table_process_df(df, df_mean)
+#    print(table.to_latex(index=False))
+    return table
 
 
 def plot_peak_hour_distance(path=work_yuval, season='JJA',
@@ -2889,40 +2869,46 @@ def plot_long_term_anomalies(path=work_yuval, era5_path=era5_path,
     from aux_gps import anomalize_xr
     from aeronet_analysis import prepare_station_to_pw_comparison
     # load GNSS Israel:
-    pw = xr.load_dataset(path / 'GNSS_PW_monthly_anoms_thresh_50_homogenized.nc')
-    pw_mean = pw.to_array('station').mean('station')
+    pw = xr.load_dataset(path / 'GNSS_PW_monthly_thresh_50_homogenized.nc')
+    pw_anoms = anomalize_xr(pw, 'MS', verbose=False)
+    pw_mean = pw_anoms.to_array('station').mean('station')
     # load ERA5:
-    era5 = xr.load_dataset(era5_path/ 'era5_TCWV_israel_1996-2019.nc')
-    era5_mean = era5.mean('lat').mean('lon')
-    era5_mean = era5_mean.resample(time='MS').mean()
-    era5_mean = anomalize_xr(era5_mean, freq='MS')
-    # load AERONET:
-    aero = prepare_station_to_pw_comparison(path=aero_path, gis_path=gis_path,
-                                            station='boker', mm_anoms=True)
+    era5 = xr.load_dataset(path/ 'GNSS_era5_monthly_PW.nc')
+    era5_anoms = anomalize_xr(era5, 'MS', verbose=False)
+    era5_mean = era5_anoms.to_array('station').mean('station')
     df = pw_mean.to_dataframe(name='GNSS')
-    df['ERA5'] = era5_mean['tcwv'].to_dataframe()
-    df['AERONET'] = aero.to_dataframe()
+    # load AERONET:
+    if aero_path is not None:
+        aero = prepare_station_to_pw_comparison(path=aero_path, gis_path=gis_path,
+                                                station='boker', mm_anoms=True)
+        df['AERONET'] = aero.to_dataframe()
+    df['ERA5'] = era5_mean.to_dataframe(name='ERA5')
     fig, ax = plt.subplots(figsize=(16, 5))
 #    df['GNSS'].plot(ax=ax, color='k')
 #    df['ERA5'].plot(ax=ax, color='r')
 #    df['AERONET'].plot(ax=ax, color='b')
-    pwln = pw_mean.plot.line('k-', ax=ax, linewidth=1.5)
-    era5ln = era5_mean['tcwv'].plot.line('r--', ax=ax, alpha=0.8)
-    aeroln = aero.plot.line('b-.', ax=ax, alpha=0.8)
+    pwln = pw_mean.plot.line('k-', marker='o', ax=ax, linewidth=1.5, alpha=0.7)
+    era5ln = era5_mean.plot.line('r--', ax=ax, linewidth=2.5)
     era5corr = df.corr().loc['GNSS', 'ERA5']
-    aerocorr = df.corr().loc['GNSS', 'AERONET']
-    ax.legend(pwln + era5ln + aeroln,
-              ['GNSS',
-               'ERA5, r={:.2f}'.format(era5corr),
-               'AERONET, r={:.2f}'.format(aerocorr)])
-    ax.set_ylabel('PW anomalies [mm]')
+    if aero_path is not None:
+        aeroln = aero.plot.line('b-.', ax=ax, alpha=0.8)    
+        aerocorr = df.corr().loc['GNSS', 'AERONET']
+        ax.legend(pwln + era5ln + aeroln,
+                  ['GNSS',
+                   'ERA5, r={:.2f}'.format(era5corr),
+                   'AERONET, r={:.2f}'.format(aerocorr)])
+    else:
+        ax.legend(pwln + era5ln,
+          ['GNSS',
+           'ERA5, r={:.2f}'.format(era5corr)])
+    ax.set_ylabel('PWV anomalies [mm]')
     ax.set_xlabel('')
     ax.grid()
     ax = fix_time_axis_ticks(ax, limits=['1998-01', '2020-01'])
     fig.tight_layout()
     fig.subplots_adjust(right=0.946)
     if save:
-        filename = 'pw_long_term_anomalies.png'
+        filename = 'pwv_long_term_anomalies_era5_comparison.png'
         plt.savefig(savefig_path / filename, bbox_inches='tight')
     return fig
 
