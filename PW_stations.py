@@ -171,32 +171,34 @@ def PW_trend_analysis(path=work_yuval, anom=False, station='tela'):
 
 
 def produce_gnss_pw_from_era5(era5_path=era5_path,
-                              glob_str='era5_PW_israel*.nc',
+                              glob_str='era5_TCWV_israel*.nc',
                               pw_path=work_yuval, savepath=None):
     from aux_gps import path_glob
     import xarray as xr
+    from aux_gps import save_ncfile
     filepath = path_glob(era5_path, glob_str)[0]
+    print('opening ERA5 file {}'.format(filepath.as_posix().split('/')[-1]))
     era5_pw = xr.open_dataarray(filepath)
+    era5_pw = era5_pw.sortby('time')
     gps = produce_geo_gnss_solved_stations(plot=False)
     era5_pw_list = []
     for station in gps.index:
         slat = gps.loc[station, 'lat']
         slon = gps.loc[station, 'lon']
-        da = era5_pw.sel(lat=slat, lon=slon, method='nearest')
+        da = era5_pw.sel(latitude=slat, longitude=slon, method='nearest')
         da.name = station
-        da.attrs['era5_lat'] = da.lat.values.item()
-        da.attrs['era5_lon'] = da.lon.values.item()
+        da.attrs['era5_lat'] = da.latitude.values.item()
+        da.attrs['era5_lon'] = da.longitude.values.item()
         da = da.reset_coords(drop=True)
         era5_pw_list.append(da)
-    ds = xr.merge(era5_pw_list)
+    ds_hourly = xr.merge(era5_pw_list)
+    ds_monthly = ds_hourly.resample(time='MS', keep_attrs=True).mean(keep_attrs=True)
     if savepath is not None:
         filename = 'GNSS_era5_hourly_PW.nc'
-        print('saving {} to {}'.format(filename, savepath))
-        comp = dict(zlib=True, complevel=9)  # best compression
-        encoding = {var: comp for var in ds}
-        ds.to_netcdf(savepath / filename, 'w', encoding=encoding)
-    print('Done!')
-    return ds
+        save_ncfile(ds_hourly, savepath, filename)
+        filename = 'GNSS_era5_monthly_PW.nc'
+        save_ncfile(ds_monthly, savepath, filename)
+    return ds_hourly
 
 
 def plug_in_approx_loc_gnss_stations(log_path=logs_path, file_path=cwd):
@@ -3816,10 +3818,12 @@ def mann_kendall_trend_analysis(da_ts, alpha=0.05, seasonal=False, CI=False,
     import numpy as np
     import pandas as pd
     if season_selection is not None:
-        print('{} season selected.'.format(season_selection))
+        if verbose:
+            print('{} season selected.'.format(season_selection))
         da_ts = da_ts.sel(time=da_ts['time.season']==season_selection)
     else:
-        print('No specific season is selected.')
+        if verbose:
+            print('No specific season is selected.')
     if seasonal:
         result = mk.seasonal_test(da_ts, alpha=alpha)
         test = 'Seasonal Mann Kendall Test'
@@ -3838,6 +3842,28 @@ def mann_kendall_trend_analysis(da_ts, alpha=0.05, seasonal=False, CI=False,
         mkt['CI_95'] = [conf_lo, conf_up]
     # da_ts.attrs.update(mkt)
     return pd.Series(mkt)
+
+
+def process_mkt_from_dataset(ds_in, alpha=0.05, seasonal=False, factor=120,
+                season_selection=None, anomalize=True):
+    """because the data is in monthly means and the output is #/decade,
+    the factor is 12 months a year and 10 years in a decade yielding 120,
+    input is xr.Dataset of monthly means (for now)"""
+    from aux_gps import anomalize_xr
+    if anomalize:
+        ds_in = anomalize_xr(ds_in, 'MS', verbose=False)
+    ds = ds_in.map(
+        mann_kendall_trend_analysis,
+        alpha=alpha,
+        seasonal=seasonal,
+        verbose=False, season_selection=season_selection)
+    ds = ds.rename({'dim_0': 'mkt'})
+    df = ds.to_dataframe().T
+    df = df.drop(['test_name', 'trend', 'h', 'z', 's', 'var_s'], axis=1)
+    df.index.name = ''
+    df.columns.name = ''
+    df['slope'] = df['slope'] * factor
+    return df
 
 
 def homogenize_pw_dataset(path=work_yuval, thresh=50, savepath=work_yuval):
