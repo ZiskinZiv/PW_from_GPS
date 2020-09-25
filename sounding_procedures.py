@@ -12,8 +12,12 @@ era5_path = work_yuval / 'ERA5'
 edt_path = sound_path / 'edt'
 
 
-def load_field_1d_from_radiosonde(
-        path=sound_path, field='Tm', data_type='phys', reduce='min', dim='time', plot=True):
+def load_field_from_radiosonde(
+        path=sound_path, field='Tm', data_type='phys', reduce='min',
+        dim='time', plot=True):
+    """data_type: phys for 2008-2013, 10 sec sample rate,
+    PTU_Wind for 2014-2016 2 sec sample rate,
+    edt for 2018-2019 1 sec sample rate with gps"""
     from aux_gps import plot_tmseries_xarray
     from aux_gps import path_glob
     import xarray as xr
@@ -44,34 +48,37 @@ def load_field_1d_from_radiosonde(
     return da
 
 
-def get_field_from_radiosonde(path=sound_path, field='Tm', data_type='phys',
-                              reduce='min', dim='time',
-                              times=['2007', '2019'], plot=True):
-    import xarray as xr
-    from aux_gps import get_unique_index
-    from aux_gps import keep_iqr
-    from aux_gps import plot_tmseries_xarray
-    from aux_gps import path_glob
-    file = path_glob(path, 'bet_dagan_{}_sounding_*.nc'.format(data_type))[0]
-    ds = xr.open_dataset(file)
-    if field is not None:
-        da = ds[field]
-        if reduce is not None:
-            if reduce == 'min':
-                da = da.min(dim)
-            elif reduce == 'max':
-                da = da.max(dim)
-            da = da.reset_coords(drop=True)
-        da = get_unique_index(da, dim='sound_time')
-        da = keep_iqr(da, k=2.0, dim='sound_time', drop_with_freq='12H')
-    da = da.sel(sound_time=slice(*times))
-    if plot:
-        plot_tmseries_xarray(da)
-    return da
+#def get_field_from_radiosonde(path=sound_path, field='Tm', data_type='phys',
+#                              reduce='min', dim='time',
+#                              times=['2007', '2019'], plot=True):
+#    import xarray as xr
+#    from aux_gps import get_unique_index
+#    from aux_gps import keep_iqr
+#    from aux_gps import plot_tmseries_xarray
+#    from aux_gps import path_glob
+#    file = path_glob(path, 'bet_dagan_{}_sounding_*.nc'.format(data_type))[0]
+#    ds = xr.open_dataset(file)
+#    if field is not None:
+#        da = ds[field]
+#        if reduce is not None:
+#            if reduce == 'min':
+#                da = da.min(dim)
+#            elif reduce == 'max':
+#                da = da.max(dim)
+#            da = da.reset_coords(drop=True)
+#        da = get_unique_index(da, dim='sound_time')
+#        da = keep_iqr(da, k=2.0, dim='sound_time', drop_with_freq='12H')
+#    da = da.sel(sound_time=slice(*times))
+#    if plot:
+#        plot_tmseries_xarray(da)
+#    return da
 
 
-def calculate_edt_north_east_distance(ds):
-    """to be inporporated in read_all"""
+def calculate_edt_north_east_distance(lat_da, lon_da, method='fast'):
+    """fast mode is 11 times faster than slow mode, however fast distance is
+    larger than slow...solve this mystery"""
+    from shapely.geometry import Point
+    from pyproj import Transformer
     import geopandas as gpd
     import pandas as pd
     import numpy as np
@@ -82,47 +89,82 @@ def calculate_edt_north_east_distance(ds):
         else:
             return value
 
-    # prepare bet dagan coords:
-    bet_dagan = pd.DataFrame(index=[0])
-    bet_dagan['x'] = 34.81
-    bet_dagan['y'] = 32.01
-    bet_dagan_gdf = gpd.GeoDataFrame(
-        bet_dagan, geometry=gpd.points_from_xy(
-            bet_dagan['x'], bet_dagan['y']))
-    bet_dagan_gdf.crs = {'init': 'epsg:4326'}
-    # transform to israeli meters coords:
-    bet_dagan_gdf.to_crs(epsg=2039, inplace=True)
-    bd_as_point = bet_dagan_gdf.geometry[0]
-    bd_lon = bet_dagan.loc[0, 'x']
-    bd_lat = bet_dagan.loc[0, 'y']
-    df = ds.reset_coords(drop=True).to_dataframe()
-    df['fixed_lon'] = 34.81 * np.ones(df['lon'].shape)
-    df['fixed_lat'] = 32.01 * np.ones(df['lat'].shape)
-    gdf_fixed_lon = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df['fixed_lon'],
-                                                                     df.lat))
-    gdf_fixed_lon.crs = {'init': 'epsg:4326'}
-    gdf_fixed_lon.dropna(inplace=True)
-    gdf_fixed_lon.to_crs(epsg=2039, inplace=True)
-    gdf_fixed_lat = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.lon,
-                                                                     df['fixed_lat']))
-    gdf_fixed_lat.crs = {'init': 'epsg:4326'}
-    gdf_fixed_lat.dropna(inplace=True)
-    gdf_fixed_lat.to_crs(epsg=2039, inplace=True)
-    # calculate distance north from bet dagan coords in km:
-    df['north_distance'] = gdf_fixed_lon.geometry.distance(
-        bd_as_point) / 1000.0
-    # calculate distance east from bet dagan coords in km:
-    df['east_distance'] = gdf_fixed_lat.geometry.distance(
-        bd_as_point) / 1000.0
-    # fix sign to indicate: negtive = south:
-    df['north_distance'] = df.apply(
-        lambda x: change_sign(
-            x.lat, bd_lat, x.north_distance), axis=1)
-    # fix sign to indicate: negtive = east:
-    df['east_distance'] = df.apply(
-        lambda x: change_sign(
-            x.lon, bd_lon, x.east_distance), axis=1)
-    return df['east_distance'].to_xarray(), df['north_distance'].to_xarray()
+    if method == 'fast':
+        # prepare bet dagan coords:
+        bd_lat = 32.01
+        bd_lon = 34.81
+        fixed_lat = np.ones(lat_da.shape) * bd_lat
+        fixed_lon = np.ones(lon_da.shape) * bd_lon
+        # define projections:
+#        wgs84 = pyproj.CRS('EPSG:4326')
+#        isr_tm = pyproj.CRS('EPSG:2039')
+        # creare transfrom from wgs84 (lat, lon) to new israel network (meters):
+    #    transformer = Transformer.from_crs(wgs84, isr_tm, always_xy=True)
+        transformer = Transformer.from_proj(4326, 2039, always_xy=True)
+        bd_meters = transformer.transform(bd_lat, bd_lon)
+        bd_point_meters = Point(bd_meters[0], bd_meters[1])
+    #    # create Points from lat_da, lon_da in wgs84:
+    #    dyn_lat = [Point(x, bd_lon) for x in lat_da.values[::2]]
+    #    dyn_lon = [Point(bd_lat, x) for x in lon_da.values[::2]]
+        # transform to meters:
+        dyn_lat_meters = transformer.transform(lat_da.values, fixed_lon)
+        dyn_lon_meters = transformer.transform(fixed_lat, lon_da.values)
+        # calculate distance in km:
+        north_distance = [Point(dyn_lat_meters[0][x],dyn_lat_meters[1][x]).distance(bd_point_meters) / 1000 for x in range(lat_da.size)]
+        east_distance = [Point(dyn_lon_meters[0][x],dyn_lon_meters[1][x]).distance(bd_point_meters) / 1000 for x in range(lon_da.size)]
+        # sign change:
+        new_north_distance = [change_sign(lat_da.values[x], bd_lat, north_distance[x]) for x in range(lat_da.size)]
+        new_east_distance = [change_sign(lon_da.values[x], bd_lon, east_distance[x]) for x in range(lon_da.size)]
+        north = lat_da.copy(data=new_north_distance)
+        north.attrs['units'] = 'km'
+        north.attrs['long_name'] = 'distance north'
+        east = lon_da.copy(data=new_east_distance)
+        east.attrs['long_name'] = 'distance east'
+        east.attrs['units'] = 'km'
+        return north, east
+    elif method == 'slow':
+        bet_dagan = pd.DataFrame(index=[0])
+        bet_dagan['x'] = 34.81
+        bet_dagan['y'] = 32.01
+        bet_dagan_gdf = gpd.GeoDataFrame(
+            bet_dagan, geometry=gpd.points_from_xy(
+                bet_dagan['x'], bet_dagan['y']))
+        bet_dagan_gdf.crs = {'init': 'epsg:4326'}
+        # transform to israeli meters coords:
+        bet_dagan_gdf.to_crs(epsg=2039, inplace=True)
+        bd_as_point = bet_dagan_gdf.geometry[0]
+        bd_lon = bet_dagan.loc[0, 'x']
+        bd_lat = bet_dagan.loc[0, 'y']
+        df = lat_da.reset_coords(drop=True).to_dataframe(name='lat')
+        df['lon'] = lon_da.reset_coords(drop=True).to_dataframe()
+    #    df = ds.reset_coords(drop=True).to_dataframe()
+        df['fixed_lon'] = 34.81 * np.ones(df['lon'].shape)
+        df['fixed_lat'] = 32.01 * np.ones(df['lat'].shape)
+        gdf_fixed_lon = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df['fixed_lon'],
+                                                                         df.lat))
+        gdf_fixed_lon.crs = {'init': 'epsg:4326'}
+        gdf_fixed_lon.dropna(inplace=True)
+        gdf_fixed_lon.to_crs(epsg=2039, inplace=True)
+        gdf_fixed_lat = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.lon,
+                                                                         df['fixed_lat']))
+        gdf_fixed_lat.crs = {'init': 'epsg:4326'}
+        gdf_fixed_lat.dropna(inplace=True)
+        gdf_fixed_lat.to_crs(epsg=2039, inplace=True)
+        # calculate distance north from bet dagan coords in km:
+        df['north_distance'] = gdf_fixed_lon.geometry.distance(
+            bd_as_point) / 1000.0
+        # calculate distance east from bet dagan coords in km:
+        df['east_distance'] = gdf_fixed_lat.geometry.distance(
+            bd_as_point) / 1000.0
+        # fix sign to indicate: negtive = south:
+        df['north_distance'] = df.apply(
+            lambda x: change_sign(
+                x.lat, bd_lat, x.north_distance), axis=1)
+        # fix sign to indicate: negtive = east:
+        df['east_distance'] = df.apply(
+            lambda x: change_sign(
+                x.lon, bd_lon, x.east_distance), axis=1)
+        return df['north_distance'].to_xarray(), df['east_distance'].to_xarray()
 
 
 #def produce_radiosonde_edt_north_east_distance(path=sound_path, savepath=None,
@@ -1510,6 +1552,12 @@ def read_one_EDT_record(filepath, year=None):
 #    ds = get_unique_index(ds, 'Height')
     # interpolate:
     new_time = np.arange(0, float(int(ds.time.max())))
+#    ds = ds.interpolate_na(
+#        'time',
+#        method='linear',
+#        max_gap=3,
+#        fill_value='extrapolate')
+#    ds = ds.interp(coords={'time': new_time}, method='cubic')
     ds_list = []
     for da in ds.data_vars.values():
         # dropna in all vars:
@@ -1526,7 +1574,7 @@ def read_one_EDT_record(filepath, year=None):
             ds_list.append(dropped)
     ds = xr.merge(ds_list)
     ds['Height'].attrs['units'] = 'm'
-    ds['time'].attrs['units'] = 'sec'
+#    ds['time'].attrs['units'] = 'sec'
     ds.attrs['station'] = meta['station']
     # copy unit attrs:
     for key, val in units_dict.items():
@@ -1537,9 +1585,7 @@ def read_one_EDT_record(filepath, year=None):
     ds = ds.rename({'Lat': 'lat', 'Lon': 'lon', 'Range': 'range'})
     # add more variables: Tm, Tpw, etc...
     ds['east_distance'], ds['north_distance'] = calculate_edt_north_east_distance(
-        ds[['lat', 'lon']])
-    ds['east_distance'].attrs['units'] = 'km'
-    ds['north_distance'].attrs['units'] = 'km'
+        ds['lat'],ds['lon'], method='fast')
     ds['T'] -= 273.15
     ds['T'].attrs['units'] = 'degC'
     ds = ds.rename({'TD': 'Dewpt', 'FF': 'WS'})
@@ -1589,6 +1635,10 @@ def read_one_EDT_record(filepath, year=None):
     ds['sonde_type'] = meta['RS_type']
     ds['RS_number'] = meta['RS_number']
     ds['termination_reason'] = meta['termination_reason']
+    # rename for consistency with phys and PTU data:
+    ds = ds.rename({'DD': 'WD'})
+    # convert to timedelta for resampling purposes:
+    ds['time'] = pd.to_timedelta(ds['time'].values, unit='sec')
     return ds
 
 
@@ -2063,6 +2113,7 @@ def move_bet_dagan_physical_to_main_path(bet_dagan_path):
 
 def read_all_radiosonde_data(path, savepath=None, data_type='phys',
                              verbose=True, year=None):
+    """use year for edt,then concat, otherwise it collapses"""
     from aux_gps import path_glob
 #    from aux_gps import get_unique_index
     from aux_gps import keep_iqr
@@ -2101,7 +2152,11 @@ def read_all_radiosonde_data(path, savepath=None, data_type='phys',
             date = pd.to_datetime(ds['sound_time'].item())
             if verbose:
                 print('reading {} {} radiosonde report'.format(date.strftime('%Y-%m-%d %H:%M'), data_type))
-            assert date == date_ff
+            try:
+                assert date == date_ff
+            except AssertionError:
+                print('date from filename : {}, date from report: {}'.format(date_ff, date))
+                return -1
             ds_list.append(ds)
     dss = xr.concat(ds_list, 'sound_time')
     print('concatenating...')
@@ -2145,7 +2200,7 @@ def combine_PTU_and_Wind_levels_radiosonde(sound_path=sound_path,
     ptu['WD'] = wind['WD']
     ptu['U'] = wind['U']
     ptu['V'] = wind['V']
-    ptu['time'].attrs['units'] = 'sec'
+#    ptu['time'].attrs['units'] = 'sec'
     ptu.attrs['lat'] = 32.01
     ptu.attrs['lon'] = 34.81
     if drop_period is not None:
@@ -2295,6 +2350,8 @@ def read_one_PTU_Wind_levels_radiosonde_report(path_file, verbose=False):
         U, V = convert_wind_speed_direction_to_zonal_meridional(ds['WS'], ds['WD'])
         ds['U'] = U
         ds['V'] = V
+    # convert to time delta:
+    ds['time'] = pd.to_timedelta(ds['time'].values, unit='sec')
     return ds
 
 
@@ -2343,6 +2400,9 @@ def read_one_physical_radiosonde_report(path_file, skip_from_year=2014,
          na_values=['/////'])
     time_str = path_file.as_posix().split('/')[-1].split('_')[-1]
     dt = pd.to_datetime(time_str, format='%Y%m%d%H')
+    sound_time = check_sound_time_datetime(dt)
+    if sound_time.year >= skip_from_year:
+        return None
     if not df[df.iloc[:, 0].str.contains('PILOT')].empty:
         return None
     # drop last two cols:
@@ -2380,9 +2440,7 @@ def read_one_physical_radiosonde_report(path_file, skip_from_year=2014,
 #    df['datetime_index'] = df['Time'] + dt
     df = df.set_index(total_sec)
     df.index.name = 'time'
-    sound_time = check_sound_time_datetime(dt)
-    if sound_time.year >= skip_from_year:
-        return None
+
 #    # now, convert Time to decimal seconds:
 #    df['Time'] = df['Time'] / np.timedelta64(1, 's')
     # check for EL and AZ that are not empty and WD and WS that are NaN's are
@@ -2445,6 +2503,8 @@ def read_one_physical_radiosonde_report(path_file, skip_from_year=2014,
     ds.attrs['lon'] = 34.81
 #    ds.attrs['alt'] = 31.0
     ds['Height'].attrs['units'] = 'm'
+    # convert to time delta:
+    ds['time'] = pd.to_timedelta(ds['time'].values, unit='sec')
     return ds
 
 
