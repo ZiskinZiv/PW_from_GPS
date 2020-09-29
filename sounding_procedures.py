@@ -559,7 +559,9 @@ def wrap_xr_metpy_specific_humidity(MR, verbose=False):
     return da
 
 
-def calculate_atmospheric_refractivity(P, T, VP, verbose=False):
+def calculate_atmospheric_refractivity(P, T, RH, verbose=False):
+    MR = wrap_xr_metpy_mixing_ratio(P, T, RH)
+    VP = wrap_xr_metpy_vapor_pressure(P, MR)
     try:
         T_unit = T.attrs['units']
         assert T_unit == 'degC'
@@ -583,7 +585,7 @@ def convert_wind_speed_direction_to_zonal_meridional(WS, WD, verbose=False):
     assert dim == list(set(WD.dims))[0]
     DS = WS.to_dataset(name='WS')
     DS['WD'] = WD
-    DS = DS.dropna(dim)
+#    DS = DS.dropna(dim)
     WS = DS['WS']
     WD = DS['WD']
     assert WS.size == WD.size
@@ -607,159 +609,613 @@ def convert_wind_speed_direction_to_zonal_meridional(WS, WD, verbose=False):
     U.attrs['units'] = 'm/s'
     V.attrs['long_name'] = 'meridional_velocity'
     V.attrs['units'] = 'm/s'
-    U.name = 'U'
-    V.name = 'V'
+    U.name = 'u'
+    V.name = 'v'
     return U, V
 
 
-def compare_WW2014_to_Rib_all_seasons(path=sound_path, times=None,
-                                      plot_type='hist', bins=25):
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-    if plot_type == 'hist' or plot_type == 'scatter':
-        fig_hist, axs = plt.subplots(2, 2, sharex=False, sharey=True,
-                                     figsize=(10, 8))
-        seasons = ['DJF', 'MAM', 'JJA', 'SON']
-        cmap = sns.color_palette("colorblind", 2)
-        for i, ax in enumerate(axs.flatten()):
-            ax = compare_WW2014_to_Rib_single_subplot(sound_path=path,
-                                                      season=seasons[i],
-                                                      times=times, ax=ax,
-                                                      colors=[cmap[0],
-                                                              cmap[1]],
-                                                      plot_type=plot_type,
-                                                      bins=bins)
-        fig_hist.tight_layout()
+#def compare_WW2014_to_Rib_all_seasons(path=sound_path, times=None,
+#                                      plot_type='hist', bins=25):
+#    import matplotlib.pyplot as plt
+#    import seaborn as sns
+#    if plot_type == 'hist' or plot_type == 'scatter':
+#        fig_hist, axs = plt.subplots(2, 2, sharex=False, sharey=True,
+#                                     figsize=(10, 8))
+#        seasons = ['DJF', 'MAM', 'JJA', 'SON']
+#        cmap = sns.color_palette("colorblind", 2)
+#        for i, ax in enumerate(axs.flatten()):
+#            ax = compare_WW2014_to_Rib_single_subplot(sound_path=path,
+#                                                      season=seasons[i],
+#                                                      times=times, ax=ax,
+#                                                      colors=[cmap[0],
+#                                                              cmap[1]],
+#                                                      plot_type=plot_type,
+#                                                      bins=bins)
+#        fig_hist.tight_layout()
+#    return
+
+
+#def compare_WW2014_to_Rib_single_subplot(sound_path=sound_path, season=None,
+#                                         times=None, bins=None,
+#                                         ax=None, colors=None,
+#                                         plot_type='hist'):
+#    from aux_gps import path_glob
+#    import xarray as xr
+#    from PW_from_gps_figures import plot_two_histograms_comparison
+#    ww_file = path_glob(sound_path, 'MLH_WW2014_*.nc')[-1]
+#    ww = xr.load_dataarray(ww_file)
+#    rib_file = path_glob(sound_path, 'MLH_Rib_*.nc')[-1]
+#    rib = xr.load_dataarray(rib_file)
+#    ds = ww.to_dataset(name='MLH_WW')
+#    ds['MLH_Rib'] = rib
+#    if season is not None:
+#        ds = ds.sel(sound_time=ds['sound_time.season'] == season)
+#        print('selected {} season'.format(season))
+#        labels = ['MLH-Rib for {}'.format(season), 'MLH-WW for {}'.format(season)]
+#    else:
+#        labels = ['MLH-Rib Annual', 'MLH-WW Annual']
+#    if times is not None:
+#        ds = ds.sel(sound_time=slice(*times))
+#        print('selected {}-{} period'.format(*times))
+#        title = 'Bet-Dagan radiosonde {}-{} period'.format(*times)
+#    else:
+#        times = [ds.sound_time.min().dt.year.item(),
+#                 ds.sound_time.max().dt.year.item()]
+#        title = 'Bet-Dagan radiosonde {}-{} period'.format(*times)
+#    if plot_type == 'hist':
+#        ax = plot_two_histograms_comparison(ds['MLH_Rib'], ds['MLH_WW'],
+#                                            ax=ax, labels=labels,
+#                                            colors=colors, bins=bins)
+#        ax.legend()
+#        ax.set_ylabel('Frequency')
+#        ax.set_xlabel('MLH [m]')
+#        ax.set_title(title)
+#    elif plot_type == 'scatter':
+#        if ax is None:
+#            fig, ax = plt.subplots()
+#        ax.scatter(ds['MLH_Rib'].values, ds['MLH_WW'].values)
+#        ax.set_xlabel(labels[0].split(' ')[0] + ' [m]')
+#        ax.set_ylabel(labels[1].split(' ')[0] + ' [m]')
+#        season_label = labels[0].split(' ')[-1]
+#        ax.plot(ds['MLH_Rib'], ds['MLH_Rib'], c='r')
+#        ax.legend(['y = x', season_label], loc='upper right')
+#        ax.set_title(title)
+#    return ax
+
+
+#def calculate_Wang_and_Wang_2014_MLH_all_profiles(sound_path=sound_path,
+#                                                  data_type='phys',
+#                                                  hour=12, plot=True,
+#                                                  savepath=None):
+#    import xarray as xr
+#    from aux_gps import smooth_xr
+#    import matplotlib.pyplot as plt
+#    import seaborn as sns
+#    from aux_gps import save_ncfile
+#    from PW_from_gps_figures import plot_seasonal_histogram
+#    if data_type == 'phys':
+#        bd = xr.load_dataset(sound_path / 'bet_dagan_phys_sounding_2007-2019.nc')
+#    elif data_type == 'edt':
+#        bd = xr.load_dataset(sound_path / 'bet_dagan_edt_sounding_2016-2019.nc')
+#    # N = calculate_atmospheric_refractivity(bd['P'], bd['T'], bd['VP'])
+#    # assemble all WW vars:
+#    WW = bd['N'].to_dataset(name='N')
+#    WW['RH'] = bd['RH']
+#    WW['PT'] = bd['PT']
+#    WW['MR'] = bd['MR']
+#    # slice hour:
+#    WW = WW.sel(sound_time=WW['sound_time.hour'] == hour)
+#    # produce gradients:
+#    WW_grad = WW.differentiate('Height', edge_order=2)
+#    # smooth them with 1-2-1 smoother:
+#    WW_grad_smoothed = smooth_xr(WW_grad, 'Height')
+##    return WW_grad_smoothed
+#    mlhs = []
+#    for dt in WW_grad_smoothed.sound_time:
+#        df = WW_grad_smoothed.sel(sound_time=dt).reset_coords(drop=True).to_dataframe()
+#        mlhs.append(calculate_Wang_and_Wang_2014_MLH_single_profile(df, plot=False))
+#    mlh = xr.DataArray(mlhs, dims=['sound_time'])
+#    mlh['sound_time'] = WW_grad_smoothed['sound_time']
+#    mlh.name = 'MLH'
+#    mlh.attrs['long_name'] = 'Mixing layer height'
+#    mlh.attrs['units'] = 'm'
+#    mlh.attrs['method'] = 'W&W2014 using PT, N, MR and RH'
+#    if savepath is not None:
+#        filename = 'MLH_WW2014_{}_{}.nc'.format(data_type, hour)
+#        save_ncfile(mlh, sound_path, filename)
+#    if plot:
+#        cmap = sns.color_palette("colorblind", 5)
+#        fig, ax = plt.subplots(3, 1, sharex=True, figsize=(12, 9))
+#        df_mean = mlh.groupby('sound_time.month').mean().to_dataframe('mean_MLH')
+#        df_mean.plot(color=cmap, ax=ax[0])
+#        ax[0].grid()
+#        ax[0].set_ylabel('Mean MLH [m]')
+#        ax[0].set_title(
+#            'Annual mixing layer height from Bet-Dagan radiosonde profiles ({}Z) using W&W2014 method'.format(hour))
+#        df_std = mlh.groupby('sound_time.month').std().to_dataframe('std_MLH')
+#        df_std.plot(color=cmap, ax=ax[1])
+#        ax[1].grid()
+#        ax[1].set_ylabel('Std MLH [m]')
+#        df_count = mlh.groupby('sound_time.month').count().to_dataframe('count_MLH')
+#        df_count.plot(color=cmap, ax=ax[2])
+#        ax[2].grid()
+#        ax[2].set_ylabel('Count MLH [#]')
+#        fig.tight_layout()
+#        plot_seasonal_histogram(mlh, dim='sound_time', xlim=(-100, 3000),
+#                                xlabel='MLH [m]',
+#                                suptitle='MLH histogram using W&W 2014 method')
+#    return mlh
+
+
+#def calculate_Wang_and_Wang_2014_MLH_single_profile(df, alt_cutoff=3000,
+#                                                    plot=True):
+#    import pandas as pd
+#    import numpy as np
+#    import matplotlib.pyplot as plt
+#    # first , cutoff:
+#    df = df.loc[0: alt_cutoff]
+#    if plot:
+##        df.plot(subplots=True)
+#        fig, ax = plt.subplots(1, 4, figsize=(20, 16))
+#        df.loc[0: 1200, 'PT'].reset_index().plot.line(y='Height', x='PT', ax=ax[0], legend=False)
+#        df.loc[0: 1200, 'RH'].reset_index().plot.line(y='Height', x='RH', ax=ax[1], legend=False)
+#        df.loc[0: 1200, 'MR'].reset_index().plot.line(y='Height', x='MR', ax=ax[2], legend=False)
+#        df.loc[0: 1200, 'N'].reset_index().plot.line(y='Height', x='N', ax=ax[3], legend=False)
+#        [x.grid() for x in ax]
+#    ind = np.arange(1, 11)
+#    pt10 = df['PT'].nlargest(n=10).index.values
+#    n10 = df['N'].nsmallest(n=10).index.values
+#    rh10 = df['RH'].nsmallest(n=10).index.values
+#    mr10 = df['MR'].nsmallest(n=10).index.values
+#    ten = pd.DataFrame([pt10, n10, rh10, mr10]).T
+#    ten.columns = ['PT', 'N', 'RH', 'MR']
+#    ten.index = ind
+#    for i, vc_df in ten.iterrows():
+#        mlh_0 = vc_df.value_counts()[vc_df.value_counts() > 2]
+#        if mlh_0.empty:
+#            continue
+#        else:
+#            mlh = mlh_0.index.item()
+#            return mlh
+#    print('MLH Not found using W&W!')
+#    return np.nan
+
+
+def classify_SBL(ds, method='T', sbl_max_height=300, filter_cbl=True):
+    """Run find_surface_inversion using T gradient and filter all 12Z records
+    use method=T for temp inversion, rig for gradient richardson"""
+    # TODO: fix gradient richardson method
+    import pandas as pd
+    import xarray as xr
+    ds = ds.drop_sel(time=pd.to_timedelta(0, unit='s'))
+    # nullify the first Height:
+    ds['Height'] -= ds['Height'].isel(time=0)
+    sbls = []
+    stimes = []
+    for i in range(ds['sound_time'].size):
+        if method == 'T':
+            mlh = find_surface_inversion_height(
+                    ds.isel(
+                            sound_time=i).reset_coords(
+                                    drop=True), max_height=sbl_max_height)
+        elif method == 'rig':
+            mlh = find_MLH_from_2s_richardson(
+                    ds.isel(
+                            sound_time=i).reset_coords(
+                                    drop=True), method='grad')
+        if mlh is not None:
+            sbls.append(mlh)
+            stimes.append(ds.isel(sound_time=i)['sound_time'])
+    sound_time = xr.concat(stimes, 'sound_time')
+    sbl = xr.DataArray([x.values for x in sbls], dims=['sound_time'])
+    sbl['sound_time'] = sound_time
+    if filter_cbl:
+        print('filtered {} 12Z records.'.format(
+            sbl[sbl['sound_time.hour'] == 12].count().item()))
+        sbl = sbl[sbl['sound_time.hour'] == 00]
+    return sbl
+
+
+def classidy_RBL(ds, sbl, method='WW'):
+    import pandas as pd
+    import xarray as xr
+    ds = ds.drop_sel(time=pd.to_timedelta(0, unit='s'))
+    # nullify the first Height:
+    ds['Height'] -= ds['Height'].isel(time=0)
+    # filter SBLs, first assemble all 00Z:
+    Z00_st = ds['T'].transpose('sound_time', 'time')[ds['sound_time.hour'] == 00]['sound_time']
+#    ds = ds.sel(sound_time=Z00_st)
+    # take out the SBL events:
+    sbl_st = sbl['sound_time']
+    st = pd.to_datetime(
+        list(set(Z00_st.values).difference(set(sbl_st.values))))
+    ds = ds.sel(sound_time=st)
+    stimes = []
+    rbls = []
+    for i in range(ds['sound_time'].size):
+        if method == 'WW':
+            mlh = find_MLH_from_2s_WW2014(
+                ds.isel(
+                    sound_time=i), alt_cutoff=3500)
+        elif method == 'rib':
+            mlh = find_MLH_from_2s_richardson(
+                ds.isel(
+                    sound_time=i), method='bulk')
+        if mlh is not None:
+            rbls.append(mlh)
+            stimes.append(ds.isel(sound_time=i)['sound_time'])
+    sound_time = xr.concat(stimes, 'sound_time')
+    rbl = xr.DataArray([x.values for x in rbls], dims=['sound_time'])
+    rbl['sound_time'] = sound_time
+    rbl = rbl.sortby('sound_time')
+    print('found {} RBLs from total of {}'.format(rbl['sound_time'].size, st.size))
+    return rbl
+
+
+def classify_CBL():
+    # TODO: wrap up all three funcs to single api
     return
 
 
-def compare_WW2014_to_Rib_single_subplot(sound_path=sound_path, season=None,
-                                         times=None, bins=None,
-                                         ax=None, colors=None,
-                                         plot_type='hist'):
-    from aux_gps import path_glob
-    import xarray as xr
-    from PW_from_gps_figures import plot_two_histograms_comparison
-    ww_file = path_glob(sound_path, 'MLH_WW2014_*.nc')[-1]
-    ww = xr.load_dataarray(ww_file)
-    rib_file = path_glob(sound_path, 'MLH_Rib_*.nc')[-1]
-    rib = xr.load_dataarray(rib_file)
-    ds = ww.to_dataset(name='MLH_WW')
-    ds['MLH_Rib'] = rib
-    if season is not None:
-        ds = ds.sel(sound_time=ds['sound_time.season'] == season)
-        print('selected {} season'.format(season))
-        labels = ['MLH-Rib for {}'.format(season), 'MLH-WW for {}'.format(season)]
-    else:
-        labels = ['MLH-Rib Annual', 'MLH-WW Annual']
-    if times is not None:
-        ds = ds.sel(sound_time=slice(*times))
-        print('selected {}-{} period'.format(*times))
-        title = 'Bet-Dagan radiosonde {}-{} period'.format(*times)
-    else:
-        times = [ds.sound_time.min().dt.year.item(),
-                 ds.sound_time.max().dt.year.item()]
-        title = 'Bet-Dagan radiosonde {}-{} period'.format(*times)
-    if plot_type == 'hist':
-        ax = plot_two_histograms_comparison(ds['MLH_Rib'], ds['MLH_WW'],
-                                            ax=ax, labels=labels,
-                                            colors=colors, bins=bins)
-        ax.legend()
-        ax.set_ylabel('Frequency')
-        ax.set_xlabel('MLH [m]')
-        ax.set_title(title)
-    elif plot_type == 'scatter':
-        if ax is None:
-            fig, ax = plt.subplots()
-        ax.scatter(ds['MLH_Rib'].values, ds['MLH_WW'].values)
-        ax.set_xlabel(labels[0].split(' ')[0] + ' [m]')
-        ax.set_ylabel(labels[1].split(' ')[0] + ' [m]')
-        season_label = labels[0].split(' ')[-1]
-        ax.plot(ds['MLH_Rib'], ds['MLH_Rib'], c='r')
-        ax.legend(['y = x', season_label], loc='upper right')
-        ax.set_title(title)
-    return ax
-
-
-def calculate_Wang_and_Wang_2014_MLH_all_profiles(sound_path=sound_path,
-                                                  data_type='phys',
-                                                  hour=12, plot=True,
-                                                  savepath=None):
-    import xarray as xr
+def find_surface_inversion_height(ds, min_height=None, max_height=300, max_time=None):
+    """calculate surface inversion height in meters, surface is defined as
+    max_time in seconds after radiosonde launch or max_height in meters,
+    if we find the surface invesion layer height is it a candidate for SBL
+    (use Rig), if not, and it is at night use Rib, W&W to find RBL"""
+    import numpy as np
     from aux_gps import smooth_xr
+#    from aux_gps import smooth_xr
+#    ds = smooth_xr(ds[['T', 'Height']], dim='time')
+    dsize = len(ds.dims)
+    if dsize != 1:
+        raise('ds dimensions should be 1!')
+    new_ds = ds[['T', 'Height']]
+    if max_height is None and max_time is None:
+        raise('Pls pick either max_time or max_height...')
+    if max_height is None and max_time is not None:
+        new_ds = new_ds.isel(time=slice(0, max_time))
+#        T_diff = (-ds['T'].diff('time').isel(time=slice(0, max_time)))
+    elif max_height is not None and max_time is None:
+        new_ds = new_ds.where(ds['Height'] <= max_height, drop=True)
+#        T_diff = (-ds['T'].diff('time').where(ds['Height']
+#                                              <= max_height, drop=True))
+    if min_height is not None:
+        new_ds = new_ds.where(ds['Height'] >= min_height, drop=True)
+    T = new_ds['T']
+    H = new_ds['Height']
+    T['time'] = H.values
+    T = T.rename(time='Height')
+    dT = smooth_xr(T.differentiate('Height'), 'Height')
+    dT = dT.dropna('Height')
+    indLeft = np.searchsorted(-dT, 0, side='left')
+    indRight = np.searchsorted(-dT, 0, side='right')
+    if indLeft == indRight:
+        ind = indLeft
+        mlh = H[ind -1: ind + 1].mean()
+    else:
+        ind = indLeft
+        mlh = H[ind]
+    # condition for SBL i.e., the temp increases with height until reveres
+    positive_dT = (dT[0] - dT[ind - 1]) > 0
+    last_ind = dT.size - 1
+    if (ind < last_ind) and (ind > 0) and positive_dT:
+        return mlh
+    else:
+        return None
+#    T_diff = T_diff.where(T_diff < 0)
+#    if T_diff['time'].size != 0:
+#        if dsize == 1:
+#            inversion_time = T_diff.idxmin('time')
+#            inversion_height = ds['Height'].sel(time=inversion_time)
+#        elif dsize == 2:
+#            inversion_time = T_diff.idxmin('time').dropna('sound_time')
+#            inversion_height = ds['Height'].sel(time=inversion_time, sound_time=inversion_time['sound_time'])
+#    else:
+#        inversion_height = None
+#    return inversion_height
+
+
+def calculate_temperature_lapse_rate_from_2s_radiosonde(ds, radio_time=2,
+                                                        Height=None):
+    """calculate the \Gamma = -dT/dz (lapse rate), with either radio_time (2 s after launch)
+    or Height at certain level"""
+    import numpy as np
+    # check for dims:
+    dsize = len(ds.dims)
+    if dsize > 2 or dsize < 1:
+        raise('ds dimensions should be 1 or 2...')
+    T = ds['T']
+    H = ds['Height']
+    T0 = T.isel(time=0)
+    H0 = H.isel(time=0)
+    if radio_time is None and Height is None:
+        raise('Pls pick either radio_time or Height...')
+    if radio_time is not None and Height is None:
+        radio_time = np.timedelta64(radio_time, 's')
+        T1 = T.sel(time=radio_time, method='nearest')
+        H1 = H.sel(time=radio_time, method='nearest')
+        seconds_after = T['time'].sel(time=radio_time, method='nearest').dt.seconds.item()
+        if dsize == 1:         
+            height = H.sel(time=radio_time, method='nearest').item()
+            dz = height - H0.item()
+        elif dsize == 2:
+            height = H.sel(time=radio_time, method='nearest').mean().item()
+            dz = (H1 - H0).mean().item()
+        method = 'time'
+    elif radio_time is None and Height is not None:
+        if dsize == 1:         
+            t1 = (np.abs(H-Height)).idxmin().item()
+        elif dsize == 2:
+            t1 = (np.abs(H-Height)).idxmin('time')
+        H1 = H.sel(time=t1)
+        T1 = T.sel(time=t1)
+        if dsize == 1:         
+            height = H1.item()
+            seconds_after = T['time'].sel(time=t1).dt.seconds.item()
+            dz = height - H0.item()
+        elif dsize == 2:
+            height = H1.mean().item()
+            dz = (H1 - H0).mean().item()
+            seconds_after = T['time'].sel(time=t1).dt.seconds.mean().item()
+        method = 'height'
+    gamma = -1* (T0 - T1) / ((H1 - H0) / 1000)
+    gamma.attrs['units'] = 'degC/km'
+    gamma.name = 'Gamma'
+    gamma.attrs['long_name'] = 'temperature lapse rate'
+    gamma.attrs['Height_taken'] = '{:.2f}'.format(height)
+    gamma.attrs['dz [m]'] = '{:.2f}'.format(dz)
+    gamma.attrs['seconds_after_launch'] = seconds_after
+    gamma.attrs['method'] = method
+    return gamma
+
+
+def plot_2s_radiosonde_single_profile(ds, max_height=1000, rib_lims=None,
+                                      plot_type='WW'):
+    # drop the first time:
+    # ds1=ds1.drop_sel(time=pd.to_timedelta(0,unit='s'))
+    # nullify the first Height:
+    # ds1['Height'] -= ds1['Height'][0]
+    # fix 31-35 meters ambiguity
+    # fix PT in K and in degC = probably calculated in K and sub 273.15
     import matplotlib.pyplot as plt
-    import seaborn as sns
-    from aux_gps import save_ncfile
-    from PW_from_gps_figures import plot_seasonal_histogram
-    if data_type == 'phys':
-        bd = xr.load_dataset(sound_path / 'bet_dagan_phys_sounding_2007-2019.nc')
-    elif data_type == 'edt':
-        bd = xr.load_dataset(sound_path / 'bet_dagan_edt_sounding_2016-2019.nc')
-    # N = calculate_atmospheric_refractivity(bd['P'], bd['T'], bd['VP'])
-    # assemble all WW vars:
-    WW = bd['N'].to_dataset(name='N')
-    WW['RH'] = bd['RH']
-    WW['PT'] = bd['PT']
-    WW['MR'] = bd['MR']
-    # slice hour:
-    WW = WW.sel(sound_time=WW['sound_time.hour'] == hour)
-    # produce gradients:
-    WW_grad = WW.differentiate('Height', edge_order=2)
-    # smooth them with 1-2-1 smoother:
-    WW_grad_smoothed = smooth_xr(WW_grad, 'Height')
-#    return WW_grad_smoothed
-    mlhs = []
-    for dt in WW_grad_smoothed.sound_time:
-        df = WW_grad_smoothed.sel(sound_time=dt).reset_coords(drop=True).to_dataframe()
-        mlhs.append(calculate_Wang_and_Wang_2014_MLH_single_profile(df, plot=False))
-    mlh = xr.DataArray(mlhs, dims=['sound_time'])
-    mlh['sound_time'] = WW_grad_smoothed['sound_time']
-    mlh.name = 'MLH'
-    mlh.attrs['long_name'] = 'Mixing layer height'
-    mlh.attrs['units'] = 'm'
-    mlh.attrs['method'] = 'W&W2014 using PT, N, MR and RH'
-    if savepath is not None:
-        filename = 'MLH_WW2014_{}_{}.nc'.format(data_type, hour)
-        save_ncfile(mlh, sound_path, filename)
-    if plot:
-        cmap = sns.color_palette("colorblind", 5)
-        fig, ax = plt.subplots(3, 1, sharex=True, figsize=(12, 9))
-        df_mean = mlh.groupby('sound_time.month').mean().to_dataframe('mean_MLH')
-        df_mean.plot(color=cmap, ax=ax[0])
-        ax[0].grid()
-        ax[0].set_ylabel('Mean MLH [m]')
-        ax[0].set_title(
-            'Annual mixing layer height from Bet-Dagan radiosonde profiles ({}Z) using W&W2014 method'.format(hour))
-        df_std = mlh.groupby('sound_time.month').std().to_dataframe('std_MLH')
-        df_std.plot(color=cmap, ax=ax[1])
-        ax[1].grid()
-        ax[1].set_ylabel('Std MLH [m]')
-        df_count = mlh.groupby('sound_time.month').count().to_dataframe('count_MLH')
-        df_count.plot(color=cmap, ax=ax[2])
-        ax[2].grid()
-        ax[2].set_ylabel('Count MLH [#]')
-        fig.tight_layout()
-        plot_seasonal_histogram(mlh, dim='sound_time', xlim=(-100, 3000),
-                                xlabel='MLH [m]',
-                                suptitle='MLH histogram using W&W 2014 method')
-    return mlh
+    import pandas as pd
+    assert len(ds.dims) == 1 and 'time' in ds.dims
+    dt = pd.to_datetime(ds['sound_time'].values)
+#    ds['Height'] -= ds['Height'][0]
+    mlh_rib = find_MLH_from_2s_richardson(ds, method='bulk')
+    mlh_rig = find_MLH_from_2s_richardson(ds, method='grad')
+    mlh_ww = find_MLH_from_2s_WW2014(ds, alt_cutoff=3500)
+    mlh_t = find_surface_inversion_height(ds, max_time=None, max_height=300)
+    ds['rib'] = calculate_richardson_from_2s_radiosonde(ds, method='bulk')
+    ds['rig'] = calculate_richardson_from_2s_radiosonde(ds, method='grad')
+    ds['N'] = calculate_atmospheric_refractivity(ds['P'], ds['T'], ds['RH'])
+    T_k = ds['T'] + 273.15
+    T_k.attrs['units'] = 'K'
+    ds['PT'] = wrap_xr_metpy_potential_temperature(ds['P'], T_k)  # in degC
+    ds = ds.assign_coords(time=ds['Height'].values)
+    ds = ds.drop('Height')
+    ds = ds.rename(time='Height')
+    df = ds[['T', 'rib', 'rig', 'PT', 'RH', 'MR', 'N']].to_dataframe()
+    if max_height is not None:
+        df = df[df.index <= max_height]
+    df['Height'] = df.index.values
+    df['MR'] *= 1000  # to g/kg
+    df['PT'] -= 273.15
+    if plot_type == 'WW':
+        fig, axes = plt.subplots(
+            1, 5, sharey=False, sharex=False, figsize=(
+                20, 15))
+        df.plot.line(
+            ax=axes[0],
+            x='rib',
+            y='Height',
+            marker='.',
+            legend=False,
+            grid=True,
+            color='g')
+        axes[0].axhline(y=mlh_rib,color='k', linestyle='-', linewidth=1.5)
+        df.plot.line(
+            ax=axes[1],
+            x='PT',
+            y='Height',
+            marker='.',
+            legend=False,
+            grid=True,
+            color='g')
+        df.plot.line(
+            ax=axes[2],
+            x='RH',
+            y='Height',
+            marker='.',
+            legend=False,
+            grid=True,
+            color='g')
+        df.plot.line(
+            ax=axes[3],
+            x='MR',
+            y='Height',
+            marker='.',
+            legend=False,
+            grid=True,
+            color='g')
+        df.plot.line(
+            ax=axes[4],
+            x='N',
+            y='Height',
+            marker='.',
+            legend=False,
+            grid=True,
+            color='g')
+        [ax.axhline(y=mlh_ww, color='k', linestyle='-', linewidth=1.5) for ax in axes[1:4]]
+        axes[0].set_xlabel('Ri$_b$')
+        axes[0].axvline(0.25, color='k', linestyle='--')
+        axes[1].set_xlabel('$\Theta$ [$\degree$C]')
+        axes[2].set_xlabel('RH [%]')
+        axes[3].set_xlabel('w [g/kg]')
+        axes[4].set_xlabel('N')
+        axes[0].set_ylabel('z [m]')
+        if rib_lims is not None:
+            axes[0].set_xlim(*rib_lims)
+    elif plot_type == 'T':
+        fig, axes = plt.subplots(
+            1, 3, sharey=False, sharex=False, figsize=(
+                20, 15))
+        df.plot.line(
+            ax=axes[0],
+            x='T',
+            y='Height',
+            marker='.',
+            legend=False,
+            grid=True,
+            color='g')
+        if mlh_t is not None:
+            axes[0].axhline(y=mlh_t,color='k', linestyle='-', linewidth=1.5)
+        df.plot.line(
+            ax=axes[1],
+            x='rig',
+            y='Height',
+            marker='.',
+            legend=False,
+            grid=True,
+            color='g')
+        axes[1].axhline(y=mlh_rig, color='k', linestyle='-', linewidth=1.5)
+        df.plot.line(
+            ax=axes[2],
+            x='rib',
+            y='Height',
+            marker='.',
+            legend=False,
+            grid=True,
+            color='g')
+        axes[1].set_ylim(0, max_height)
+        axes[2].axhline(y=mlh_rib, color='k', linestyle='-', linewidth=1.5)
+        axes[0].set_xlabel('T [$\degree$C]')
+        axes[1].set_xlabel('Ri$_g$')
+        axes[2].set_xlabel('Ri$_b$')
+        axes[1].axvline(0.25, color='k', linestyle='--')
+        axes[2].axvline(0.25, color='k', linestyle='--')
+        axes[0].set_ylabel('Z [m]')
+        if rib_lims is not None:
+            axes[2].set_xlim(*rib_lims)
+    fig.suptitle(dt)
+    return fig
 
 
-def calculate_Wang_and_Wang_2014_MLH_single_profile(df, alt_cutoff=3000,
-                                                    plot=True):
+def calculate_richardson_from_2s_radiosonde(ds, g=9.79474, method='bulk'):
+    import numpy as np
+    dsize = len(ds.dims)
+    if dsize == 2:
+        axis=1
+    else:
+        axis=0
+    T_k = ds['T'] + 273.15
+    T_k.attrs['units'] = 'K'
+    PT = wrap_xr_metpy_potential_temperature(ds['P'], T_k)
+    VPT = wrap_xr_metpy_virtual_potential_temperature(ds['P'], ds['T'], ds['MR'])
+    U = ds['u']
+    V = ds['v']
+    H = ds['Height']
+#    VPT = wrap_xr_metpy_virtual_potential_temperature(ds['P'], ds['T'], ds['MR']*1000)
+#    VPT = PT * (1 +ds['MR']*1000/0.622)/(1+ds['MR']*1000) - 273.15
+#    VPT_mean = VPT.cumsum('time') / (np.arange(H.size) + 1)
+    if method == 'bulk':
+        H0 = H.isel(time=0)
+#        H0 = 0
+        U0 = U.isel(time=0)
+        V0 = V.isel(time=0)
+        VPT_0 = VPT.isel(time=0)
+        U0 = 0
+        V0 = 0 
+        U2 = (U - U0)**2.0
+        V2 = (V - V0)**2.0
+        Rib_values = g * (VPT - VPT_0) * (H - H0) / ((VPT_0) * (U2 + V2))
+#        Rib_values = g * (VPT - VPT_0) * (H - H0) / ((VPT_mean) * (U2 + V2))
+        Ri = VPT.copy(data=Rib_values)
+        Ri.name = 'Rib'
+        Ri.attrs.update(long_name='Bulk Richardson Number')
+        Ri.attrs.update(units='dimensionless')
+    elif method == 'grad':
+#        PT -= 273.15
+        BVF2 = wrap_xr_metpy_brunt_vaisala_f2(H, PT, verbose=False, axis=axis)
+#        U.assign_coords(time=H)
+#        V.assign_coords(time=H)
+#        U = U.rename(time='Height')
+#        V = V.rename(time='Height')
+#        dU = U.differentiate('Height').values
+#        dV = V.differentiate('Height').values
+        dU = (U.differentiate('time') / H.differentiate('time')).values
+        dV = (V.differentiate('time') / H.differentiate('time')).values
+        Ri = BVF2 / (dU**2 + dV**2)
+        Ri.name = 'Rig'
+        Ri.attrs.update(long_name='Gradient Richardson Number')
+        Ri.attrs.update(units='dimensionless')
+    return Ri
+
+#
+#def calculate_bulk_richardson_from_physical_radiosonde(VPT, U, V, g=9.79474,
+#                                                       initial_height_pos=0):
+#    import numpy as np
+#    z = VPT['Height']  # in meters
+#    z0 = VPT['Height'].isel(Height=initial_height_pos)
+#    U0 = U.isel(Height=int(initial_height_pos))
+#    V0 = V.isel(Height=int(initial_height_pos))
+#    VPT_0 = VPT.isel(Height=int(initial_height_pos))
+#    VPT_mean = VPT.cumsum('Height') / (np.arange(VPT.Height.size) + 1)
+##    U.loc[dict(Height=35)]=0
+##    V.loc[dict(Height=35)]=0
+#    U2 = (U-U0)**2.0
+#    V2 = (V-V0)**2.0
+##     WS2 = (WS * 0.51444445)**2
+##    Rib_values = g * (VPT - VPT_0) * (z) / ((VPT_mean) * (U2 + V2))
+#    Rib_values = g * (VPT - VPT_0) * (z - z0) / ((VPT_0) * (U2 + V2))
+#    Rib = VPT.copy(data=Rib_values)
+#    Rib.name = 'Rib'
+#    Rib.attrs.update(long_name='Bulk Richardson Number')
+#    Rib.attrs.update(units='dimensionless')
+#    return Rib
+
+
+#def calculate_gradient_richardson_from_physical_radiosonde(BVF2, U, V):
+#    dU = U.differentiate('Height')
+#    dV = V.differentiate('Height')
+#    Rig = BVF2 / (dU**2 + dV**2)
+#    Rig.name = 'Rig'
+#    Rig.attrs.update(long_name='Gradient Richardson Number')
+#    Rig.attrs.update(units='dimensionless')
+#    return Rig
+
+
+def find_MLH_from_2s_WW2014(ds, alt_cutoff=None, eps=50,
+                            return_found_df=False, plot=False):
     import pandas as pd
     import numpy as np
     import matplotlib.pyplot as plt
-    # first , cutoff:
-    df = df.loc[0: alt_cutoff]
-    if plot:
-#        df.plot(subplots=True)
-        fig, ax = plt.subplots(1, 4, figsize=(20, 16))
-        df.loc[0: 1200, 'PT'].reset_index().plot.line(y='Height', x='PT', ax=ax[0], legend=False)
-        df.loc[0: 1200, 'RH'].reset_index().plot.line(y='Height', x='RH', ax=ax[1], legend=False)
-        df.loc[0: 1200, 'MR'].reset_index().plot.line(y='Height', x='MR', ax=ax[2], legend=False)
-        df.loc[0: 1200, 'N'].reset_index().plot.line(y='Height', x='N', ax=ax[3], legend=False)
-        [x.grid() for x in ax]
+    from aux_gps import smooth_xr
+    import xarray as xr
+    dsize = len(ds.dims)
+    if dsize != 1:
+        raise('ds has to be 1D!')
+    if 'PT' not in ds:
+        T_k = ds['T'] + 273.15
+        T_k.attrs['units'] = 'K'
+        ds['PT'] = wrap_xr_metpy_potential_temperature(ds['P'], T_k)
+    if 'N' not in ds:
+        ds['N'] = calculate_atmospheric_refractivity(ds['P'], ds['T'], ds['RH'])
+    dt = pd.to_datetime(ds['sound_time'].item())
+    dss = ds[['PT', 'RH', 'MR', 'N']].reset_coords(drop=True)
+    df_plot = dss.to_dataframe()
+    df_plot['Height'] = ds['Height'].values
+    df_plot = df_plot.dropna().set_index('Height')
+    if alt_cutoff is not None:
+        dss = dss.where(ds['Height'] <= alt_cutoff, drop=True)
+        H = ds['Height'].where(ds['Height'] <= alt_cutoff, drop=True)
+    dss['time'] = H
+    dss = dss.rename(time='Height')
+#        nearest_cutoff = ds['Height'].dropna('time').sel(Height=alt_cutoff, method='nearest')
+#        dss = dss.sel(Height=slice(None, nearest_cutoff))
+    dss = dss.differentiate('Height')
+    dss = smooth_xr(dss, 'Height')
+    df = dss.to_dataframe().dropna()
     ind = np.arange(1, 11)
     pt10 = df['PT'].nlargest(n=10).index.values
     n10 = df['N'].nsmallest(n=10).index.values
@@ -768,170 +1224,202 @@ def calculate_Wang_and_Wang_2014_MLH_single_profile(df, alt_cutoff=3000,
     ten = pd.DataFrame([pt10, n10, rh10, mr10]).T
     ten.columns = ['PT', 'N', 'RH', 'MR']
     ten.index = ind
+    found = []
     for i, vc_df in ten.iterrows():
-        mlh_0 = vc_df.value_counts()[vc_df.value_counts() > 2]
-        if mlh_0.empty:
-            continue
-        else:
-            mlh = mlh_0.index.item()
-            return mlh
-    print('MLH Not found using W&W!')
-    return np.nan
+        row_sorted = vc_df.sort_values()
+        diff_3_1 = row_sorted[3] - row_sorted[1]
+        diff_2_0 = row_sorted[2] - row_sorted[0]
+        if (diff_3_1 <= eps) and (diff_2_0 <= eps):
+            found.append(row_sorted)
+        elif diff_3_1 <= eps:
+            found.append(row_sorted[1:4])
+        elif diff_2_0 <= eps:
+            found.append(row_sorted[0:3])
+            
+#        mlh_0 = vc_df.value_counts()[vc_df.value_counts() > 2]
+#        if mlh_0.empty:
+#            continue
+#        else:
+#            mlh = mlh_0.index.item()
+#            return mlh
+    if not found:
+        print('MLH Not found for {} using W&W!'.format(dt))
+        return None
+    found_df = pd.concat(found, axis=1).T
+    mlh_mean = found_df.iloc[0].mean()
+    if return_found_df:
+        return found_df
+    if plot:
+#        df.plot(subplots=True)
+        fig, ax = plt.subplots(1, 4, figsize=(20, 16))
+        df_plot.loc[0: 1200, 'PT'].reset_index().plot.line(y='Height', x='PT', ax=ax[0], legend=False)
+        df_plot.loc[0: 1200, 'RH'].reset_index().plot.line(y='Height', x='RH', ax=ax[1], legend=False)
+        df_plot.loc[0: 1200, 'MR'].reset_index().plot.line(y='Height', x='MR', ax=ax[2], legend=False)
+        df_plot.loc[0: 1200, 'N'].reset_index().plot.line(y='Height', x='N', ax=ax[3], legend=False)
+        [x.grid() for x in ax]
+        [ax[0].axhline(y=mlh, color='r', linestyle='--') for mlh in found_df['PT'].dropna()]
+        [ax[1].axhline(y=mlh, color='r', linestyle='--') for mlh in found_df['RH'].dropna()]
+        [ax[2].axhline(y=mlh, color='r', linestyle='--') for mlh in found_df['MR'].dropna()]
+        [ax[3].axhline(y=mlh, color='r', linestyle='--') for mlh in found_df['N'].dropna()]
+        [axx.axhline(y=mlh_mean,color='k', linestyle='-', linewidth=1.5) for axx in ax]
+        [axx.set_ylim(0, 1200) for axx in ax]
+        [axx.autoscale(enable=True, axis='x', tight=True) for axx in ax]
+    return xr.DataArray(mlh_mean)
 
 
-def calculate_bulk_richardson_from_physical_radiosonde(VPT, U, V, g=9.79474,
-                                                       initial_height_pos=0):
+def find_MLH_from_2s_richardson(ds, crit=0.25, method='bulk'):
     import numpy as np
-    z = VPT['Height']  # in meters
-    z0 = VPT['Height'].isel(Height=initial_height_pos)
-    U0 = U.isel(Height=int(initial_height_pos))
-    V0 = V.isel(Height=int(initial_height_pos))
-    VPT_0 = VPT.isel(Height=int(initial_height_pos))
-    VPT_mean = VPT.cumsum('Height') / (np.arange(VPT.Height.size) + 1)
-#    U.loc[dict(Height=35)]=0
-#    V.loc[dict(Height=35)]=0
-    U2 = (U-U0)**2.0
-    V2 = (V-V0)**2.0
-#     WS2 = (WS * 0.51444445)**2
-#    Rib_values = g * (VPT - VPT_0) * (z) / ((VPT_mean) * (U2 + V2))
-    Rib_values = g * (VPT - VPT_0) * (z - z0) / ((VPT_0) * (U2 + V2))
-    Rib = VPT.copy(data=Rib_values)
-    Rib.name = 'Rib'
-    Rib.attrs.update(long_name='Bulk Richardson Number')
-    Rib.attrs.update(units='dimensionless')
-    return Rib
-
-
-def calculate_gradient_richardson_from_physical_radiosonde(BVF2, U, V):
-    dU = U.differentiate('Height')
-    dV = V.differentiate('Height')
-    Rig = BVF2 / (dU**2 + dV**2)
-    Rig.name = 'Rig'
-    Rig.attrs.update(long_name='Gradient Richardson Number')
-    Rig.attrs.update(units='dimensionless')
-    return Rig
-
-
-def calculate_MLH_from_Rib_single_profile(Rib_df, crit=0.25):
-    import numpy as np
-    # drop first row:
-    # df = Rib_df.drop(35)
-#    # get index position of first closest to crit:
-#    i = df['Rib'].sub(crit).abs().argmin() + 1
-#    df_c = df.iloc[i-2:i+2]
-    indLeft = np.searchsorted(Rib_df['Rib'], crit, side='left')
-    indRight = np.searchsorted(Rib_df['Rib'], crit, side='right')
+    ri_dict = {'bulk': 'rib', 'grad': 'rig'}
+    ri_name = ri_dict.get(method)
+    if ri_name not in ds:
+        ds[ri_name] = calculate_richardson_from_2s_radiosonde(
+            ds, method=method)
+#        if ri_name == 'rig':
+#            ds[ri_name] = smooth_xr(ds[ri_name])
+    indLeft = np.searchsorted(ds[ri_name], crit, side='left')
+    indRight = np.searchsorted(ds[ri_name], crit, side='right')
     if indLeft == indRight:
         ind = indLeft
+        last_ind = ds[ri_name].size - 1
+        if (ind < last_ind) and (ind > 0):
+            assert ds[ri_name][ind - 1] < crit
+            mlh = ds['Height'][ind - 1: ind + 1].mean()
+        else:
+            return None
     else:
-        ind = indLeft
-    mlh = Rib_df.index[ind]
-    # mlh = df['Rib'].sub(crit).abs().idxmin()
+        if (ind < last_ind) and (ind > 0):
+            ind = indLeft
+            mlh = ds['Height'][indLeft]
+        else:
+            return None
+
+#    mlh_time = np.abs(ds[ri_name] - crit).idxmin('time')
+#    mlh = ds['Height'].sel(time=mlh_time)
+    mlh.name = 'MLH'
+    mlh.attrs['long_name'] = 'Mixing Layer Height'
     return mlh
 
 
-def calculate_Rib_MLH_all_profiles(sound_path=sound_path, crit=0.25, hour=12,
-                                   data_type='phys', savepath=None):
-    from aux_gps import save_ncfile
-    import xarray as xr
-    from PW_from_gps_figures import plot_seasonal_histogram
-    if data_type == 'phys':
-        bd = xr.load_dataset(sound_path /
-                             'bet_dagan_phys_sounding_2007-2019.nc')
-        pos = 0
-    elif data_type == 'edt':
-        bd = xr.load_dataset(sound_path /
-                             'bet_dagan_edt_sounding_2016-2019.nc')
-        pos = 2
-    Rib = calculate_bulk_richardson_from_physical_radiosonde(bd['VPT'], bd['U'],
-                                                             bd['V'], g=9.79474,
-                                                             initial_height_pos=pos)
-    mlh = calculate_MLH_time_series_from_all_profiles(Rib, crit=crit,
-                                                      hour=hour, plot=False)
-    plot_seasonal_histogram(mlh, dim='sound_time', xlim=(-100, 3000),
-                            xlabel='MLH [m]',
-                            suptitle='MLH histogram using Rib method')
-    if savepath is not None:
-        filename = 'MLH_Rib_{}_{}_{}.nc'.format(
-            str(crit).replace('.', 'p'), data_type, hour)
-        save_ncfile(mlh, sound_path, filename)
-    return mlh
+#def calculate_MLH_from_Rib_single_profile(Rib_df, crit=0.25):
+#    import numpy as np
+#    # drop first row:
+#    # df = Rib_df.drop(35)
+##    # get index position of first closest to crit:
+##    i = df['Rib'].sub(crit).abs().argmin() + 1
+##    df_c = df.iloc[i-2:i+2]
+#    indLeft = np.searchsorted(Rib_df['Rib'], crit, side='left')
+#    indRight = np.searchsorted(Rib_df['Rib'], crit, side='right')
+#    if indLeft == indRight:
+#        ind = indLeft
+#    else:
+#        ind = indLeft
+#    mlh = Rib_df.index[ind]
+#    # mlh = df['Rib'].sub(crit).abs().idxmin()
+#    return mlh
 
 
-def calculate_MLH_time_series_from_all_profiles(Rib, crit=0.25, hour=12,
-                                                dim='sound_time', plot=True):
-    from aux_gps import keep_iqr
-    import matplotlib.pyplot as plt
-    import xarray as xr
-    rib = Rib.sel(sound_time=Rib['sound_time.hour'] == hour)
-    mlhs = []
-    for time in rib[dim]:
-        #        print('proccessing MLH retreival of {} using Rib at {}'.format(
-        #            time.dt.strftime('%Y-%m-%d:%H').item(), crit))
-        df = rib.sel({dim: time}).reset_coords(drop=True).to_dataframe()
-        mlhs.append(calculate_MLH_from_Rib_single_profile(df, crit=crit))
-    da = xr.DataArray(mlhs, dims=[dim])
-    da[dim] = rib[dim]
-    da.name = 'MLH'
-    da.attrs['long_name'] = 'Mixing layer height'
-    da.attrs['units'] = 'm'
-    da.attrs['method'] = 'Rib@{}'.format(crit)
-    if plot:
-        da = keep_iqr(da, dim)
-        fig, ax = plt.subplots(figsize=(15, 6))
-        ln = da.plot(ax=ax)
-        ln200 = da.where(da >= 200).plot(ax=ax)
-        lnmm = da.where(da > 200).resample(
-            {dim: 'MS'}).mean().plot(ax=ax, linewidth=3, color='r')
-        ax.legend(ln + ln200 + lnmm,
-                  ['MLH', 'MLH above 200m', 'MLH above 200m monthly means'])
-        ax.grid()
-        ax.set_ylabel('MLH from Rib [m]')
-        ax.set_xlabel('')
-        fig.tight_layout()
-    return da
+#def calculate_Rib_MLH_all_profiles(sound_path=sound_path, crit=0.25, hour=12,
+#                                   data_type='phys', savepath=None):
+#    from aux_gps import save_ncfile
+#    import xarray as xr
+#    from PW_from_gps_figures import plot_seasonal_histogram
+#    if data_type == 'phys':
+#        bd = xr.load_dataset(sound_path /
+#                             'bet_dagan_phys_sounding_2007-2019.nc')
+#        pos = 0
+#    elif data_type == 'edt':
+#        bd = xr.load_dataset(sound_path /
+#                             'bet_dagan_edt_sounding_2016-2019.nc')
+#        pos = 2
+#    Rib = calculate_bulk_richardson_from_physical_radiosonde(bd['VPT'], bd['U'],
+#                                                             bd['V'], g=9.79474,
+#                                                             initial_height_pos=pos)
+#    mlh = calculate_MLH_time_series_from_all_profiles(Rib, crit=crit,
+#                                                      hour=hour, plot=False)
+#    plot_seasonal_histogram(mlh, dim='sound_time', xlim=(-100, 3000),
+#                            xlabel='MLH [m]',
+#                            suptitle='MLH histogram using Rib method')
+#    if savepath is not None:
+#        filename = 'MLH_Rib_{}_{}_{}.nc'.format(
+#            str(crit).replace('.', 'p'), data_type, hour)
+#        save_ncfile(mlh, sound_path, filename)
+#    return mlh
 
 
-def solve_MLH_with_all_crits(RiB, mlh_all=None, hour=12, cutoff=200,
-                             plot=True):
-    import xarray as xr
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-    from aux_gps import keep_iqr
-    if mlh_all is None:
-        mlhs = []
-        crits = [0.25, 0.33, 0.5, 0.75, 1.0]
-        for crit in crits:
-            print('solving mlh for {} critical RiB value.'.format(crit))
-            mlh = calculate_MLH_time_series_from_all_profiles(RiB, crit=crit,
-                                                              hour=hour,
-                                                              plot=False)
-            mlh = keep_iqr(mlh, dim='sound_time')
-            mlhs.append(mlh)
+#def calculate_MLH_time_series_from_all_profiles(Rib, crit=0.25, hour=12,
+#                                                dim='sound_time', plot=True):
+#    from aux_gps import keep_iqr
+#    import matplotlib.pyplot as plt
+#    import xarray as xr
+#    rib = Rib.sel(sound_time=Rib['sound_time.hour'] == hour)
+#    mlhs = []
+#    for time in rib[dim]:
+#        #        print('proccessing MLH retreival of {} using Rib at {}'.format(
+#        #            time.dt.strftime('%Y-%m-%d:%H').item(), crit))
+#        df = rib.sel({dim: time}).reset_coords(drop=True).to_dataframe()
+#        mlhs.append(calculate_MLH_from_Rib_single_profile(df, crit=crit))
+#    da = xr.DataArray(mlhs, dims=[dim])
+#    da[dim] = rib[dim]
+#    da.name = 'MLH'
+#    da.attrs['long_name'] = 'Mixing layer height'
+#    da.attrs['units'] = 'm'
+#    da.attrs['method'] = 'Rib@{}'.format(crit)
+#    if plot:
+#        da = keep_iqr(da, dim)
+#        fig, ax = plt.subplots(figsize=(15, 6))
+#        ln = da.plot(ax=ax)
+#        ln200 = da.where(da >= 200).plot(ax=ax)
+#        lnmm = da.where(da > 200).resample(
+#            {dim: 'MS'}).mean().plot(ax=ax, linewidth=3, color='r')
+#        ax.legend(ln + ln200 + lnmm,
+#                  ['MLH', 'MLH above 200m', 'MLH above 200m monthly means'])
+#        ax.grid()
+#        ax.set_ylabel('MLH from Rib [m]')
+#        ax.set_xlabel('')
+#        fig.tight_layout()
+#    return da
 
-        mlh_all = xr.concat(mlhs, 'crit')
-        mlh_all['crit'] = crits
-        if cutoff is not None:
-            mlh_all = mlh_all.where(mlh_all >= cutoff)
-    if plot:
-        cmap = sns.color_palette("colorblind", 5)
-        fig, ax = plt.subplots(3, 1, sharex=True, figsize=(12, 9))
-        df_mean = mlh_all.groupby('sound_time.month').mean().to_dataset('crit').to_dataframe()
-        df_mean.plot(color=cmap, style=['-+', '-.', '-', '--', '-.'], ax=ax[0])
-        ax[0].grid()
-        ax[0].set_ylabel('Mean MLH [m]')
-        ax[0].set_title(
-            'Annual mixing layer height from Bet-Dagan radiosonde profiles ({}Z) using RiB method'.format(hour))
-        df_std = mlh_all.groupby('sound_time.month').std().to_dataset('crit').to_dataframe()
-        df_std.plot(color=cmap, style=['-+', '-.', '-', '--', '-.'], ax=ax[1])
-        ax[1].grid()
-        ax[1].set_ylabel('Std MLH [m]')
-        df_count = mlh_all.groupby('sound_time.month').count().to_dataset('crit').to_dataframe()
-        df_count.plot(color=cmap, style=['-+', '-.', '-', '--', '-.'], ax=ax[2])
-        ax[2].grid()
-        ax[2].set_ylabel('Count MLH [#]')
-        fig.tight_layout()
-    return mlh_all
+
+#def solve_MLH_with_all_crits(RiB, mlh_all=None, hour=12, cutoff=200,
+#                             plot=True):
+#    import xarray as xr
+#    import matplotlib.pyplot as plt
+#    import seaborn as sns
+#    from aux_gps import keep_iqr
+#    if mlh_all is None:
+#        mlhs = []
+#        crits = [0.25, 0.33, 0.5, 0.75, 1.0]
+#        for crit in crits:
+#            print('solving mlh for {} critical RiB value.'.format(crit))
+#            mlh = calculate_MLH_time_series_from_all_profiles(RiB, crit=crit,
+#                                                              hour=hour,
+#                                                              plot=False)
+#            mlh = keep_iqr(mlh, dim='sound_time')
+#            mlhs.append(mlh)
+#
+#        mlh_all = xr.concat(mlhs, 'crit')
+#        mlh_all['crit'] = crits
+#        if cutoff is not None:
+#            mlh_all = mlh_all.where(mlh_all >= cutoff)
+#    if plot:
+#        cmap = sns.color_palette("colorblind", 5)
+#        fig, ax = plt.subplots(3, 1, sharex=True, figsize=(12, 9))
+#        df_mean = mlh_all.groupby('sound_time.month').mean().to_dataset('crit').to_dataframe()
+#        df_mean.plot(color=cmap, style=['-+', '-.', '-', '--', '-.'], ax=ax[0])
+#        ax[0].grid()
+#        ax[0].set_ylabel('Mean MLH [m]')
+#        ax[0].set_title(
+#            'Annual mixing layer height from Bet-Dagan radiosonde profiles ({}Z) using RiB method'.format(hour))
+#        df_std = mlh_all.groupby('sound_time.month').std().to_dataset('crit').to_dataframe()
+#        df_std.plot(color=cmap, style=['-+', '-.', '-', '--', '-.'], ax=ax[1])
+#        ax[1].grid()
+#        ax[1].set_ylabel('Std MLH [m]')
+#        df_count = mlh_all.groupby('sound_time.month').count().to_dataset('crit').to_dataframe()
+#        df_count.plot(color=cmap, style=['-+', '-.', '-', '--', '-.'], ax=ax[2])
+#        ax[2].grid()
+#        ax[2].set_ylabel('Count MLH [#]')
+#        fig.tight_layout()
+#    return mlh_all
 
 
 def scatter_plot_MLH_PWV(ds, season='JJA', crit=0.25):
@@ -984,7 +1472,7 @@ def return_PWV_with_MLH_values(PW, MLH, dim='sound_time'):
     return ds
 
 
-def wrap_xr_metpy_brunt_vaisala_f2(Height, PT, verbose=False):
+def wrap_xr_metpy_brunt_vaisala_f2(Height, PT, axis=0, verbose=False):
     from metpy.calc import brunt_vaisala_frequency_squared
     from metpy.units import units
     try:
@@ -994,7 +1482,7 @@ def wrap_xr_metpy_brunt_vaisala_f2(Height, PT, verbose=False):
         PT_unit = 'K'
         if verbose:
             print('assuming potential temperature units are degree kelvin...')
-    PT_values = PT.values * units('K')
+    PT_values = PT.values * units('kelvin')
     try:
         H_unit = Height.attrs['units']
         assert H_unit == 'm'
@@ -1003,7 +1491,7 @@ def wrap_xr_metpy_brunt_vaisala_f2(Height, PT, verbose=False):
         if verbose:
             print('assuming Height units are m...')
     H_values = Height.values * units('m')
-    bvf2 = brunt_vaisala_frequency_squared(H_values, PT_values, axis=1)
+    bvf2 = brunt_vaisala_frequency_squared(H_values, PT_values, axis=axis)
     da = PT.copy(data=bvf2.magnitude)
     da.name = 'BVF2'
     da.attrs['units'] = '1/sec**2'
@@ -1026,14 +1514,14 @@ def wrap_xr_metpy_virtual_temperature(T, MR, verbose=False):
     T_values = T_values * units('K')
     try:
         MR_unit = MR.attrs['units']
-        assert MR_unit == 'g/kg'
+        assert MR_unit == 'kg/kg'
     except KeyError:
-        MR_unit = 'g/kg'
+        MR_unit = 'kg/kg'
         if verbose:
             print('assuming mixing ratio units are gr/kg...')
     MR_values = MR.values * units(MR_unit)
     Theta = virtual_temperature(T_values, MR_values)
-    da = MR.copy(data=Theta.magnitude) / 1000  # fixing for g/kg
+    da = MR.copy(data=Theta.magnitude) #/ 1000  # fixing for g/kg
     da.name = 'VPT'
     da.attrs['units'] = 'K'
     da.attrs['long_name'] = 'Virtual Potential Temperature'
@@ -1063,14 +1551,14 @@ def wrap_xr_metpy_virtual_potential_temperature(P, T, MR, verbose=False):
     T_values = T_values * units('K')
     try:
         MR_unit = MR.attrs['units']
-        assert MR_unit == 'g/kg'
+        assert MR_unit == 'kg/kg'
     except KeyError:
-        MR_unit = 'g/kg'
+        MR_unit = 'kg/kg'
         if verbose:
             print('assuming mixing ratio units are gr/kg...')
     MR_values = MR.values * units(MR_unit)
     Theta = virtual_potential_temperature(P_values, T_values, MR_values)
-    da = P.copy(data=Theta.magnitude) / 1000  # fixing for g/kg
+    da = P.copy(data=Theta.magnitude)#   / 1000  # fixing for g/kg
     da.name = 'VPT'
     da.attrs['units'] = 'K'
     da.attrs['long_name'] = 'Virtual Potential Temperature'
@@ -1079,6 +1567,7 @@ def wrap_xr_metpy_virtual_potential_temperature(P, T, MR, verbose=False):
 
 def wrap_xr_metpy_potential_temperature(P, T, verbose=False):
     from metpy.calc import potential_temperature
+    from metpy.calc import exner_function
     from metpy.units import units
     try:
         P_unit = P.attrs['units']
@@ -1088,20 +1577,21 @@ def wrap_xr_metpy_potential_temperature(P, T, verbose=False):
         if verbose:
             print('assuming pressure units are hpa...')
     P_values = P.values * units(P_unit)
-    try:
-        T_unit = T.attrs['units']
-        assert T_unit == 'degC'
-    except KeyError:
-        T_unit = 'degC'
-        if verbose:
-            print('assuming temperature units are degree celsius...')
-    # convert to Kelvin:
-    T_values = T.values + 273.15
-    T_values = T_values * units('K')
-    Theta = potential_temperature(P_values, T_values)
-    da = P.copy(data=Theta.magnitude)
+#    try:
+#        T_unit = T.attrs['units']
+#        assert T_unit == 'degC'
+#    except KeyError:
+#        T_unit = 'degC'
+#        if verbose:
+#            print('assuming temperature units are degree celsius...')
+#     convert to Kelvin:
+#    T_values = T.values + 273.15
+#    T_values = T_values * units('K')
+#    Theta = potential_temperature(P_values, T)
+    Theta = T / exner_function(P_values)
+    da = P.copy(data=Theta.values)
     da.name = 'PT'
-    da.attrs['units'] = 'K'
+    da.attrs['units'] = T.attrs['units']
     da.attrs['long_name'] = 'Potential Temperature'
     return da
 
@@ -1118,11 +1608,11 @@ def wrap_xr_metpy_vapor_pressure(P, MR, verbose=False):
             print('assuming pressure units are hPa...')
     try:
         MR_unit = MR.attrs['units']
-        assert MR_unit == 'g/kg'
+        assert MR_unit == 'kg/kg'
     except KeyError:
-        MR_unit = 'g/kg'
+        MR_unit = 'kg/kg'
         if verbose:
-            print('assuming mixing ratio units are g/kg...')  
+            print('assuming mixing ratio units are kg/kg...')  
     P_values = P.values * units(P_unit)
     MR_values = MR.values * units(MR_unit)
     VP = vapor_pressure(P_values, MR_values)
@@ -1160,7 +1650,8 @@ def wrap_xr_metpy_mixing_ratio(P, T, RH, verbose=False):
     mixing_ratio = mixing_ratio_from_relative_humidity(
         RH_values, T_values, P_values)
     da = T.copy(data=mixing_ratio.magnitude)
-    da.attrs['units'] = 'g/kg'
+    da.name = 'MR'
+    da.attrs['units'] = 'kg/kg'
     da.attrs['long_name'] = 'Water vapor mass mixing ratio'
     return da
 
@@ -1584,11 +2075,12 @@ def read_one_EDT_record(filepath, year=None):
             pass
     ds = ds.rename({'Lat': 'lat', 'Lon': 'lon', 'Range': 'range'})
     # add more variables: Tm, Tpw, etc...
-    ds['east_distance'], ds['north_distance'] = calculate_edt_north_east_distance(
-        ds['lat'],ds['lon'], method='fast')
+#    ds['east_distance'], ds['north_distance'] = calculate_edt_north_east_distance(
+#        ds['lat'],ds['lon'], method='fast')
     ds['T'] -= 273.15
     ds['T'].attrs['units'] = 'degC'
-    ds = ds.rename({'TD': 'Dewpt', 'FF': 'WS'})
+    # rename for consistency with phys and PTU data:
+    ds = ds.rename({'TD': 'Dewpt', 'FF': 'WS', 'DD': 'WD'})
     ds['Dewpt'] -= 273.15
     ds['Dewpt'].attrs['units'] = 'degC'
     long_names = {'T': 'Air temperature', 'Dewpt': 'Dew point', 'RH': 'Relative humidity',
@@ -1598,45 +2090,43 @@ def read_one_EDT_record(filepath, year=None):
     for var, long_name in long_names.items():
         ds[var].attrs['long_name'] = long_name
     # fix MR:
-    ds['MR'] /= 1000.0
-    ds['Rho'] = wrap_xr_metpy_density(ds['P'], ds['T'], ds['MR'])
-    ds['Rho'].attrs['long_name'] = 'Air density'
-    ds['Q'] = wrap_xr_metpy_specific_humidity(ds['MR'])
-    ds['Q'].attrs['long_name'] = 'Specific humidity'
-    ds['VP'] = wrap_xr_metpy_vapor_pressure(ds['P'], ds['MR'])
-    ds['VP'].attrs['long_name'] = 'Water vapor partial pressure'
-    ds['Rho_wv'] = calculate_absolute_humidity_from_partial_pressure(
-        ds['VP'], ds['T'])
-    pw = cumtrapz((ds['Q']*ds['Rho']).fillna(0), ds['Height'], initial=0)
-    ds['PW'] = xr.DataArray(pw, dims=['time'])
-    ds['PW'].attrs['units'] = 'mm'
-    ds['PW'].attrs['long_name'] = 'Precipitable water'
-    tm = calculate_tm_via_trapz_height(
-        ds['VP'],
-        ds['T'],
-        ds['Height'])
-    ds['VPT'] = wrap_xr_metpy_virtual_potential_temperature(ds['P'], ds['T'],
-                                                            ds['MR'])
-    ds['PT'] = wrap_xr_metpy_potential_temperature(ds['P'], ds['T'])
-    ds['VT'] = wrap_xr_metpy_virtual_temperature(ds['T'], ds['MR'])
-    U, V = convert_wind_speed_direction_to_zonal_meridional(ds['WS'], ds['DD'])
-    ds['U'] = U
-    ds['V'] = V
-    ds['N'] = calculate_atmospheric_refractivity(ds['P'], ds['T'], ds['VP'])
-    ds['Tm'] = xr.DataArray(tm, dims=['time'])
-    ds['Tm'].attrs['units'] = 'K'
-    ds['Tm'].attrs['long_name'] = 'Water vapor mean air temperature'
-    ds['Ts'] = ds['T'].dropna('time').values[0] + 273.15
-    ds['Ts'].attrs['units'] = 'K'
-    ds['Ts'].attrs['long_name'] = 'Surface temperature'
+#    ds['MR'] /= 1000.0
+#    ds['Rho'] = wrap_xr_metpy_density(ds['P'], ds['T'], ds['MR'])
+#    ds['Rho'].attrs['long_name'] = 'Air density'
+#    ds['Q'] = wrap_xr_metpy_specific_humidity(ds['MR'])
+#    ds['Q'].attrs['long_name'] = 'Specific humidity'
+#    ds['VP'] = wrap_xr_metpy_vapor_pressure(ds['P'], ds['MR'])
+#    ds['VP'].attrs['long_name'] = 'Water vapor partial pressure'
+#    ds['Rho_wv'] = calculate_absolute_humidity_from_partial_pressure(
+#        ds['VP'], ds['T'])
+#    pw = cumtrapz((ds['Q']*ds['Rho']).fillna(0), ds['Height'], initial=0)
+#    ds['PW'] = xr.DataArray(pw, dims=['time'])
+#    ds['PW'].attrs['units'] = 'mm'
+#    ds['PW'].attrs['long_name'] = 'Precipitable water'
+#    tm = calculate_tm_via_trapz_height(
+#        ds['VP'],
+#        ds['T'],
+#        ds['Height'])
+#    ds['VPT'] = wrap_xr_metpy_virtual_potential_temperature(ds['P'], ds['T'],
+#                                                            ds['MR'])
+#    ds['PT'] = wrap_xr_metpy_potential_temperature(ds['P'], ds['T'])
+#    ds['VT'] = wrap_xr_metpy_virtual_temperature(ds['T'], ds['MR'])
+#    U, V = convert_wind_speed_direction_to_zonal_meridional(ds['WS'], ds['DD'])
+#    ds['U'] = U
+#    ds['V'] = V
+#    ds['N'] = calculate_atmospheric_refractivity(ds['P'], ds['T'], ds['VP'])
+#    ds['Tm'] = xr.DataArray(tm, dims=['time'])
+#    ds['Tm'].attrs['units'] = 'K'
+#    ds['Tm'].attrs['long_name'] = 'Water vapor mean air temperature'
+#    ds['Ts'] = ds['T'].dropna('time').values[0] + 273.15
+#    ds['Ts'].attrs['units'] = 'K'
+#    ds['Ts'].attrs['long_name'] = 'Surface temperature'
     ds['sound_time'] = sound_time
     ds['min_time'] = meta['launch_time']
     ds['max_time'] = ds['min_time'] + pd.Timedelta(ds['time'][-1].item(), unit='s')
     ds['sonde_type'] = meta['RS_type']
     ds['RS_number'] = meta['RS_number']
     ds['termination_reason'] = meta['termination_reason']
-    # rename for consistency with phys and PTU data:
-    ds = ds.rename({'DD': 'WD'})
     # convert to timedelta for resampling purposes:
     ds['time'] = pd.to_timedelta(ds['time'].values, unit='sec')
     return ds
@@ -2184,8 +2674,69 @@ def read_all_radiosonde_data(path, savepath=None, data_type='phys',
     return dss
 
 
+def combine_EDT_and_PTU_radiosonde(sound_path=sound_path, savepath=None,
+                                   resample='2s'):
+    from aux_gps import path_glob
+    from aux_gps import save_ncfile
+    import pandas as pd
+    import numpy as np
+    import xarray as xr
+    
+    def interpolate_one_da(da, dim_over, freq='2s'):
+        ds_list = []
+        for stime in dim_over:
+            daa = da.sel({dim_over.name: stime})
+            # dropna in all vars:
+            dropped = daa.dropna('time')
+            last_time = pd.Timedelta(daa.dropna('time')['time'].max().item(),units='s')
+            new_time = pd.timedelta_range(pd.Timedelta(0,unit='s'), last_time, freq=freq)
+            # if some data remain, interpolate:
+            if dropped.size > 0:
+                interpolated = dropped.interp(coords={'time': new_time}, method='cubic',
+                                              kwargs={'fill_value': np.nan})
+                ds_list.append(interpolated)
+        ds = xr.concat(ds_list, dim_over.name)
+        return ds
+        
+    ptu_file = path_glob(sound_path, 'bet_dagan_PTU_Wind_sounding_*.nc')[-1]
+    edt_file = path_glob(sound_path, 'bet_dagan_edt_sounding*.nc')[-1]
+    ptu = xr.load_dataset(ptu_file)
+    edt = xr.load_dataset(edt_file)
+    if resample is not None:
+        time_vars = [x for x in edt if 'time' in edt[x].dims]
+        other_vars = [x for x in edt if 'time' not in edt[x].dims]
+        other_ds = edt[other_vars]
+        msg = 'interpolated to {} seconds'.format(resample)
+        print(msg)
+        edt = edt[time_vars].map(interpolate_one_da, dim_over=edt['sound_time'], freq=resample)
+#        edt = edt[time_vars].interp(coords={'time': new_time}, method='cubic',
+#                             kwargs={'fill_value': np.nan})
+#        edt = edt[time_vars].resample(time=resample, keep_attrs=True).mean(keep_attrs=True)
+        edt = edt.update(other_ds)
+        edt.attrs['action'] = msg
+    # convert edt['MR'] to kg/kg:
+    edt['MR'] /= 1000
+    edt['MR'].attrs['units'] = 'kg/kg'
+    # add some vars to ptu for consistensy with edt:
+    ptu['u'], ptu['v'] = convert_wind_speed_direction_to_zonal_meridional(
+        ptu['WS'], ptu['WD'])
+    ptu['MR'] = wrap_xr_metpy_mixing_ratio(ptu['P'], ptu['T'], ptu['RH'])
+    # intersection fields:
+    inter_fields = list(set(edt.data_vars).intersection(set(ptu.data_vars)))
+    ptu = ptu[inter_fields]
+    edt = edt[inter_fields]
+    # finally concat:
+    ds = xr.concat([ptu, edt], 'sound_time')
+    if savepath is not None:
+        yr_min = ds.sound_time.min().dt.year.item()
+        yr_max = ds.sound_time.max().dt.year.item()
+        save_ncfile(
+            ds, savepath, 'bet_dagan_2s_sounding_{}-{}.nc'.format(yr_min, yr_max))
+    return ds
+
+
 def combine_PTU_and_Wind_levels_radiosonde(sound_path=sound_path,
-                                           savepath=None,
+                                           savepath=None, resample='2s',
                                            drop_period=['2016-11-17',
                                                         '2016-12-31']):
     from aux_gps import path_glob
@@ -2198,8 +2749,8 @@ def combine_PTU_and_Wind_levels_radiosonde(sound_path=sound_path,
     wind = xr.load_dataset(wind_file)
     ptu['WS'] = wind['WS']
     ptu['WD'] = wind['WD']
-    ptu['U'] = wind['U']
-    ptu['V'] = wind['V']
+#    ptu['U'] = wind['U']
+#    ptu['V'] = wind['V']
 #    ptu['time'].attrs['units'] = 'sec'
     ptu.attrs['lat'] = 32.01
     ptu.attrs['lon'] = 34.81
@@ -2214,6 +2765,15 @@ def combine_PTU_and_Wind_levels_radiosonde(sound_path=sound_path,
                 drop_period[1])
         print(msg)
         ptu.attrs['operation'] = msg
+    if resample is not None:
+        time_vars = [x for x in ptu if 'time' in ptu[x].dims]
+        other_vars = [x for x in ptu if 'time' not in ptu[x].dims]
+        other_ds = ptu[other_vars]
+        msg = 'resampled to {} seconds'.format(resample)
+        print(msg)
+        ptu = ptu[time_vars].resample(time=resample, keep_attrs=True).mean(keep_attrs=True)
+        ptu = ptu.update(other_ds)
+        ptu.attrs['action'] = msg
     if savepath is not None:
         yr_min = ptu.sound_time.min().dt.year.item()
         yr_max = ptu.sound_time.max().dt.year.item()
@@ -2317,39 +2877,39 @@ def read_one_PTU_Wind_levels_radiosonde_report(path_file, verbose=False):
     ds['min_time'] = dt + pd.Timedelta(df.index[0], unit='s')
     ds['max_time'] = ds['min_time'] + pd.Timedelta(df.index[-1], unit='s')
     # caclculate different variables:
-    if report_type == 'ptu':
-        ds['MR'] = wrap_xr_metpy_mixing_ratio(ds['P'], ds['T'], ds['RH'])
-        ds['MR'].attrs['long_name'] = 'Water vapor mass mixing ratio'
-        ds['Rho'] = wrap_xr_metpy_density(ds['P'], ds['T'], ds['MR'])
-        ds['Rho'].attrs['long_name'] = 'Air density'
-        ds['Q'] = wrap_xr_metpy_specific_humidity(ds['MR'])
-        ds['Q'].attrs['long_name'] = 'Specific humidity'
-        ds['VP'] = wrap_xr_metpy_vapor_pressure(ds['P'], ds['MR'])
-        ds['VP'].attrs['long_name'] = 'Water vapor partial pressure'
-        ds['Rho_wv'] = calculate_absolute_humidity_from_partial_pressure(
-            ds['VP'], ds['T'])
-        pw = cumtrapz(ds['Q']*ds['Rho'], ds['Height'], initial=0)
-        ds['PW'] = xr.DataArray(pw, dims=['time'])
-        ds['PW'].attrs['units'] = 'mm'
-        ds['PW'].attrs['long_name'] = 'Precipitable water'
-        tm = calculate_tm_via_trapz_height(ds['VP'], ds['T'], ds['Height'])
-    #    tm, unit = calculate_tm_via_pressure_sum(ds['VP'], ds['T'], ds['Rho'], ds['P'],
-    #                                             cumulative=True, verbose=False)
-        ds['VPT'] = wrap_xr_metpy_virtual_potential_temperature(ds['P'], ds['T'],
-                                                                ds['MR'])
-        ds['PT'] = wrap_xr_metpy_potential_temperature(ds['P'], ds['T'])
-        ds['VT'] = wrap_xr_metpy_virtual_temperature(ds['T'], ds['MR'])
-        ds['N'] = calculate_atmospheric_refractivity(ds['P'], ds['T'], ds['VP'])
-        ds['Tm'] = xr.DataArray(tm, dims=['time'])
-        ds['Tm'].attrs['units'] = 'K'
-        ds['Tm'].attrs['long_name'] = 'Water vapor mean air temperature'
-        ds['Ts'] = ds['T'].dropna('time').values[0] + 273.15
-        ds['Ts'].attrs['units'] = 'K'
-        ds['Ts'].attrs['long_name'] = 'Surface temperature'
-    elif report_type == 'wind':
-        U, V = convert_wind_speed_direction_to_zonal_meridional(ds['WS'], ds['WD'])
-        ds['U'] = U
-        ds['V'] = V
+#    if report_type == 'ptu':
+#        ds['MR'] = wrap_xr_metpy_mixing_ratio(ds['P'], ds['T'], ds['RH'])
+#        ds['MR'].attrs['long_name'] = 'Water vapor mass mixing ratio'
+#        ds['Rho'] = wrap_xr_metpy_density(ds['P'], ds['T'], ds['MR'])
+#        ds['Rho'].attrs['long_name'] = 'Air density'
+#        ds['Q'] = wrap_xr_metpy_specific_humidity(ds['MR'])
+#        ds['Q'].attrs['long_name'] = 'Specific humidity'
+#        ds['VP'] = wrap_xr_metpy_vapor_pressure(ds['P'], ds['MR'])
+#        ds['VP'].attrs['long_name'] = 'Water vapor partial pressure'
+#        ds['Rho_wv'] = calculate_absolute_humidity_from_partial_pressure(
+#            ds['VP'], ds['T'])
+#        pw = cumtrapz(ds['Q']*ds['Rho'], ds['Height'], initial=0)
+#        ds['PW'] = xr.DataArray(pw, dims=['time'])
+#        ds['PW'].attrs['units'] = 'mm'
+#        ds['PW'].attrs['long_name'] = 'Precipitable water'
+#        tm = calculate_tm_via_trapz_height(ds['VP'], ds['T'], ds['Height'])
+#    #    tm, unit = calculate_tm_via_pressure_sum(ds['VP'], ds['T'], ds['Rho'], ds['P'],
+#    #                                             cumulative=True, verbose=False)
+#        ds['VPT'] = wrap_xr_metpy_virtual_potential_temperature(ds['P'], ds['T'],
+#                                                                ds['MR'])
+#        ds['PT'] = wrap_xr_metpy_potential_temperature(ds['P'], ds['T'])
+#        ds['VT'] = wrap_xr_metpy_virtual_temperature(ds['T'], ds['MR'])
+#        ds['N'] = calculate_atmospheric_refractivity(ds['P'], ds['T'], ds['VP'])
+#        ds['Tm'] = xr.DataArray(tm, dims=['time'])
+#        ds['Tm'].attrs['units'] = 'K'
+#        ds['Tm'].attrs['long_name'] = 'Water vapor mean air temperature'
+#        ds['Ts'] = ds['T'].dropna('time').values[0] + 273.15
+#        ds['Ts'].attrs['units'] = 'K'
+#        ds['Ts'].attrs['long_name'] = 'Surface temperature'
+#    elif report_type == 'wind':
+#        U, V = convert_wind_speed_direction_to_zonal_meridional(ds['WS'], ds['WD'])
+#        ds['U'] = U
+#        ds['V'] = V
     # convert to time delta:
     ds['time'] = pd.to_timedelta(ds['time'].values, unit='sec')
     return ds
@@ -2460,39 +3020,39 @@ def read_one_physical_radiosonde_report(path_file, skip_from_year=2014,
     for name in ds.data_vars:
         ds[name].attrs['units'] = radio_units[name]
     # add more fields:
-    ds['Dewpt'] = wrap_xr_metpy_dewpoint(ds['T'], ds['RH'])
-    ds['Dewpt'].attrs['long_name'] = 'Dew point'
-    ds['MR'] = wrap_xr_metpy_mixing_ratio(ds['P'], ds['T'], ds['RH'])
-    ds['MR'].attrs['long_name'] = 'Water vapor mass mixing ratio'
-    ds['Rho'] = wrap_xr_metpy_density(ds['P'], ds['T'], ds['MR'])
-    ds['Rho'].attrs['long_name'] = 'Air density'
-    ds['Q'] = wrap_xr_metpy_specific_humidity(ds['MR'])
-    ds['Q'].attrs['long_name'] = 'Specific humidity'
-    ds['VP'] = wrap_xr_metpy_vapor_pressure(ds['P'], ds['MR'])
-    ds['VP'].attrs['long_name'] = 'Water vapor partial pressure'
-    ds['Rho_wv'] = calculate_absolute_humidity_from_partial_pressure(
-        ds['VP'], ds['T'])
-    pw = cumtrapz(ds['Q']*ds['Rho'], ds['Height'], initial=0)
-    ds['PW'] = xr.DataArray(pw, dims=['time'])
-    ds['PW'].attrs['units'] = 'mm'
-    ds['PW'].attrs['long_name'] = 'Precipitable water'
-    tm = calculate_tm_via_trapz_height(ds['VP'], ds['T'], ds['Height'])
-#    tm, unit = calculate_tm_via_pressure_sum(ds['VP'], ds['T'], ds['Rho'], ds['P'],
-#                                             cumulative=True, verbose=False)
-    ds['VPT'] = wrap_xr_metpy_virtual_potential_temperature(ds['P'], ds['T'],
-                                                            ds['MR'])
-    ds['PT'] = wrap_xr_metpy_potential_temperature(ds['P'], ds['T'])
-    ds['VT'] = wrap_xr_metpy_virtual_temperature(ds['T'], ds['MR'])
-    U, V = convert_wind_speed_direction_to_zonal_meridional(ds['WS'], ds['WD'])
-    ds['U'] = U
-    ds['V'] = V
-    ds['N'] = calculate_atmospheric_refractivity(ds['P'], ds['T'], ds['VP'])
-    ds['Tm'] = xr.DataArray(tm, dims=['time'])
-    ds['Tm'].attrs['units'] = 'K'
-    ds['Tm'].attrs['long_name'] = 'Water vapor mean air temperature'
-    ds['Ts'] = ds['T'].dropna('time').values[0] + 273.15
-    ds['Ts'].attrs['units'] = 'K'
-    ds['Ts'].attrs['long_name'] = 'Surface temperature'
+#    ds['Dewpt'] = wrap_xr_metpy_dewpoint(ds['T'], ds['RH'])
+#    ds['Dewpt'].attrs['long_name'] = 'Dew point'
+#    ds['MR'] = wrap_xr_metpy_mixing_ratio(ds['P'], ds['T'], ds['RH'])
+#    ds['MR'].attrs['long_name'] = 'Water vapor mass mixing ratio'
+#    ds['Rho'] = wrap_xr_metpy_density(ds['P'], ds['T'], ds['MR'])
+#    ds['Rho'].attrs['long_name'] = 'Air density'
+#    ds['Q'] = wrap_xr_metpy_specific_humidity(ds['MR'])
+#    ds['Q'].attrs['long_name'] = 'Specific humidity'
+#    ds['VP'] = wrap_xr_metpy_vapor_pressure(ds['P'], ds['MR'])
+#    ds['VP'].attrs['long_name'] = 'Water vapor partial pressure'
+#    ds['Rho_wv'] = calculate_absolute_humidity_from_partial_pressure(
+#        ds['VP'], ds['T'])
+#    pw = cumtrapz(ds['Q']*ds['Rho'], ds['Height'], initial=0)
+#    ds['PW'] = xr.DataArray(pw, dims=['time'])
+#    ds['PW'].attrs['units'] = 'mm'
+#    ds['PW'].attrs['long_name'] = 'Precipitable water'
+#    tm = calculate_tm_via_trapz_height(ds['VP'], ds['T'], ds['Height'])
+##    tm, unit = calculate_tm_via_pressure_sum(ds['VP'], ds['T'], ds['Rho'], ds['P'],
+##                                             cumulative=True, verbose=False)
+#    ds['VPT'] = wrap_xr_metpy_virtual_potential_temperature(ds['P'], ds['T'],
+#                                                            ds['MR'])
+#    ds['PT'] = wrap_xr_metpy_potential_temperature(ds['P'], ds['T'])
+#    ds['VT'] = wrap_xr_metpy_virtual_temperature(ds['T'], ds['MR'])
+#    U, V = convert_wind_speed_direction_to_zonal_meridional(ds['WS'], ds['WD'])
+#    ds['U'] = U
+#    ds['V'] = V
+#    ds['N'] = calculate_atmospheric_refractivity(ds['P'], ds['T'], ds['VP'])
+#    ds['Tm'] = xr.DataArray(tm, dims=['time'])
+#    ds['Tm'].attrs['units'] = 'K'
+#    ds['Tm'].attrs['long_name'] = 'Water vapor mean air temperature'
+#    ds['Ts'] = ds['T'].dropna('time').values[0] + 273.15
+#    ds['Ts'].attrs['units'] = 'K'
+#    ds['Ts'].attrs['long_name'] = 'Surface temperature'
     ds['sound_time'] = sound_time
     ds['min_time'] = dt
     ds['max_time'] = max_time
