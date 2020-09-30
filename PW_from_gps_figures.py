@@ -602,7 +602,7 @@ def plot_fft_diurnal(path=work_yuval, save=True):
 
 def plot_rinex_availability_with_map(path=work_yuval, gis_path=gis_path,
                                      scope='diurnal',
-                                     dem_path=dem_path, save=True):
+                                     dem_path=dem_path, fontsize=18, save=True):
     # TODO: add box around merged stations and removed stations
     # TODO: add color map labels to stations removed and merged
     from aux_gps import gantt_chart
@@ -615,9 +615,11 @@ def plot_rinex_availability_with_map(path=work_yuval, gis_path=gis_path,
     from matplotlib.colors import ListedColormap
     from aux_gps import path_glob
     print('{} scope selected.'.format(scope))
-    fig = plt.figure(figsize=(20, 10))
+    fig = plt.figure(figsize=(20, 15))
+#    grid = plt.GridSpec(1, 2, width_ratios=[
+#        5, 2], wspace=0.1)
     grid = plt.GridSpec(1, 2, width_ratios=[
-        5, 2], wspace=0.1)
+        4, 3], wspace=0.05)
     ax_gantt = fig.add_subplot(grid[0, 0])  # plt.subplot(221)
     ax_map = fig.add_subplot(grid[0, 1])  # plt.subplot(122)
 #    fig, ax = plt.subplots(1, 2, sharex=False, sharey=False, figsize=(20, 6))
@@ -638,9 +640,9 @@ def plot_rinex_availability_with_map(path=work_yuval, gis_path=gis_path,
         ax=ax_gantt,
         fw='normal',
         title='',
-        pe_dict=None, fontsize=16)
+        pe_dict=None, fontsize=fontsize, linewidth=24, antialiased=False)
     # Israel gps ims map:
-    ax_map = plot_israel_map(gis_path=gis_path, ax=ax_map, ticklabelsize=16)
+    ax_map = plot_israel_map(gis_path=gis_path, ax=ax_map, ticklabelsize=fontsize)
     # overlay with dem data:
     cmap = plt.get_cmap('terrain', 41)
     dem = xr.open_dataarray(dem_path / 'israel_dem_250_500.nc')
@@ -650,8 +652,8 @@ def plot_rinex_availability_with_map(path=work_yuval, gis_path=gis_path,
 #    scale_bar(ax_map, 50)
     cbar_kwargs = {'fraction': 0.1, 'aspect': 50, 'pad': 0.03}
     cb = plt.colorbar(fg, **cbar_kwargs)
-    cb.set_label(label='meters above sea level', size=14, weight='normal')
-    cb.ax.tick_params(labelsize=14)
+    cb.set_label(label='meters above sea level', size=fontsize, weight='normal')
+    cb.ax.tick_params(labelsize=fontsize)
     ax_map.set_xlabel('')
     ax_map.set_ylabel('')
     gps = produce_geo_gnss_solved_stations(path=gis_path, plot=False)
@@ -681,11 +683,11 @@ def plot_rinex_availability_with_map(path=work_yuval, gis_path=gis_path,
         if label.lower() in to_plot_offset:
             ax_map.annotate(label, xy=(x, y), xytext=(4, -6),
                             textcoords="offset points", color='k',
-                            fontweight='bold', fontsize=12)
+                            fontweight='bold', fontsize=fontsize - 2)
         else:
             ax_map.annotate(label, xy=(x, y), xytext=(3, 3),
                             textcoords="offset points", color='k',
-                            fontweight='bold', fontsize=12)
+                            fontweight='bold', fontsize=fontsize - 2)
 #    geo_annotate(ax_map, gps_normal_anno.lon, gps_normal_anno.lat,
 #                 gps_normal_anno.index.str.upper(), xytext=(3, 3), fmt=None,
 #                 c='k', fw='normal', fs=10, colorupdown=False)
@@ -703,7 +705,7 @@ def plot_rinex_availability_with_map(path=work_yuval, gis_path=gis_path,
                    marker='x', linewidth=2, zorder=2)
     geo_annotate(ax_map, bet_dagan.lon, bet_dagan.lat,
                  bet_dagan.index, xytext=(4, -6), fmt=None,
-                 c='k', fw='bold', fs=12, colorupdown=False)
+                 c='k', fw='bold', fs=fontsize - 2, colorupdown=False)
 #    plt.legend(['GNSS \nreceiver sites',
 #                'removed \nGNSS sites',
 #                'merged \nGNSS sites',
@@ -712,14 +714,14 @@ def plot_rinex_availability_with_map(path=work_yuval, gis_path=gis_path,
 #               handletextpad=0.2, handlelength=1.5)
     print('getting IMS temperature stations metadata...')
     ims = produce_geo_ims(path=gis_path, freq='10mins', plot=False)
-    ims.plot(ax=ax_map, marker='o', edgecolor='tab:orange', alpha=0.65,
-             markersize=15, facecolor="tab:orange", zorder=1)
+    ims.plot(ax=ax_map, marker='o', edgecolor='tab:orange', alpha=1.0,
+             markersize=35, facecolor="tab:orange", zorder=1)
     # ims, gps = produce_geo_df(gis_path=gis_path, plot=False)
     print('getting solved GNSS israeli stations metadata...')
     plt.legend(['GNSS \nstations',
                 'radiosonde\nstation', 'IMS stations'],
            loc='upper left', framealpha=0.7, fancybox=True,
-           handletextpad=0.2, handlelength=1.5, fontsize=12)
+           handletextpad=0.2, handlelength=1.5, fontsize=fontsize - 2)
     fig.subplots_adjust(top=0.95,
                         bottom=0.11,
                         left=0.05,
@@ -729,7 +731,7 @@ def plot_rinex_availability_with_map(path=work_yuval, gis_path=gis_path,
     # plt.legend(['IMS stations', 'GNSS stations'], loc='upper left')
 
     filename = 'rinex_israeli_gnss_map.png'
-    caption('Daily RINEX files availability for the Israeli GNSS station network at the SOPAC/GARNER website')
+#    caption('Daily RINEX files availability for the Israeli GNSS station network at the SOPAC/GARNER website')
     if save:
         plt.savefig(savefig_path / filename, bbox_inches='tight')
     return fig
