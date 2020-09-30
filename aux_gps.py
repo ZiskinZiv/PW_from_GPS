@@ -665,9 +665,9 @@ def consecutive_runs(arr, num=False):
     return A
 
 
-def gantt_chart(ds, fw='bold', ax=None, pe_dict=None, fontsize=14,
+def gantt_chart(ds, fw='bold', ax=None, pe_dict=None, fontsize=14, linewidth=10,
                 title='RINEX files availability for the Israeli GNSS stations',
-                time_dim='time'):
+                time_dim='time', antialiased=False):
     import pandas as pd
     import matplotlib.pyplot as plt
     import numpy as np
@@ -704,15 +704,15 @@ def gantt_chart(ds, fw='bold', ax=None, pe_dict=None, fontsize=14,
 #        dt_max_list.append(dt_max)
         # v = int(calc(i, max = len(ds)))
         if pe_dict is not None:
-            ax.hlines(y, dt_min, dt_max, linewidth=10, color=colors[i], path_effects=[pe.Stroke(linewidth=15, foreground='k'), pe.Normal()])
+            ax.hlines(y, dt_min, dt_max, linewidth=linewidth, color=colors[i], path_effects=[pe.Stroke(linewidth=15, foreground='k'), pe.Normal()])
         else:
-            ax.hlines(y, dt_min, dt_max, linewidth=10, color=colors[i])
+            ax.hlines(y, dt_min, dt_max, linewidth=linewidth, color=colors[i], antialiased=antialiased)
         #plt.show()
         # ds[da][~ds[da].isnull()] = i + 1
         # ds[da] = ds[da].fillna(0)
     # yticks and their labels:
     ax.set_yticks(vals)
-    ax.set_yticklabels(names[::-1], fontweight=fw, fontsize=12)
+    ax.set_yticklabels(names[::-1], fontweight=fw, fontsize=fontsize)
     [ax.get_yticklabels()[i].set_color(colors[::-1][i]) for i in range(len(colors))]
     ax.set_xlim(xmin, xmax)
     # handle x-axis (time):
