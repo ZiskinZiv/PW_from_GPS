@@ -781,34 +781,67 @@ def convert_wind_speed_direction_to_zonal_meridional(WS, WD, verbose=False):
 #    return np.nan
 
 
-def classify_SBL(ds, method='T', sbl_max_height=300, filter_cbl=True):
-    """Run find_surface_inversion using T gradient and filter all 12Z records
-    use method=T for temp inversion, rig for gradient richardson"""
-    # TODO: fix gradient richardson method
-    import pandas as pd
+def digitize_rbl(rbl):
     import xarray as xr
+    import numpy as np
+    bins = rbl.quantile(
+        [0.0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0])
+    bins = [200, 400, 800, 1000, 1200, 1400, 1600, 1800, 2000]
+    result = xr.apply_ufunc(np.digitize, rbl, kwargs={'bins': bins})
+    df = result.to_dataframe('bins')
+    df['rbl'] = rbl.to_dataframe(name='rbl')
+    means = df['rbl'].groupby(df['bins']).mean()
+    # or just:
+    rbl.to_dataset(name='rbl').groupby_bins(group='rbl',bins=bins, labels=np.arange(1, len(bins))).groups
+    return df
+
+
+def prepare_radiosonde_and_solve_MLH(ds, method='T', max_height=300):
+    import xarray as xr
+    import pandas as pd
     ds = ds.drop_sel(time=pd.to_timedelta(0, unit='s'))
     # nullify the first Height:
     ds['Height'] -= ds['Height'].isel(time=0)
-    sbls = []
+    pbls = []
     stimes = []
     for i in range(ds['sound_time'].size):
         if method == 'T':
             mlh = find_surface_inversion_height(
                     ds.isel(
                             sound_time=i).reset_coords(
-                                    drop=True), max_height=sbl_max_height)
+                                    drop=True), max_height=max_height)
         elif method == 'rig':
             mlh = find_MLH_from_2s_richardson(
                     ds.isel(
                             sound_time=i).reset_coords(
                                     drop=True), method='grad')
+        elif method == 'WW':
+            mlh = find_MLH_from_2s_WW2014(
+                ds.isel(
+                    sound_time=i), alt_cutoff=max_height)
+        elif method == 'rib':
+            mlh = find_MLH_from_2s_richardson(
+                ds.isel(
+                    sound_time=i), method='bulk')
         if mlh is not None:
-            sbls.append(mlh)
+            pbls.append(mlh)
             stimes.append(ds.isel(sound_time=i)['sound_time'])
     sound_time = xr.concat(stimes, 'sound_time')
-    sbl = xr.DataArray([x.values for x in sbls], dims=['sound_time'])
-    sbl['sound_time'] = sound_time
+    pbl = xr.DataArray([x.values for x in pbls], dims=['sound_time'])
+    pbl['sound_time'] = sound_time
+    pbl = pbl.sortby('sound_time')
+    pbl.attrs['method'] = method
+    if max_height is not None:
+        pbl.attrs['max_height'] = max_height
+    return pbl
+
+
+def classify_SBL(ds, method='T', sbl_max_height=300, filter_cbl=True):
+    """Run find_surface_inversion using T gradient and filter all 12Z records
+    use method=T for temp inversion, rig for gradient richardson"""
+    # TODO: fix gradient richardson method
+    sbl = prepare_radiosonde_and_solve_MLH(
+        ds, method=method, max_height=sbl_max_height)
     if filter_cbl:
         print('filtered {} 12Z records.'.format(
             sbl[sbl['sound_time.hour'] == 12].count().item()))
@@ -816,45 +849,38 @@ def classify_SBL(ds, method='T', sbl_max_height=300, filter_cbl=True):
     return sbl
 
 
-def classidy_RBL(ds, sbl, method='WW'):
+def classidy_RBL(ds, sbl, method='WW', max_height=3500):
     import pandas as pd
-    import xarray as xr
-    ds = ds.drop_sel(time=pd.to_timedelta(0, unit='s'))
-    # nullify the first Height:
-    ds['Height'] -= ds['Height'].isel(time=0)
     # filter SBLs, first assemble all 00Z:
-    Z00_st = ds['T'].transpose('sound_time', 'time')[ds['sound_time.hour'] == 00]['sound_time']
+    Z00_st = ds['T'].transpose('sound_time', 'time')[
+        ds['sound_time.hour'] == 00]['sound_time']
 #    ds = ds.sel(sound_time=Z00_st)
     # take out the SBL events:
     sbl_st = sbl['sound_time']
     st = pd.to_datetime(
         list(set(Z00_st.values).difference(set(sbl_st.values))))
     ds = ds.sel(sound_time=st)
-    stimes = []
-    rbls = []
-    for i in range(ds['sound_time'].size):
-        if method == 'WW':
-            mlh = find_MLH_from_2s_WW2014(
-                ds.isel(
-                    sound_time=i), alt_cutoff=3500)
-        elif method == 'rib':
-            mlh = find_MLH_from_2s_richardson(
-                ds.isel(
-                    sound_time=i), method='bulk')
-        if mlh is not None:
-            rbls.append(mlh)
-            stimes.append(ds.isel(sound_time=i)['sound_time'])
-    sound_time = xr.concat(stimes, 'sound_time')
-    rbl = xr.DataArray([x.values for x in rbls], dims=['sound_time'])
-    rbl['sound_time'] = sound_time
-    rbl = rbl.sortby('sound_time')
-    print('found {} RBLs from total of {}'.format(rbl['sound_time'].size, st.size))
+    rbl = prepare_radiosonde_and_solve_MLH(
+        ds, method=method, max_height=max_height)
+    print(
+        'found {} RBLs from total of {}'.format(
+            rbl['sound_time'].size,
+            st.size))
     return rbl
 
 
-def classify_CBL():
-    # TODO: wrap up all three funcs to single api
-    return
+def classify_CBL(ds, method='WW', max_height=3500):
+    # filter only daytime:
+    Z12_st = ds['T'].transpose('sound_time', 'time')[
+        ds['sound_time.hour'] == 12]['sound_time']
+    ds = ds.sel(sound_time=Z12_st)
+    cbl = prepare_radiosonde_and_solve_MLH(
+        ds, method=method, max_height=max_height)
+    print(
+        'found {} CBLs from total of {}'.format(
+            cbl['sound_time'].size,
+            ds['sound_time'].size))
+    return cbl
 
 
 def find_surface_inversion_height(ds, min_height=None, max_height=300, max_time=None):
