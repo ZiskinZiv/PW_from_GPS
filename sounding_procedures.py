@@ -781,19 +781,34 @@ def convert_wind_speed_direction_to_zonal_meridional(WS, WD, verbose=False):
 #    return np.nan
 
 
-def digitize_rbl(rbl):
-    import xarray as xr
+def categorize_rbl(rbl, season=None,
+                   bins=[0, 200, 400, 800, 1000, 1200, 1400, 1600, 1800, 2000, 2500],
+                   final_sample_rate='5T'):
+    # import xarray as xr
     import numpy as np
-    bins = rbl.quantile(
-        [0.0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0])
-    bins = [200, 400, 800, 1000, 1200, 1400, 1600, 1800, 2000]
-    result = xr.apply_ufunc(np.digitize, rbl, kwargs={'bins': bins})
-    df = result.to_dataframe('bins')
-    df['rbl'] = rbl.to_dataframe(name='rbl')
-    means = df['rbl'].groupby(df['bins']).mean()
+    import pandas as pd
+    if season is not None:
+        rbl = rbl.sel(sound_time=rbl['sound_time.season']==season)
+        print('{} season selected'.format(season))
+    # bins = rbl.quantile(
+    #     [0.0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0])
+    if rbl.name is None:
+        name = 'MLH'
+    else:
+        name = rbl.name
+    df = rbl.to_dataframe(name=name)
+    labels = np.arange(0, len(bins) - 1)
+    df['{}_bins'.format(name)] = pd.cut(df['{}'.format(name)], bins=bins, labels=labels)
+    # result = xr.apply_ufunc(np.digitize, rbl, kwargs={'bins': bins})
+    # df = result.to_dataframe('bins')
+    # df['rbl'] = rbl.to_dataframe(name='rbl')
+    # means = df['rbl'].groupby(df['bins']).mean()
     # or just:
-    rbl.to_dataset(name='rbl').groupby_bins(group='rbl',bins=bins, labels=np.arange(1, len(bins))).groups
-    return df
+    # rbl_bins = rbl.to_dataset(name='rbl').groupby_bins(group='rbl',bins=bins, labels=np.arange(1, len(bins))).groups
+    # grp = df.groupby('{}_bins'.format(name)).groups
+    da = df['{}_bins'.format(name)].to_xarray().resample(sound_time=final_sample_rate).ffill()
+    print('resampling to {} using ffill.'.format(final_sample_rate))
+    return da
 
 
 def prepare_radiosonde_and_solve_MLH(ds, method='T', max_height=300):
@@ -836,21 +851,41 @@ def prepare_radiosonde_and_solve_MLH(ds, method='T', max_height=300):
     return pbl
 
 
+def classify_bet_dagan_pblh(path=sound_path, savepath=None):
+    import xarray as xr
+    from aux_gps import save_ncfile
+    ds = xr.load_dataset(path / 'bet_dagan_2s_sounding_2014-2019.nc')
+    sbl = classify_SBL(ds, method='T', sbl_max_height=300, filter_cbl=True)
+    rbl = classify_RBL(ds, sbl, method='WW', max_height=3500)
+    cbl = classify_CBL(ds, method='WW', max_height=3500)
+    dss = xr.merge([sbl, rbl, cbl])
+    if savepath is not None:
+        filename = 'PBLH_classification_bet_dagan_2s_sounding_2014-2019.nc'
+        save_ncfile(dss, savepath, filename)
+    return dss
+
+
 def classify_SBL(ds, method='T', sbl_max_height=300, filter_cbl=True):
     """Run find_surface_inversion using T gradient and filter all 12Z records
     use method=T for temp inversion, rig for gradient richardson"""
     # TODO: fix gradient richardson method
+    print('classifying SBL...')
     sbl = prepare_radiosonde_and_solve_MLH(
         ds, method=method, max_height=sbl_max_height)
     if filter_cbl:
         print('filtered {} 12Z records.'.format(
             sbl[sbl['sound_time.hour'] == 12].count().item()))
         sbl = sbl[sbl['sound_time.hour'] == 00]
+    sbl.name = 'SBLH'
+    sbl.attrs['long_name'] = 'Stable Boundary Layer Height'
+    sbl.attrs['units'] = 'm'
+    sbl.attrs['method'] = method
     return sbl
 
 
-def classidy_RBL(ds, sbl, method='WW', max_height=3500):
+def classify_RBL(ds, sbl, method='WW', max_height=3500):
     import pandas as pd
+    print('classifying RBL...')
     # filter SBLs, first assemble all 00Z:
     Z00_st = ds['T'].transpose('sound_time', 'time')[
         ds['sound_time.hour'] == 00]['sound_time']
@@ -866,11 +901,18 @@ def classidy_RBL(ds, sbl, method='WW', max_height=3500):
         'found {} RBLs from total of {}'.format(
             rbl['sound_time'].size,
             st.size))
+    rbl.name = 'RBLH'
+    rbl.attrs['long_name'] = 'Residual Boundary Layer Height'
+    rbl.attrs['units'] = 'm'
+    rbl.attrs['rbl_candidates'] = st.size
+    rbl.attrs['rbl_success'] = rbl['sound_time'].size
+    rbl.attrs['method'] = method
     return rbl
 
 
 def classify_CBL(ds, method='WW', max_height=3500):
     # filter only daytime:
+    print('classifying CBL...')
     Z12_st = ds['T'].transpose('sound_time', 'time')[
         ds['sound_time.hour'] == 12]['sound_time']
     ds = ds.sel(sound_time=Z12_st)
@@ -880,6 +922,12 @@ def classify_CBL(ds, method='WW', max_height=3500):
         'found {} CBLs from total of {}'.format(
             cbl['sound_time'].size,
             ds['sound_time'].size))
+    cbl.name = 'CBLH'
+    cbl.attrs['long_name'] = 'Convective Boundary Layer Height'
+    cbl.attrs['units'] = 'm'
+    cbl.attrs['cbl_candidates'] = ds['sound_time'].size
+    cbl.attrs['cbl_success'] = cbl['sound_time'].size
+    cbl.attrs['method'] = method
     return cbl
 
 
