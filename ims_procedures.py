@@ -44,6 +44,43 @@ ims_units_dict = {
     'G': ''}
 
 
+def produce_bet_dagan_long_term_pressure(path=ims_path, rate='1H',
+                                         savepath=None):
+    import xarray as xr
+    from aux_gps import xr_reindex_with_date_range
+    from aux_gps import get_unique_index
+    from aux_gps import save_ncfile
+    # load manual old measurements and new 3 hr ones:
+    bd_man = xr.open_dataset(
+        path / 'IMS_hourly_03hr.nc')['BET-DAGAN-MAN_2520_ps']
+    bd_auto = xr.open_dataset(path / 'IMS_hourly_03hr.nc')['BET-DAGAN_2523_ps']
+    bd = xr.concat(
+        [bd_man.dropna('time'), bd_auto.dropna('time')], 'time', join='inner')
+    bd = get_unique_index(bd)
+    bd = bd.sortby('time')
+    bd = xr_reindex_with_date_range(bd, freq='1H')
+    bd_inter = bd.interpolate_na('time', max_gap='3H', method='cubic')
+    # load 10-mins new measurements:
+    bd_10 = xr.open_dataset(path / 'IMS_BP_israeli_hourly.nc')['BET-DAGAN']
+    bd_10 = bd_10.dropna('time').sel(
+        time=slice(
+            '2019-06-30T00:00:00',
+            None)).resample(
+                time='1H').mean()   
+    bd_inter = xr.concat([bd_inter, bd_10], 'time', join='inner')
+    bd_inter = get_unique_index(bd_inter)
+    bd_inter = bd_inter.sortby('time')
+    bd_inter.name = 'bet_dagan'
+    bd_inter.attrs['action'] = 'interpolated from 3H'
+    if savepath is not None:
+        filename = 'IMS_BD_hourly_ps.nc'
+        yr_min = bd_inter.time.min().dt.year.item()
+        yr_max = bd_inter.time.max().dt.year.item()
+        filename = 'IMS_BD_hourly_ps_{}-{}.nc'.format(yr_min, yr_max)
+        save_ncfile(bd_inter, savepath, filename)
+    return bd_inter
+
+
 def transform_wind_speed_direction_to_u_v(path=ims_path, savepath=ims_path):
     import xarray as xr
     import numpy as np
