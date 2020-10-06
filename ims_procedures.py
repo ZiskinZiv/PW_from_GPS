@@ -70,7 +70,7 @@ def produce_bet_dagan_long_term_pressure(path=ims_path, rate='1H',
     bd_inter = xr.concat([bd_inter, bd_10], 'time', join='inner')
     bd_inter = get_unique_index(bd_inter)
     bd_inter = bd_inter.sortby('time')
-    bd_inter.name = 'bet_dagan'
+    bd_inter.name = 'bet-dagan'
     bd_inter.attrs['action'] = 'interpolated from 3H'
     if savepath is not None:
         filename = 'IMS_BD_hourly_ps.nc'
