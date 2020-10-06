@@ -12,7 +12,6 @@ gis_path = work_yuval / 'gis'
 ims_path = work_yuval / 'IMS_T'
 
 # TODO: scan for seasons in the tide events and remove summer
-# TODO: prepare pw_hourly_50 so no homogenized data will enter
 def plot_all_decompositions(X, y, n=2):
     import xarray as xr
     models = [
@@ -237,7 +236,12 @@ def ML_main_procedure(X, y, estimator=None, model_name='SVC', features='pwv',
                       val_size=0.18, n_splits=None, test_size=0.2, seed=42, best_score='f1',
                       savepath=None, plot=True):
     """split the X,y for train and test, either do HP tuning using HP_tuning
-    with val_size or use already tuned (or not) estimator."""
+    with val_size or use already tuned (or not) estimator.
+    models to play with = MLP, RF and SVC.
+    n_splits = 2, 3, 4.
+    features = pwv, pressure.
+    best_score = f1, roc_auc, accuracy.
+    can do loop on them. RF takes the most time to tune."""
     from sklearn.model_selection import train_test_split
     # first slice X for features:
     if isinstance(features, str):
@@ -266,13 +270,14 @@ def ML_main_procedure(X, y, estimator=None, model_name='SVC', features='pwv',
         return model
 
 
-def load_ML_models(path=hydro_path, prefix='CVR', suffix='.pkl', plot=True):
+def load_ML_models(path=hydro_path, prefix='CVM', suffix='.pkl', plot=True):
     from aux_gps import path_glob
     import joblib
     import matplotlib.pyplot as plt
     import seaborn as sns
     import xarray as xr
     import pandas as pd
+    # TODO: Add plotting of also features
     cmap = sns.color_palette("colorblind", 3)
     model_files = path_glob(path, '{}_*{}'.format(prefix, suffix))
     model_names = [x.as_posix().split('/')[-1].split('.')
@@ -281,19 +286,22 @@ def load_ML_models(path=hydro_path, prefix='CVR', suffix='.pkl', plot=True):
                     for x in model_files]
     model_scores = [x.as_posix().split('.')[0].split('_')[-3]
                     for x in model_files]
-    data_names = ['_'.join(x) for x in zip(model_names, model_scores, model_nsplits)]
+#    data_names = ['_'.join(x) for x in zip(model_names, model_scores, model_nsplits)]
     m_list = [joblib.load(x) for x in model_files]
-    model_dict = dict(zip(data_names, m_list))
+#    model_dict = dict(zip(data_names, m_list))
+    # also load CVR attrs (for features):
+    cvr_files = [x.as_posix().replace('CVM', 'CVR').replace('.pkl','.nc') for x in model_files]
+    cvrs = [xr.load_dataset(x).attrs for x in cvr_files]
+    model_features = ['+'.join(x['features']) for x in cvrs]
     # transform model_dict to dataarray:
-    tups = [tuple(x) for x in zip(model_names, model_scores, model_nsplits)]
-    ind = pd.MultiIndex.from_tuples((tups), names=['model', 'scoring', 'splits'])
+    tups = [tuple(x) for x in zip(model_names, model_scores, model_nsplits, model_features)]
+    ind = pd.MultiIndex.from_tuples((tups), names=['model', 'scoring', 'splits', 'feature'])
     da = xr.DataArray(m_list, dims='dim_0')
     da['dim_0'] = ind
     da = da.unstack('dim_0')
     da['splits'] = da['splits'].astype(int)
     if plot:
-        X, y = produce_X_y('drag', '48125', neg_pos_ratio=1,
-                           add_pressure=True, return_xarray=True)
+        X, y = produce_X_y('drag', '48125', neg_pos_ratio=1)
         just_pw = [x for x in X.feature.values if 'pressure' not in x]
         X_pw = X.sel(feature=just_pw)
         fg = xr.plot.FacetGrid(
@@ -344,6 +352,9 @@ def HP_tuning(X, y, model_name='SVC', val_size=0.18, n_splits=None,
     from sklearn.model_selection import StratifiedKFold
     """ do HP tuning with ML_Classfier_Switcher object and return a DataSet of
     results. note that the X, y are already after split to val/test"""
+    # first get the features from X:
+    features = list(set(['_'.join(x.split('_')[0:2])
+                         for x in X['feature'].values]))
     ml = ML_Classifier_Switcher()
     sk_model = ml.pick_model(model_name)
     param_grid = ml.param_grid
@@ -358,16 +369,17 @@ def HP_tuning(X, y, model_name='SVC', val_size=0.18, n_splits=None,
                       refit=best_score, return_train_score=True)
     gr.fit(X, y)
     if best_score is not None:
-        ds, best_model= process_gridsearch_results(gr, model_name)
+        ds, best_model = process_gridsearch_results(gr, model_name,
+                                                    features=features)
     else:
-        ds = process_gridsearch_results(gr, model_name)
+        ds = process_gridsearch_results(gr, model_name, features=features)
         best_model = None
     if savepath is not None:
         save_cv_results(ds, best_model=best_model, savepath=savepath)
     return ds, best_model
 
 
-def process_gridsearch_results(GridSearchCV, model_name):
+def process_gridsearch_results(GridSearchCV, model_name, features=None):
     import xarray as xr
     import pandas as pd
     """takes GridSreachCV object with cv_results and xarray it into dataarray"""
@@ -424,6 +436,8 @@ def process_gridsearch_results(GridSearchCV, model_name):
     ds.attrs['param_names'] = names
     ds.attrs['model_name'] = model_name
     ds.attrs['n_splits'] = ds['split'].size
+    if features is not None:
+        ds.attrs['features'] = features
     if GridSearchCV.refit:
         ds.attrs['best_score'] = GridSearchCV.best_score_
 #        ds['best_model'] = GridSearchCV.best_estimator_
@@ -440,21 +454,26 @@ def process_gridsearch_results(GridSearchCV, model_name):
 def save_cv_results(cvr, best_model=None, savepath=hydro_path):
     import joblib
     from aux_gps import save_ncfile
+    features = cvr.attrs['features']
     name = cvr.attrs['model_name']
-    params = cvr.attrs['param_names']
+#    params = cvr.attrs['param_names']
     nsplits = cvr.attrs['n_splits']
     if best_model is not None:
         refitted_scorer = cvr.attrs['refitted_scorer']
-        filename = 'CVR_{}_{}_{}_splits_{}.nc'.format(
-                name, '_'.join(params), refitted_scorer, nsplits)
+        filename = 'CVR_{}_Features_{}_Scorer_{}_Nsplits_{}.nc'.format(
+                name, '_'.join(features), refitted_scorer, nsplits)
+#        filename = 'CVR_{}_{}_{}_splits_{}.nc'.format(
+#                name, '_'.join(params), refitted_scorer, nsplits)
 #    cvr_to_save = cvr[[x for x in cvr if x != 'best_model']]
         save_ncfile(cvr, savepath, filename)
-        filepath = savepath / filename.replace('.nc', '.pkl')
+        model_filename = filename.replace('.nc', '.pkl').replace('CVR', 'CVM')
+#        filepath = savepath / filename.replace('.nc', '.pkl')
+        filepath = savepath / model_filename
         _ = joblib.dump(best_model, filepath,
                         compress=9)
     else:
-        filename = 'CVR_{}_{}_splits_{}.nc'.format(
-                name, '_'.join(params), nsplits)
+        filename = 'CVR_Features_{}_Scorer_{}_Nsplits_{}.nc'.format(
+                name, '_'.join(features), nsplits)
 #    cvr_to_save = cvr[[x for x in cvr if x != 'best_model']]
         save_ncfile(cvr, savepath, filename)
     return
@@ -551,19 +570,48 @@ def scikit_fit_predict(X, y, seed=42, with_pressure=True, n_splits=7,
     # clf.fit(X,y)
 
 
-def produce_X_y(pw_station='drag', hs_id=48125, window=25, seed=42,
+def produce_X_y(pw_station='drag', hs_id=48125, pressure_station='bet-dagan',
+                window=25, seed=42,
                 max_flow=0, neg_pos_ratio=1, path=work_yuval,
                 ims_path=ims_path, hydro_path=hydro_path):
     import xarray as xr
+    from aux_gps import anomalize_xr
+    from PW_stations import produce_geo_gnss_solved_stations
     # call preprocess_hydro_station
-    hdf = preprocess_hydro_station(hs_id, hydro_path, max_flow=max_flow)
+    hdf, y_meta = preprocess_hydro_station(hs_id, hydro_path, max_flow=max_flow)
     # load PWV and other features and combine them to fdf:
     pw = xr.open_dataset(path / 'GNSS_PW_anom_hourly_50_hour_dayofyear.nc')
     fdf = pw[pw_station].to_dataframe(name='pwv_{}'.format(pw_station))
+    if pressure_station is not None:
+        p = xr.load_dataset(
+            ims_path /
+            'IMS_BD_hourly_ps_1964-2020.nc')[pressure_station]
+        p_attrs = p.attrs
+        p_attrs = {'pressure_{}'.format(key): val for key, val in p_attrs.items()}
+        p = p.sel(time=slice('1996', None))
+        p = anomalize_xr(p, freq='MS')
+        fdf['pressure_{}'.format(pressure_station)] = p.to_dataframe()
     # finally, call add_features_and_produce_X_y
     X, y = add_features_and_produce_X_y(hdf, fdf, window_size=window,
                                         seed=seed,
                                         neg_pos_ratio=neg_pos_ratio)
+    # add meta data:
+    gps = produce_geo_gnss_solved_stations(plot=False)
+    pwv_attrs = gps.loc[pw_station, :][['lat', 'lon', 'alt', 'name']].to_dict()
+    pwv_attrs = {'pwv_{}'.format(key): val for key, val in pwv_attrs.items()}
+    X.attrs = pwv_attrs
+    if pressure_station is not None:
+        X.attrs.update(p_attrs)
+    y.attrs = y_meta
+    y.attrs['hydro_station_id'] = hs_id
+    # calculate distance to hydro station:
+    lat1 = X.attrs['pwv_lat']
+    lon1 = X.attrs['pwv_lon']
+    lat2 = y.attrs['lat']
+    lon2 = y.attrs['lon']
+    distance = calculate_distance_between_two_latlons_israel(lat1, lon1, lat2, lon2)
+    X.attrs['distance_to_hydro_station_in_km'] = distance / 1000.0
+    y.attrs['distance_to_pwv_station_in_km'] = distance / 1000.0
     return X, y
 
 #def produce_X_y(station='drag', hs_id=48125, lag=25, anoms=True,
@@ -702,6 +750,7 @@ def preprocess_hydro_station(hs_id=48125, hydro_path=hydro_path, max_flow=0,
         raise KeyError('hydro station {} not found in database'.format(hs_id))
     tides = all_tides[sta_slice].dropna('tide_start')
     max_flow_tide = tides['TS_{}_max_flow'.format(hs_id)]
+    max_flow_attrs = max_flow_tide.attrs
     tide_starts = tides['tide_start'].where(
         ~tides.isnull()).where(max_flow_tide > max_flow).dropna('tide_start')['tide_start']
     tide_ends = tides['TS_{}_tide_end'.format(hs_id)].where(
@@ -723,7 +772,7 @@ def preprocess_hydro_station(hs_id=48125, hydro_path=hydro_path, max_flow=0,
     df = df.fillna(0)
     if with_tide_ends:
         df.loc[ts_end.values, :] = 2
-    return df
+    return df, max_flow_attrs
 
 
 def add_features_and_produce_X_y(hdf, fdf, window_size=25, seed=42,
@@ -770,7 +819,7 @@ def add_features_and_produce_X_y(hdf, fdf, window_size=25, seed=42,
     # now produce the feature list itself:
     good_inds_for_masks = [adf.index.get_loc(x) for x in good_dts]
     good_masks = [masks[x] for x in good_inds_for_masks]
-    feature_pos_list = [df[feature][x] for x in good_masks]
+    feature_pos_list = [df[feature][x].values for x in good_masks]
     dts_pos_list = [df[feature][x].index[-1] + pd.Timedelta(1, unit='H') for x in good_masks]
     # TODO: add diagnostic mode for how and where are missing features
     # now get the negative y's with neg_pos_ratio
@@ -793,7 +842,7 @@ def add_features_and_produce_X_y(hdf, fdf, window_size=25, seed=42,
             # print('#')
             continue
         # now if no 24 items exist, also continue:
-        negative = df.iloc[r - window_size:r - 1][feature].dropna()
+        negative = df.iloc[r - window_size:r - 1][feature].dropna().values
         if len(negative) != (window_size - 1):
             # print('!')
             continue
@@ -806,8 +855,11 @@ def add_features_and_produce_X_y(hdf, fdf, window_size=25, seed=42,
         # print(cnt)
     # lastly, assemble for X, y using np.columnstack:
     y = np.concatenate([y_pos_arr, y_neg_arr])
-    X = np.stack([[x.values for x in feature_pos_list] +
-                  [x.values for x in feature_neg_list]])
+    if feature_pos_list[0].shape[1] > 0 and feature_neg_list[0].shape[1] > 0:
+        xpos = [x.ravel() for x in feature_pos_list]
+        xneg = [x.ravel() for x in feature_neg_list]
+    X = np.stack([[x for x in xpos] +
+                  [x for x in xneg]])
     y_dts = np.stack([[x for x in dts_pos_list]+[x for x in dts_neg_list]])
     y_dts = y_dts.squeeze()
     X = X.squeeze()
@@ -816,10 +868,11 @@ def add_features_and_produce_X_y(hdf, fdf, window_size=25, seed=42,
     y_da = xr.DataArray(y, dims=['sample'])
     y_da['sample'] = y_dts
     X_da['sample'] = y_dts
+    feats = []
     for f in feature:
-        X_da['feature'] = ['{}_{}'.format(f, x) for x in np.arange(0,
-                                                                   window_size
-                                                                   - 1, 1)]
+        feats.append(['{}_{}'.format(f, x) for x in np.arange(0, window_size
+                                                                   - 1, 1)])
+    X_da['feature'] = [item for sublist in feats for item in sublist]
     return X_da, y_da
 
 
@@ -1135,6 +1188,20 @@ def get_n_days_pw_hydro_all(pw_da, hs_id, max_flow_thresh=None,
         return max_flows, pw_ndays, da
     else:
         return da
+
+
+def calculate_distance_between_two_latlons_israel(lat1, lon1, lat2, lon2):
+    import geopandas as gpd
+    import numpy as np
+    import pandas as pd
+    points = np.array(([lat1, lon1], [lat2, lon2]))
+    df = pd.DataFrame(points, columns=['lat', 'lon'])
+    pdf = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.lon, df.lat),
+                           crs={'init': 'epsg:4326'})
+    pdf_meters = pdf.to_crs({'init': 'epsg:6991'})
+    # distance in meters:
+    distance = pdf_meters.geometry[0].distance(pdf_meters.geometry[1])
+    return distance
 
 
 def get_hydro_near_GNSS(radius=5, n=5, hydro_path=hydro_path,
@@ -1474,6 +1541,7 @@ class ML_Classifier_Switcher(object):
     def SVC(self):
         from sklearn.svm import SVC
         import numpy as np
+#        self.param_grid = {'kernel': ['rbf', 'sigmoid']}
         self.param_grid = {'kernel': ['rbf', 'sigmoid', 'linear', 'poly'],
                            'C': np.logspace(-5, 2, 25),
                            'gamma': np.logspace(-5, 2, 25),
