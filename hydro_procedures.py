@@ -327,14 +327,6 @@ def load_ML_models(path=hydro_path, prefix='CVM', suffix='.pkl', plot=True):
         fg.fig.tight_layout()
     return da
 
-# TODO: write a loop script with args and run it on geophysics1
-def loop_over_main_ML():
-    X, y = produce_X_y(pw_station='drag', hs_id=48125, pressure_station='bet-dagan', window=25, max_flow=0, neg_pos_ratio==1)
-    scorers = ['roc_auc','f1','accuracy']
-    splits = [2,3,4]
-    for scorer in scorers:
-        for n_s in splits:
-            model = ML_main_procedure(X,y,model_name='SVC', features='pressure', n_splits=n_s, best_score=scorer,val_size=None,savepath=hydro_path,plot=False)
         
 def plot_many_ROC_curves(model, X, y, name='', color='b', ax=None,
                          plot_chance=True, title=None):
