@@ -10,6 +10,7 @@ from PW_paths import work_yuval
 sound_path = work_yuval / 'sounding'
 era5_path = work_yuval / 'ERA5'
 edt_path = sound_path / 'edt'
+ceil_path = work_yuval / 'ceilometers'
 
 
 def load_field_from_radiosonde(
@@ -781,24 +782,154 @@ def convert_wind_speed_direction_to_zonal_meridional(WS, WD, verbose=False):
 #    return np.nan
 
 
-def categorize_rbl(rbl, season=None,
-                   bins=[0, 200, 400, 800, 1000, 1200, 1400, 1600, 1800, 2000, 2500],
-                   final_sample_rate='5T'):
+def plot_pblh_radiosonde(path=sound_path, reduce='median', fontsize=20):
+    import xarray as xr
+    import matplotlib.pyplot as plt
+    import numpy as np
+    pblh = xr.load_dataset(
+        sound_path /
+        'PBLH_classification_bet_dagan_2s_sounding_2014-2019.nc')
+    if reduce == 'median':
+        pblh_r = pblh.groupby('sound_time.month').median()
+    elif reduce == 'mean':
+        pblh_r = pblh.groupby('sound_time.month').mean()
+    pblh_c = pblh.groupby('sound_time.month').count()
+    count_total = pblh_c.sum()
+    df = pblh_r.to_dataframe()
+    df[['SBLH_c', 'RBLH_c', 'CBLH_c']] = pblh_c.to_dataframe()
+    fig, axes = plt.subplots(3, 1, sharex=False, sharey=False, figsize=(10, 10))
+    line_color = 'black'
+    bar_color = 'tab:orange'
+    df['CBLH'].plot(ax=axes[0], linewidth=2, color=line_color, marker='o', label='CBL', legend=True)
+    tw_0 = axes[0].twinx()
+    tw_0.bar(x=df.index.values, height=df['CBLH_c'].values, color=bar_color, alpha=0.4)
+    df['RBLH'].plot(ax=axes[1], linewidth=2, color=line_color, marker='o', label='RBL', legend=True)
+    tw_1 = axes[1].twinx()
+    tw_1.bar(x=df.index.values, height=df['RBLH_c'].values, color=bar_color, alpha=0.4)
+    df['SBLH'].plot(ax=axes[2], linewidth=2, color=line_color, marker='o', label='SBL', legend=True)
+    tw_2 = axes[2].twinx()
+    tw_2.bar(x=df.index.values, height=df['SBLH_c'].values, color=bar_color, alpha=0.4)
+    axes[0].set_ylabel('CBL [m]', fontsize=fontsize)
+    axes[1].set_ylabel('RBL [m]', fontsize=fontsize)
+    axes[2].set_ylabel('SBL [m]', fontsize=fontsize)
+    tw_0.set_ylabel('Launch ({} total)'.format(count_total['CBLH'].values), fontsize=fontsize)
+    tw_1.set_ylabel('Launch ({} total)'.format(count_total['RBLH'].values), fontsize=fontsize)
+    tw_2.set_ylabel('Launch ({} total)'.format(count_total['SBLH'].values), fontsize=fontsize)
+    [ax.set_xticks(np.arange(1,13,1)) for ax in axes]
+    [ax.grid() for ax in axes]
+    [ax.tick_params(labelsize=fontsize) for ax in axes]
+    [ax.tick_params(labelsize=fontsize) for ax in [tw_0, tw_1, tw_2]]
+    fig.suptitle(
+        'PBL {} Height from Bet-Dagan radiosonde (2014-2019)'.format(reduce),
+        fontsize=fontsize)
+    fig.tight_layout()
+    return fig
+
+
+def align_rbl_times_cloud_h1_pwv(rbl_cat, path=work_yuval,
+                                 ceil_path=ceil_path, pw_station='tela',
+                                 plot_diurnal=True, fontsize=16):
+    from ceilometers import read_BD_ceilometer_yoav_all_years
+    import xarray as xr
+    import matplotlib.pyplot as plt
+    from aux_gps import anomalize_xr
+    import numpy as np
+    # first load cloud_H1 and pwv:
+    cld = read_BD_ceilometer_yoav_all_years(path=ceil_path)['cloud_H1']
+    cld[cld==0]=np.nan
+    ds = cld.to_dataset(name='cloud_H1')
+    pwv = xr.open_dataset(
+        path /
+        'GNSS_PW_thresh_50.nc')[pw_station]
+    pwv.load()
+    pw_name = 'pwv_{}'.format(pw_station)
+    bins_name = '{}'.format(rbl_cat.name)
+    ds[pw_name] = pwv.sel(time=pwv['time.season']=='JJA')
+    daily_pwv_total = ds[pw_name].groupby('time.hour').count().sum()
+    print(daily_pwv_total)
+    daily_pwv = anomalize_xr(ds[pw_name]).groupby('time.hour').mean()
+    # now load rbl_cat with attrs:
+    ds[bins_name] = rbl_cat
+    ds = ds.dropna('time')
+    # change dtype of bins to int:
+    ds[bins_name] = ds[bins_name].astype(int)
+    # produce pwv anomalies regarding the bins:
+    pwv_anoms = ds[pw_name].groupby(ds[bins_name]) - ds[pw_name].groupby(ds[bins_name]).mean('time')
+    counts = ds.groupby('time.hour').count()['cloud_H1']
+    ds['pwv_{}_anoms'.format(pw_station)] = pwv_anoms.reset_coords(drop=True)
+    if plot_diurnal:
+        fig, axes = plt.subplots(figsize=(15, 8))
+        df_hour = ds['pwv_tela_anoms'].groupby('time.hour').mean().to_dataframe()
+        df_hour['cloud_H1'] = ds['cloud_H1'].groupby('time.hour').mean()
+        df_hour['cloud_H1_counts'] = counts
+        df_hour['pwv_tela_daily_anoms'] = daily_pwv
+        df_hour['pwv_tela_anoms'].plot(marker='s', ax=axes, linewidth=2)
+        df_hour['pwv_tela_daily_anoms'].plot(ax=axes, marker='s', color='r', linewidth=2)
+#        ax2 = df_hour['cloud_H1'].plot(ax=axes[0], secondary_y=True, marker='o')
+        ax2 = df_hour['cloud_H1_counts'].plot(ax=axes, secondary_y=True, marker='o', linewidth=2)
+        axes.set_ylabel('PWV TELA anomalies [mm]', fontsize=fontsize)
+        axes.set_xlabel('Hour of day [UTC]', fontsize=fontsize)
+        ax2.set_ylabel('Cloud H1 data points', fontsize=fontsize)
+        axes.set_xticks(np.arange(0, 24, 1))
+        axes.xaxis.grid()
+        handles,labels = [],[]
+        for ax in fig.axes:
+            for h,l in zip(*ax.get_legend_handles_labels()):
+                handles.append(h)
+                labels.append(l)
+        axes.legend(handles,labels, fontsize=fontsize)
+#        counts.to_dataframe(name='Count').plot(kind='bar', color='tab:blue', alpha=0.5, ax=axes[1], rot=0)
+#        axes[1].bar(x=np.arange(0, 24, 1), height=counts.values, color='tab:blue', alpha=0.5)
+#        axes[1].set_xticks(np.arange(0, 24, 1))
+        axes.tick_params(labelsize=fontsize)
+        ax2.tick_params(labelsize=fontsize)
+        fig.tight_layout()
+        fig.suptitle('PWV TELA anomalies and Cloud H1 counts for JJA', fontsize=fontsize)
+        fig.subplots_adjust(top=0.951,
+                            bottom=0.095,
+                            left=0.071,
+                            right=0.936,
+                            hspace=0.2,
+                            wspace=0.2)
+    return ds
+
+
+def categorize_da_ts(da_ts, season=None, add_hours_to_dt=None, resample=True,
+                     bins=[0, 200, 400, 800, 1000, 1200, 1400, 1600, 1800, 2000, 2500]):
     # import xarray as xr
     import numpy as np
     import pandas as pd
+    time_dim = list(set(da_ts.dims))[0]
     if season is not None:
-        rbl = rbl.sel(sound_time=rbl['sound_time.season']==season)
+        da_ts = da_ts.sel(
+            {time_dim: da_ts['{}.season'.format(time_dim)] == season})
         print('{} season selected'.format(season))
     # bins = rbl.quantile(
     #     [0.0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0])
-    if rbl.name is None:
+    if da_ts.name is None:
         name = 'MLH'
     else:
-        name = rbl.name
-    df = rbl.to_dataframe(name=name)
+        name = da_ts.name
+    # rename sound_time to time:
+    da_ts = da_ts.rename({time_dim: 'time'})
+    df = da_ts.to_dataframe(name=name)
     labels = np.arange(0, len(bins) - 1)
-    df['{}_bins'.format(name)] = pd.cut(df['{}'.format(name)], bins=bins, labels=labels)
+    df['{}_bins'.format(name)] = pd.cut(
+        df['{}'.format(name)], bins=bins, labels=labels, retbins=False)
+    df_bins = df['{}_bins'.format(name)]
+    if add_hours_to_dt is not None:
+        print('adding {} hours to datetimes.'.format(add_hours_to_dt))
+        df_bins.index += pd.Timedelta(add_hours_to_dt, unit='H')
+    if resample:
+        re = []
+        for row in df_bins.dropna().to_frame().iterrows():
+            bin1 = row[1].values
+            new_time = pd.date_range(row[0], periods=288, freq='5T')
+            new_bins = [bin1 for x in new_time]
+            re.append(pd.DataFrame(new_bins, index=new_time, columns=['{}_bins'.format(name)]))
+#        df_bins = df_bins.resample('5T').ffill(limit=576).dropna()
+        df_bins = pd.concat(re, axis=0)
+        print('resampling to 5 mins using ffill.')
     # result = xr.apply_ufunc(np.digitize, rbl, kwargs={'bins': bins})
     # df = result.to_dataframe('bins')
     # df['rbl'] = rbl.to_dataframe(name='rbl')
@@ -806,8 +937,16 @@ def categorize_rbl(rbl, season=None,
     # or just:
     # rbl_bins = rbl.to_dataset(name='rbl').groupby_bins(group='rbl',bins=bins, labels=np.arange(1, len(bins))).groups
     # grp = df.groupby('{}_bins'.format(name)).groups
-    da = df['{}_bins'.format(name)].to_xarray().resample(sound_time=final_sample_rate).ffill()
-    print('resampling to {} using ffill.'.format(final_sample_rate))
+    print('categorizing to bins: {}'.format(','.join([str(x) for x in bins])))
+    df_bins.index.name = 'time'
+    da = df_bins.to_xarray().to_array(name='{}_bins'.format(name)).squeeze(drop=True)
+    # get the bins borders and insert them as attrs to da:
+    dumm = pd.cut(df['{}'.format(name)], bins=bins, labels=None, retbins=False)
+    left = [x.left for x in dumm.dtype.categories]
+    right = [x.right for x in dumm.dtype.categories]
+    for i, label in enumerate(labels):
+        da.attrs[str(label)] = [float(left[i]), float(right[i])]
+    da.attrs['units'] = da_ts.attrs['units']
     return da
 
 
