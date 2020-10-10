@@ -12,6 +12,61 @@ from PW_paths import work_yuval
 # TODO: if not, build func to replace datetimeindex to numbers and vise versa
 
 
+def normality_test_xr(da_ts, sample=None, alpha=0.05, test='lili',
+                      dropna=True, verbose=True):
+    """normality tests on da_ts"""
+    from statsmodels.stats.diagnostic import lilliefors
+    from scipy.stats import shapiro
+    from scipy.stats import normaltest
+    time_dim = list(set(da_ts.dims))[0]
+    if sample is not None:
+        da_ts = da_ts.resample({time_dim: sample}).mean()
+    if dropna:
+        da_ts = da_ts.dropna(time_dim)
+    if test == 'shapiro':
+        mean, pvalue = shapiro(da_ts)
+    elif test == 'lili':
+        mean, pvalue = lilliefors(da_ts, dist='norm', pvalmethod='table')
+    elif test == 'normaltest':
+        mean, pvalue = normaltest(da_ts)
+    if pvalue < alpha:
+        Not = 'NOT'
+        normal = False
+    else:
+        Not = ''
+        normal = True
+    if verbose:
+        print('Mean: {:.4f}, pvalue: {:.4f}'.format(mean, pvalue))
+        print('Thus, the data is {} Normally distributed with alpha {}'.format(Not, alpha))
+    return mean, pvalue, normal
+
+
+def VN_ratio_trend_test(da_ts, dropna=True, alpha=0.05, loadpath=work_yuval,
+                        verbose=True, return_just_trend=False):
+    """calculate the Von Nuemann ratio test statistic and test for trend."""
+    import xarray as xr
+    time_dim = list(set(da_ts.dims))[0]
+    if dropna:
+        da_ts = da_ts.dropna(time_dim)
+    n = da_ts.dropna(time_dim).size
+    d2 = (da_ts.diff(time_dim)**2.0).sum() / (n - 1)
+    # s**2 is the variance:
+    s2 = da_ts.var()
+    eta = (d2 / s2).item()
+    cv_da = xr.load_dataarray(loadpath / 'VN_critical_values.nc')
+    cv = cv_da.sel(sample_size=n, pvalue=alpha, method='nearest').item()
+    if eta < cv:
+        if verbose:
+            print('the hypothesis of stationary cannot be rejected at the level {}'.format(alpha))
+        trend = True
+    else:
+        trend = False
+    if return_just_trend:
+        return trend
+    else:
+        return eta, cv, trend
+
+
 def reduce_tail_xr(xarray, reduce='mean', time_dim='time', records=120,
                    return_df=False):
     import xarray as xr
