@@ -3796,21 +3796,6 @@ def pettitt_test_on_pw(da_ts, sample=None, alpha=0.05):
 #    a=[loc; K ;pvalue];
     return 
 
-def normality_test_on_pw(da_ts, sample=None, alpha=0.05, test='shapiro'):
-    from statsmodels.stats.diagnostic import lilliefors
-    from scipy.stats import shapiro
-    if sample is not None:
-        da_ts = da_ts.resample(time=sample).mean()
-    if test == 'shapiro':
-        mean, pvalue = shapiro(da_ts.dropna('time'))
-    else:
-        mean, pvalue = lilliefors(da_ts.dropna('time'))
-    if pvalue < alpha:
-        return 'Not Normally distributed with alpha {}'.format(alpha)
-    else:
-        return 'Normally distributed with alpha {}'.format(alpha)
-
-
 def mann_kendall_trend_analysis(da_ts, alpha=0.05, seasonal=False, CI=False,
                                 season_selection=None, verbose=True):
     import pymannkendall as mk
