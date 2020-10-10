@@ -10,6 +10,8 @@ from PW_paths import work_yuval
 hydro_path = work_yuval / 'hydro'
 gis_path = work_yuval / 'gis'
 ims_path = work_yuval / 'IMS_T'
+from PW_paths import savefig_path
+
 
 # TODO: scan for seasons in the tide events and remove summer
 def plot_all_decompositions(X, y, n=2):
@@ -270,6 +272,54 @@ def ML_main_procedure(X, y, estimator=None, model_name='SVC', features='pwv',
         return model
 
 
+def plot_hydro_ML_models_result(model_da, nsplits=2, save=True):
+    import xarray as xr
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+    # TODO: add plot_roc_curve(model, X_other_station, y_other_station)
+    cmap = sns.color_palette("colorblind", 3)
+    X, y = produce_X_y('drag', '48125', neg_pos_ratio=1)
+    model_da = model_da.sel(splits=nsplits).reset_coords(drop=True)
+#    just_pw = [x for x in X.feature.values if 'pressure' not in x]
+#    X_pw = X.sel(feature=just_pw)
+    fg = xr.plot.FacetGrid(
+        model_da,
+        col='model',
+        row='scoring',
+        sharex=True,
+        sharey=True, figsize=(20, 20))
+    for i in range(fg.axes.shape[0]):  # i is rows
+        for j in range(fg.axes.shape[1]):  # j is cols
+            ax = fg.axes[i, j]
+            modelname = model_da['model'].isel(model=j).item()
+            scoring = model_da['scoring'].isel(scoring=i).item()
+            chance_plot = [False, False, True]
+            for k, feat in enumerate(model_da['feature'].values):
+                name = '{}-{}-{}'.format(modelname, scoring, feat)
+                model = model_da.isel({'model': j, 'scoring': i}).sel({'feature': feat}).item()
+                title = 'ROC of {} model ({})'.format(modelname, scoring)
+                if not '+' in feat:
+                    f = [x for x in X.feature.values if feat in x]
+                    X_f = X.sel(feature=f)
+                else:
+                    X_f = X
+                plot_many_ROC_curves(model, X_f, y, name=name,
+                                     color=cmap[k], ax=ax,
+                                     plot_chance=chance_plot[k],
+                                     title=title)
+    fg.fig.suptitle('n_splits = {}'.format(nsplits))
+    fg.fig.tight_layout()
+    fg.fig.subplots_adjust(top=0.937,
+                           bottom=0.054,
+                           left=0.039,
+                           right=0.993,
+                           hspace=0.173,
+                           wspace=0.051)
+    if save:
+        plt.savefig(savefig_path / 'try.png', bbox_inches='tight')
+    return fg
+
+
 def load_ML_models(path=hydro_path, prefix='CVM', suffix='.pkl', plot=True):
     from aux_gps import path_glob
     import joblib
@@ -280,6 +330,7 @@ def load_ML_models(path=hydro_path, prefix='CVM', suffix='.pkl', plot=True):
     # TODO: Add plotting of also features
     cmap = sns.color_palette("colorblind", 3)
     model_files = path_glob(path, '{}_*{}'.format(prefix, suffix))
+    model_files = sorted(model_files)
     model_names = [x.as_posix().split('/')[-1].split('.')
                    [0].split('_')[1] for x in model_files]
     model_nsplits = [x.as_posix().split('.')[0].split('_')[-1]
@@ -291,8 +342,8 @@ def load_ML_models(path=hydro_path, prefix='CVM', suffix='.pkl', plot=True):
 #    model_dict = dict(zip(data_names, m_list))
     # also load CVR attrs (for features):
     cvr_files = [x.as_posix().replace('CVM', 'CVR').replace('.pkl','.nc') for x in model_files]
-    cvrs = [xr.load_dataset(x).attrs for x in cvr_files]
-    model_features = ['+'.join(x['features']) for x in cvrs]
+    cvrs = [xr.load_dataset(x).attrs for x in sorted(cvr_files)]
+    model_features = ['+'.join(sorted(x['features'])) if isinstance(x['features'], list) else x['features'] for x in cvrs]
     # transform model_dict to dataarray:
     tups = [tuple(x) for x in zip(model_names, model_scores, model_nsplits, model_features)]
     ind = pd.MultiIndex.from_tuples((tups), names=['model', 'scoring', 'splits', 'feature'])
@@ -746,6 +797,7 @@ def preprocess_hydro_station(hs_id=48125, hydro_path=hydro_path, max_flow=0,
     all_tides = xr.open_dataset(hydro_path / 'hydro_tides.nc')
     # get all tides for specific station without nans:
     sta_slice = [x for x in all_tides.data_vars if str(hs_id) in x]
+    sta_slice = [x for x in sta_slice if 'max_flow' in x or 'tide_end' in x or 'tide_max' in x]
     if not sta_slice:
         raise KeyError('hydro station {} not found in database'.format(hs_id))
     tides = all_tides[sta_slice].dropna('tide_start')
@@ -855,6 +907,8 @@ def add_features_and_produce_X_y(hdf, fdf, window_size=25, seed=42,
         # print(cnt)
     # lastly, assemble for X, y using np.columnstack:
     y = np.concatenate([y_pos_arr, y_neg_arr])
+    # TODO: add exception where no features exist, i.e., there is no
+    # pw near flood events at all...
     if feature_pos_list[0].shape[1] > 0 and feature_neg_list[0].shape[1] > 0:
         xpos = [x.ravel() for x in feature_pos_list]
         xneg = [x.ravel() for x in feature_neg_list]
