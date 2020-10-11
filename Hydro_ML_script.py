@@ -34,6 +34,14 @@ def check_station_name(name):
 #def check_features(feat):
 #    return
 
+def check_path(path):
+    import os
+    from pathlib import Path
+    path = str(path)
+    if not os.path.exists(path):
+        raise argparse.ArgumentTypeError(path + ' does not exist...')
+    return Path(path)
+
 
 def main_hydro_ML(args):
     from hydro_procedures import produce_X_y
@@ -43,6 +51,10 @@ def main_hydro_ML(args):
     scorers = ['roc_auc', 'f1', 'accuracy']
     splits = [2, 3, 4]
     features = ['pwv', 'pressure', ['pwv', 'pressure']]
+    if args.savepath is not None:
+        savepath = args.savepath
+    else:
+        savepath = hydro_path
     for scorer in scorers:
         for n_s in splits:
             for feature in features:
@@ -57,7 +69,7 @@ def main_hydro_ML(args):
                     n_splits=n_s,
                     best_score=scorer,
                     val_size=None,
-                    savepath=hydro_path,
+                    savepath=savepath,
                     plot=False)
 
 if __name__ == '__main__':
@@ -77,8 +89,7 @@ if __name__ == '__main__':
     required.add_argument('--hydro_id', help="5 integer hydro station", type=int)# check_hydro_id)
 #    optional.add_argument('--loop_over', help='select which params to loop over',
 #                          type=check_loopover, nargs='+')
-#    optional.add_argument('--scorer', help='select scorer for ML test.',
-#                          type=str, choices=['f1', 'roc_auc', 'accuracy'])
+    optional.add_argument('--savepath', help="a full path to download the files, e.g., /home/ziskin/Work_Files/PW_yuval/IMS_T/10mins", type=check_path)
 #    optional.add_argument('--nsplits', help='select number of splits for HP tuning.', type=int)
     required.add_argument('--model', help='select ML model.', choices=['SVC', 'MLP', 'RF'])
 #    optional.add_argument('--feature', help='select features for ML', type=check_features, nargs='+')
