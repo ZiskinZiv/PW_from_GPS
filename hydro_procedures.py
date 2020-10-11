@@ -10,8 +10,10 @@ from PW_paths import work_yuval
 hydro_path = work_yuval / 'hydro'
 gis_path = work_yuval / 'gis'
 ims_path = work_yuval / 'IMS_T'
+hydro_ml_path = hydro_path / 'hydro_ML'
 from PW_paths import savefig_path
 
+hydro_pw_dict = {'drag': 48125, 'dsea': 48199, 'elat': 60170}
 
 # TODO: scan for seasons in the tide events and remove summer
 def plot_all_decompositions(X, y, n=2):
@@ -277,6 +279,7 @@ def plot_hydro_ML_models_result(model_da, nsplits=2, save=True):
     import seaborn as sns
     import matplotlib.pyplot as plt
     # TODO: add plot_roc_curve(model, X_other_station, y_other_station)
+    # TODO: add pw_station, hs_id
     cmap = sns.color_palette("colorblind", 3)
     X, y = produce_X_y('drag', '48125', neg_pos_ratio=1)
     model_da = model_da.sel(splits=nsplits).reset_coords(drop=True)
@@ -320,15 +323,13 @@ def plot_hydro_ML_models_result(model_da, nsplits=2, save=True):
     return fg
 
 
-def load_ML_models(path=hydro_path, prefix='CVM', suffix='.pkl', plot=True):
+def load_ML_models(path=hydro_path, prefix='CVM', suffix='.pkl'):
     from aux_gps import path_glob
     import joblib
     import matplotlib.pyplot as plt
     import seaborn as sns
     import xarray as xr
     import pandas as pd
-    # TODO: Add plotting of also features
-    cmap = sns.color_palette("colorblind", 3)
     model_files = path_glob(path, '{}_*{}'.format(prefix, suffix))
     model_files = sorted(model_files)
     model_names = [x.as_posix().split('/')[-1].split('.')
@@ -351,31 +352,6 @@ def load_ML_models(path=hydro_path, prefix='CVM', suffix='.pkl', plot=True):
     da['dim_0'] = ind
     da = da.unstack('dim_0')
     da['splits'] = da['splits'].astype(int)
-    if plot:
-        X, y = produce_X_y('drag', '48125', neg_pos_ratio=1)
-        just_pw = [x for x in X.feature.values if 'pressure' not in x]
-        X_pw = X.sel(feature=just_pw)
-        fg = xr.plot.FacetGrid(
-            da,
-            col='model',
-            row='scoring',
-            sharex=True,
-            sharey=True, figsize=(20, 20))
-        for i in range(fg.axes.shape[0]):  # i is rows
-            for j in range(fg.axes.shape[1]):  # j is cols
-                ax = fg.axes[i, j]
-                modelname = da['model'].isel(model=j).item()
-                scoring = da['scoring'].isel(scoring=i).item()
-                chance_plot = [False, False, True]
-                for k, n in enumerate(da['splits'].values):
-                    name = '{}-{}-{}'.format(modelname, scoring, n)
-                    model = da.isel(model=j, scoring=i).sel(splits=n).item()
-                    title = 'ROC of {} model ({})'.format(modelname, scoring)
-                    plot_many_ROC_curves(model, X_pw, y, name=name,
-                                         color=cmap[k], ax=ax,
-                                         plot_chance=chance_plot[k],
-                                         title=title)
-        fg.fig.tight_layout()
     return da
 
         
@@ -421,16 +397,17 @@ def HP_tuning(X, y, model_name='SVC', val_size=0.18, n_splits=None,
     gr.fit(X, y)
     if best_score is not None:
         ds, best_model = process_gridsearch_results(gr, model_name,
-                                                    features=features)
+                                                    features=features, pwv_id=X.attrs['pwv_id'], hs_id=y.attrs['hydro_station_id'])
     else:
-        ds = process_gridsearch_results(gr, model_name, features=features)
+        ds = process_gridsearch_results(gr, model_name, features=features, pwv_id=X.attrs['pwv_id'], hs_id=y.attrs['hydro_station_id'])
         best_model = None
     if savepath is not None:
         save_cv_results(ds, best_model=best_model, savepath=savepath)
     return ds, best_model
 
 
-def process_gridsearch_results(GridSearchCV, model_name, features=None):
+def process_gridsearch_results(GridSearchCV, model_name, features=None,
+                               pwv_id=None, hs_id=None):
     import xarray as xr
     import pandas as pd
     """takes GridSreachCV object with cv_results and xarray it into dataarray"""
@@ -489,6 +466,10 @@ def process_gridsearch_results(GridSearchCV, model_name, features=None):
     ds.attrs['n_splits'] = ds['split'].size
     if features is not None:
         ds.attrs['features'] = features
+    if pwv_id is not None:
+        ds.attrs['pwv_id'] = pwv_id
+    if hs_id is not None:
+        ds.attrs['hs_id'] = hs_id
     if GridSearchCV.refit:
         ds.attrs['best_score'] = GridSearchCV.best_score_
 #        ds['best_model'] = GridSearchCV.best_estimator_
@@ -505,14 +486,22 @@ def process_gridsearch_results(GridSearchCV, model_name, features=None):
 def save_cv_results(cvr, best_model=None, savepath=hydro_path):
     import joblib
     from aux_gps import save_ncfile
-    features = cvr.attrs['features']
+    features = '_'.join(cvr.attrs['features'])
+    if 'pwv' in features and 'pressure' in features:
+        features = 'pwv+pressure'
+    elif 'pwv' in features:
+        features = 'pwv'
+    elif 'pressure' in features:
+        features = 'pressure'
+    pwv_id = cvr.attrs['pwv_id']
+    hs_id = cvr.attrs['hs_id']
     name = cvr.attrs['model_name']
 #    params = cvr.attrs['param_names']
     nsplits = cvr.attrs['n_splits']
     if best_model is not None:
         refitted_scorer = cvr.attrs['refitted_scorer']
-        filename = 'CVR_{}_Features_{}_Scorer_{}_Nsplits_{}.nc'.format(
-                name, '_'.join(features), refitted_scorer, nsplits)
+        filename = 'CVR_{}_{}_{}_{}_{}_{}.nc'.format(pwv_id, hs_id,
+                                                     name, features, refitted_scorer, nsplits)
 #        filename = 'CVR_{}_{}_{}_splits_{}.nc'.format(
 #                name, '_'.join(params), refitted_scorer, nsplits)
 #    cvr_to_save = cvr[[x for x in cvr if x != 'best_model']]
@@ -523,8 +512,8 @@ def save_cv_results(cvr, best_model=None, savepath=hydro_path):
         _ = joblib.dump(best_model, filepath,
                         compress=9)
     else:
-        filename = 'CVR_Features_{}_Scorer_{}_Nsplits_{}.nc'.format(
-                name, '_'.join(features), nsplits)
+        filename = 'CVR_{}_{}_{}_{}_{}.nc'.format(pwv_id, hs_id,
+                                                  name, features, nsplits)
 #    cvr_to_save = cvr[[x for x in cvr if x != 'best_model']]
         save_ncfile(cvr, savepath, filename)
     return
@@ -642,6 +631,11 @@ def produce_X_y(pw_station='drag', hs_id=48125, pressure_station='bet-dagan',
         p = p.sel(time=slice('1996', None))
         p = anomalize_xr(p, freq='MS')
         fdf['pressure_{}'.format(pressure_station)] = p.to_dataframe()
+    # check the the last date of hdf is bigger than the first date of fdf,
+    # i.e., there is at least one overlapping event in the data:
+    if hdf.index[-1] < fdf.index[0]:
+            raise KeyError('Data not overlapping, hdf for {} stops at {} and fdf starts at {}'.format(
+                hs_id, hdf.index[-1], fdf.index[0]))
     # finally, call add_features_and_produce_X_y
     X, y = add_features_and_produce_X_y(hdf, fdf, window_size=window,
                                         seed=seed,
@@ -663,6 +657,7 @@ def produce_X_y(pw_station='drag', hs_id=48125, pressure_station='bet-dagan',
     distance = calculate_distance_between_two_latlons_israel(lat1, lon1, lat2, lon2)
     X.attrs['distance_to_hydro_station_in_km'] = distance / 1000.0
     y.attrs['distance_to_pwv_station_in_km'] = distance / 1000.0
+    X.attrs['pwv_id'] = pw_station
     return X, y
 
 #def produce_X_y(station='drag', hs_id=48125, lag=25, anoms=True,
@@ -1473,6 +1468,16 @@ def read_tides(path=hydro_path):
     ds.to_netcdf(path / filename, 'w', encoding=encoding)
     print('Done!')
     return ds
+
+
+def plot_hydro_events(hs_id, path=hydro_path, field='max_flow'):
+    import xarray as xr
+    tides = xr.open_dataset(path/'hydro_tides.nc')
+    sta_slice = [x for x in tides.data_vars if str(hs_id) in x]
+    tide = tides[sta_slice]['TS_{}_{}'.format(hs_id, field)]
+    tide = tide.dropna('tide_start')
+    tide.plot.line(linewidth=0., marker='x', color='r')
+    return tide
 
 
 def text_process_hydrographs(path=hydro_path, gis_path=gis_path):
