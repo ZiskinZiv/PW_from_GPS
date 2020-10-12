@@ -323,7 +323,7 @@ def plot_hydro_ML_models_result(model_da, nsplits=2, save=True):
     return fg
 
 
-def load_ML_models(path=hydro_path, prefix='CVM', suffix='.pkl'):
+def load_ML_models(path=hydro_ml_path, prefix='CVM', suffix='.pkl'):
     from aux_gps import path_glob
     import joblib
     import matplotlib.pyplot as plt
@@ -333,21 +333,29 @@ def load_ML_models(path=hydro_path, prefix='CVM', suffix='.pkl'):
     model_files = path_glob(path, '{}_*{}'.format(prefix, suffix))
     model_files = sorted(model_files)
     model_names = [x.as_posix().split('/')[-1].split('.')
-                   [0].split('_')[1] for x in model_files]
+                   [0].split('_')[3] for x in model_files]
+    model_pw_stations = [x.as_posix().split('/')[-1].split('.')
+                       [0].split('_')[1] for x in model_files]
+    model_hydro_stations = [x.as_posix().split('/')[-1].split('.')
+                       [0].split('_')[2] for x in model_files]
     model_nsplits = [x.as_posix().split('.')[0].split('_')[-1]
                     for x in model_files]
-    model_scores = [x.as_posix().split('.')[0].split('_')[-3]
+    model_scores = [x.as_posix().split('.')[0].split('_')[-2]
                     for x in model_files]
+    model_features = [x.as_posix().split('.')[0].split('_')[-3]
+                    for x in model_files]
+    model_pwv_hs_id = list(zip(model_pw_stations, model_hydro_stations))
+    model_pwv_hs_id = ['_'.join(x) for x in model_pwv_hs_id]
 #    data_names = ['_'.join(x) for x in zip(model_names, model_scores, model_nsplits)]
     m_list = [joblib.load(x) for x in model_files]
 #    model_dict = dict(zip(data_names, m_list))
     # also load CVR attrs (for features):
-    cvr_files = [x.as_posix().replace('CVM', 'CVR').replace('.pkl','.nc') for x in model_files]
-    cvrs = [xr.load_dataset(x).attrs for x in sorted(cvr_files)]
-    model_features = ['+'.join(sorted(x['features'])) if isinstance(x['features'], list) else x['features'] for x in cvrs]
+#    cvr_files = [x.as_posix().replace('CVM', 'CVR').replace('.pkl','.nc') for x in model_files]
+#    cvrs = [xr.load_dataset(x).attrs for x in sorted(cvr_files)]
+#    model_features = ['+'.join(sorted(x['features'])) if isinstance(x['features'], list) else x['features'] for x in cvrs]
     # transform model_dict to dataarray:
-    tups = [tuple(x) for x in zip(model_names, model_scores, model_nsplits, model_features)]
-    ind = pd.MultiIndex.from_tuples((tups), names=['model', 'scoring', 'splits', 'feature'])
+    tups = [tuple(x) for x in zip(model_names, model_scores, model_nsplits, model_features, model_pwv_hs_id)]
+    ind = pd.MultiIndex.from_tuples((tups), names=['model', 'scoring', 'splits', 'feature', 'station'])
     da = xr.DataArray(m_list, dims='dim_0')
     da['dim_0'] = ind
     da = da.unstack('dim_0')
