@@ -2915,6 +2915,98 @@ def plot_long_term_anomalies(path=work_yuval, era5_path=era5_path,
     return fig
 
 
+def plot_day_night_pwv_monthly_mean_std_heatmap(
+        path=work_yuval, day_time=['09:00', '15:00'], night_time=['17:00', '21:00'], compare=['day', 'std']):
+    import xarray as xr
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+    pw = xr.load_dataset(work_yuval / 'GNSS_PW_thresh_50_homogenized.nc')
+    pw = pw[[x for x in pw if 'error' not in x]]
+    df = pw.to_dataframe()
+    sites = group_sites_to_xarray(upper=False, scope='annual')
+    coast = [x for x in sites.sel(group='coastal').dropna('GNSS').values]
+    high = [x for x in sites.sel(group='highland').dropna('GNSS').values]
+    east = [x for x in sites.sel(group='eastern').dropna('GNSS').values]
+    box_coast = dict(facecolor='cyan', pad=0.05, alpha=0.4)
+    box_high = dict(facecolor='green', pad=0.05, alpha=0.4)
+    box_east = dict(facecolor='yellow', pad=0.05, alpha=0.4)
+    color_dict = [{x :box_coast} for x in coast]
+    color_dict += [{x :box_high} for x in high]
+    color_dict += [{x :box_east} for x in east]
+    color_dict = dict((key,d[key]) for d in color_dict for key in d)
+    sites = sites.T.values.ravel()
+    sites_flat = [x for x in sites if isinstance(x, str)]
+    df = df[sites_flat]
+    df_mm = df.resample('MS').mean()
+    df_mm_mean = df_mm.groupby(df_mm.index.month).mean()
+    df_mm_std = df_mm.groupby(df_mm.index.month).std()
+    df_day = df.between_time(*day_time)
+    df_night = df.between_time(*night_time)
+    df_day_mm = df_day.resample('MS').mean()
+    df_night_mm = df_night.resample('MS').mean()
+    day_std = df_day_mm.groupby(df_day_mm.index.month).std()
+    night_std = df_night_mm.groupby(df_night_mm.index.month).std()
+    day_mean = df_day_mm.groupby(df_day_mm.index.month).mean()
+    night_mean = df_night_mm.groupby(df_night_mm.index.month).mean()
+    per_day_std = 100 * (day_std - df_mm_std) / df_mm_std
+    per_day_mean = 100 * (day_mean - df_mm_mean) / df_mm_mean
+    per_night_std = 100 * (night_std - df_mm_std) / df_mm_std
+    per_night_mean = 100 * (night_mean - df_mm_mean) / df_mm_mean
+    day_night = compare[0]
+    mean_std = compare[1]
+    fig, axes = plt.subplots(1, 2, sharex=False, sharey=False, figsize=(17, 10))
+    cbar_ax = fig.add_axes([.91, .3, .03, .4])
+    vmax = max(day_std.max().max(), df_mm_std.max().max())
+    vmin = min(day_std.min().min(), df_mm_std.min().min())
+    sns.heatmap(df_mm_std.T, ax=axes[0], cbar=False, vmin=vmin, vmax=vmax,
+                annot=True, cbar_ax=None, cmap='Reds')
+    sns.heatmap(day_std.T, ax=axes[1], cbar=True, vmin=vmin, vmax=vmax,
+                annot=True, cbar_ax=cbar_ax, cmap='Reds')
+    labels_1 = [x for x in axes[0].yaxis.get_ticklabels()]
+    [label.set_bbox(color_dict[label.get_text()]) for label in labels_1]
+    labels_2 = [x for x in axes[1].yaxis.get_ticklabels()]
+    [label.set_bbox(color_dict[label.get_text()]) for label in labels_2]
+    axes[0].set_title('All STD in mm')
+    axes[1].set_title('Day only ({}-{}) STD in mm'.format(*day_time))
+    [ax.set_xlabel('month') for ax in axes]
+    fig.tight_layout(rect=[0, 0, .9, 1])
+    
+#    fig, axes = plt.subplots(1, 2, sharex=False, sharey=False, figsize=(17, 10))
+#    ax_mean = sns.heatmap(df_mm_mean.T, annot=True, ax=axes[0])
+#    ax_mean.set_title('All mean in mm')
+#    ax_std = sns.heatmap(df_mm_std.T, annot=True, ax=axes[1])
+#    ax_std.set_title('All std in mm')
+#    labels_mean = [x for x in ax_mean.yaxis.get_ticklabels()]
+#    [label.set_bbox(color_dict[label.get_text()]) for label in labels_mean]
+#    labels_std = [x for x in ax_std.yaxis.get_ticklabels()]
+#    [label.set_bbox(color_dict[label.get_text()]) for label in labels_std]
+#    [ax.set_xlabel('month') for ax in axes]
+#    fig.tight_layout()
+#    fig_day, axes_day = plt.subplots(1, 2, sharex=False, sharey=False, figsize=(17, 10))
+#    ax_mean = sns.heatmap(per_day_mean.T, annot=True, cmap='bwr', center=0, ax=axes_day[0])
+#    ax_mean.set_title('Day mean - All mean in % from All mean')
+#    ax_std = sns.heatmap(per_day_std.T, annot=True, cmap='bwr', center=0, ax=axes_day[1])
+#    ax_std.set_title('Day std - All std in % from All std')
+#    labels_mean = [x for x in ax_mean.yaxis.get_ticklabels()]
+#    [label.set_bbox(color_dict[label.get_text()]) for label in labels_mean]
+#    labels_std = [x for x in ax_std.yaxis.get_ticklabels()]
+#    [label.set_bbox(color_dict[label.get_text()]) for label in labels_std]
+#    [ax.set_xlabel('month') for ax in axes_day]
+#    fig_day.tight_layout()
+#    fig_night, axes_night = plt.subplots(1, 2, sharex=False, sharey=False, figsize=(17, 10))
+#    ax_mean = sns.heatmap(per_night_mean.T, annot=True, cmap='bwr', center=0, ax=axes_night[0])
+#    ax_mean.set_title('Night mean - All mean in % from All mean')
+#    ax_std = sns.heatmap(per_night_std.T, annot=True, cmap='bwr', center=0, ax=axes_night[1])
+#    ax_std.set_title('Night std - All std in % from All std')
+#    labels_mean = [x for x in ax_mean.yaxis.get_ticklabels()]
+#    [label.set_bbox(color_dict[label.get_text()]) for label in labels_mean]
+#    labels_std = [x for x in ax_std.yaxis.get_ticklabels()]
+#    [label.set_bbox(color_dict[label.get_text()]) for label in labels_std]
+#    [ax.set_xlabel('month') for ax in axes_night]
+#    fig_night.tight_layout()
+    return fig
+
+
 def plot_pw_geographical_segments(df, scope='diurnal', kind=None, fg=None,
                                   marker='o', color='b', ylim=[-2, 3],
                                   fontsize=14, labelsize=10, zorder=0,
@@ -2968,10 +3060,6 @@ def plot_pw_geographical_segments(df, scope='diurnal', kind=None, fg=None,
                 elif kind == 'violin':
                     df['month'] = df.index.month
                     pal = sns.color_palette("Paired", 12)
-                    sns.violinplot(ax=ax, data=df, fliersize=4, x='month',
-                                   y=site, palette=pal,
-                                   gridsize=250, inner='quartile',
-                                   scale='area')
                     ax.set_ylabel('')
                     ax.spines["top"].set_visible(False)
                     ax.spines["right"].set_visible(False)
