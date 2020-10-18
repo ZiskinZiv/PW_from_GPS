@@ -4004,25 +4004,7 @@ def read_gps_axis_xlsx(path=work_yuval, field='ZWD'):
     return ds
 
 
-def read_Dls_matfile(path=work_yuval):
-    from scipy.io import loadmat
-    import datetime
-    import pandas as pd
-    from aux_gps import xr_reindex_with_date_range
-    file = path / 'data_DIs_Bet_Dagan_2015.mat'
-    mat = loadmat(file)
-    arr = mat['data_DIs_2015']
-    startdate = datetime.datetime.strptime("0001-01-01", "%Y-%m-%d")
-    dts = [pd.to_datetime(startdate + datetime.timedelta(arr[x, 1])) -
-           pd.Timedelta(366, unit='D') for x in range(arr[:, 1].shape[0])]
-    vals = arr[:, 0]
-    df = pd.DataFrame(vals, index=dts)
-    df.columns = ['p']
-    df.index.name = 'time'
-    da = df.to_xarray()
-    da = xr_reindex_with_date_range(da, freq='12H')['p']
-    return da
-    
+   
 #def analyze_sounding_and_formulatxe(sound_path=sound_path,
     
 #                                   model_names = ['TSEN', 'LR'],
