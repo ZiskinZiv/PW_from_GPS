@@ -835,6 +835,15 @@ def time_series_stack_with_window(ts_da, time_dim='time',
     return ds
 
 
+def annual_standertize(data, time_dim='time'):
+    """just divide by the time.month std()"""
+    attrs = data.attrs
+    data = data.groupby('{}.month'.format(time_dim)) / data.groupby('{}.month'.format(time_dim)).std(keep_attrs=True)
+    data = data.reset_coords(drop=True)
+    data.attrs.update(attrs)
+    return data
+
+    
 def normalize_xr(data, time_dim='time', norm=1, down_bound=-1.,
                  upper_bound=1., verbose=True):
     attrs = data.attrs
@@ -2181,6 +2190,21 @@ def coarse_dem(data, dem_path=work_yuval / 'AW3D30'):
         awds.to_netcdf(dem_path / filename)
         print('{} is saved to {}'.format(filename, dem_path))
     return awds
+
+
+def invert_dict(d):
+    """unvert dict"""
+    inverse = dict()
+    for key in d:
+        # Go through the list that is saved in the dict:
+        for item in d[key]:
+            # Check if in the inverted dict the key exists
+            if item not in inverse:
+                # If not create a new list
+                inverse[item] = key
+            else:
+                inverse[item].append(key)
+    return inverse
 
 
 def concat_shp(path, shp_file_list, saved_filename):
