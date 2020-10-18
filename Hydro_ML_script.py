@@ -51,26 +51,55 @@ def main_hydro_ML(args):
     scorers = ['roc_auc', 'f1', 'accuracy']
     splits = [2, 3, 4]
     features = ['pwv', 'pressure', ['pwv', 'pressure']]
+    if args.test_size is not None:
+        test_size = args.test_size
+    else:
+        test_size = 0.2
     if args.savepath is not None:
         savepath = args.savepath
     else:
         savepath = hydro_path
-    for scorer in scorers:
-        for n_s in splits:
-            for feature in features:
-                logger.info(
-                    'Running {} model with {} test scorer and {} nsplits, features={}'.format(
-                        args.model, scorer, n_s, feature))
-                model = ML_main_procedure(
-                    X,
-                    y,
-                    model_name=args.model,
-                    features=feature,
-                    n_splits=n_s,
-                    best_score=scorer,
-                    val_size=None,
-                    savepath=savepath,
-                    plot=False)
+    if args.model is not None:
+        model_name = args.model
+        for scorer in scorers:
+            for n_s in splits:
+                for feature in features:
+                    logger.info(
+                        'Running {} model with {} test scorer and {} nsplits, features={}'.format(
+                            model_name, scorer, n_s, feature))
+                    model = ML_main_procedure(
+                        X,
+                        y,
+                        model_name=model_name,
+                        features=feature,
+                        n_splits=n_s,
+                        best_score=scorer,
+                        val_size=None,
+                        test_size=test_size,
+                        savepath=savepath,
+                        plot=False)
+    else:
+        logger.info('Running with all three models:')
+        models = ['SVC', 'RF', 'MLP']
+        for model_name in models:
+            for scorer in scorers:
+                for n_s in splits:
+                    for feature in features:
+                        logger.info(
+                            'Running {} model with {} test scorer and {} nsplits, features={}'.format(
+                                model_name, scorer, n_s, feature))
+                        model = ML_main_procedure(
+                            X,
+                            y,
+                            model_name=model_name,
+                            features=feature,
+                            n_splits=n_s,
+                            best_score=scorer,
+                            val_size=None,
+                            test_size=test_size,
+                            savepath=savepath,
+                            plot=False)
+
 
 if __name__ == '__main__':
     import argparse
@@ -90,8 +119,9 @@ if __name__ == '__main__':
 #    optional.add_argument('--loop_over', help='select which params to loop over',
 #                          type=check_loopover, nargs='+')
     optional.add_argument('--savepath', help="a full path to download the files, e.g., /home/ziskin/Work_Files/PW_yuval/IMS_T/10mins", type=check_path)
+    optional.add_argument('--test_size', help='how much to leave for test [0-1]', type=float)
 #    optional.add_argument('--nsplits', help='select number of splits for HP tuning.', type=int)
-    required.add_argument('--model', help='select ML model.', choices=['SVC', 'MLP', 'RF'])
+    optional.add_argument('--model', help='select ML model.', choices=['SVC', 'MLP', 'RF'])
 #    optional.add_argument('--feature', help='select features for ML', type=check_features, nargs='+')
     parser._action_groups.append(optional)  # added this line
     args = parser.parse_args()
