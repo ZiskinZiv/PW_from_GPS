@@ -13,7 +13,7 @@ ims_path = work_yuval / 'IMS_T'
 hydro_ml_path = hydro_path / 'hydro_ML'
 from PW_paths import savefig_path
 
-hydro_pw_dict = {'drag': 48125, 'dsea': 48199, 'elat': 60170}
+hydro_pw_dict = {'drag': 48125, 'dsea': 48199, 'elat': 60170, 'tela': 17135}
 
 # TODO: scan for seasons in the tide events and remove summer
 def plot_all_decompositions(X, y, n=2):
@@ -262,7 +262,7 @@ def ML_main_procedure(X, y, estimator=None, model_name='SVC', features='pwv',
                                                         random_state=seed)
     # do HP_tuning:
     if estimator is None:
-        cvr, model = HP_tuning(X_train, y_train, model_name=model_name, val_size=val_size,
+        cvr, model = HP_tuning(X_train, y_train, model_name=model_name, val_size=val_size, test_size=test_size,
                         best_score=best_score, seed=seed, savepath=savepath, n_splits=n_splits)
     else:
         model = estimator
@@ -274,14 +274,16 @@ def ML_main_procedure(X, y, estimator=None, model_name='SVC', features='pwv',
         return model
 
 
-def plot_hydro_ML_models_result(model_da, nsplits=2, save=True):
+def plot_hydro_ML_models_result(model_da, nsplits=2, station='drag',
+                                save=False):
     import xarray as xr
     import seaborn as sns
     import matplotlib.pyplot as plt
     # TODO: add plot_roc_curve(model, X_other_station, y_other_station)
     # TODO: add pw_station, hs_id
     cmap = sns.color_palette("colorblind", 3)
-    X, y = produce_X_y('drag', '48125', neg_pos_ratio=1)
+    X, y = produce_X_y(station, hydro_pw_dict[station], neg_pos_ratio=1)
+    events = int(y[y==1].sum().item())
     model_da = model_da.sel(splits=nsplits).reset_coords(drop=True)
 #    just_pw = [x for x in X.feature.values if 'pressure' not in x]
 #    X_pw = X.sel(feature=just_pw)
@@ -310,7 +312,7 @@ def plot_hydro_ML_models_result(model_da, nsplits=2, save=True):
                                      color=cmap[k], ax=ax,
                                      plot_chance=chance_plot[k],
                                      title=title)
-    fg.fig.suptitle('n_splits = {}'.format(nsplits))
+    fg.fig.suptitle('{} station: {} total_events, n_splits = {}'.format(station.upper(), events, nsplits))
     fg.fig.tight_layout()
     fg.fig.subplots_adjust(top=0.937,
                            bottom=0.054,
@@ -323,7 +325,7 @@ def plot_hydro_ML_models_result(model_da, nsplits=2, save=True):
     return fg
 
 
-def load_ML_models(path=hydro_ml_path, prefix='CVM', suffix='.pkl'):
+def load_ML_models(path=hydro_ml_path, station='drag', prefix='CVM', suffix='.pkl'):
     from aux_gps import path_glob
     import joblib
     import matplotlib.pyplot as plt
@@ -332,30 +334,26 @@ def load_ML_models(path=hydro_ml_path, prefix='CVM', suffix='.pkl'):
     import pandas as pd
     model_files = path_glob(path, '{}_*{}'.format(prefix, suffix))
     model_files = sorted(model_files)
+    model_files = [x for x in model_files if station in x.as_posix()]
+    print('loading {} station only.'.format(station))
     model_names = [x.as_posix().split('/')[-1].split('.')
                    [0].split('_')[3] for x in model_files]
     model_pw_stations = [x.as_posix().split('/')[-1].split('.')
                        [0].split('_')[1] for x in model_files]
     model_hydro_stations = [x.as_posix().split('/')[-1].split('.')
                        [0].split('_')[2] for x in model_files]
-    model_nsplits = [x.as_posix().split('.')[0].split('_')[-1]
+    model_nsplits = [x.as_posix().split('/')[-1].split('.')[0].split('_')[-1]
                     for x in model_files]
-    model_scores = [x.as_posix().split('.')[0].split('_')[-2]
+    model_scores = [x.as_posix().split('/')[-1].split('.')[0].split('_')[-2]
                     for x in model_files]
-    model_features = [x.as_posix().split('.')[0].split('_')[-3]
+    model_features = [x.as_posix().split('/')[-1].split('.')[0].split('_')[4]
                     for x in model_files]
-    model_pwv_hs_id = list(zip(model_pw_stations, model_hydro_stations))
-    model_pwv_hs_id = ['_'.join(x) for x in model_pwv_hs_id]
-#    data_names = ['_'.join(x) for x in zip(model_names, model_scores, model_nsplits)]
+#    model_pwv_hs_id = list(zip(model_pw_stations, model_hydro_stations))
+#    model_pwv_hs_id = ['_'.join(x) for x in model_pwv_hs_id]
     m_list = [joblib.load(x) for x in model_files]
-#    model_dict = dict(zip(data_names, m_list))
-    # also load CVR attrs (for features):
-#    cvr_files = [x.as_posix().replace('CVM', 'CVR').replace('.pkl','.nc') for x in model_files]
-#    cvrs = [xr.load_dataset(x).attrs for x in sorted(cvr_files)]
-#    model_features = ['+'.join(sorted(x['features'])) if isinstance(x['features'], list) else x['features'] for x in cvrs]
     # transform model_dict to dataarray:
-    tups = [tuple(x) for x in zip(model_names, model_scores, model_nsplits, model_features, model_pwv_hs_id)]
-    ind = pd.MultiIndex.from_tuples((tups), names=['model', 'scoring', 'splits', 'feature', 'station'])
+    tups = [tuple(x) for x in zip(model_names, model_scores, model_nsplits, model_features)] #, model_pwv_hs_id)]
+    ind = pd.MultiIndex.from_tuples((tups), names=['model', 'scoring', 'splits', 'feature']) #, 'station'])
     da = xr.DataArray(m_list, dims='dim_0')
     da['dim_0'] = ind
     da = da.unstack('dim_0')
@@ -382,6 +380,7 @@ def plot_many_ROC_curves(model, X, y, name='', color='b', ax=None,
 
 
 def HP_tuning(X, y, model_name='SVC', val_size=0.18, n_splits=None,
+              test_size=None,
               best_score='f1', seed=42, savepath=None):
     from sklearn.model_selection import GridSearchCV
     from sklearn.model_selection import StratifiedKFold
@@ -405,9 +404,9 @@ def HP_tuning(X, y, model_name='SVC', val_size=0.18, n_splits=None,
     gr.fit(X, y)
     if best_score is not None:
         ds, best_model = process_gridsearch_results(gr, model_name,
-                                                    features=features, pwv_id=X.attrs['pwv_id'], hs_id=y.attrs['hydro_station_id'])
+                                                    features=features, pwv_id=X.attrs['pwv_id'], hs_id=y.attrs['hydro_station_id'], test_size=test_size)
     else:
-        ds = process_gridsearch_results(gr, model_name, features=features, pwv_id=X.attrs['pwv_id'], hs_id=y.attrs['hydro_station_id'])
+        ds = process_gridsearch_results(gr, model_name, features=features, pwv_id=X.attrs['pwv_id'], hs_id=y.attrs['hydro_station_id'], test_size=test_size)
         best_model = None
     if savepath is not None:
         save_cv_results(ds, best_model=best_model, savepath=savepath)
@@ -415,7 +414,7 @@ def HP_tuning(X, y, model_name='SVC', val_size=0.18, n_splits=None,
 
 
 def process_gridsearch_results(GridSearchCV, model_name, features=None,
-                               pwv_id=None, hs_id=None):
+                               pwv_id=None, hs_id=None, test_size=None):
     import xarray as xr
     import pandas as pd
     """takes GridSreachCV object with cv_results and xarray it into dataarray"""
@@ -478,6 +477,8 @@ def process_gridsearch_results(GridSearchCV, model_name, features=None,
         ds.attrs['pwv_id'] = pwv_id
     if hs_id is not None:
         ds.attrs['hs_id'] = hs_id
+    if test_size is not None:
+        ds.attrs['test_size'] = test_size
     if GridSearchCV.refit:
         ds.attrs['best_score'] = GridSearchCV.best_score_
 #        ds['best_model'] = GridSearchCV.best_estimator_
@@ -503,13 +504,14 @@ def save_cv_results(cvr, best_model=None, savepath=hydro_path):
         features = 'pressure'
     pwv_id = cvr.attrs['pwv_id']
     hs_id = cvr.attrs['hs_id']
+    test_size = int(cvr.attrs['test_size'] * 100)
     name = cvr.attrs['model_name']
 #    params = cvr.attrs['param_names']
     nsplits = cvr.attrs['n_splits']
     if best_model is not None:
         refitted_scorer = cvr.attrs['refitted_scorer']
-        filename = 'CVR_{}_{}_{}_{}_{}_{}.nc'.format(pwv_id, hs_id,
-                                                     name, features, refitted_scorer, nsplits)
+        filename = 'CVR_{}_{}_{}_{}_{}_{}_{}.nc'.format(pwv_id, hs_id,
+                                                     name, features, refitted_scorer, nsplits, test_size)
 #        filename = 'CVR_{}_{}_{}_splits_{}.nc'.format(
 #                name, '_'.join(params), refitted_scorer, nsplits)
 #    cvr_to_save = cvr[[x for x in cvr if x != 'best_model']]
@@ -520,8 +522,8 @@ def save_cv_results(cvr, best_model=None, savepath=hydro_path):
         _ = joblib.dump(best_model, filepath,
                         compress=9)
     else:
-        filename = 'CVR_{}_{}_{}_{}_{}.nc'.format(pwv_id, hs_id,
-                                                  name, features, nsplits)
+        filename = 'CVR_{}_{}_{}_{}_{}_{}.nc'.format(pwv_id, hs_id,
+                                                  name, features, nsplits, test_size)
 #    cvr_to_save = cvr[[x for x in cvr if x != 'best_model']]
         save_ncfile(cvr, savepath, filename)
     return
