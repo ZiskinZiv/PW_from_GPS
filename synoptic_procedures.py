@@ -8,7 +8,8 @@ Created on Mon May 25 13:46:44 2020
 
 from pathlib import Path
 from PW_paths import work_yuval
-cwd = Path().cwd()
+climate_path = work_yuval / 'climate'
+#cwd = Path().cwd()
 
 
 def val_counts(ser):
@@ -18,7 +19,8 @@ def val_counts(ser):
 
 
 upper_class_dict = {'RST': [1, 2, 3], 'PT': [4, 5, 6], 'H': [7, 8, 9, 10],
-                    'CL': [12, 13, 14, 15], 'Other': [11, 16, 17, 18, 19]}
+                    'CL': [12, 13, 14, 15], 'DS': [17, 18, 19],
+                    'Other': [11, 16]}
 
 def class_to_upper(class_da, class_type='upper1', name='upper_class'):
     import numpy as np
@@ -104,11 +106,12 @@ def add_class_abbr(class_num):
 
 
 def read_synoptic_classification(
-        path=cwd,
+        path=climate_path,
         filename='synoptic_classification_1948-8_May_2020.xls', report=True):
     import pandas as pd
     from aux_gps import path_glob
     import numpy as np
+    from aux_gps import invert_dict
     synoptic_filename = path_glob(path, 'synoptic_classification_1948*.xls')
     # read excell:
     df = pd.read_excel(synoptic_filename[0])
@@ -140,12 +143,14 @@ def read_synoptic_classification(
     df['Name-EN'] = class_df['Name-EN'].loc[df['class'].values].values
     df['Name-HE'] = class_df['Name-HE'].loc[df['class'].values].values
     # define upper level class:
-    df['upper_class'] = np.ones(df['class'].shape) * np.nan
-    df.loc[(df['class'] <= 3) & (df['class'] >= 1), 'upper_class'] = 'RST'
-    df.loc[(df['class'] <= 6) & (df['class'] >= 4), 'upper_class'] = 'PT'
-    df.loc[(df['class'] <= 10) & (df['class'] >= 7), 'upper_class'] = 'H'
-    df.loc[(df['class'] <= 15) & (df['class'] >= 12), 'upper_class'] = 'CL'
-    df['upper_class'] = df['upper_class'].fillna('Other')
+    d = invert_dict(upper_class_dict)
+    df['upper_class'] = df['class'].map(d)
+#    df['upper_class'] = np.ones(df['class'].shape) * np.nan
+#    df.loc[(df['class'] <= 3) & (df['class'] >= 1), 'upper_class'] = 'RST'
+#    df.loc[(df['class'] <= 6) & (df['class'] >= 4), 'upper_class'] = 'PT'
+#    df.loc[(df['class'] <= 10) & (df['class'] >= 7), 'upper_class'] = 'H'
+#    df.loc[(df['class'] <= 15) & (df['class'] >= 12), 'upper_class'] = 'CL'
+#    df['upper_class'] = df['upper_class'].fillna('Other')
     df.index.name = 'time'
     df['class_abbr'] = df['class'].apply(add_class_abbr)
     if report:
@@ -173,11 +178,11 @@ def find_consecutive_classes(df):
     return df_clas
 
 
-def agg_month_consecutive_syn_class(path=cwd):
+def agg_month_consecutive_syn_class(path=climate_path):
     import numpy as np
     import pandas as pd
     from aux_gps import save_ncfile
-    df = read_synoptic_classification(path=path)
+    df = read_synoptic_classification(path=path, report=False)
     df['month'] = df.index.month
     df['year'] = df.index.year
     df['months'] = df['year'].astype(str) + '-' + df['month'].astype(str)
@@ -196,22 +201,34 @@ def agg_month_consecutive_syn_class(path=cwd):
     return da
 
 
-def agg_month_count_syn_class(path=cwd):
+def agg_month_count_syn_class(path=climate_path, syn_category='normal',
+                              freq=True):
     # df.loc['2015-09']['Name-EN'].value_counts()
     import pandas as pd
-    df = read_synoptic_classification(path=path)
+    if syn_category == 'normal':
+        syn_cat = 'class'
+    elif syn_category == 'upper':
+        syn_cat = 'upper_class'
+    df = read_synoptic_classification(path=path, report=False)
+    print('used {} synoptic category'.format(syn_category))
     df['month'] = df.index.month
     df['year'] = df.index.year
     df['months'] = df['year'].astype(str) + '-' + df['month'].astype(str)
-    new_df = df.groupby([df['months'], df['class']]).size().to_frame()
+    new_df = df.groupby([df['months'], df[syn_cat]]).size().to_frame()
     new_df.columns = ['class_sum']
-    dfmm = pd.pivot_table(new_df, index='months', columns='class')
+    dfmm = pd.pivot_table(new_df, index='months', columns=syn_cat)
     dfmm.set_index(pd.to_datetime(dfmm.index), inplace=True)
+    dfmm.sort_index()
     dfmm = dfmm.fillna(0)
     dfmm = dfmm.astype(int)
-    dfmm.columns = [x + 1 for x in range(19)]
+    dfmm.columns = dfmm.columns.droplevel()
     dfmm.index.name = 'time'
-    da = dfmm.to_xarray().to_array('class')
+    if freq:
+        dfmm /= pd.DataFrame(dfmm.index.days_in_month.values, index=dfmm.index).values
+    da = dfmm.to_xarray().to_array('syn_cls')
     da = da.sortby('time')
+    da.attrs['units'] = 'counts in a month'
+    if freq:
+        da.attrs['units'] = 'relative frequency in a month'
     return da
     
