@@ -1455,6 +1455,14 @@ def flip_xy_axes(ax, ylim=None):
     return ax
 
 
+def choose_time_groupby_arg(da_ts, time_dim='time', grp='hour'):
+    if grp != 'date':
+        grp_arg = '{}.{}'.format(time_dim, grp)
+    else:
+        grp_arg = groupby_date_xr(da_ts)
+    return grp_arg
+
+
 def time_series_stack(time_da, time_dim='time', grp1='hour', grp2='month',
                       plot=True):
     """Takes a time-series xr.DataArray objects and reshapes it using
@@ -1470,37 +1478,54 @@ def time_series_stack(time_da, time_dim='time', grp1='hour', grp2='month',
     # drop all NaNs:
     time_da = time_da.dropna(time_dim)
     # first grouping:
-    grp_obj1 = time_da.groupby(time_dim + '.' + grp1)
+    grp1_arg = choose_time_groupby_arg(time_da, time_dim=time_dim, grp=grp1)
+    grp_obj1 = time_da.groupby(grp1_arg)
     da_list = []
     t_list = []
     for grp1_name, grp1_inds in grp_obj1.groups.items():
         da = time_da.isel({time_dim: grp1_inds})
-        # second grouping:
-        grp_obj2 = da.groupby(time_dim + '.' + grp2)
-        for grp2_name, grp2_inds in grp_obj2.groups.items():
-            da2 = da.isel({time_dim: grp2_inds})
-            # extract datetimes and rewrite time coord to 'rest':
-            times = da2[time_dim]
+        if grp2 is not None:
+            # second grouping:
+            grp2_arg = choose_time_groupby_arg(time_da, time_dim=time_dim, grp=grp2)
+            grp_obj2 = da.groupby(grp2_arg)
+            for grp2_name, grp2_inds in grp_obj2.groups.items():
+                da2 = da.isel({time_dim: grp2_inds})
+                # extract datetimes and rewrite time coord to 'rest':
+                times = da2[time_dim]
+                times = times.rename({time_dim: 'rest'})
+                times.coords['rest'] = range(len(times))
+                t_list.append(times)
+                da2 = da2.rename({time_dim: 'rest'})
+                da2.coords['rest'] = range(len(da2))
+                da_list.append(da2)
+        else:
+            times = da[time_dim]
             times = times.rename({time_dim: 'rest'})
             times.coords['rest'] = range(len(times))
             t_list.append(times)
-            da2 = da2.rename({time_dim: 'rest'})
-            da2.coords['rest'] = range(len(da2))
-            da_list.append(da2)
+            da = da.rename({time_dim: 'rest'})
+            da.coords['rest'] = range(len(da))
+            da_list.append(da)
     # get group keys:
     grps1 = [x for x in grp_obj1.groups.keys()]
-    grps2 = [x for x in grp_obj2.groups.keys()]
+    if grp2 is not None:
+        grps2 = [x for x in grp_obj2.groups.keys()]
     # concat and convert to dataset:
     stacked_ds = xr.concat(da_list, dim='all').to_dataset(name=name)
     stacked_ds[time_dim] = xr.concat(t_list, 'all')
-    # create a multiindex for the groups:
-    mindex = pd.MultiIndex.from_product([grps1, grps2], names=[grp1, grp2])
-    stacked_ds.coords['all'] = mindex
+    if grp2 is not None:
+        # create a multiindex for the groups:
+        mindex = pd.MultiIndex.from_product([grps1, grps2], names=[grp1, grp2])
+        stacked_ds.coords['all'] = mindex
+    else:
+        # create a multiindex for first group only:
+        mindex = pd.MultiIndex.from_product([grps1], names=[grp1])
+        stacked_ds.coords['all'] = mindex
     # unstack:
     ds = stacked_ds.unstack('all')
     ds.attrs = attrs
-    if plot:
-        plot_stacked_time_series(ds[name].mean('rest', keep_attrs=True))
+#    if plot:
+#        plot_stacked_time_series(ds[name].mean('rest', keep_attrs=True))
     return ds
 
 
