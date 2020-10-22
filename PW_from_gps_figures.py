@@ -2956,18 +2956,26 @@ def plot_day_night_pwv_monthly_mean_std_heatmap(
     mean_std = compare[1]
     fig, axes = plt.subplots(1, 2, sharex=False, sharey=False, figsize=(17, 10))
     cbar_ax = fig.add_axes([.91, .3, .03, .4])
-    vmax = max(day_std.max().max(), df_mm_std.max().max())
-    vmin = min(day_std.min().min(), df_mm_std.min().min())
-    sns.heatmap(df_mm_std.T, ax=axes[0], cbar=False, vmin=vmin, vmax=vmax,
+    if compare[1] == 'std':
+        all_heat = df_mm_std.T
+        day_heat = day_std.T
+        title = 'STD'
+    elif compare[1] == 'mean':
+        all_heat = df_mm_mean.T
+        day_heat = day_mean.T
+        title = 'MEAN'
+    vmax = max(day_heat.max().max(), all_heat.max().max())
+    vmin = min(day_heat.min().min(), all_heat.min().min())
+    sns.heatmap(all_heat, ax=axes[0], cbar=False, vmin=vmin, vmax=vmax,
                 annot=True, cbar_ax=None, cmap='Reds')
-    sns.heatmap(day_std.T, ax=axes[1], cbar=True, vmin=vmin, vmax=vmax,
+    sns.heatmap(day_heat, ax=axes[1], cbar=True, vmin=vmin, vmax=vmax,
                 annot=True, cbar_ax=cbar_ax, cmap='Reds')
     labels_1 = [x for x in axes[0].yaxis.get_ticklabels()]
     [label.set_bbox(color_dict[label.get_text()]) for label in labels_1]
     labels_2 = [x for x in axes[1].yaxis.get_ticklabels()]
     [label.set_bbox(color_dict[label.get_text()]) for label in labels_2]
-    axes[0].set_title('All STD in mm')
-    axes[1].set_title('Day only ({}-{}) STD in mm'.format(*day_time))
+    axes[0].set_title('All {} in mm'.format(title))
+    axes[1].set_title('Day only ({}-{}) {} in mm'.format(*day_time, title))
     [ax.set_xlabel('month') for ax in axes]
     fig.tight_layout(rect=[0, 0, .9, 1])
     
