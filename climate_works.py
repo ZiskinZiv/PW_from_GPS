@@ -198,11 +198,42 @@ def read_old_ncp(savepath=climate_path):
     return da
 
 
-def read_all_12h_DIs(path=climate_path):
+def DI_and_PWV_lag_analysis(bin_di, path=work_yuval, station='tela',
+                            hour_interval=48):
+    import xarray as xr
+    from aux_gps import xr_reindex_with_date_range
+    bin_di = xr_reindex_with_date_range(bin_di, freq='5min')
+    pw = xr.open_dataset(path /'GNSS_PW_thresh_50_for_diurnal_analysis.nc')[station]
+    print('loaded {} pwv station.'.format(station))
+    pw.load()
+    df = pw.to_dataframe()
+    df['bins'] = bin_di.to_dataframe()
+    cats = df['bins'].value_counts().index.values
+    pw_time_cat_list = []
+#    for di_cat in cats:
+#                
+#    return df
+
+
+def bin_DIs(di, bins=[300, 500, 700, 900, 1030]):
+    import pandas as pd
+    import numpy as np
+    df = di.to_dataframe()
+    df = df.dropna()
+    labels = np.arange(1, len(bins))
+    df_bins = pd.cut(df[di.name], bins=bins, labels=labels)
+    da = df_bins.to_xarray()
+    return da
+
+
+def read_all_DIs(path=climate_path, sample_rate='12H'):
     from aux_gps import path_glob
     import xarray as xr
-    files = path_glob(path, 'data_DIs_Bet_Dagan_*.mat')
-    da_list = [read_DIs_matfile(x) for x in files]
+    if sample_rate == '12H':
+        files = path_glob(path, 'data_DIs_Bet_Dagan_*.mat')
+    elif sample_rate == '3H':
+        files = path_glob(path, 'data_DIs_Bet_Dagan_hr_*.mat')
+    da_list = [read_DIs_matfile(x, sample_rate=sample_rate) for x in files]
     da = xr.concat(da_list, 'time')
     da = da.sortby('time')
     return da
@@ -213,6 +244,7 @@ def read_DIs_matfile(file, sample_rate='12H'):
     import datetime
     import pandas as pd
     from aux_gps import xr_reindex_with_date_range
+    print('sample rate is {}'.format(sample_rate))
 #    file = path / 'data_DIs_Bet_Dagan_2015.mat'
 #    name = file.as_posix().split('/')[-1].split('.')[0]
     mat = loadmat(file)
@@ -230,11 +262,19 @@ def read_DIs_matfile(file, sample_rate='12H'):
     return da
 
 
-def run_MLR(X, y):
+def run_MLR(X, y, plot=True):
     from sklearn.linear_model import LinearRegression
     model = ImprovedRegressor(LinearRegression(fit_intercept=True),
                               reshapes='regressors', sample_dim='time')
     model.fit(X, y)
+    print(model.results_['explained_variance'])
+    results = model.results_['original'].to_dataframe()
+    results['predict'] = model.results_['predict'].to_dataframe()
+    if plot:
+        ax = results.plot()
+        ax.set_ylabel('PWV anomalies [mm]')
+        ax.set_title('PWV monthly means anomalies and reconstruction')
+        ax.grid()
     return model
 
 
