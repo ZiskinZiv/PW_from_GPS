@@ -236,6 +236,114 @@ def permutation_scikit(X, y, cv=False, plot=True):
     return
 
 
+def produce_ROC_curves_from_model(model, X, y, cv, kfold_name='inner_kfold'):
+    import numpy as np
+    import xarray as xr
+    from sklearn.metrics import roc_curve
+    from sklearn.metrics import roc_auc_score
+    tprs = []
+    aucs = []
+    mean_fpr = np.linspace(0, 1, 100)
+    for i, (train, val) in enumerate(cv.split(X, y)):
+        model.fit(X[train], y[train])
+        y_pred = model.predict(X[val])
+        fpr, tpr, _ = roc_curve(y[val], y_pred)
+        interp_tpr = np.interp(mean_fpr, fpr, tpr)
+        interp_tpr[0] = 0.0
+        tprs.append(interp_tpr)
+        aucs.append(roc_auc_score(y[val], y_pred))
+#    mean_tpr = np.mean(tprs, axis=0)
+#    mean_tpr[-1] = 1.0
+#    mean_auc = auc(mean_fpr, mean_tpr)
+#    std_auc = np.std(aucs)
+#    std_tpr = np.std(tprs, axis=0)
+    tpr_da = xr.DataArray(tprs, dims=[kfold_name, 'fpr'])
+    auc_da = xr.DataArray(aucs, dims=[kfold_name])
+    ds = xr.Dataset()
+    ds['TPR'] = tpr_da
+    ds['AUC'] = auc_da
+    ds['fpr'] = mean_fpr
+    ds[kfold_name] = np.arange(1, cv.n_splits + 1)
+    # variability for each tpr is ds['TPR'].std('kfold')
+    return ds
+
+
+def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
+                                      outer_splits=4, inner_splits=2,
+                                      refit_scorer='roc_auc',
+                                      seed=42, savepath=None, verbose=0,
+                                      diagnostic=False):
+    from sklearn.model_selection import cross_validate
+    from sklearn.model_selection import StratifiedKFold
+    from sklearn.model_selection import GridSearchCV
+    import numpy as np
+    import xarray as xr
+    # first slice X for features:
+    if isinstance(features, str):
+        f = [x for x in X.feature.values if features in x]
+        X = X.sel(feature=f)
+    elif isinstance(features, list):
+        fs = []
+        for f in features:
+            fs += [x for x in X.feature.values if f in x]
+        X = X.sel(feature=fs)
+    # configure the cross-validation procedure
+    cv_inner = StratifiedKFold(n_splits=inner_splits, shuffle=True,
+                               random_state=seed)
+    print('Inner CV StratifiedKfolds of {}.'.format(inner_splits))
+    # define the model and search space:
+    ml = ML_Classifier_Switcher()
+    light = False
+    if diagnostic:
+        print('disgnostic mode.')
+        light = True
+    sk_model = ml.pick_model(model_name, light=light)
+    search_space = ml.param_grid
+    # define search
+    gr_search = GridSearchCV(estimator=sk_model, param_grid=search_space,
+                             cv=cv_inner, n_jobs=-1,
+                             scoring=['f1', 'roc_auc', 'accuracy'],
+                             verbose=verbose,
+                             refit=refit_scorer, return_train_score=True)
+#    gr.fit(X, y)
+    # configure the cross-validation procedure
+    cv_outer = StratifiedKFold(n_splits=outer_splits, shuffle=True, random_state=seed)
+    # execute the nested cross-validation
+    scores_est_dict = cross_validate(gr_search, X, y,
+                                     scoring=('f1', 'roc_auc', 'accuracy'),
+                                     cv=cv_outer, n_jobs=-1,
+                                     return_estimator=True, verbose=verbose)
+    # get the test scores:
+    test_keys = [x for x in scores_est_dict.keys() if 'test' in x]
+    ds = xr.Dataset()
+    for key in test_keys:
+        ds[key] = xr.DataArray(scores_est_dict[key], dims=['outer_kfold'])
+    tpr_ds = []
+    gr_ds = []
+    for est in scores_est_dict['estimator']:
+        gr, _ = process_gridsearch_results(est, model_name, split_dim='inner_kfold')
+        # somehow save gr:
+        gr_ds.append(gr)
+        tpr_ds.append(produce_ROC_curves_from_model(est, X, y, cv_inner))
+    dss = xr.concat(tpr_ds, 'outer_kfold')
+    gr_dss = xr.concat(gr_ds, 'outer_kfold')
+    dss['outer_kfold'] = np.arange(1, cv_outer.n_splits + 1)
+    gr_dss['outer_kfold'] = np.arange(1, cv_outer.n_splits + 1)
+    # aggragate results:
+    dss = xr.merge([ds, dss])
+    dss = xr.merge([dss, gr_dss])
+    dss.attrs = gr_dss.attrs
+    dss.attrs['outer_kfold_splits'] = outer_splits
+    features = list(set(['_'.join(x.split('_')[0:2])
+                         for x in X['feature'].values]))
+    # add more attrs, features etc:
+    dss.attrs['features'] = features
+    dss.attrs['pwv_id'] = X.attrs['pwv_id']
+    dss.attrs['hs_id'] = y.attrs['hydro_station_id']
+    dss.attrs['hydro_max_flow'] = y.attrs['max_flow']
+    return dss
+
+
 def ML_main_procedure(X, y, estimator=None, model_name='SVC', features='pwv',
                       val_size=0.18, n_splits=None, test_size=0.2, seed=42, best_score='f1',
                       savepath=None, plot=True):
@@ -275,16 +383,20 @@ def ML_main_procedure(X, y, estimator=None, model_name='SVC', features='pwv',
 
 
 def plot_hydro_ML_models_result(model_da, nsplits=2, station='drag',
-                                save=False):
+                                test_size=20, n_splits_plot=None, save=False):
     import xarray as xr
     import seaborn as sns
     import matplotlib.pyplot as plt
+    from sklearn.model_selection import train_test_split
     # TODO: add plot_roc_curve(model, X_other_station, y_other_station)
     # TODO: add pw_station, hs_id
     cmap = sns.color_palette("colorblind", 3)
     X, y = produce_X_y(station, hydro_pw_dict[station], neg_pos_ratio=1)
-    events = int(y[y==1].sum().item())
-    model_da = model_da.sel(splits=nsplits).reset_coords(drop=True)
+    events = int(y[y == 1].sum().item())
+    model_da = model_da.sel(
+        splits=nsplits,
+        test_size=test_size).reset_coords(
+            drop=True)
 #    just_pw = [x for x in X.feature.values if 'pressure' not in x]
 #    X_pw = X.sel(feature=just_pw)
     fg = xr.plot.FacetGrid(
@@ -308,11 +420,14 @@ def plot_hydro_ML_models_result(model_da, nsplits=2, station='drag',
                     X_f = X.sel(feature=f)
                 else:
                     X_f = X
+#                X_train, X_test, y_train, y_test = train_test_split(
+#                        X_f, y, test_size=test_size/100, shuffle=True, random_state=42)
+
                 plot_many_ROC_curves(model, X_f, y, name=name,
                                      color=cmap[k], ax=ax,
                                      plot_chance=chance_plot[k],
-                                     title=title)
-    fg.fig.suptitle('{} station: {} total_events, n_splits = {}'.format(station.upper(), events, nsplits))
+                                     title=title, n_splits=n_splits_plot)
+    fg.fig.suptitle('{} station: {} total_events, test_events = {}, n_splits = {}'.format(station.upper(), events, int(events* test_size/100), nsplits))
     fg.fig.tight_layout()
     fg.fig.subplots_adjust(top=0.937,
                            bottom=0.054,
@@ -335,41 +450,87 @@ def load_ML_models(path=hydro_ml_path, station='drag', prefix='CVM', suffix='.pk
     model_files = path_glob(path, '{}_*{}'.format(prefix, suffix))
     model_files = sorted(model_files)
     model_files = [x for x in model_files if station in x.as_posix()]
+    m_list = [joblib.load(x) for x in model_files]
+    model_files = [x.as_posix().split('/')[-1].split('.')[0] for x in model_files]
+    # fix roc-auc:
+    model_files = [x.replace('roc_auc', 'roc-auc') for x in model_files]
     print('loading {} station only.'.format(station))
-    model_names = [x.as_posix().split('/')[-1].split('.')
-                   [0].split('_')[3] for x in model_files]
-    model_pw_stations = [x.as_posix().split('/')[-1].split('.')
-                       [0].split('_')[1] for x in model_files]
-    model_hydro_stations = [x.as_posix().split('/')[-1].split('.')
-                       [0].split('_')[2] for x in model_files]
-    model_nsplits = [x.as_posix().split('/')[-1].split('.')[0].split('_')[-1]
-                    for x in model_files]
-    model_scores = [x.as_posix().split('/')[-1].split('.')[0].split('_')[-2]
-                    for x in model_files]
-    model_features = [x.as_posix().split('/')[-1].split('.')[0].split('_')[4]
-                    for x in model_files]
+    model_names = [x.split('_')[3] for x in model_files]
+#    model_pw_stations = [x.split('_')[1] for x in model_files]
+#    model_hydro_stations = [x.split('_')[2] for x in model_files]        
+    model_nsplits = [x.split('_')[6] for x in model_files]
+    model_scores = [x.split('_')[5] for x in model_files]
+    model_features = [x.split('_')[4] for x in model_files]
+    model_test_sizes = []
+    for file in model_files:
+        try:
+            model_test_sizes.append(int(file.split('_')[7]))
+        except IndexError:
+            model_test_sizes.append(20)
 #    model_pwv_hs_id = list(zip(model_pw_stations, model_hydro_stations))
 #    model_pwv_hs_id = ['_'.join(x) for x in model_pwv_hs_id]
-    m_list = [joblib.load(x) for x in model_files]
     # transform model_dict to dataarray:
-    tups = [tuple(x) for x in zip(model_names, model_scores, model_nsplits, model_features)] #, model_pwv_hs_id)]
-    ind = pd.MultiIndex.from_tuples((tups), names=['model', 'scoring', 'splits', 'feature']) #, 'station'])
+    tups = [tuple(x) for x in zip(model_names, model_scores, model_nsplits, model_features, model_test_sizes)] #, model_pwv_hs_id)]
+    ind = pd.MultiIndex.from_tuples((tups), names=['model', 'scoring', 'splits', 'feature', 'test_size']) #, 'station'])
     da = xr.DataArray(m_list, dims='dim_0')
     da['dim_0'] = ind
     da = da.unstack('dim_0')
     da['splits'] = da['splits'].astype(int)
+    da['test_size'].attrs['units'] = '%'
     return da
 
-        
+
 def plot_many_ROC_curves(model, X, y, name='', color='b', ax=None,
-                         plot_chance=True, title=None):
+                         plot_chance=True, title=None, n_splits=None):
     from sklearn.metrics import plot_roc_curve
     import matplotlib.pyplot as plt
+    from sklearn.metrics import roc_auc_score
+    from sklearn.metrics import f1_score
+    from sklearn.metrics import roc_curve
+    from sklearn.metrics import auc
+    import numpy as np
+    from sklearn.model_selection import StratifiedKFold
     if ax is None:
         fig, ax = plt.subplots()
     if title is None:
         title = "Receiver operating characteristic"
-    viz = plot_roc_curve(model, X, y, color=color, ax=ax, name=name)
+    # just plot the ROC curve for X, y, no nsplits and stats:
+    if n_splits is None:
+        viz = plot_roc_curve(model, X, y, color=color, ax=ax, name=name)
+    else:
+        cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+        tprs = []
+        aucs = []
+        mean_fpr = np.linspace(0, 1, 100)
+        for i, (train, val) in enumerate(cv.split(X, y)):
+            model.fit(X[train], y[train])
+#            y_score = model.fit(X[train], y[train]).predict_proba(X[val])[:, 1]
+            y_pred = model.predict(X[val])
+            fpr, tpr, _ = roc_curve(y[val], y_pred)
+#            viz = plot_roc_curve(model, X[val], y[val],
+#                             name='ROC fold {}'.format(i),
+#                             alpha=0.3, lw=1, ax=ax)
+#            fpr = viz.fpr
+#            tpr = viz.tpr
+            interp_tpr = np.interp(mean_fpr, fpr, tpr)
+            interp_tpr[0] = 0.0
+            tprs.append(interp_tpr)
+            aucs.append(roc_auc_score(y[val], y_pred))
+#            scores.append(f1_score(y[val], y_pred))
+#        scores = np.array(scores)
+        mean_tpr = np.mean(tprs, axis=0)
+        mean_tpr[-1] = 1.0
+        mean_auc = auc(mean_fpr, mean_tpr)
+        std_auc = np.std(aucs)
+        ax.plot(mean_fpr, mean_tpr, color=color,
+                label=r'Mean ROC (AUC = %0.2f $\pm$ %0.2f)' % (mean_auc, std_auc),
+                lw=2, alpha=.8)
+        
+        std_tpr = np.std(tprs, axis=0)
+        tprs_upper = np.minimum(mean_tpr + std_tpr, 1)
+        tprs_lower = np.maximum(mean_tpr - std_tpr, 0)
+        ax.fill_between(mean_fpr, tprs_lower, tprs_upper, color='grey', alpha=.2,
+                        label=r'$\pm$ 1 std. dev.')
     if plot_chance:
         ax.plot([0, 1], [0, 1], linestyle='--', lw=2, color='r',
                 label='Chance', alpha=.8)
@@ -413,10 +574,12 @@ def HP_tuning(X, y, model_name='SVC', val_size=0.18, n_splits=None,
     return ds, best_model
 
 
-def process_gridsearch_results(GridSearchCV, model_name, features=None,
+def process_gridsearch_results(GridSearchCV, model_name,
+                               split_dim='inner_kfold', features=None,
                                pwv_id=None, hs_id=None, test_size=None):
     import xarray as xr
     import pandas as pd
+    import numpy as np
     """takes GridSreachCV object with cv_results and xarray it into dataarray"""
     params = GridSearchCV.param_grid
     scoring = GridSearchCV.scoring
@@ -452,10 +615,10 @@ def process_gridsearch_results(GridSearchCV, model_name, features=None,
     tests = []
     for scorer in scoring:
         train_splits_scorer = [x for x in train_splits if scorer in x]
-        trains.append(xr.concat([ds[x] for x in train_splits_scorer], 'split'))
+        trains.append(xr.concat([ds[x] for x in train_splits_scorer], split_dim))
         test_splits_scorer = [x for x in test_splits if scorer in x]
-        tests.append(xr.concat([ds[x] for x in test_splits_scorer], 'split'))
-        splits_scorer = [x for x in range(len(train_splits_scorer))]
+        tests.append(xr.concat([ds[x] for x in test_splits_scorer], split_dim))
+        splits_scorer = np.arange(1, len(train_splits_scorer) + 1)
     train_splits = xr.concat(trains, 'scoring')
     test_splits = xr.concat(tests, 'scoring')
 #    splits = [x for x in range(len(train_splits))]
@@ -465,35 +628,25 @@ def process_gridsearch_results(GridSearchCV, model_name, features=None,
     ds = ds[[x for x in ds.data_vars if x not in all_splits]]
     ds['split_train_score'] = train_splits
     ds['split_test_score'] = test_splits
-    ds['split'] = splits_scorer
+    ds[split_dim] = splits_scorer
     ds['scoring'] = scoring
     ds.attrs['name'] = 'CV_results'
     ds.attrs['param_names'] = names
     ds.attrs['model_name'] = model_name
-    ds.attrs['n_splits'] = ds['split'].size
-    if features is not None:
-        ds.attrs['features'] = features
-    if pwv_id is not None:
-        ds.attrs['pwv_id'] = pwv_id
-    if hs_id is not None:
-        ds.attrs['hs_id'] = hs_id
-    if test_size is not None:
-        ds.attrs['test_size'] = test_size
+    ds.attrs['{}_splits'.format(split_dim)] = ds[split_dim].size
     if GridSearchCV.refit:
-        ds.attrs['best_score'] = GridSearchCV.best_score_
+        ds['best_score'] = GridSearchCV.best_score_
 #        ds['best_model'] = GridSearchCV.best_estimator_
         ds.attrs['refitted_scorer'] = GridSearchCV.refit
         for name in names:
-            ds.attrs['best_{}'.format(name)] = GridSearchCV.best_params_[name]
-            if isinstance(ds.attrs['best_{}'.format(name)], bool):
-                ds.attrs['best_{}'.format(name)] = str(ds.attrs['best_{}'.format(name)])
+            ds['best_{}'.format(name)] = GridSearchCV.best_params_[name]
         return ds, GridSearchCV.best_estimator_
     else:
         return ds
 
 
 def save_cv_results(cvr, best_model=None, savepath=hydro_path):
-    import joblib
+#    import joblib
     from aux_gps import save_ncfile
     features = '_'.join(cvr.attrs['features'])
     if 'pwv' in features and 'pressure' in features:
@@ -504,28 +657,30 @@ def save_cv_results(cvr, best_model=None, savepath=hydro_path):
         features = 'pressure'
     pwv_id = cvr.attrs['pwv_id']
     hs_id = cvr.attrs['hs_id']
-    test_size = int(cvr.attrs['test_size'] * 100)
+    ikfolds = cvr.attrs['inner_kfold_splits']
+    okfolds = cvr.attrs['outer_kfold_splits']
+#    test_size = int(cvr.attrs['test_size'] * 100)
     name = cvr.attrs['model_name']
 #    params = cvr.attrs['param_names']
-    nsplits = cvr.attrs['n_splits']
-    if best_model is not None:
-        refitted_scorer = cvr.attrs['refitted_scorer']
-        filename = 'CVR_{}_{}_{}_{}_{}_{}_{}.nc'.format(pwv_id, hs_id,
-                                                     name, features, refitted_scorer, nsplits, test_size)
+#    nsplits = cvr.attrs['n_splits']
+#    if best_model is not None:
+    refitted_scorer = cvr.attrs['refitted_scorer'].replace('_', '-')
+    filename = 'CVR_{}_{}_{}_{}_{}_{}_{}.nc'.format(pwv_id, hs_id,
+                                                    name, features, refitted_scorer, ikfolds, okfolds)
 #        filename = 'CVR_{}_{}_{}_splits_{}.nc'.format(
 #                name, '_'.join(params), refitted_scorer, nsplits)
 #    cvr_to_save = cvr[[x for x in cvr if x != 'best_model']]
-        save_ncfile(cvr, savepath, filename)
-        model_filename = filename.replace('.nc', '.pkl').replace('CVR', 'CVM')
-#        filepath = savepath / filename.replace('.nc', '.pkl')
-        filepath = savepath / model_filename
-        _ = joblib.dump(best_model, filepath,
-                        compress=9)
-    else:
-        filename = 'CVR_{}_{}_{}_{}_{}_{}.nc'.format(pwv_id, hs_id,
-                                                  name, features, nsplits, test_size)
+    save_ncfile(cvr, savepath, filename)
+#    model_filename = filename.replace('.nc', '.pkl').replace('CVR', 'CVM')
+##        filepath = savepath / filename.replace('.nc', '.pkl')
+#    filepath = savepath / model_filename
+#    _ = joblib.dump(best_model, filepath,
+#                    compress=9)
+#    else:
+#        filename = 'CVR_{}_{}_{}_{}_{}_{}.nc'.format(pwv_id, hs_id,
+#                                                  name, features, nsplits, test_size)
 #    cvr_to_save = cvr[[x for x in cvr if x != 'best_model']]
-        save_ncfile(cvr, savepath, filename)
+#        save_ncfile(cvr, savepath, filename)
     return
 
 
@@ -664,6 +819,7 @@ def produce_X_y(pw_station='drag', hs_id=48125, pressure_station='bet-dagan',
     lon1 = X.attrs['pwv_lon']
     lat2 = y.attrs['lat']
     lon2 = y.attrs['lon']
+    y.attrs['max_flow'] = max_flow
     distance = calculate_distance_between_two_latlons_israel(lat1, lon1, lat2, lon2)
     X.attrs['distance_to_hydro_station_in_km'] = distance / 1000.0
     y.attrs['distance_to_pwv_station_in_km'] = distance / 1000.0
@@ -1480,13 +1636,18 @@ def read_tides(path=hydro_path):
     return ds
 
 
-def plot_hydro_events(hs_id, path=hydro_path, field='max_flow'):
+def plot_hydro_events(hs_id, path=hydro_path, field='max_flow', min_flow=10):
     import xarray as xr
+    import matplotlib.pyplot as plt
     tides = xr.open_dataset(path/'hydro_tides.nc')
     sta_slice = [x for x in tides.data_vars if str(hs_id) in x]
     tide = tides[sta_slice]['TS_{}_{}'.format(hs_id, field)]
     tide = tide.dropna('tide_start')
-    tide.plot.line(linewidth=0., marker='x', color='r')
+    fig, ax = plt.subplots()
+    tide.plot.line(linewidth=0., marker='x', color='r', ax=ax)
+    if min_flow is not None:
+        tide[tide>min_flow].plot.line(linewidth=0., marker='x', color='b',ax=ax)
+        print('min flow of {} m^3/sec: {}'.format(min_flow, tide[tide>min_flow].dropna('tide_start').size))
     return tide
 
 
@@ -1593,7 +1754,7 @@ def read_hydrographs(path=hydro_path):
 
 
 class ML_Classifier_Switcher(object):
-    def pick_model(self, model_name):
+    def pick_model(self, model_name, light=False):
         """Dispatch method"""
         # from sklearn.model_selection import GridSearchCV
         self.param_grid = None
@@ -1604,41 +1765,54 @@ class ML_Classifier_Switcher(object):
 #            return(GridSearchCV(method(), self.param_grid, n_jobs=-1,
 #                                return_train_score=True))
 #        else:
-            # Call the method as we return it
+        # Call the method as we return it
+        # whether to select lighter param grid, e.g., for testing purposes.
+        self.light = light
         return method()
 
     def SVC(self):
         from sklearn.svm import SVC
         import numpy as np
-#        self.param_grid = {'kernel': ['rbf', 'sigmoid']}
-        self.param_grid = {'kernel': ['rbf', 'sigmoid', 'linear', 'poly'],
-                           'C': np.logspace(-5, 2, 25),
-                           'gamma': np.logspace(-5, 2, 25),
-                           'degree': [1, 2, 3, 4 ,5],
-                           'coef0': [0, 1 , 2, 3, 4]}
+        if self.light:
+            self.param_grid = {'kernel': ['rbf', 'sigmoid']}
+        else:
+            self.param_grid = {'kernel': ['rbf', 'sigmoid', 'linear', 'poly'],
+                               'C': np.logspace(-5, 2, 25),
+                               'gamma': np.logspace(-5, 2, 25),
+                               'degree': [1, 2, 3, 4, 5],
+                               'coef0': [0, 1, 2, 3, 4]}
         return SVC(random_state=42)
-
 
     def MLP(self):
         import numpy as np
         from sklearn.neural_network import MLPClassifier
-        self.param_grid = {'alpha': np.logspace(-5, 3, 25),
-                           'activation': ['identity', 'logistic', 'tanh', 'relu'],
-                           'hidden_layer_sizes': [(50, 50, 50), (50, 100, 50), (100,)],
-                           'learning_rate': ['constant', 'adaptive'],
-                           'solver': ['adam', 'lbfgs']}
-        # return MLPRegressor(random_state=42, solver='lbfgs')
+        if self.light:
+            self.param_grid = {
+                'activation': [
+                    'identity',
+                    'logistic',
+                    'tanh',
+                    'relu']}
+        else:
+            self.param_grid = {'alpha': np.logspace(-5, 3, 25),
+                               'activation': ['identity', 'logistic', 'tanh', 'relu'],
+                               'hidden_layer_sizes': [(50, 50, 50), (50, 100, 50), (100,)],
+                               'learning_rate': ['constant', 'adaptive'],
+                               'solver': ['adam', 'lbfgs']}
         return MLPClassifier(random_state=42, max_iter=500)
-    
+
     def RF(self):
         from sklearn.ensemble import RandomForestClassifier
         import numpy as np
-        self.param_grid = {'max_depth': np.arange(10, 110, 10),
-                           'bootstrap': [True, False],
-                           'max_features': ['auto', 'sqrt'],
-                           'min_samples_leaf': [1, 2, 4],
-                           'min_samples_split': [2, 5, 10],
-                           'n_estimators': np.arange(200, 2200, 200)
-                           }
-#        self.param_grid = {'bootstrap': [True, False], 'max_features': ['auto', 'sqrt']}
+        if self.light:
+            self.param_grid = {'bootstrap': [True, False],
+                               'max_features': ['auto', 'sqrt']}
+        else:
+            self.param_grid = {'max_depth': np.arange(10, 110, 10),
+                               'bootstrap': [True, False],
+                               'max_features': ['auto', 'sqrt'],
+                               'min_samples_leaf': [1, 2, 4],
+                               'min_samples_split': [2, 5, 10],
+                               'n_estimators': np.arange(200, 2200, 200)
+                               }
         return RandomForestClassifier(random_state=42)
