@@ -1843,6 +1843,45 @@ def produce_table_stats(thresh=50):
     return df
 
 
+def plot_pwv_longterm_trend(path=work_yuval, model_name='LR', save=True):
+    import matplotlib.pyplot as plt
+    from PW_stations import ML_Switcher
+    import xarray as xr
+    from aux_gps import anomalize_xr
+    from aux_gps import get_julian_dates_from_da
+    """TSEN and LR for linear fit"""
+    # load GNSS Israel:
+    pw = xr.load_dataset(path / 'GNSS_PW_monthly_thresh_50_homogenized.nc')
+    pw_anoms = anomalize_xr(pw, 'MS', verbose=False)
+    pw_mean = pw_anoms.to_array('station').mean('station')
+    # init linear models
+    ml = ML_Switcher()
+    model = ml.pick_model(model_name)
+    fig, ax = plt.subplots(1, 1, figsize=(15, 5.5))
+    fig.suptitle('PWV mean anomalies and linear trend',fontweight='bold')
+    jul, jul_no_nans = get_julian_dates_from_da(pw_mean)
+    y = pw_mean.dropna('time').values
+    X = jul_no_nans.reshape(-1, 1)
+    model.fit(X, y)
+    predict = model.predict(jul.reshape(-1, 1))
+    coef = model.coef_[0]
+    inter = model.intercept_
+    trend = xr.DataArray(predict, dims=['time'])
+    trend['time'] = pw_mean['time']
+    slope_in_mm_per_decade = coef * 10 * 365.25
+    pwln = pw_mean.plot(ax=ax, color='k', marker='o', linewidth=1.5)
+    trendln = trend.plot(ax=ax, color='r', linewidth=2)
+    ax.grid()
+    ax.set_xlabel('')
+    ax.set_ylabel('PWV mean anomalies [mm]')
+    ax.legend(labels=['PWV-mean', '{} model, slope={:.2f} mm/decade'.format(model_name, slope_in_mm_per_decade)],handles=[pwln[0], trendln[0]])
+    fig.tight_layout()
+    if save:
+        filename = 'pwv_mean_trend_{}.png'.format(model_name)
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
+    return ax
+
+
 def produce_table_mann_kendall(thresh=50, alpha=0.05, load_data='pwv-homo'):
     from PW_stations import process_mkt_from_dataset
     from aux_gps import reduce_tail_xr
@@ -2901,8 +2940,8 @@ def plot_long_term_anomalies(path=work_yuval, era5_path=era5_path,
                    'AERONET, r={:.2f}'.format(aerocorr)])
     else:
         ax.legend(pwln + era5ln,
-          ['GNSS',
-           'ERA5, r={:.2f}'.format(era5corr)])
+          ['GNSS-mean',
+           'ERA5-mean, r={:.2f}'.format(era5corr)])
     ax.set_ylabel('PWV anomalies [mm]')
     ax.set_xlabel('')
     ax.grid()
