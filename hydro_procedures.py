@@ -241,6 +241,10 @@ def produce_ROC_curves_from_model(model, X, y, cv, kfold_name='inner_kfold'):
     import xarray as xr
     from sklearn.metrics import roc_curve
     from sklearn.metrics import roc_auc_score
+    from sklearn.model_selection import GridSearchCV
+#    from sklearn.base import clone
+    if isinstance(model, GridSearchCV):
+        model = model.best_estimator_
     tprs = []
     aucs = []
     mean_fpr = np.linspace(0, 1, 100)
@@ -478,6 +482,45 @@ def load_ML_models(path=hydro_ml_path, station='drag', prefix='CVM', suffix='.pk
     da['splits'] = da['splits'].astype(int)
     da['test_size'].attrs['units'] = '%'
     return da
+
+
+def plot_ROC_curve_from_dss(dss, outer_dim='outer_kfold',
+                            inner_dim='inner_kfold', plot_chance=True, ax=None,
+                            color='b', title=None, std_on='inner'):
+    import matplotlib.pyplot as plt
+    import numpy as np
+    if ax is None:
+        fig, ax = plt.subplots()
+    if title is None:
+        title = "Receiver operating characteristic"
+    mean_fpr = dss['fpr'].values
+    mean_tpr = dss['TPR'].mean(outer_dim).mean(inner_dim).values
+    mean_auc = dss['AUC'].mean().item()
+    std_auc = dss['AUC'].std().item()
+    ax.plot(mean_fpr, mean_tpr, color=color,
+            label=r'Mean ROC (AUC = %0.2f $\pm$ %0.2f)' % (mean_auc, std_auc),
+            lw=2, alpha=.8)
+    if std_on == 'inner':
+        std_tpr = dss['TPR'].mean(outer_dim).std(inner_dim).values
+        n = dss[inner_dim].size
+    elif std_on == 'outer':
+        std_tpr = dss['TPR'].mean(inner_dim).std(outer_dim).values
+        n = dss[outer_dim].size
+    elif std_on == 'all':
+        std_tpr = dss['TPR'].stack(dumm=[inner_dim, outer_dim]).std('dumm').values
+        n = dss[outer_dim].size + dss[inner_dim].size
+    tprs_upper = np.minimum(mean_tpr + std_tpr, 1)
+    tprs_lower = np.maximum(mean_tpr - std_tpr, 0)
+    ax.fill_between(mean_fpr, tprs_lower, tprs_upper, color='grey', alpha=.2,
+                    label=r'$\pm$ 1 std. dev. ({} {} splits)'.format(n,std_on))
+    ax.grid()
+    if plot_chance:
+        ax.plot([0, 1], [0, 1], linestyle='--', lw=2, color='r',
+                label='Chance', alpha=.8)
+    ax.set(xlim=[-0.05, 1.05], ylim=[-0.05, 1.05],
+           title=title)
+    ax.legend(loc="lower right")
+    return ax
 
 
 def plot_many_ROC_curves(model, X, y, name='', color='b', ax=None,
@@ -1774,7 +1817,9 @@ class ML_Classifier_Switcher(object):
         from sklearn.svm import SVC
         import numpy as np
         if self.light:
-            self.param_grid = {'kernel': ['rbf', 'sigmoid']}
+            self.param_grid = {'kernel': ['rbf', 'linear'],
+                               'C': [0.001, 0.01, 0.1, 1, 10],
+                               'gamma': [0.001, 0.01, 0.1]}
         else:
             self.param_grid = {'kernel': ['rbf', 'sigmoid', 'linear', 'poly'],
                                'C': np.logspace(-5, 2, 25),
