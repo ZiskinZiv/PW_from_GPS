@@ -2479,7 +2479,10 @@ def plot_tide_pw_lags(path=hydro_path, pw_anom=False, rolling='1H', save=True):
 
         ser.plot(marker='.', linewidth=0., ax=ax)
     ax.set_xlabel('Days around tide event')
-    ax.set_ylabel('PW [mm]')
+    if pw_anom:
+        ax.set_ylabel('PWV anomalies [mm]')
+    else:
+        ax.set_ylabel('PWV [mm]')
     hstations = [ds[x].attrs['hydro_stations'] for x in ds.data_vars]
     events = [ds[x].attrs['total_events'] for x in ds.data_vars]
     fmt = list(zip(names, hstations, events))
