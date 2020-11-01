@@ -2190,6 +2190,23 @@ def process_gridsearch_results(GridSearchCV):
     return ds
 
 
+def calculate_std_error(arr, statistic='std'):
+    from scipy.stats import moment
+    import numpy as np
+    # remove nans:
+    arr = arr[np.logical_not(np.isnan(arr))]
+    n = len(arr)
+    if statistic == 'std':
+        mu4 = moment(arr, moment=4)
+        sig4 = np.var(arr)**2.0
+        se = mu4 - sig4 * (n - 3) / (n - 1)
+        se = np.sqrt(se / n)
+    elif statistic == 'mean':
+        std = np.std(arr)
+        se = std / np.sqrt(n)
+    return se
+
+
 def coarse_dem(data, dem_path=work_yuval / 'AW3D30'):
     """coarsen to data coords"""
     # data is lower resolution than awd
