@@ -345,6 +345,8 @@ def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
     dss.attrs['pwv_id'] = X.attrs['pwv_id']
     dss.attrs['hs_id'] = y.attrs['hydro_station_id']
     dss.attrs['hydro_max_flow'] = y.attrs['max_flow']
+    # save results to file:
+    save_cv_results(dss, savepath=savepath)
     return dss
 
 
@@ -442,6 +444,49 @@ def plot_hydro_ML_models_result(model_da, nsplits=2, station='drag',
     if save:
         plt.savefig(savefig_path / 'try.png', bbox_inches='tight')
     return fg
+
+
+def load_ML_run_results(path=hydro_ml_path, prefix='CVR', pw_station='drag'):
+    from aux_gps import path_glob
+    import xarray as xr
+#    from aux_gps import save_ncfile
+    import pandas as pd
+    model_files = path_glob(path, '{}_*.nc'.format(prefix))
+    model_files = sorted(model_files)
+    model_files = [x for x in model_files if pw_station in x.as_posix()]
+    ds_list = [xr.load_dataset(x) for x in model_files]
+    model_as_str = [x.as_posix().split('/')[-1].split('.')[0]
+                    for x in model_files]
+    model_names = [x.split('_')[3] for x in model_as_str]
+    model_scores = [x.split('_')[5] for x in model_as_str]
+    model_features = [x.split('_')[4] for x in model_as_str]
+    model_hs_id = [x.split('_')[2] for x in model_as_str]
+    assert len(set(model_hs_id)) == 1
+#    hs_id = list(set(model_hs_id))[0]
+    tups = [
+        tuple(x) for x in zip(
+            model_names,
+            model_scores,
+            model_features)]  # , model_pwv_hs_id)]
+    ind = pd.MultiIndex.from_tuples(
+        (tups),
+        names=[
+            'model',
+            'scoring',
+            'feature'])  # , 'station'])
+    data_vars = [x for x in ds_list[0] if x.startswith('test')]
+    data_vars += ['AUC', 'TPR']
+    ds_list = [x[data_vars] for x in ds_list]
+    dss = xr.concat(ds_list, dim='dim_0')
+    dss['dim_0'] = ind
+    dss = dss.unstack('dim_0')
+    attrs_to_remove = [
+        'param_names',
+        'model_name',
+        'refitted_scorer',
+        'features']
+    [dss.attrs.pop(x) for x in attrs_to_remove]
+    return dss
 
 
 def load_ML_models(path=hydro_ml_path, station='drag', prefix='CVM', suffix='.pkl'):
@@ -688,7 +733,7 @@ def process_gridsearch_results(GridSearchCV, model_name,
         return ds
 
 
-def save_cv_results(cvr, best_model=None, savepath=hydro_path):
+def save_cv_results(cvr, savepath=hydro_path):
 #    import joblib
     from aux_gps import save_ncfile
     features = '_'.join(cvr.attrs['features'])
