@@ -824,7 +824,7 @@ def plot_means_box_plots(path=work_yuval, thresh=50, kind='box',
     return fg
 
 
-def plot_annual_pw(path=work_yuval, fontsize=20, labelsize=18,
+def plot_annual_pw(path=work_yuval, fontsize=20, labelsize=18, era5=True,
                    ylim=[7.5, 40], save=True, kind='violin', bins=None):
     """kind can be violin or hist, for violin choose ylim=7.5,40 and for hist
     choose ylim=0,0.3"""
@@ -833,13 +833,17 @@ def plot_annual_pw(path=work_yuval, fontsize=20, labelsize=18,
     gnss_filename = 'GNSS_PW_monthly_thresh_50_homogenized.nc'
     pw = xr.load_dataset(path / gnss_filename)
     df_annual = pw.to_dataframe()
+    hue = None
+    if era5:
+        df_annual = prepare_era5_monthly_pwv_to_dataframe(path)
+        hue = 'source'
     fg = plot_pw_geographical_segments(
         df_annual, scope='annual',
         kind=kind,
         fg=None,
         ylim=ylim,
         fontsize=fontsize,
-        labelsize=labelsize,
+        labelsize=labelsize, hue=hue,
         save=False, bins=bins)
     fg.fig.subplots_adjust(
             top=0.973,
@@ -850,6 +854,8 @@ def plot_annual_pw(path=work_yuval, fontsize=20, labelsize=18,
             wspace=0.12)
     if save:
         filename = 'pw_annual_means_{}.png'.format(kind)
+        if era5:
+            filename = 'pw_annual_means_{}_with_era5.png'.format(kind)
         plt.savefig(savefig_path / filename, orientation='portrait')
     return fg
 
@@ -1016,7 +1022,7 @@ def plot_box_df(df, x='month', title='TELA', marker='o',
         ax.set_ylim(*ylimits)
         if twin_attrs is not None:
             twinx.set_ylim(*twin_attrs['ylimits'])
-            align_yaxis(ax, 0, twinxplot_mea, 0)
+            align_yaxis(ax, 0, twinx, 0)
     if xlimits is not None:
         ax.set_xlim(*xlimits)
     return ax
@@ -1825,8 +1831,11 @@ def produce_table_1(removed=['hrmn', 'nizn', 'spir'], merged={'klhv': ['klhv', '
     return df
 
 
-def produce_table_stats(thresh=50):
+def produce_table_stats(thresh=50, add_location=True, add_height=True):
+    """add plot sd to height with se_sd errorbars"""
     from PW_stations import produce_pw_statistics
+    from PW_stations import produce_geo_gnss_solved_stations
+    import pandas as pd
     import xarray as xr
     sites = group_sites_to_xarray(upper=False, scope='annual') 
     new = sites.T.values.ravel()
@@ -1839,6 +1848,24 @@ def produce_table_stats(thresh=50):
     pw_mm = pw_mm[new]
     df = produce_pw_statistics(thresh=thresh, resample_to_mm=False
                                , pw_input=pw_mm)
+    if add_location:
+        cols = [x for x in df.columns]
+        cols.insert(1, 'Location')
+        gr_df = sites.to_dataframe('sites')
+        location = [gr_df[gr_df==x].dropna().index.values.item()[1].title() for x in new]
+        df['Location'] = location
+        df = df[cols]
+    if add_height:
+        cols = [x for x in df.columns]
+        if add_location:
+            cols.insert(2, 'Height [m a.s.l]')
+        else:
+            cols.insert(1, 'Height [m a.s.l]')
+        df_gnss = produce_geo_gnss_solved_stations(plot=False,
+                                                   add_distance_to_coast=False)
+        #    pd.options.display.float_format = '{:.2f}'.format
+        df['Height [m a.s.l]'] = df_gnss['alt'].map('{:.0f}'.format)
+        df = df[cols]
     print(df.to_latex(index=False))
     return df
 
@@ -1942,6 +1969,45 @@ def produce_table_mann_kendall(thresh=50, alpha=0.05, load_data='pwv-homo'):
     table = table_process_df(df, df_mean)
 #    print(table.to_latex(index=False))
     return table
+
+
+def plot_pwv_statistic_vs_height(pwv_ds, stat='mean', x='alt', ax=None):
+    from PW_stations import produce_geo_gnss_solved_stations
+    import matplotlib.pyplot as plt
+    from aux_gps import calculate_std_error
+    import pandas as pd
+    df = produce_geo_gnss_solved_stations(plot=False,
+                                          add_distance_to_coast=True)
+    if stat == 'mean':
+        pw_stat = pwv_ds.mean()
+        pw_stat_error = pwv_ds.map(calculate_std_error, statistic=stat)
+    elif stat == 'std':
+        pw_stat = pwv_ds.std()
+        pw_stat_error = pwv_ds.map(calculate_std_error, statistic=stat)
+    df[stat] = pd.Series(
+        pw_stat.to_array(
+            dim='gnss'),
+        index=pw_stat.to_array('gnss')['gnss'])
+    df['{}_error'.format(stat)] = pd.Series(pw_stat_error.to_array(
+        dim='gnss'), index=pw_stat_error.to_array('gnss')['gnss'])
+    if ax is None:
+        fig, ax = plt.subplots()
+        if x == 'alt':
+            ax.set_xlabel('Altitude [m a.s.l]')
+        elif x == 'distance':
+            ax.set_xlabel('Distance to sea shore [km]')
+        ax.set_ylabel('{} [mm]'.format(stat))
+    ax.errorbar(df[x],
+                df[stat],
+                df['{}_error'.format(stat)],
+                marker='o',
+                ls='',
+                capsize=2.5,
+                elinewidth=2.5,
+                markeredgewidth=2.5,
+                color='b')
+    ax.grid()
+    return ax
 
 
 def plot_peak_hour_distance(path=work_yuval, season='JJA',
@@ -2907,6 +2973,25 @@ def group_sites_to_xarray(upper=False, scope='diurnal'):
 #    fg.fig.subplots_adjust()
 #    return fg
 
+
+def prepare_era5_monthly_pwv_to_dataframe(path=work_yuval):
+    import xarray as xr
+    import pandas as pd
+    era5 = xr.load_dataset(work_yuval / 'GNSS_era5_monthly_PW.nc')
+    df_era5 = era5.to_dataframe()
+    df_era5['month'] = df_era5.index.month
+    pw_mm = xr.load_dataset(
+        work_yuval /
+        'GNSS_PW_monthly_thresh_50_homogenized.nc')
+    df = pw_mm.to_dataframe()
+    df['month'] = df.index.month
+    # concat:
+    dff = pd.concat([df, df_era5], keys=['GNSS', 'ERA5'])
+    dff['source'] = dff.index.get_level_values(0)
+    dff = dff.reset_index()
+    return dff
+
+
 def plot_long_term_anomalies(path=work_yuval, era5_path=era5_path,
                              aero_path=aero_path, save=True):
     import xarray as xr
@@ -3059,8 +3144,8 @@ def plot_day_night_pwv_monthly_mean_std_heatmap(
 
 def plot_pw_geographical_segments(df, scope='diurnal', kind=None, fg=None,
                                   marker='o', color='b', ylim=[-2, 3],
-                                  fontsize=14, labelsize=10, zorder=0,
-                                  label=None, save=False, bins=None):
+                                  hue=None, fontsize=14, labelsize=10,
+                                  zorder=0, label=None, save=False, bins=None):
     import xarray as xr
     import numpy as np
     from scipy.stats import kurtosis
@@ -3108,8 +3193,12 @@ def plot_pw_geographical_segments(df, scope='diurnal', kind=None, fg=None,
                     ax.grid(which='major')
                     ax.grid(axis='y', which='minor', linestyle='--')
                 elif kind == 'violin':
-                    df['month'] = df.index.month
+                    if not 'month' in df.columns:
+                        df['month'] = df.index.month
                     pal = sns.color_palette("Paired", 12)
+                    sns.violinplot(ax=ax, data=df,x='month', y=df[site], hue=hue,
+                                   fliersize=4, gridsize=250, inner='quartile',
+                                   scale='area')
                     ax.set_ylabel('')
                     ax.spines["top"].set_visible(False)
                     ax.spines["right"].set_visible(False)
