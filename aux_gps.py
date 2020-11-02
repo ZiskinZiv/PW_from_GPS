@@ -2207,6 +2207,22 @@ def calculate_std_error(arr, statistic='std'):
     return se
 
 
+def get_nearest_lat_lon_for_xy(lat_da, lon_da, points):
+    import numpy as np
+    from scipy.spatial import cKDTree
+    if isinstance(points, np.ndarray):
+        points = list(points)
+    combined_x_y_arrays = np.dstack(
+        [lat_da.values.ravel(), lon_da.values.ravel()])[0]
+    mytree = cKDTree(combined_x_y_arrays)
+    dist, inds = mytree.query(points)
+    yx = []
+    for ind in inds:
+        y, x = np.unravel_index(ind, lat_da.shape)
+        yx.append([y, x])
+    return yx
+
+
 def coarse_dem(data, dem_path=work_yuval / 'AW3D30'):
     """coarsen to data coords"""
     # data is lower resolution than awd
