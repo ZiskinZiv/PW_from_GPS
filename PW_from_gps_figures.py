@@ -1916,14 +1916,22 @@ def produce_table_mann_kendall(thresh=50, alpha=0.05, load_data='pwv-homo'):
 
     def table_process_df(df, means):
         # calculate percent changes from last decade means:
-        df['Percent change'] = means
-        df['Percent change'] = 100 * df['slope'] / df['Percent change']
-        df['Temperature change'] = df['Percent change'] / 7.0
+        df['CI95'] = '(' + df['CI_95_low'].map('{:.2f}'.format).astype(str) + ', ' + df['CI_95_high'].map('{:.2f}'.format).astype(str) + ')'
+        df['means'] = means
+        df['Pct_change'] = 100 * df['slope'] / df['means']
+        Pct_high = 100 * df['CI_95_high'] / df['means']
+        Pct_low = 100 * df['CI_95_low'] / df['means']
+        df['Pct_change_CI95'] = '(' + Pct_low.map('{:.2f}'.format).astype(str) + ', ' + Pct_high.map('{:.2f}'.format).astype(str) + ')'
+#        df['Temperature change'] = df['Percent change'] / 7.0
+        df.drop(['means', 'CI_95_low', 'CI_95_high'], axis=1, inplace=True)
         # station id is big:
         df['id'] = df.index.str.upper()
-        df = df[['id', 'Tau', 'p', 'slope', 'Percent change', 'Temperature change']]
+        df = df[['id', 'Tau', 'p', 'slope', 'CI95', 'Pct_change', 'Pct_change_CI95']]# , 'Temperature change']]
         # filter for non significant trends:
         df['slope'] = df['slope'][df['p'] < 0.05]
+        df['Pct_change'] = df['Pct_change'][df['p'] < 0.05]
+        df['CI95'] = df['CI95'][df['p'] < 0.05]
+        df['Pct_change_CI95'] = df['Pct_change_CI95'][df['p'] < 0.05]
         # higher and better results:
         df.loc[:, 'p'][df['p'] < 0.0001] = '<0.0001'
         df['p'][df['p'] != '<0.0001'] = df['p'][df['p'] !=
@@ -1935,14 +1943,19 @@ def produce_table_mann_kendall(thresh=50, alpha=0.05, load_data='pwv-homo'):
             'Site ID',
             "Kendall's Tau",
             'P-value',
-            "Sen's slope",
-            'Percent change', 'Temperature change']
+            "Sen's slope", "Sen's slope CI 95%",
+            'Percent change', 'Percent change CI 95%'] #, 'Temperature change']
         df['Percent change'] = df['Percent change'].map('{:,.1f}'.format)
         df['Percent change'] = df[df["Sen's slope"] != '-']['Percent change']
         df['Percent change'] = df['Percent change'].fillna('-')
-        df['Temperature change'] = df['Temperature change'].map('{:,.1f}'.format)
-        df['Temperature change'] = df[df["Sen's slope"] != '-']['Temperature change']
-        df['Temperature change'] = df['Temperature change'].fillna('-')
+        df["Sen's slope CI 95%"] = df["Sen's slope CI 95%"].fillna(' ')
+        df['Percent change CI 95%'] = df['Percent change CI 95%'].fillna(' ')
+        df["Sen's slope"] = df["Sen's slope"].astype(str) + ' ' + df["Sen's slope CI 95%"].astype(str)
+        df['Percent change'] = df['Percent change'].astype(str) + ' ' + df['Percent change CI 95%'].astype(str)
+        df.drop(['Percent change CI 95%', "Sen's slope CI 95%"], axis=1, inplace=True)
+#        df['Temperature change'] = df['Temperature change'].map('{:,.1f}'.format)
+#        df['Temperature change'] = df[df["Sen's slope"] != '-']['Temperature change']
+#        df['Temperature change'] = df['Temperature change'].fillna('-')
         # last, reindex according to geography:
         gr = group_sites_to_xarray(scope='annual')
         new = [x for x in gr.T.values.ravel() if isinstance(x, str)]
@@ -1963,7 +1976,7 @@ def produce_table_mann_kendall(thresh=50, alpha=0.05, load_data='pwv-homo'):
         season_selection=None,
         seasonal=False,
         factor=120,
-        anomalize=True)
+        anomalize=True, CI=True)
     df_mean = reduce_tail_xr(data, reduce='mean', records=120,
                              return_df=True)
     table = table_process_df(df, df_mean)
