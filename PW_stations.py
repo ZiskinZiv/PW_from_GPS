@@ -3824,13 +3824,15 @@ def mann_kendall_trend_analysis(da_ts, alpha=0.05, seasonal=False, CI=False,
     if CI:
         masked = np.ma.masked_array(da_ts, mask=np.isnan(da_ts))
         slope, inter, conf_lo, conf_up = theilslopes(y=masked, alpha=alpha)
-        mkt['CI_95'] = [conf_lo, conf_up]
+        confi_per = int((1-alpha) * 100)
+        mkt['CI_{}_low'.format(confi_per)] = conf_lo
+        mkt['CI_{}_high'.format(confi_per)] = conf_up
     # da_ts.attrs.update(mkt)
     return pd.Series(mkt)
 
 
 def process_mkt_from_dataset(ds_in, alpha=0.05, seasonal=False, factor=120,
-                season_selection=None, anomalize=True):
+                season_selection=None, anomalize=True, CI=False):
     """because the data is in monthly means and the output is #/decade,
     the factor is 12 months a year and 10 years in a decade yielding 120,
     input is xr.Dataset of monthly means (for now)"""
@@ -3841,13 +3843,16 @@ def process_mkt_from_dataset(ds_in, alpha=0.05, seasonal=False, factor=120,
         mann_kendall_trend_analysis,
         alpha=alpha,
         seasonal=seasonal,
-        verbose=False, season_selection=season_selection)
+        verbose=False, season_selection=season_selection, CI=CI)
     ds = ds.rename({'dim_0': 'mkt'})
     df = ds.to_dataframe().T
     df = df.drop(['test_name', 'trend', 'h', 'z', 's', 'var_s'], axis=1)
     df.index.name = ''
     df.columns.name = ''
     df['slope'] = df['slope'] * factor
+    if CI:
+        ci_cols = [x for x in df.columns if 'CI' in x]
+        df[ci_cols] = df[ci_cols] * factor
     return df
 
 
