@@ -3006,10 +3006,13 @@ def prepare_era5_monthly_pwv_to_dataframe(path=work_yuval):
 
 
 def plot_long_term_anomalies(path=work_yuval, era5_path=era5_path,
-                             aero_path=aero_path, save=True):
+                             aero_path=aero_path, model_name=None, save=True):
     import xarray as xr
     from aux_gps import anomalize_xr
     from aeronet_analysis import prepare_station_to_pw_comparison
+    from PW_stations import ML_Switcher
+    from aux_gps import get_julian_dates_from_da
+
     # load GNSS Israel:
     pw = xr.load_dataset(path / 'GNSS_PW_monthly_thresh_50_homogenized.nc')
     pw_anoms = anomalize_xr(pw, 'MS', verbose=False)
@@ -3030,19 +3033,40 @@ def plot_long_term_anomalies(path=work_yuval, era5_path=era5_path,
 #    df['ERA5'].plot(ax=ax, color='r')
 #    df['AERONET'].plot(ax=ax, color='b')
     pwln = pw_mean.plot.line('k-', marker='o', ax=ax, linewidth=1.5, alpha=0.7)
-    era5ln = era5_mean.plot.line('r--', ax=ax, linewidth=2.5)
+    era5ln = era5_mean.plot.line('b--', ax=ax, linewidth=2.5)
     era5corr = df.corr().loc['GNSS', 'ERA5']
+    handles = pwln + era5ln
+    labels =  ['GNSS', 'ERA5, r={:.2f}'.format(era5corr)]
     if aero_path is not None:
         aeroln = aero.plot.line('b-.', ax=ax, alpha=0.8)    
         aerocorr = df.corr().loc['GNSS', 'AERONET']
-        ax.legend(pwln + era5ln + aeroln,
-                  ['GNSS',
-                   'ERA5, r={:.2f}'.format(era5corr),
-                   'AERONET, r={:.2f}'.format(aerocorr)])
-    else:
-        ax.legend(pwln + era5ln,
-          ['GNSS-mean',
-           'ERA5-mean, r={:.2f}'.format(era5corr)])
+        aero_label = 'AERONET, r={:.2f}'.format(aerocorr)
+        handles += aeroln
+    if model_name is not None:
+        # init linear models
+        ml = ML_Switcher()
+        model = ml.pick_model(model_name)
+        jul, jul_no_nans = get_julian_dates_from_da(pw_mean)
+        y = pw_mean.dropna('time').values
+        X = jul_no_nans.reshape(-1, 1)
+        model.fit(X, y)
+        predict = model.predict(jul.reshape(-1, 1))
+        coef = model.coef_[0]
+        inter = model.intercept_
+        trend = xr.DataArray(predict, dims=['time'])
+        trend['time'] = pw_mean['time']
+        slope_in_mm_per_decade = coef * 10 * 365.25
+        # pwln = pw_mean.plot(ax=ax, color='k', marker='o', linewidth=1.5)
+        trendln = trend.plot(ax=ax, color='r', linewidth=2)
+        # ax.grid()
+        # ax.set_xlabel('')
+        # ax.set_ylabel('PWV mean anomalies [mm]')
+        trend_label = '{} model, slope={:.2f} mm/decade'.format(model_name, slope_in_mm_per_decade)
+        handles += trendln
+        labels.append(trend_label)
+        # ax.legend(labels=[],handles=[trendln[0]])
+        # fig.tight_layout()
+    ax.legend(handles=handles, labels=labels)
     ax.set_ylabel('PWV anomalies [mm]')
     ax.set_xlabel('')
     ax.grid()
