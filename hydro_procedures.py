@@ -346,7 +346,8 @@ def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
     dss.attrs['hs_id'] = y.attrs['hydro_station_id']
     dss.attrs['hydro_max_flow'] = y.attrs['max_flow']
     # save results to file:
-    save_cv_results(dss, savepath=savepath)
+    if savepath is not None:
+        save_cv_results(dss, savepath=savepath)
     return dss
 
 
@@ -727,6 +728,8 @@ def process_gridsearch_results(GridSearchCV, model_name,
 #        ds['best_model'] = GridSearchCV.best_estimator_
         ds.attrs['refitted_scorer'] = GridSearchCV.refit
         for name in names:
+            if isinstance(GridSearchCV.best_params_[name], tuple):
+                GridSearchCV.best_params_[name] = ','.join(map(str, GridSearchCV.best_params_[name]))
             ds['best_{}'.format(name)] = GridSearchCV.best_params_[name]
         return ds, GridSearchCV.best_estimator_
     else:
@@ -1880,9 +1883,8 @@ class ML_Classifier_Switcher(object):
             self.param_grid = {
                 'activation': [
                     'identity',
-                    'logistic',
-                    'tanh',
-                    'relu']}
+                    'relu'],
+                'hidden_layer_sizes': [(50, 50, 50), (50, 100, 50)]}
         else:
             self.param_grid = {'alpha': np.logspace(-5, 3, 25),
                                'activation': ['identity', 'logistic', 'tanh', 'relu'],
@@ -1905,4 +1907,4 @@ class ML_Classifier_Switcher(object):
                                'min_samples_split': [2, 5, 10],
                                'n_estimators': np.arange(200, 2200, 200)
                                }
-        return RandomForestClassifier(random_state=42)
+        return RandomForestClassifier(random_state=42, n_jobs=-1)
