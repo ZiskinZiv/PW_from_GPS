@@ -1075,10 +1075,19 @@ def produce_geo_gnss_solved_stations(path=gis_path,
                                 crs=isr.crs)
     if add_distance_to_coast:
         isr_coast = get_israeli_coast_line(path=path)
-        coast_lines = [isr_coast.to_crs('epsg:2039').loc[x].geometry for x in isr_coast.index]
+        coast_lines = [isr_coast.to_crs(
+            'epsg:2039').loc[x].geometry for x in isr_coast.index]
         for station in stations.index:
             point = stations.to_crs('epsg:2039').loc[station, 'geometry']
-            stations.loc[station, 'distance'] = min([x.distance(point) for x in coast_lines]) / 1000.0
+            stations.loc[station, 'distance'] = min(
+                [x.distance(point) for x in coast_lines]) / 1000.0
+    coastal_dict = {key: 0 for (key) in['kabr', 'bshm', 'csar', 'tela', 'alon', 'slom']}
+    highland_dict = {key: 1 for (key) in 
+        ['nzrt', 'mrav', 'yosh', 'jslm', 'klhv', 'yrcm', 'ramo']}
+    eastern_dict = {key: 2 for (key) in 
+        ['elro', 'katz', 'drag', 'dsea', 'nrif', 'elat']}
+    groups_dict = {**coastal_dict, **highland_dict, **eastern_dict}
+    stations['groups_annual'] = pd.Series(groups_dict)
     if plot:
         ax = isr.plot()
         stations.plot(ax=ax, column='alt', cmap='Greens',
