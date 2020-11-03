@@ -1984,11 +1984,15 @@ def produce_table_mann_kendall(thresh=50, alpha=0.05, load_data='pwv-homo'):
     return table
 
 
-def plot_pwv_statistic_vs_height(pwv_ds, stat='mean', x='alt', ax=None):
+def plot_pwv_statistic_vs_height(pwv_ds, stat='mean', x='alt', season=None,
+                                 ax=None, color='b'):
     from PW_stations import produce_geo_gnss_solved_stations
     import matplotlib.pyplot as plt
     from aux_gps import calculate_std_error
     import pandas as pd
+    if season is not None:
+        print('{} season selected'.format(season))
+        pwv_ds = pwv_ds.sel(time=pwv_ds['time.season']==season)
     df = produce_geo_gnss_solved_stations(plot=False,
                                           add_distance_to_coast=True)
     if stat == 'mean':
@@ -2018,7 +2022,9 @@ def plot_pwv_statistic_vs_height(pwv_ds, stat='mean', x='alt', ax=None):
                 capsize=2.5,
                 elinewidth=2.5,
                 markeredgewidth=2.5,
-                color='b')
+                color=color)
+    if season is not None:
+        ax.set_title('{} season'.format(season))
     ax.grid()
     return ax
 
@@ -2140,6 +2146,82 @@ def plot_peak_hour_distance(path=work_yuval, season='JJA',
     return ax
 
 
+def plot_monthly_variability_heatmap_from_pwv_anomalies(load_path=work_yuval,
+                                                        thresh=50, save=True,
+                                                        fontsize=16,
+                                                        sort_by=['groups_annual', 'alt']):
+    """sort_by=['group_annual', 'lat'], ascending=[1,0]"""
+    import xarray as xr
+    import seaborn as sns
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from calendar import month_abbr
+    from PW_stations import produce_geo_gnss_solved_stations
+    df = produce_geo_gnss_solved_stations(plot=False,
+                                          add_distance_to_coast=True)
+    sites = df.dropna()[['lat', 'alt', 'distance','groups_annual']].sort_values(by=sort_by,ascending=[1,1]).index
+    anoms = xr.load_dataset(
+        load_path /
+        'GNSS_PW_monthly_anoms_thresh_{:.0f}_homogenized.nc'.format(thresh))
+    df = anoms.groupby('time.month').std().to_dataframe()
+#    sites = group_sites_to_xarray(upper=True, scope='annual').T
+#    sites_flat = [x.lower() for x in sites.values.flatten() if isinstance(x, str)]
+#    df = df[sites_flat]
+
+#    cols = [x for x in sites if x in df.columns]
+    df = df[sites]
+    df.columns = [x.upper() for x in df.columns]
+    fig = plt.figure(figsize=(14, 10))
+    grid = plt.GridSpec(
+        2, 1, height_ratios=[
+            2, 1], hspace=0)
+    ax_heat = fig.add_subplot(grid[0, 0])  # plt.subplot(221)
+    ax_group = fig.add_subplot(grid[1, 0])  # plt.subplot(223)
+    cbar_ax = fig.add_axes([0.91, 0.37, 0.02, 0.62])  # [left, bottom, width,
+    # height]
+    ax_heat = sns.heatmap(
+        df.T,
+        cmap='Reds',
+        vmin=df.min().min(),
+        vmax=df.max().max(),
+        annot=True,
+        yticklabels=True,
+        ax=ax_heat,
+        cbar_ax=cbar_ax,
+        cbar_kws={'label': 'PWV anomalies STD [mm]'},
+        annot_kws={'fontsize': fontsize}, xticklabels=False)
+    cbar_ax.set_ylabel('PWV anomalies STD [mm]', fontsize=fontsize)
+    cbar_ax.tick_params(labelsize=fontsize)
+    # activate top ticks and tickslabales:
+    ax_heat.xaxis.set_tick_params(
+        bottom='off',
+        labelbottom='off',
+        labelsize=fontsize)
+    # emphasize the yticklabels (stations):
+    ax_heat.yaxis.set_tick_params(left='on')
+    ax_heat.set_yticklabels(ax_heat.get_ymajorticklabels(),
+                            fontweight='bold', fontsize=fontsize)
+    df_mean = df.T.mean()
+    df_mean = df_mean.to_frame()
+    df_mean[1] = [month_abbr[x] for x in range(1, 13)]
+    df_mean.columns = ['std', 'month']
+    g = sns.barplot(data=df_mean, x='month', y='std', ax=ax_group, palette='Reds',
+                    hue='std', dodge=False, linewidth=2.5)
+    g.legend_.remove()
+    ax_group.set_ylabel('PWV anomalies STD [mm]', fontsize=fontsize)
+    ax_group.grid(color='k', linestyle='--', linewidth=1.5, alpha=0.5, axis='y')
+    ax_group.xaxis.set_tick_params(labelsize=fontsize)
+    ax_group.yaxis.set_tick_params(labelsize=fontsize)
+    ax_group.set_xlabel('', fontsize=fontsize)
+#    df.T.mean().plot(ax=ax_group, kind='bar', color='k', fontsize=fontsize, rot=0)
+    fig.tight_layout()
+    fig.subplots_adjust(right=0.906)
+    if save:
+        filename = 'pw_anoms_monthly_variability_heatmap.png'
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
+    return fig
+
+    
 def plot_monthly_means_anomalies_with_station_mean(load_path=work_yuval,
                                                    thresh=50, save=True,
                                                    anoms=None, agg='mean', fontsize=16):
@@ -2149,15 +2231,21 @@ def plot_monthly_means_anomalies_with_station_mean(load_path=work_yuval,
     import numpy as np
     import matplotlib.dates as mdates
     import pandas as pd
+    from PW_stations import produce_geo_gnss_solved_stations
     div_cmap = divsci.Vik_20.mpl_colormap
+    df = produce_geo_gnss_solved_stations(plot=False,
+                                          add_distance_to_coast=True)
+    sites = df['alt'].sort_values(ascending=False).index
     if anoms is None:
         anoms = xr.load_dataset(
                 load_path /
                 'GNSS_PW_monthly_anoms_thresh_{:.0f}_homogenized.nc'.format(thresh))
     df = anoms.to_dataframe()
-    sites = group_sites_to_xarray(upper=True, scope='annual').T
-    sites_flat = [x.lower() for x in sites.values.flatten() if isinstance(x, str)]
-    df = df[sites_flat]
+#    sites = group_sites_to_xarray(upper=True, scope='annual').T
+#    sites_flat = [x.lower() for x in sites.values.flatten() if isinstance(x, str)]
+#    df = df[sites_flat]
+    cols = [x for x in sites if x in df.columns]
+    df = df[cols]
     df.columns = [x.upper() for x in df.columns]
     fig = plt.figure(figsize=(20, 10))
     grid = plt.GridSpec(
