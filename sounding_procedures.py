@@ -36,6 +36,7 @@ def load_field_from_radiosonde(
         file = path_glob(
             path, 'bet_dagan_{}_sounding_*.nc'.format(data_type))[-1]
         da = xr.open_dataset(file)[field]
+        da = da.sortby('sound_time')
         da = reduce_da(da)
     else:
         files = path_glob(path, 'bet_dagan_*_sounding_*.nc')
