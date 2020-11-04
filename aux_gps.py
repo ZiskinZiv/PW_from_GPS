@@ -2200,7 +2200,7 @@ def calculate_std_error(arr, statistic='std'):
         mu4 = moment(arr, moment=4)
         sig4 = np.var(arr)**2.0
         se = mu4 - sig4 * (n - 3) / (n - 1)
-        se = np.sqrt(se / n)
+        se = (se / n)**0.25
     elif statistic == 'mean':
         std = np.std(arr)
         se = std / np.sqrt(n)
