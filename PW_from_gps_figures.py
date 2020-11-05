@@ -3094,13 +3094,14 @@ def prepare_era5_monthly_pwv_to_dataframe(path=work_yuval):
 
 
 def plot_long_term_anomalies(path=work_yuval, era5_path=era5_path,
-                             aero_path=aero_path, model_name=None, save=True):
+                             model_name=None, scipy=True, save=True):  # ,aero_path=aero_path):
     import xarray as xr
     from aux_gps import anomalize_xr
-    from aeronet_analysis import prepare_station_to_pw_comparison
+#    from aeronet_analysis import prepare_station_to_pw_comparison
     from PW_stations import ML_Switcher
     from aux_gps import get_julian_dates_from_da
-
+    from scipy.stats.mstats import theilslopes
+    # TODO: add merra2, 3 panel plot and trend
     # load GNSS Israel:
     pw = xr.load_dataset(path / 'GNSS_PW_monthly_thresh_50_homogenized.nc')
     pw_anoms = anomalize_xr(pw, 'MS', verbose=False)
@@ -3110,46 +3111,75 @@ def plot_long_term_anomalies(path=work_yuval, era5_path=era5_path,
     era5_anoms = anomalize_xr(era5, 'MS', verbose=False)
     era5_mean = era5_anoms.to_array('station').mean('station')
     df = pw_mean.to_dataframe(name='GNSS')
+    # load MERRA2:
+    merra2 = xr.load_dataset(path / 'MERRA2/MERRA2_TQV_israel_area_1995-2019.nc')['TQV']
+    merra2_mm = merra2.resample(time='MS').mean()
+    merra2_anoms = anomalize_xr(merra2_mm, time_dim='time', freq='MS', verbose=False)
+    merra2_mean = merra2_anoms.mean('lat').mean('lon')
     # load AERONET:
-    if aero_path is not None:
-        aero = prepare_station_to_pw_comparison(path=aero_path, gis_path=gis_path,
-                                                station='boker', mm_anoms=True)
-        df['AERONET'] = aero.to_dataframe()
+#    if aero_path is not None:
+#        aero = prepare_station_to_pw_comparison(path=aero_path, gis_path=gis_path,
+#                                                station='boker', mm_anoms=True)
+#        df['AERONET'] = aero.to_dataframe()
+    era5_to_plot = era5_mean - 5
+    merra2_to_plot = merra2_mean - 10
     df['ERA5'] = era5_mean.to_dataframe(name='ERA5')
+    df['MERRA2'] = merra2_mean.to_dataframe('MERRA2')
     fig, ax = plt.subplots(figsize=(16, 5))
 #    df['GNSS'].plot(ax=ax, color='k')
 #    df['ERA5'].plot(ax=ax, color='r')
 #    df['AERONET'].plot(ax=ax, color='b')
-    pwln = pw_mean.plot.line('k-', marker='o', ax=ax, linewidth=1.5, alpha=0.7)
-    era5ln = era5_mean.plot.line('b--', ax=ax, linewidth=2.5)
+    pwln = pw_mean.plot.line('k-', marker='o', ax=ax, linewidth=1.5, markersize=2.5)
+    era5ln = era5_to_plot.plot.line('b-', marker='s', ax=ax, linewidth=1.5, markersize=2.5)
+    merra2ln = merra2_to_plot.plot.line('g-', marker='d', ax=ax, linewidth=1.5, markersize=2.5)
     era5corr = df.corr().loc['GNSS', 'ERA5']
-    handles = pwln + era5ln
-    labels =  ['GNSS', 'ERA5, r={:.2f}'.format(era5corr)]
-    if aero_path is not None:
-        aeroln = aero.plot.line('b-.', ax=ax, alpha=0.8)    
-        aerocorr = df.corr().loc['GNSS', 'AERONET']
-        aero_label = 'AERONET, r={:.2f}'.format(aerocorr)
-        handles += aeroln
+    merra2corr = df.corr().loc['GNSS', 'MERRA2']
+    handles = pwln + era5ln + merra2ln
+    labels =  ['GNSS', 'ERA5, r={:.2f}'.format(era5corr), 'MERRA2, r={:.2f}'.format(merra2corr)]
+#    if aero_path is not None:
+#        aeroln = aero.plot.line('b-.', ax=ax, alpha=0.8)    
+#        aerocorr = df.corr().loc['GNSS', 'AERONET']
+#        aero_label = 'AERONET, r={:.2f}'.format(aerocorr)
+#        handles += aeroln
     if model_name is not None:
         # init linear models
-        ml = ML_Switcher()
-        model = ml.pick_model(model_name)
-        jul, jul_no_nans = get_julian_dates_from_da(pw_mean)
+        # TODO: thielslopes from scipy:
+        jul, jul_no_nans = get_julian_dates_from_da(pw_mean, subtract='median')
         y = pw_mean.dropna('time').values
         X = jul_no_nans.reshape(-1, 1)
-        model.fit(X, y)
-        predict = model.predict(jul.reshape(-1, 1))
-        coef = model.coef_[0]
-        inter = model.intercept_
+        if scipy:
+            coef, inter, coef_lo, coef_hi = theilslopes(y, X)
+            predict = jul * coef + inter
+            predict_lo = jul * coef_lo + inter
+            predict_hi = jul * coef_hi + inter
+            trend_hi = xr.DataArray(predict_hi, dims=['time'])
+            trend_lo = xr.DataArray(predict_lo, dims=['time'])
+            trend_hi['time'] = pw_mean['time']
+            trend_lo['time'] = pw_mean['time']
+            slope_in_mm_per_decade_lo = coef_lo * 10 * 365.25
+            slope_in_mm_per_decade_hi = coef_hi * 10 * 365.25
+        else:
+            ml = ML_Switcher()
+            model = ml.pick_model(model_name)
+            model.fit(X, y)
+            predict = model.predict(jul.reshape(-1, 1))
+            coef = model.coef_[0]
+            inter = model.intercept_
         trend = xr.DataArray(predict, dims=['time'])
         trend['time'] = pw_mean['time']
         slope_in_mm_per_decade = coef * 10 * 365.25
         # pwln = pw_mean.plot(ax=ax, color='k', marker='o', linewidth=1.5)
         trendln = trend.plot(ax=ax, color='r', linewidth=2)
+        if scipy:
+            trend_hi.plot.line('r--', ax=ax, linewidth=1.5)
+            trend_lo.plot.line('r--', ax=ax, linewidth=1.5)
         # ax.grid()
         # ax.set_xlabel('')
         # ax.set_ylabel('PWV mean anomalies [mm]')
-        trend_label = '{} model, slope={:.2f} mm/decade'.format(model_name, slope_in_mm_per_decade)
+        if scipy:
+            trend_label = '{} model, slope={:.2f} ({:.2f}, {:.2f}) mm/decade'.format(model_name, slope_in_mm_per_decade, slope_in_mm_per_decade_lo, slope_in_mm_per_decade_hi)
+        else:
+            trend_label = '{} model, slope={:.2f} mm/decade'.format(model_name, slope_in_mm_per_decade)
         handles += trendln
         labels.append(trend_label)
         # ax.legend(labels=[],handles=[trendln[0]])
@@ -3164,7 +3194,7 @@ def plot_long_term_anomalies(path=work_yuval, era5_path=era5_path,
     if save:
         filename = 'pwv_long_term_anomalies_era5_comparison.png'
         plt.savefig(savefig_path / filename, bbox_inches='tight')
-    return fig
+    return df
 
 
 def plot_day_night_pwv_monthly_mean_std_heatmap(
