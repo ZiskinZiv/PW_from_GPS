@@ -10,6 +10,23 @@ from PW_paths import work_yuval
 climate_path = work_yuval / 'climate'
 
 
+def read_VN_table(path=climate_path, savepath=None):
+    import pandas as pd
+    from aux_gps import path_glob
+    from aux_gps import save_ncfile
+    file = path_glob(path, 'vonNeumannCV_Shlomi.xlsx')[0]
+    df = pd.read_excel(file, header=1)
+    df.columns = ['sample_size', 0.001, 0.01, 0.05, 0.95, 0.99, 0.999]
+    df.set_index('sample_size', inplace=True)
+    cv_da = df.to_xarray().to_array('pvalue')
+    cv_da.name = 'VN_CV'
+    cv_da.attrs['full_name'] = 'Von Nuemann ratio test critical values table'
+    if savepath is not None:
+        filename = 'VN_critical_values.nc'
+        save_ncfile(cv_da, savepath, filename)
+    return cv_da
+
+
 def prepare_ORAS5_download_script(path=work_yuval, var='sossheig'):
     from aux_gps import path_glob
     files = path_glob(path, 'wget_oras5*.sh')
@@ -26,18 +43,24 @@ def prepare_ORAS5_download_script(path=work_yuval, var='sossheig'):
     return
 
 
-def create_index_from_synoptics(path=climate_path, syn_cat='normal'):
+def create_index_from_synoptics(path=climate_path, syn_cat='normal',
+                                normalize='zscore'):
     """create a long term index from synoptics"""
     from aux_gps import anomalize_xr
     from aux_gps import annual_standertize
+    from aux_gps import Zscore_xr
     from synoptic_procedures import agg_month_count_syn_class
     da = agg_month_count_syn_class(path=path, syn_category=syn_cat,
                                    freq=False)
     ds = da.to_dataset('syn_cls')
     ds = anomalize_xr(ds, 'MS')
-    ds = annual_standertize(ds)
     ds = ds.fillna(0)
-    return ds
+    if normalize == 'zscore':
+        return Zscore_xr(ds)
+    elif normalize == 'longterm':
+        ds = annual_standertize(ds)
+        ds = ds.fillna(0)
+        return ds
 
 
 def read_ea_index(path=climate_path):
@@ -97,19 +120,36 @@ def read_mo_indicies(path=climate_path, moi=1, resample_to_mm=True):
     return da
 
 
+def run_best_MLR():
+    # check for correlation between synoptics and maybe
+    # agg some classes and leave everything else
+    df = produce_interannual_df(lags=1, smooth=3, corr_thresh=None, syn='class',
+                                drop_worse_lags=True)
+    dff = df.drop(['moi2+1', 'meiv2+1'], axis=1)
+    X, y = preprocess_interannual_df(dff)
+    model = run_MLR(X, y)
+    return model
+
+
 def produce_interannual_df(climate_path=climate_path, work_path=work_yuval,
-                           lags=1, corr_thresh=0.2, smooth=False):
+                           lags=1, corr_thresh=0.2, smooth=False,
+                           syn='agg+class', drop_worse_lags=True,
+                           replace_syn=None):
     import xarray as xr
     from aux_gps import smooth_xr
     from aux_gps import anomalize_xr
     from aux_gps import annual_standertize
+    from synoptic_procedures import upper_class_dict
     from synoptic_procedures import agg_month_count_syn_class    # load pwv:
     pw = xr.load_dataset(
         work_path /
         'GNSS_PW_monthly_anoms_thresh_50_homogenized.nc')
     pw_mean = pw.to_array('station').mean('station')
-    if smooth:
-        pw_mean = smooth_xr(pw_mean)
+    if smooth is not None:
+        if isinstance(smooth, int):
+            pw_mean = pw_mean.rolling(time=smooth, center=True).mean()
+        elif isinstance(smooth, str):
+            pw_mean = smooth_xr(pw_mean)
     df_pw = pw_mean.to_dataframe(name='pwv')
     # load other large circulation indicies:
     ds = load_all_indicies(path=climate_path)
@@ -117,25 +157,48 @@ def produce_interannual_df(climate_path=climate_path, work_path=work_yuval,
         ds = smooth_xr(ds)
     df = ds.to_dataframe()
     # add lags:
-    for ind in df.columns:
-        df['{}+1'.format(ind)] = df[ind].shift(lags)
-        df['{}-1'.format(ind)] = df[ind].shift(-lags)
+    if lags is not None:
+        inds = df.columns
+        for ind in inds:
+            df['{}+1'.format(ind)] = df[ind].shift(lags)
+            df['{}-1'.format(ind)] = df[ind].shift(-lags)
+        if drop_worse_lags:
+            df = df_pw.join(df)
+            # find the best corr for each ind and its lags:
+            best_inds = []
+            for ind in inds:
+                ind_cols = [x for x in df.columns if ind in x]
+                ind_cols.insert(0, 'pwv')
+                best_ind = df.corr().loc[ind_cols]['pwv'][1:].abs().idxmax()
+                best_inds.append(best_ind)
+                print('best index from its lags: {}'.format(best_ind))
+            best_inds.insert(0, 'pwv')
+            df = df[best_inds]
+            df = df.drop('pwv', axis=1)
     # load synoptics:
-    ds = agg_month_count_syn_class(path=climate_path, syn_category='upper', freq=False).to_dataset('syn_cls')
-    ds = anomalize_xr(ds, 'MS')
-    ds = annual_standertize(ds)
-    ds = ds.fillna(0)
-    ds_cls = agg_month_count_syn_class(path=climate_path, syn_category='normal', freq=False).to_dataset('syn_cls')
-    ds_cls = anomalize_xr(ds_cls, 'MS')
-    ds_cls = annual_standertize(ds_cls)
-    ds_cls = ds_cls.fillna(0)
-    if smooth:
-        ds = smooth_xr(ds)
-        ds_cls = smooth_xr(ds_cls)
+    ds = create_index_from_synoptics(path=climate_path, syn_cat='upper',
+                                     normalize='longterm')
+    ds_cls = create_index_from_synoptics(path=climate_path, syn_cat='normal',
+                                         normalize='longterm')
+#    if smooth:
+#        ds = smooth_xr(ds)
+#        ds_cls = smooth_xr(ds_cls)
     df_syn = ds.to_dataframe()
     df_syn_cls = ds_cls.to_dataframe()
-    df_syn = df_syn.join(df_syn_cls)
-    df = df.join(df_syn)
+    if syn is not None:
+        print('adding synoptic monthly counts.')
+        if syn == 'agg+class':
+            df_syn = df_syn.join(df_syn_cls)
+            if replace_syn is not None:
+                for agg in replace_syn:
+                    print('dropping {} and keeping {}'.format(upper_class_dict[agg], agg))
+                    df_syn = df_syn.drop(upper_class_dict[agg], axis=1)
+        elif syn == 'agg':
+            df_syn = df_syn
+        elif syn == 'class':
+            df_syn = df_syn_cls
+        # implement mixed class and agg, e.g., RST (and remove 1, 2, 3)
+        df = df.join(df_syn)    
     # sort cols:
     df.columns = [str(x) for x in df.columns]
     cols = sorted([x for x in df.columns])
@@ -151,12 +214,15 @@ def produce_interannual_df(climate_path=climate_path, work_path=work_yuval,
         return df
 
 
-def preprocess_interannual_df(df, yname='pwv'):
+def preprocess_interannual_df(df, yname='pwv', standartize=True):
+    from aux_gps import Zscore_xr
     df = df.dropna()
     y = df[yname].to_xarray()
     xnames = [x for x in df.columns if yname not in x]
     X = df[xnames].to_xarray().to_array('regressors')
     X = X.transpose('time', 'regressors')
+    if standartize:
+        X = Zscore_xr(X)
     return X, y
 
 
@@ -212,6 +278,19 @@ def read_old_ncp(savepath=climate_path):
     da = df.to_xarray()['ncpi']
     da.name = 'Old_NCPI'
     return da
+
+
+def produce_DI_index(path=climate_path, savepath=climate_path):
+    from aux_gps import Zscore_xr
+    from aux_gps import save_ncfile
+    p3 = read_all_DIs(sample_rate='3H')
+    p3_mm = p3.resample(time='MS').mean()
+    p = Zscore_xr(p3_mm)
+    p.name = 'DI'
+    if savepath is not None:
+        filename = 'DI_index.nc'
+        save_ncfile(p, savepath, filename)
+    return p
 
 
 def DI_and_PWV_lag_analysis(bin_di, path=work_yuval, station='tela',
