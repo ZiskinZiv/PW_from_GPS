@@ -10,6 +10,22 @@ from PW_paths import work_yuval
 climate_path = work_yuval / 'climate'
 
 
+def prepare_ORAS5_download_script(path=work_yuval, var='sossheig'):
+    from aux_gps import path_glob
+    files = path_glob(path, 'wget_oras5*.sh')
+    for file in files:
+        filename = file.as_posix().split('/')[-1].split('.')[0]
+        print('reading file {} file'.format(filename))
+        with open(file) as f:
+            content = f.readlines()
+            var_content = [x for x in content if var in x]
+            new_filename = filename + '_{}.sh'.format(var)
+            with open(path / new_filename, 'w') as fi:
+                for item in var_content:
+                    fi.write("%s\n" % item)
+    return
+
+
 def create_index_from_synoptics(path=climate_path, syn_cat='normal'):
     """create a long term index from synoptics"""
     from aux_gps import anomalize_xr

@@ -1099,6 +1099,35 @@ def produce_geo_gnss_solved_stations(path=gis_path,
     return stations
 
 
+def add_UERRA_xy_to_israeli_gps_coords(path=work_yuval, era5_path=era5_path):
+    import xarray as xr
+    from aux_gps import path_glob
+    from aux_gps import get_nearest_lat_lon_for_xy
+    import pandas as pd
+    from aux_gps import calculate_distance_between_two_lat_lon_points
+    file = path_glob(era5_path, 'UERRA*.nc')[0]
+    uerra = xr.open_dataset(file)
+    ulat = uerra['latitude']
+    ulon = uerra['longitude']
+    df = produce_geo_gnss_solved_stations(
+        plot=False, add_distance_to_coast=True)
+    points = df[['lat', 'lon']].values
+    xy = get_nearest_lat_lon_for_xy(ulat, ulon, points)
+    udf = pd.DataFrame(xy, index=df.index, columns=['y', 'x'])
+    udf['lat'] = [ulat.isel(y=xi, x=yi).item() for (xi, yi) in xy]
+    udf['lon'] = [ulon.isel(y=xi, x=yi).item() for (xi, yi) in xy]
+    ddf = calculate_distance_between_two_lat_lon_points(
+        df['lat'],
+        df['lon'],
+        udf['lat'],
+        udf['lon'],
+        orig_epsg='4326',
+        meter_epsg='2039')
+    ddf /= 1000  # distance in km
+    udf['distance_to_orig'] = ddf
+    return udf
+
+
 def produce_geo_gps_stations(path=gis_path, file='All_gps_stations.txt',
                              plot=True):
     import geopandas as gpd

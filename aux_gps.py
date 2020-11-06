@@ -285,9 +285,10 @@ def harmonic_da(da_ts, n=3, field=None, init=None):
     return ds
 
 
-def anomalize_xr(da_ts, freq='D', verbose=True):  # i.e., like deseason
+def anomalize_xr(da_ts, freq='D', time_dim=None, verbose=True):  # i.e., like deseason
     import xarray as xr
-    time_dim = list(set(da_ts.dims))[0]
+    if time_dim is None:
+        time_dim = list(set(da_ts.dims))[0]
     attrs = da_ts.attrs
     if isinstance(da_ts, xr.Dataset):
         da_attrs = dict(zip([x for x in da_ts],[da_ts[x].attrs for x in da_ts]))
@@ -1044,20 +1045,28 @@ def fit_da_to_model(da, params=None, modelname='sin', method='leastsq', times=No
     return fit
 
 
-def get_julian_dates_from_da(da):
+def get_julian_dates_from_da(da, subtract='first'):
     """transform the time dim of a dataarray to julian dates(days since)"""
     import pandas as pd
+    import numpy as np
     # get time dim:
     time_dim = list(set(da.dims))[0]
     # convert to days since 2000 (julian_date):
     jul = pd.to_datetime(da[time_dim].values).to_julian_date()
     # normalize all days to first entry:
-    first_day = jul[0]
-    jul -= first_day
+    if subtract == 'first':
+        first_day = jul[0]
+        jul -= first_day
+    elif subtract == 'median':
+        med = np.median(jul)
+        jul -= med
     # do the same but without nans:
     jul_no_nans = pd.to_datetime(
             da.dropna(time_dim)[time_dim].values).to_julian_date()
-    jul_no_nans -= first_day
+    if subtract == 'first':
+        jul_no_nans -= first_day
+    elif subtract == 'median':
+        jul_no_nans -= med
     return jul.values, jul_no_nans.values
 
 
@@ -1852,9 +1861,10 @@ def dt_to_np64(time_coord, unit='m', convert_back=False):
     return new_time
 
 
-def xr_reindex_with_date_range(ds, drop=True, freq='5min'):
+def xr_reindex_with_date_range(ds, drop=True, time_dim=None, freq='5min'):
     import pandas as pd
-    time_dim = list(set(ds.dims))[0]
+    if time_dim is None:
+        time_dim = list(set(ds.dims))[0]
     if drop:
         ds = ds.dropna(time_dim)
     start = pd.to_datetime(ds[time_dim].min().item())
@@ -2207,7 +2217,55 @@ def calculate_std_error(arr, statistic='std'):
     return se
 
 
+def calculate_distance_between_two_lat_lon_points(
+        lat1,
+        lon1,
+        lat2,
+        lon2,
+        orig_epsg='4326',
+        meter_epsg='2039',
+        verbose=False):
+    """calculate the distance between two points (lat,lon) with epsg of
+    WGS84 and convert to meters with a local epsg. if lat1 is array then
+    calculates the distance of many points."""
+    import geopandas as gpd
+    import pandas as pd
+    try:
+        df1 = pd.DataFrame(index=lat1.index)
+    except AttributeError:
+        try:
+            len(lat1)
+        except TypeError:
+            lat1 = [lat1]
+        df1 = pd.DataFrame(index=[x for x in range(len(lat1))])
+    df1['lat'] = lat1
+    df1['lon'] = lon1
+    first_gdf = gpd.GeoDataFrame(
+        df1, geometry=gpd.points_from_xy(
+            df1['lon'], df1['lat']))
+    first_gdf.crs = {'init': 'epsg:{}'.format(orig_epsg)}
+    first_gdf.to_crs(epsg=int(meter_epsg), inplace=True)
+    try:
+        df2 = pd.DataFrame(index=lat2.index)
+    except AttributeError:
+        try:
+            len(lat2)
+        except TypeError:
+            lat2 = [lat2]
+        df2 = pd.DataFrame(index=[x for x in range(len(lat2))])
+    df2['lat'] = lat2
+    df2['lon'] = lon2
+    second_gdf = gpd.GeoDataFrame(
+        df2, geometry=gpd.points_from_xy(
+            df2['lon'], df2['lat']))
+    second_gdf.crs = {'init': 'epsg:{}'.format(orig_epsg)}
+    second_gdf.to_crs(epsg=int(meter_epsg), inplace=True)
+    ddf = first_gdf.geometry.distance(second_gdf.geometry)
+    return ddf
+
+
 def get_nearest_lat_lon_for_xy(lat_da, lon_da, points):
+    """used to access UERRA reanalysis, where the variable has x,y as coords"""
     import numpy as np
     from scipy.spatial import cKDTree
     if isinstance(points, np.ndarray):
