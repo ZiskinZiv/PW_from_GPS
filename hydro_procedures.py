@@ -389,6 +389,56 @@ def ML_main_procedure(X, y, estimator=None, model_name='SVC', features='pwv',
         return model
 
 
+def plot_hydro_ML_models_results_from_dss(dss, station='drag', std_on='outer',
+                                          save=False, fontsize=16):
+    import xarray as xr
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+    cmap = sns.color_palette("colorblind", 3)
+    X, y = produce_X_y(station, hydro_pw_dict[station], neg_pos_ratio=1)
+    events = int(y[y == 1].sum().item())
+    assert station == dss.attrs['pwv_id']
+    fg = xr.plot.FacetGrid(
+        dss,
+        col='model',
+        row='scoring',
+        sharex=True,
+        sharey=True, figsize=(20, 20))
+    for i in range(fg.axes.shape[0]):  # i is rows
+        for j in range(fg.axes.shape[1]):  # j is cols
+            ax = fg.axes[i, j]
+            modelname = dss['model'].isel(model=j).item()
+            scoring = dss['scoring'].isel(scoring=i).item()
+            chance_plot = [False, False, True]
+            for k, feat in enumerate(dss['feature'].values):
+                name = '{}-{}-{}'.format(modelname, scoring, feat)
+                model = dss.isel({'model': j, 'scoring': i}).sel(
+                    {'feature': feat})
+                title = 'ROC of {} model ({})'.format(modelname, scoring)
+                plot_ROC_curve_from_dss(model, outer_dim='outer_kfold',
+                                        inner_dim='inner_kfold',
+                                        plot_chance=chance_plot[k],
+                                        main_label=feat,
+                                        plot_std_legend=False, ax=ax,
+                                        color=cmap[k], title=title,
+                                        std_on=std_on, fontsize=fontsize)
+    fg.fig.suptitle(
+        '{} station: {} total_events'.format(
+            station.upper(), events), fontsize=fontsize)
+    fg.fig.tight_layout()
+    fg.fig.subplots_adjust(top=0.937,
+                           bottom=0.054,
+                           left=0.039,
+                           right=0.993,
+                           hspace=0.173,
+                           wspace=0.051)
+    if save:
+        filename = 'hydro_models_on_{}_{}_{}_std_on_{}.png'.format(
+            station, dss.attrs['inner_kfold_splits'], dss.attrs['outer_kfold_splits'], std_on)
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
+    return fg
+
+
 def plot_hydro_ML_models_result(model_da, nsplits=2, station='drag',
                                 test_size=20, n_splits_plot=None, save=False):
     import xarray as xr
@@ -532,7 +582,9 @@ def load_ML_models(path=hydro_ml_path, station='drag', prefix='CVM', suffix='.pk
 
 def plot_ROC_curve_from_dss(dss, outer_dim='outer_kfold',
                             inner_dim='inner_kfold', plot_chance=True, ax=None,
-                            color='b', title=None, std_on='inner'):
+                            color='b', title=None, std_on='inner',
+                            main_label=None, fontsize=14,
+                            plot_std_legend=True):
     import matplotlib.pyplot as plt
     import numpy as np
     if ax is None:
@@ -543,9 +595,14 @@ def plot_ROC_curve_from_dss(dss, outer_dim='outer_kfold',
     mean_tpr = dss['TPR'].mean(outer_dim).mean(inner_dim).values
     mean_auc = dss['AUC'].mean().item()
     std_auc = dss['AUC'].std().item()
+    # plot mean ROC:
+    if main_label is None:
+        main_label = r'Mean ROC (AUC=%0.2f$\pm$%0.2f)' % (mean_auc, std_auc)
+    else:
+        textstr = '\n'.join(['Mean ROC {}'.format(main_label), r'(AUC={:.2f}$\pm${:.2f})'.format(mean_auc, std_auc)])
+        main_label = textstr
     ax.plot(mean_fpr, mean_tpr, color=color,
-            label=r'Mean ROC (AUC = %0.2f $\pm$ %0.2f)' % (mean_auc, std_auc),
-            lw=2, alpha=.8)
+            lw=2, alpha=.8, label=main_label)
     if std_on == 'inner':
         std_tpr = dss['TPR'].mean(outer_dim).std(inner_dim).values
         n = dss[inner_dim].size
@@ -553,19 +610,37 @@ def plot_ROC_curve_from_dss(dss, outer_dim='outer_kfold',
         std_tpr = dss['TPR'].mean(inner_dim).std(outer_dim).values
         n = dss[outer_dim].size
     elif std_on == 'all':
-        std_tpr = dss['TPR'].stack(dumm=[inner_dim, outer_dim]).std('dumm').values
-        n = dss[outer_dim].size + dss[inner_dim].size
+        std_tpr = dss['TPR'].stack(
+            dumm=[inner_dim, outer_dim]).std('dumm').values
+        n = dss[outer_dim].size * dss[inner_dim].size
     tprs_upper = np.minimum(mean_tpr + std_tpr, 1)
     tprs_lower = np.maximum(mean_tpr - std_tpr, 0)
-    ax.fill_between(mean_fpr, tprs_lower, tprs_upper, color='grey', alpha=.2,
-                    label=r'$\pm$ 1 std. dev. ({} {} splits)'.format(n,std_on))
-    ax.grid()
+    # plot Chance line:
     if plot_chance:
         ax.plot([0, 1], [0, 1], linestyle='--', lw=2, color='r',
                 label='Chance', alpha=.8)
-    ax.set(xlim=[-0.05, 1.05], ylim=[-0.05, 1.05],
-           title=title)
-    ax.legend(loc="lower right")
+    # plot ROC STD range:
+    ax.fill_between(
+        mean_fpr,
+        tprs_lower,
+        tprs_upper,
+        color='grey',
+        alpha=.2, label= r'$\pm$ 1 std. dev. ({} {} splits)'.format(n, std_on))
+    ax.grid()
+    ax.set(xlim=[-0.05, 1.05], ylim=[-0.05, 1.05])
+    ax.set_title(title, fontsize=fontsize)
+    ax.tick_params(axis='y', labelsize=fontsize)
+    ax.tick_params(axis='x', labelsize=fontsize)
+    handles, labels = ax.get_legend_handles_labels()
+    if not plot_std_legend:
+        if len(handles) == 7:
+            handles = handles[:-2]
+            labels = labels[:-2]
+        else:
+            handles = handles[:-1]
+            labels = labels[:-1]
+    ax.legend(handles=handles, labels=labels, loc="lower right",
+              fontsize=fontsize)
     return ax
 
 
