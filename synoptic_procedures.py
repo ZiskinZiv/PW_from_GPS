@@ -219,8 +219,8 @@ def agg_month_count_syn_class(path=climate_path, syn_category='normal',
     dfmm = pd.pivot_table(new_df, index='months', columns=syn_cat)
     dfmm.set_index(pd.to_datetime(dfmm.index), inplace=True)
     dfmm.sort_index()
-    dfmm = dfmm.fillna(0)
-    dfmm = dfmm.astype(int)
+#    dfmm = dfmm.fillna(0)
+#    dfmm = dfmm.astype(int)
     dfmm.columns = dfmm.columns.droplevel()
     dfmm.index.name = 'time'
     if freq:
