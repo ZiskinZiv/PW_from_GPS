@@ -64,7 +64,9 @@ def VN_ratio_trend_test(da_ts, dropna=True, alpha=0.05, loadpath=work_yuval,
     if return_just_trend:
         return trend
     else:
-        return eta, cv, trend
+        da = xr.DataArray([eta, cv, trend, n], dims=['results'])
+        da['results'] = ['eta', 'cv', 'trend', 'n']
+        return da
 
 
 def reduce_tail_xr(xarray, reduce='mean', time_dim='time', records=120,
@@ -836,10 +838,13 @@ def time_series_stack_with_window(ts_da, time_dim='time',
     return ds
 
 
-def annual_standertize(data, time_dim='time'):
+def annual_standertize(data, time_dim='time', std_nan=1.0):
     """just divide by the time.month std()"""
     attrs = data.attrs
-    data = data.groupby('{}.month'.format(time_dim)) / data.groupby('{}.month'.format(time_dim)).std(keep_attrs=True)
+    std_longterm = data.groupby('{}.month'.format(time_dim)).std(keep_attrs=True)
+    if std_nan is not None:
+        std_longterm = std_longterm.fillna(std_nan)
+    data = data.groupby('{}.month'.format(time_dim)) / std_longterm
     data = data.reset_coords(drop=True)
     data.attrs.update(attrs)
     return data
