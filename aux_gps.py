@@ -838,6 +838,25 @@ def time_series_stack_with_window(ts_da, time_dim='time',
     return ds
 
 
+def get_RI_reg_combinations(dataset):
+    """return n+1 sized dataset of full regressors and median value regressors"""
+    import xarray as xr
+
+    def replace_dta_with_median(dataset, dta):
+        ds = dataset.copy()
+        ds[dta] = dataset[dta] - dataset[dta] + dataset[dta].median('time')
+        ds.attrs['median'] = dta
+        return ds
+    if type(dataset) != xr.Dataset:
+        return print('Input is xarray dataset only')
+    ds_list = []
+    ds_list.append(dataset)
+    dataset.attrs['median'] = 'full_set'
+    for da in dataset.data_vars:
+        ds_list.append(replace_dta_with_median(dataset, da))
+    return ds_list
+
+
 def annual_standertize(data, time_dim='time', std_nan=1.0):
     """just divide by the time.month std()"""
     attrs = data.attrs
