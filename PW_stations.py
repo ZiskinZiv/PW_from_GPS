@@ -170,6 +170,43 @@ def PW_trend_analysis(path=work_yuval, anom=False, station='tela'):
     return pw_tsen
 
 
+def produce_gnss_pw_from_uerra(era5_path=era5_path,
+                               glob_str='UERRA_TCWV_*.nc',
+                               pw_path=work_yuval, savepath=None):
+    from aux_gps import path_glob
+    import xarray as xr
+    from aux_gps import save_ncfile
+    udf = add_UERRA_xy_to_israeli_gps_coords(pw_path, era5_path)
+    files = path_glob(era5_path, glob_str)
+    uerra_list = [xr.open_dataset(file) for file in files]
+    ds_attrs = uerra_list[0].attrs
+    ds_list = []
+    for i, uerra in enumerate(uerra_list):
+        print('proccessing {}'.format(files[i].as_posix().split('/')[-1]))
+        st_list = []
+        for station in udf.index:
+            y = udf.loc[station, 'y']
+            x = udf.loc[station, 'x']
+            uerra_st = uerra['tciwv'].isel(y=y, x=x).reset_coords(drop=True)
+            uerra_st.name = station
+            uerra_st.attrs = uerra['tciwv'].attrs
+            uerra_st.attrs['lon'] = udf.loc[station, 'lon']
+            uerra_st.attrs['lat'] = udf.loc[station, 'lat']
+            st_list.append(uerra_st)
+        ds_st = xr.merge(st_list)
+        ds_list.append(ds_st)
+    ds = xr.concat(ds_list, 'time')
+    ds = ds.sortby('time')
+    ds.attrs = ds_attrs
+    ds_monthly = ds.resample(time='MS', keep_attrs=True).mean(keep_attrs=True)
+    if savepath is not None:
+        filename = 'GNSS_uerra_4xdaily_PW.nc'
+        save_ncfile(ds, savepath, filename)
+        filename = 'GNSS_uerra_monthly_PW.nc'
+        save_ncfile(ds_monthly, savepath, filename)
+    return ds
+
+
 def produce_gnss_pw_from_era5(era5_path=era5_path,
                               glob_str='era5_TCWV_israel*.nc',
                               pw_path=work_yuval, savepath=None):
