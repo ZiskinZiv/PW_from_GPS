@@ -824,7 +824,7 @@ def plot_means_box_plots(path=work_yuval, thresh=50, kind='box',
     return fg
 
 
-def plot_annual_pw(path=work_yuval, fontsize=20, labelsize=18, era5=True,
+def plot_annual_pw(path=work_yuval, fontsize=20, labelsize=18, compare='uerra',
                    ylim=[7.5, 40], save=True, kind='violin', bins=None):
     """kind can be violin or hist, for violin choose ylim=7.5,40 and for hist
     choose ylim=0,0.3"""
@@ -834,8 +834,8 @@ def plot_annual_pw(path=work_yuval, fontsize=20, labelsize=18, era5=True,
     pw = xr.load_dataset(path / gnss_filename)
     df_annual = pw.to_dataframe()
     hue = None
-    if era5:
-        df_annual = prepare_era5_monthly_pwv_to_dataframe(path)
+    if compare is not None:
+        df_annual = prepare_reanalysis_monthly_pwv_to_dataframe(path, re=compare)
         hue = 'source'
     fg = plot_pw_geographical_segments(
         df_annual, scope='annual',
@@ -854,8 +854,8 @@ def plot_annual_pw(path=work_yuval, fontsize=20, labelsize=18, era5=True,
             wspace=0.12)
     if save:
         filename = 'pw_annual_means_{}.png'.format(kind)
-        if era5:
-            filename = 'pw_annual_means_{}_with_era5.png'.format(kind)
+        if compare is not None:
+            filename = 'pw_annual_means_{}_with_{}.png'.format(kind, compare)
         plt.savefig(savefig_path / filename, orientation='portrait')
     return fg
 
@@ -3075,19 +3075,24 @@ def group_sites_to_xarray(upper=False, scope='diurnal'):
 #    return fg
 
 
-def prepare_era5_monthly_pwv_to_dataframe(path=work_yuval):
+def prepare_reanalysis_monthly_pwv_to_dataframe(path=work_yuval, re='era5'):
     import xarray as xr
     import pandas as pd
-    era5 = xr.load_dataset(work_yuval / 'GNSS_era5_monthly_PW.nc')
-    df_era5 = era5.to_dataframe()
-    df_era5['month'] = df_era5.index.month
+    if re == 'era5':
+        reanalysis = xr.load_dataset(work_yuval / 'GNSS_era5_monthly_PW.nc')
+        re_name = 'ERA5'
+    elif re == 'uerra':
+        reanalysis = xr.load_dataset(work_yuval / 'GNSS_uerra_monthly_PW.nc')
+        re_name = 'UERRA-HARMONIE'
+    df_re = reanalysis.to_dataframe()
+    df_re['month'] = df_re.index.month
     pw_mm = xr.load_dataset(
         work_yuval /
         'GNSS_PW_monthly_thresh_50_homogenized.nc')
     df = pw_mm.to_dataframe()
     df['month'] = df.index.month
     # concat:
-    dff = pd.concat([df, df_era5], keys=['GNSS', 'ERA5'])
+    dff = pd.concat([df, df_re], keys=['GNSS', re_name])
     dff['source'] = dff.index.get_level_values(0)
     dff = dff.reset_index()
     return dff
