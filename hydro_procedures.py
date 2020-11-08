@@ -13,7 +13,8 @@ ims_path = work_yuval / 'IMS_T'
 hydro_ml_path = hydro_path / 'hydro_ML'
 from PW_paths import savefig_path
 
-hydro_pw_dict = {'drag': 48125, 'dsea': 48199, 'elat': 60170, 'tela': 17135}
+hydro_pw_dict = {'drag': 48125, 'dsea': 48199,
+                 'elat': 60170, 'tela': 17135}
 
 # TODO: scan for seasons in the tide events and remove summer
 def plot_all_decompositions(X, y, n=2):
@@ -280,6 +281,7 @@ def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
     from sklearn.model_selection import cross_validate
     from sklearn.model_selection import StratifiedKFold
     from sklearn.model_selection import GridSearchCV
+    from string import digits
     import numpy as np
     import xarray as xr
     # first slice X for features:
@@ -338,12 +340,18 @@ def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
     dss = xr.merge([dss, gr_dss])
     dss.attrs = gr_dss.attrs
     dss.attrs['outer_kfold_splits'] = outer_splits
-    features = list(set(['_'.join(x.split('_')[0:2])
-                         for x in X['feature'].values]))
+    remove_digits = str.maketrans('', '', digits)
+    features = list(set([x.translate(remove_digits).split('_')[0] for x in X.feature.values]))
     # add more attrs, features etc:
     dss.attrs['features'] = features
-    dss.attrs['pwv_id'] = X.attrs['pwv_id']
-    dss.attrs['hs_id'] = y.attrs['hydro_station_id']
+    if isinstance(X.attrs['pwv_id'], list):
+        dss.attrs['pwv_id'] = '-'.join(X.attrs['pwv_id'])
+    else:
+        dss.attrs['pwv_id'] = X.attrs['pwv_id']
+    if isinstance(y.attrs['hydro_station_id'], list):
+        dss.attrs['hs_id'] = '-'.join([str(x) for x in y.attrs['hydro_station_id']])
+    else:
+        dss.attrs['hs_id'] = y.attrs['hydro_station_id']
     dss.attrs['hydro_max_flow'] = y.attrs['max_flow']
     # save results to file:
     if savepath is not None:
@@ -939,6 +947,50 @@ def scikit_fit_predict(X, y, seed=42, with_pressure=True, n_splits=7,
         plt.hist(scores, bins=15, edgecolor='k')
     return scores
     # clf.fit(X,y)
+
+
+def produce_X_y_from_list(pw_stations=['drag', 'dsea', 'elat'],
+                          pressure_station='bet-dagan', max_flow=0,
+                          hs_ids=[48125, 48199, 60170], window=25,
+                          neg_pos_ratio=1, path=work_yuval,
+                          ims_path=ims_path, hydro_path=hydro_path,
+                          concat_Xy=False):
+    if isinstance(hs_ids, int):
+        hs_ids = [hs_ids for x in range(len(pw_stations))]
+    kwargs = locals()
+    [kwargs.pop(x) for x in ['pw_stations', 'hs_ids', 'concat_Xy']]
+    Xs = []
+    ys = []
+    for pw_station, hs_id in list(zip(pw_stations, hs_ids)):
+        X, y = produce_X_y(pw_station, hs_id, **kwargs)
+        Xs.append(X)
+        ys.append(y)
+    if concat_Xy:
+        print('concatenating pwv stations {}, with hydro_ids {}.'.format(pw_stations, hs_ids))
+        X, y = concat_X_y(Xs, ys)
+        return X, y
+    else:
+        return Xs, ys
+
+
+def concat_X_y(Xs, ys):
+    import xarray as xr
+    import pandas as pd
+    X_attrs = [x.attrs for x in Xs]
+    X_com_attrs = dict(zip(pd.DataFrame(X_attrs).T.index.values,
+                           pd.DataFrame(X_attrs).T.values.tolist()))
+    y_attrs = [x.attrs for x in ys]
+    y_com_attrs = dict(zip(pd.DataFrame(y_attrs).T.index.values,
+                           pd.DataFrame(y_attrs).T.values.tolist()))
+    for X in Xs:
+        feat = [x.replace('_' + X.attrs['pwv_id'], '')
+                for x in X.feature.values]
+        X['feature'] = feat
+    X = xr.concat(Xs, 'sample')
+    X.attrs = X_com_attrs
+    y = xr.concat(ys, 'sample')
+    y.attrs = y_com_attrs
+    return X, y
 
 
 def produce_X_y(pw_station='drag', hs_id=48125, pressure_station='bet-dagan',
