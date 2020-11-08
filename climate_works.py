@@ -8,6 +8,55 @@ Created on Thu Oct 15 08:21:02 2020
 from sklearn_xarray import RegressorWrapper
 from PW_paths import work_yuval
 climate_path = work_yuval / 'climate'
+era5_path = work_yuval / 'ERA5'
+
+
+def produce_local_index_from_eof_analysis(da, npcs=2, savepath=None):
+    from aux_gps import anomalize_xr
+    from aux_gps import save_ncfile
+    da = anomalize_xr(da, 'MS', time_dim='time')
+    pc = eof_analysis(da, npcs, False)
+    pc_ds = pc.to_dataset('mode')
+    names = [x for x in pc_ds]
+    new_names = [x.replace('pc', da.name) for x in names]
+    nd = dict(zip(names, new_names))
+    pc_ds = pc_ds.rename(nd)
+    if savepath is not None:
+        filename = '{}_index.nc'.format(pc.name)
+        save_ncfile(pc_ds, savepath, filename)
+    return pc_ds
+
+  
+def eof_analysis(da, npcs=2, plot=True):
+    from eofs.xarray import Eof
+    import matplotlib.pyplot as plt
+    import numpy as np
+    solver = Eof(da)
+    eof = solver.eofsAsCorrelation(neofs=npcs)
+    pc = solver.pcs(npcs=npcs, pcscaling=1)
+    pc.name = '{}_{}'.format(da.name, pc.name)
+    eof.name = '{}_{}'.format(da.name, eof.name)
+    pc['mode'] = ['pc_{}'.format(x + 1) for x in pc.mode.values]
+    eof['mode'] = ['eof_{}'.format(x + 1) for x in eof.mode.values]
+    vf = solver.varianceFraction(npcs)
+    errors = solver.northTest(npcs, vfscaled=True)
+    if plot:
+        plt.close('all')
+#        plt.figure(figsize=(8, 6))
+#        eof.plot(hue='mode')
+        plt.figure(figsize=(10, 4))
+        pc.plot(hue='mode')
+        plt.figure(figsize=(8, 6))
+        x = np.arange(1, len(vf.values) + 1)
+        y = vf.values
+        ax = plt.gca()
+        ax.errorbar(x, y, yerr=errors.values, color='b', linewidth=2, fmt='-o')
+        ax.set_xticks(np.arange(1, len(vf.values) + 1, 1))
+        ax.set_yticks(np.arange(0, 1, 0.1))
+        ax.grid()
+        ax.set_xlabel('Eigen Values')
+        plt.show()
+    return pc
 
 
 def read_VN_table(path=climate_path, savepath=None):
@@ -134,17 +183,16 @@ def run_best_MLR():
 def produce_interannual_df(climate_path=climate_path, work_path=work_yuval,
                            lags=1, corr_thresh=0.2, smooth=False,
                            syn='agg+class', drop_worse_lags=True,
-                           replace_syn=None):
+                           replace_syn=None, times=None):
     import xarray as xr
     from aux_gps import smooth_xr
-    from aux_gps import anomalize_xr
-    from aux_gps import annual_standertize
     from synoptic_procedures import upper_class_dict
-    from synoptic_procedures import agg_month_count_syn_class    # load pwv:
     pw = xr.load_dataset(
         work_path /
         'GNSS_PW_monthly_anoms_thresh_50_homogenized.nc')
     pw_mean = pw.to_array('station').mean('station')
+    if times is not None:
+        pw_mean = pw_mean.sel(time=slice(times[0], times[1]))
     if smooth is not None:
         if isinstance(smooth, int):
             pw_mean = pw_mean.rolling(time=smooth, center=True).mean()
@@ -193,12 +241,15 @@ def produce_interannual_df(climate_path=climate_path, work_path=work_yuval,
                 for agg in replace_syn:
                     print('dropping {} and keeping {}'.format(upper_class_dict[agg], agg))
                     df_syn = df_syn.drop(upper_class_dict[agg], axis=1)
+                other_to_drop = list(set(upper_class_dict).difference(set(replace_syn)))
+                df_syn = df_syn.drop(other_to_drop, axis=1)
+                print('dropping {}.'.format(other_to_drop))
         elif syn == 'agg':
             df_syn = df_syn
         elif syn == 'class':
             df_syn = df_syn_cls
         # implement mixed class and agg, e.g., RST (and remove 1, 2, 3)
-        df = df.join(df_syn)    
+        df = df.join(df_syn)
     # sort cols:
     df.columns = [str(x) for x in df.columns]
     cols = sorted([x for x in df.columns])
@@ -357,11 +408,13 @@ def read_DIs_matfile(file, sample_rate='12H'):
     return da
 
 
-def run_MLR(X, y, plot=True):
+def run_MLR(X, y, make_RI=True, plot=True):
     from sklearn.linear_model import LinearRegression
     model = ImprovedRegressor(LinearRegression(fit_intercept=True),
                               reshapes='regressors', sample_dim='time')
     model.fit(X, y)
+    if make_RI:
+        model.make_RI(X, y)
     print(model.results_['explained_variance'])
     results = model.results_['original'].to_dataframe()
     results['predict'] = model.results_['predict'].to_dataframe()
@@ -411,6 +464,43 @@ def get_feature_multitask_dim(X, y, sample_dim):
     if feature_dim:
         feature_dim = feature_dim[0]
     return feature_dim, mt_dim
+
+
+def produce_RI(res_dict, feature_dim):
+    """produce Relative Impcat from regressors and predicted fields from
+    scikit learn models"""
+    # input is a result_dict with keys as 'full_set' ,'reg_list[1], etc...
+    # output is the RI calculated dataset from('full_set') with RI dataarrays
+    import xarray as xr
+#    from aux_functions_strat import text_blue, xr_order
+    # first all operations run on full-set dataset:
+    rds = res_dict['full_set']
+    names = [x for x in res_dict.keys() if x != 'full_set']
+    for da_name in names:
+        rds['std_' + da_name] = (rds['predict'] -
+                                 res_dict[da_name]['predict']).std('time')
+    std_names = [x for x in rds.data_vars.keys() if 'std' in x]
+    rds['std_total'] = sum(d for d in rds[std_names].data_vars.values())
+    for da_name in names:
+        rds['RI_' + da_name] = rds['std_' + da_name] / rds['std_total']
+        rds['RI_' + da_name].attrs['long_name'] = 'Relative Impact of '\
+                                                  + da_name + ' regressor'
+        rds['RI_' + da_name].attrs['units'] = 'Relative Impact'
+    # get the RI names to concat them all to single dataarray:
+    RI_names = [x for x in rds.data_vars.keys() if 'RI_' in x]
+    rds['RI'] = xr.concat(rds[RI_names].to_array(), dim=feature_dim)
+    rds['RI'].attrs = ''
+    rds['RI'].attrs['long_name'] = 'Relative Impact of regressors'
+    rds['RI'].attrs['units'] = 'RI'
+    rds['RI'].attrs['defenition'] = 'std(predicted_full_set -\
+    predicted_full_where_regressor_is_equal_to_its_median)/sum(denominator)'
+    names_to_drop = [x for x in rds.data_vars.keys() if 'std' in x]
+    rds = rds.drop(RI_names)
+    rds = rds.drop(names_to_drop)
+    rds = rds.reset_coords(drop=True)
+    rds.attrs['feature_types'].append('RI')
+    print('Calculating RI scores for SciKit Learn Model.')
+    return rds
 
 
 class ImprovedRegressor(RegressorWrapper):
@@ -528,6 +618,37 @@ class ImprovedRegressor(RegressorWrapper):
         if verbose:
             print('Producing results...Done!')
         return rds
+
+    def make_RI(self, X, y):
+        """ make Relative Impact score for estimator into xarray"""
+#        import aux_functions_strat as aux
+        from aux_gps import get_RI_reg_combinations
+        import warnings
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
+        feature_dim = [x for x in X.dims if x != self.sample_dim][0]
+        regressors_list = get_RI_reg_combinations(X.to_dataset
+                                                  (dim=feature_dim))
+        res_dict = {}
+        for i in range(len(regressors_list)):
+            keys = ','.join([key for key in regressors_list[i].
+                             data_vars.keys()])
+            print('Preforming ML-Analysis with regressors: ' + keys +
+                  ', median = ' + regressors_list[i].attrs['median'])
+            keys = regressors_list[i].attrs['median']
+            new_X = regressors_list[i].to_array(dim=feature_dim)
+#            new_X = aux.xr_order(new_X)
+            new_X = new_X.transpose(..., feature_dim)
+#            self = run_model_with_shifted_plevels(self, new_X, y, Target, plevel=plevels, lms=lms)
+            self = self.fit(new_X, y)
+            # self.fit(new_X, y)
+            res_dict[keys] = self.results_
+#            elif mode == 'model_all':
+#                params, res_dict[keys] = run_model_for_all(new_X, y, params)
+#            elif mode == 'multi_model':
+#                params, res_dict[keys] = run_multi_model(new_X, y, params)
+        self.results_ = produce_RI(res_dict, feature_dim)
+        self.X_ = X
+        return
 
     def save_results(self, path_like):
         ds = self.results_
