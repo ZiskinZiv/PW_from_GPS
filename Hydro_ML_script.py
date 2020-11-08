@@ -50,10 +50,23 @@ def check_path(path):
 
 def main_hydro_ML(args):
     from hydro_procedures import produce_X_y
+    from hydro_procedures import produce_X_y_from_list
     from hydro_procedures import nested_cross_validation_procedure
-    X, y = produce_X_y(pw_station=args.pw_station, hs_id=args.hydro_id,
-                       pressure_station='bet-dagan', window=25, max_flow=0,
-                       neg_pos_ratio=1)
+    if args.max_flow is None:
+        max_flow = 0
+    else:
+        max_flow = args.max_flow
+    if len(args.pw_station) > 1:
+        X, y = produce_X_y_from_list(pw_stations=args.pw_station,
+                                     hs_ids=args.hydro_id,
+                                     pressure_station='bet-dagan', window=25,
+                                     max_flow=max_flow,
+                                     neg_pos_ratio=1, concat_Xy=True)
+    else:
+        X, y = produce_X_y(pw_station=args.pw_station, hs_id=args.hydro_id,
+                           pressure_station='bet-dagan', window=25,
+                           max_flow=max_flow,
+                           neg_pos_ratio=1)
     scorers = ['roc_auc', 'f1', 'accuracy']
 #    splits = [2, 3, 4]
     features = ['pwv', 'pressure', ['pwv', 'pressure']]
@@ -129,11 +142,11 @@ if __name__ == '__main__':
     # remove this line: optional = parser...
     required.add_argument(
         '--pw_station',
-        help="GNSS 4 letter station",
+        help="GNSS 4 letter station", nargs='+',
         type=check_station_name)
     required.add_argument(
         '--hydro_id',
-        help="5 integer hydro station",
+        help="5 integer hydro station", nargs='+',
         type=int)  # check_hydro_id)
 #    optional.add_argument('--loop_over', help='select which params to loop over',
 #                          type=check_loopover, nargs='+')
@@ -149,6 +162,10 @@ if __name__ == '__main__':
         '--inner_splits',
         help='how many splits for the inner nested loop',
         type=int)
+    optional.add_argument(
+        '--max_flow',
+        help='slice the hydro events for minimum max flow',
+        type=float)
 #    optional.add_argument('--nsplits', help='select number of splits for HP tuning.', type=int)
     optional.add_argument(
         '--model',
@@ -168,4 +185,5 @@ if __name__ == '__main__':
     if args.hydro_id is None:
         print('hydro_id is a required argument, run with -h...')
         sys.exit()
+    logger.info('Running pwv station {} with hydro station {}.'.format(args.pw_station, args.hydro_id))
     main_hydro_ML(args)
