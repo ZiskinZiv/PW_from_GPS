@@ -207,6 +207,25 @@ def produce_gnss_pw_from_uerra(era5_path=era5_path,
     return ds
 
 
+def produce_era5_field_at_gnss_coords(era5_da, savepath=None,
+                                      pw_path=work_yuval):
+    import xarray as xr
+    print('reading ERA5 {} field.'.format(era5_da.name))
+    gps = produce_geo_gnss_solved_stations(plot=False)
+    era5_pw_list = []
+    for station in gps.index:
+        slat = gps.loc[station, 'lat']
+        slon = gps.loc[station, 'lon']
+        da = era5_da.sel(latitude=slat, longitude=slon, method='nearest')
+        da.name = station
+        da.attrs['era5_lat'] = da.latitude.values.item()
+        da.attrs['era5_lon'] = da.longitude.values.item()
+        da = da.reset_coords(drop=True)
+        era5_pw_list.append(da)
+    ds = xr.merge(era5_pw_list)
+    return ds
+
+
 def produce_gnss_pw_from_era5(era5_path=era5_path,
                               glob_str='era5_TCWV_israel*.nc',
                               pw_path=work_yuval, savepath=None):
