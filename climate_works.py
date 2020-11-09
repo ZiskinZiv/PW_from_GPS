@@ -11,22 +11,29 @@ climate_path = work_yuval / 'climate'
 era5_path = work_yuval / 'ERA5'
 
 
-def produce_local_index_from_eof_analysis(da, npcs=2, savepath=None):
+# what worked: z300_3, tp_2, tp_4, tcwv_1, slhf_3, sshf_3, str_1_2_3
+
+def produce_local_index_from_eof_analysis(da, npcs=2, with_mean=False,
+                                          savepath=None, plot=False):
     from aux_gps import anomalize_xr
     from aux_gps import save_ncfile
     da = anomalize_xr(da, 'MS', time_dim='time')
-    pc = eof_analysis(da, npcs, False)
+    pc = eof_analysis(da, npcs, plot)
+    pc_mean = pc.mean('mode')
+    pc_mean.name = pc.name + '_mean'
     pc_ds = pc.to_dataset('mode')
     names = [x for x in pc_ds]
     new_names = [x.replace('pc', da.name) for x in names]
     nd = dict(zip(names, new_names))
     pc_ds = pc_ds.rename(nd)
+    if with_mean:
+        pc_ds[pc_mean.name] = pc_mean
     if savepath is not None:
         filename = '{}_index.nc'.format(pc.name)
         save_ncfile(pc_ds, savepath, filename)
     return pc_ds
 
-  
+
 def eof_analysis(da, npcs=2, plot=True):
     from eofs.xarray import Eof
     import matplotlib.pyplot as plt
@@ -410,6 +417,7 @@ def read_DIs_matfile(file, sample_rate='12H'):
 
 def run_MLR(X, y, make_RI=True, plot=True):
     from sklearn.linear_model import LinearRegression
+    import pandas as pd
     model = ImprovedRegressor(LinearRegression(fit_intercept=True),
                               reshapes='regressors', sample_dim='time')
     model.fit(X, y)
@@ -418,12 +426,17 @@ def run_MLR(X, y, make_RI=True, plot=True):
     print(model.results_['explained_variance'])
     results = model.results_['original'].to_dataframe()
     results['predict'] = model.results_['predict'].to_dataframe()
+    df = model.results_[['params', 'pvalues', 'RI']].to_dataframe()
+    df = df.sort_values('params')
+#    df['pvalues'] = df['pvalues'].map('{:.4f}'.format)
+    pd.options.display.float_format = '{:.3f}'.format
+    print(df)
     if plot:
         ax = results.plot()
         ax.set_ylabel('PWV anomalies [mm]')
         ax.set_title('PWV monthly means anomalies and reconstruction')
         ax.grid()
-    return model
+    return model, df
 
 
 def sk_attr(est, attr):
