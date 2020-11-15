@@ -52,24 +52,34 @@ def main_hydro_ML(args):
     from hydro_procedures import produce_X_y
     from hydro_procedures import produce_X_y_from_list
     from hydro_procedures import nested_cross_validation_procedure
+    from aux_gps import get_all_possible_combinations_from_list
     if args.max_flow is None:
         max_flow = 0
     else:
         max_flow = args.max_flow
+    if args.neg_pos_ratio is not None:
+        neg_pos_ratio = args.neg_pos_ratio
+    else:
+        neg_pos_ratio = 1
+    logger.info('max flow {} threshold m^3/sec selected.'.format(max_flow))
+    logger.info('negative to positive ratio {} selected.'.format(neg_pos_ratio))
     if len(args.pw_station) > 1:
         X, y = produce_X_y_from_list(pw_stations=args.pw_station,
                                      hs_ids=args.hydro_id,
                                      pressure_station='bet-dagan', window=25,
                                      max_flow=max_flow,
-                                     neg_pos_ratio=1, concat_Xy=True)
+                                     neg_pos_ratio=neg_pos_ratio,
+                                     concat_Xy=True)
     else:
-        X, y = produce_X_y(pw_station=args.pw_station, hs_id=args.hydro_id,
+        X, y = produce_X_y(pw_station=args.pw_station[0], hs_id=args.hydro_id[0],
                            pressure_station='bet-dagan', window=25,
                            max_flow=max_flow,
-                           neg_pos_ratio=1)
+                           neg_pos_ratio=neg_pos_ratio)
     scorers = ['roc_auc', 'f1', 'accuracy']
 #    splits = [2, 3, 4]
-    features = ['pwv', 'pressure', ['pwv', 'pressure']]
+    f = ['pwv', 'pressure', 'doy']
+    features = get_all_possible_combinations_from_list(
+        f, reduce_single_list=True)
     if args.inner_splits is not None:
         inner_splits = args.inner_splits
     else:
@@ -166,6 +176,10 @@ if __name__ == '__main__':
         '--max_flow',
         help='slice the hydro events for minimum max flow',
         type=float)
+    optional.add_argument(
+        '--neg_pos_ratio',
+        help='negative to positive events ratio',
+        type=int)
 #    optional.add_argument('--nsplits', help='select number of splits for HP tuning.', type=int)
     optional.add_argument(
         '--model',
