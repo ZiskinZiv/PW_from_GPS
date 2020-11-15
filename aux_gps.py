@@ -508,9 +508,9 @@ def rename_data_vars(ds, suffix='_error', prefix=None, verbose=False):
 #    if remove_suffix:
 #        new_names = [x.replace(suffix, '') for x in ds.data_vars]
     if suffix is not None:
-        new_names = [x + suffix for x in ds.data_vars]
+        new_names = [str(x) + suffix for x in ds.data_vars]
     if prefix is not None:
-        new_names = [prefix + x for x in ds.data_vars]
+        new_names = [prefix + str(x) for x in ds.data_vars]
     name_dict = dict(zip(vnames, new_names))
     ds = ds.rename_vars(name_dict)
     if verbose:
@@ -721,6 +721,16 @@ def consecutive_runs(arr, num=False):
                 name, notnum), '{}_{}_end'.format(
                 name, notnum), 'total_{}'.format(notnum)]
     return A
+
+
+def get_all_possible_combinations_from_list(li, reduce_single_list=True):
+    from itertools import combinations
+    output = sum([list(map(list, combinations(li, i)))
+                  for i in range(len(li) + 1)], [])
+    output = output[1:]
+    if reduce_single_list:
+        output = [x[0] if len(x) == 1 else x for x in output]
+    return output
 
 
 def gantt_chart(ds, fw='bold', ax=None, pe_dict=None, fontsize=14, linewidth=10,
