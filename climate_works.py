@@ -91,8 +91,9 @@ def prepare_ERA5_field(da, lon_roll=True, expver=1, time_dim='time', name=None,
 
 def create_single_vars_indices(path=era5_path, savepath=climate_path,
                                var='msl', lats=lat_box, lons=lon_box,
-                               anomalize_before_eof=True, lon_dim='longitude',
+                               anomalize_before_eof=None, lon_dim='longitude',
                                lat_dim='latitude'):
+    """anomalize_before_eof is None - no deseasoning, True: before EOF, False: after EOF"""
     import xarray as xr
     from aux_gps import path_glob
     print('creating {} index.'.format(var))
@@ -132,20 +133,23 @@ def produce_local_index_from_eof_analysis(da, npcs=2, with_mean=False,
     from aux_gps import anomalize_xr
     from aux_gps import save_ncfile
     from aux_gps import keep_iqr
-    if anomalize_before_eof:
-        print('anomalizing before EOF')
-        da = anomalize_xr(da, 'MS', time_dim='time')
-    pc = eof_analysis(da, npcs, plot)
+    if anomalize_before_eof is not None:
+        if anomalize_before_eof:
+            print('anomalizing before EOF')
+            da = anomalize_xr(da, 'MS', time_dim='time')
+    pc = eof_analysis(da, npcs=npcs, plot=plot)
     pc_mean = pc.mean('mode')
     pc_mean.name = pc.name + '_mean'
 #    pc = keep_iqr(pc)
     pc_ds = pc.to_dataset('mode')
     names = [x for x in pc_ds]
-    new_names = [x.replace('pc', da.name) for x in names]
+    new_names = ['{}_{}'.format(da.name, x) for x in names]
+#    new_names = [x.replace('pc', da.name) for x in names]
     nd = dict(zip(names, new_names))
     pc_ds = pc_ds.rename(nd)
-    if not anomalize_before_eof:
-        pc_ds = anomalize_xr(pc_ds, 'MS')
+    if anomalize_before_eof is not None:
+        if not anomalize_before_eof:
+            pc_ds = anomalize_xr(pc_ds, 'MS')
     if with_mean:
         pc_ds[pc_mean.name] = pc_mean
     if savepath is not None:
@@ -154,11 +158,18 @@ def produce_local_index_from_eof_analysis(da, npcs=2, with_mean=False,
     return pc_ds
 
 
-def eof_analysis(da, npcs=2, return_all=False, plot=True):
+def eof_analysis(da, npcs=2, return_all=False, plot=True,
+                 lat_weights_on='latitude'):
+    # TODO: add costlat weights
     from eofs.xarray import Eof
     import matplotlib.pyplot as plt
     import numpy as np
-    solver = Eof(da)
+    if lat_weights_on is not None:
+        coslat = np.cos(np.deg2rad(da.coords[lat_weights_on].values)).clip(0., 1.)
+        wgts = np.sqrt(coslat)[..., np.newaxis]
+    else:
+        wgts = None
+    solver = Eof(da, weights=wgts)
     eof = solver.eofsAsCorrelation(neofs=npcs)
     pc = solver.pcs(npcs=npcs, pcscaling=1)
     pc.name = '{}_{}'.format(da.name, pc.name)
@@ -361,9 +372,73 @@ def run_best_MLR(savepath=None, heatmap=True):
     keep_inds = ['pwv', 'ea-1', 'MJO_20E+1', 'iod+1', 'wemoi', 'z500_1']
     keep_inds = ['pwv', 'ea-1', 'iod+1', 'wemoi', 'z500_1']
     keep_inds = [x for x in df.columns]
-    keep_inds = ['pwv', 'ea-1', 'iod+1', 'wemoi', 'MJO_20E+1', 'v300_2', 'v300_3', 'v500_1', 'v500_2', 'u300_3','u300_1', 'u500_3', 'u500_4', 'u10_2','u10_3','v10_1','v10_4']# , 'v700_1', 'v700_4']
-    keep_inds = ['pwv', 'v300_2', 'v300_3', 'v500_1', 'v500_2', 'u300_3','u300_1', 'u500_3', 'u500_4', 'u10_2','u10_3','v10_1','v10_4']# , 'v700_1', 'v700_4']
-    keep_inds = ['pwv', 'v1000_1', 'v1000_2', 'v500_2', 'v500_4', 'v700_2', 'u300_2','u300_3', 'u500_2', 'u500_4', 'u700_3','u700_4']# , 'v700_1', 'v700_4']
+    keep_inds = [
+        'pwv',
+        'ea-1',
+        'iod+1',
+        'wemoi',
+        'MJO_20E+1',
+        'v300_2',
+        'v300_3',
+        'v500_1',
+        'v500_2',
+        'u300_3',
+        'u300_1',
+        'u500_3',
+        'u500_4',
+        'u10_2',
+        'u10_3',
+        'v10_1',
+        'v10_4']  # , 'v700_1', 'v700_4']
+    keep_inds = [
+        'pwv',
+        'v300_2',
+        'v300_3',
+        'v500_1',
+        'v500_2',
+        'u300_3',
+        'u300_1',
+        'u500_3',
+        'u500_4',
+        'u10_2',
+        'u10_3',
+        'v10_1',
+        'v10_4']  # , 'v700_1', 'v700_4']
+    keep_inds = [
+        'pwv',
+        'v1000_1',
+        'v1000_2',
+        'v500_2',
+        'v500_4',
+        'v700_2',
+        'u300_2',
+        'u300_3',
+        'u500_2',
+        'u500_4',
+        'u700_3',
+        'u700_4']  # , 'v700_1', 'v700_4']
+    u_cols = ['u_anoms_225',
+              'u_anoms_350',
+              'u_anoms_300',
+              'u_anoms_200',
+              'u_anoms_250',
+              'u_anoms_400']
+    v_cols = ['v_anoms_775',
+              'v_anoms_900',
+              'v_anoms_825',
+              'v_anoms_700',
+              'v_anoms_950',
+              'v_anoms_650',
+              'v_anoms_550',
+              'v_anoms_850',
+              'v_anoms_600',
+              'v_anoms_875',
+              'v_anoms_925',
+              'v_anoms_750',
+              'v_anoms_800']
+    keep_inds = ['pwv', 'ea-1', 'iod+1', 'wemoi', 'MJO_20E+1']
+    keep_inds = ['pwv'] + u_cols + v_cols
+    keep_inds = ['pwv', 'ea-1', 'iod+1', 'wemoi', 'z500_1', 'z500_2', 'z500_3']
 #    keep_inds = ['pwv', 'MJO_20E+1', 'wemoi', 'z500_1']
     dff = df[keep_inds]
     X, y = preprocess_interannual_df(dff)
