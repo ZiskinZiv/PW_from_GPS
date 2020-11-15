@@ -1016,6 +1016,8 @@ def produce_X_y(pw_station='drag', hs_id=48125, pressure_station='bet-dagan',
     # load PWV and other features and combine them to fdf:
     pw = xr.open_dataset(path / 'GNSS_PW_anom_hourly_50_hour_dayofyear.nc')
     fdf = pw[pw_station].to_dataframe(name='pwv_{}'.format(pw_station))
+    # add Day of year to fdf:
+    fdf['doy'] = fdf.index.dayofyear
     if pressure_station is not None:
         p = xr.load_dataset(
             ims_path /
@@ -1299,24 +1301,32 @@ def add_features_and_produce_X_y(hdf, fdf, window_size=25, seed=42,
     y = np.concatenate([y_pos_arr, y_neg_arr])
     # TODO: add exception where no features exist, i.e., there is no
     # pw near flood events at all...
-    if feature_pos_list[0].shape[1] > 0 and feature_neg_list[0].shape[1] > 0:
-        xpos = [x.ravel() for x in feature_pos_list]
-        xneg = [x.ravel() for x in feature_neg_list]
-    X = np.stack([[x for x in xpos] +
-                  [x for x in xneg]])
+    Xpos_da = xr.DataArray(feature_pos_list, dims=['sample', 'window', 'feat'])
+    Xpos_da['window'] = np.arange(0, window_size - 1)
+    Xpos_da['feat'] = adf.columns
+    Xpos_da['sample'] = dts_pos_list
+    Xneg_da = xr.DataArray(feature_neg_list, dims=['sample', 'window', 'feat'])
+    Xneg_da['window'] = np.arange(0, window_size - 1)
+    Xneg_da['feat'] = adf.columns
+    Xneg_da['sample'] = dts_neg_list
+    X = xr.concat([Xpos_da, Xneg_da], 'sample')
+#    if feature_pos_list[0].shape[1] > 0 and feature_neg_list[0].shape[1] > 0:
+#        xpos = [x.ravel() for x in feature_pos_list]
+#        xneg = [x.ravel() for x in feature_neg_list]
+#    X = np.column_stack([[x for x in xpos] +
+#                         [x for x in xneg]])
     y_dts = np.stack([[x for x in dts_pos_list]+[x for x in dts_neg_list]])
     y_dts = y_dts.squeeze()
-    X = X.squeeze()
-    X_da = xr.DataArray(X, dims=['sample', 'feature'])
-    X_da['sample'] = y_dts
+    X_da = X.stack(feature=['feat', 'window'])
+    feature = ['_'.join([str(x), str(y)]) for x, y in X_da.feature.values]
+    X_da['feature'] = feature
     y_da = xr.DataArray(y, dims=['sample'])
     y_da['sample'] = y_dts
-    X_da['sample'] = y_dts
-    feats = []
-    for f in feature:
-        feats.append(['{}_{}'.format(f, x) for x in np.arange(0, window_size
-                                                                   - 1, 1)])
-    X_da['feature'] = [item for sublist in feats for item in sublist]
+#    feats = []
+#    for f in feature:
+#        feats.append(['{}_{}'.format(f, x) for x in np.arange(0, window_size
+#                                                                   - 1, 1)])
+#    X_da['feature'] = [item for sublist in feats for item in sublist]
     return X_da, y_da
 
 
@@ -2012,7 +2022,7 @@ class ML_Classifier_Switcher(object):
                                'gamma': np.logspace(-5, 2, 25),
                                'degree': [1, 2, 3, 4, 5],
                                'coef0': [0, 1, 2, 3, 4]}
-        return SVC(random_state=42)
+        return SVC(random_state=42, class_weight='balanced')
 
     def MLP(self):
         import numpy as np
@@ -2045,4 +2055,5 @@ class ML_Classifier_Switcher(object):
                                'min_samples_split': [2, 5, 10],
                                'n_estimators': np.arange(200, 2200, 200)
                                }
-        return RandomForestClassifier(random_state=42, n_jobs=-1)
+        return RandomForestClassifier(random_state=42, n_jobs=-1,
+                                      class_weight='balanced')
