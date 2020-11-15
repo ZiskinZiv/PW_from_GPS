@@ -403,7 +403,15 @@ def plot_hydro_ML_models_results_from_dss(dss, station='drag', std_on='outer',
     import seaborn as sns
     import matplotlib.pyplot as plt
     cmap = sns.color_palette("colorblind", 3)
-    X, y = produce_X_y(station, hydro_pw_dict[station], neg_pos_ratio=1)
+    if len(station) > 4:
+        max_flow = 0
+        sts = [x for x in station.split('-')]
+        hs_ids = [int(x) for x in dss.attrs['hs_id'].split('-')]
+        X, y = produce_X_y_from_list(sts, hs_ids, neg_pos_ratio=1, concat_Xy=True)
+    else:
+        max_flow = dss.attrs['hydro_max_flow']
+        X, y = produce_X_y(station, hydro_pw_dict[station], neg_pos_ratio=1,
+                           max_flow=max_flow)
     events = int(y[y == 1].sum().item())
     assert station == dss.attrs['pwv_id']
     fg = xr.plot.FacetGrid(
@@ -430,9 +438,12 @@ def plot_hydro_ML_models_results_from_dss(dss, station='drag', std_on='outer',
                                         plot_std_legend=False, ax=ax,
                                         color=cmap[k], title=title,
                                         std_on=std_on, fontsize=fontsize)
-    fg.fig.suptitle(
-        '{} station: {} total_events'.format(
-            station.upper(), events), fontsize=fontsize)
+    title = '{} station: {} total events'.format(
+            station.upper(), events)
+    if max_flow > 0:
+        title = '{} station: {} total events (max flow = {} m^3/sec)'.format(
+            station.upper(), events, max_flow)
+    fg.fig.suptitle(title, fontsize=fontsize)
     fg.fig.tight_layout()
     fg.fig.subplots_adjust(top=0.937,
                            bottom=0.054,
@@ -950,9 +961,9 @@ def scikit_fit_predict(X, y, seed=42, with_pressure=True, n_splits=7,
 
 
 def produce_X_y_from_list(pw_stations=['drag', 'dsea', 'elat'],
+                          hs_ids=[48125, 48199, 60170],
                           pressure_station='bet-dagan', max_flow=0,
-                          hs_ids=[48125, 48199, 60170], window=25,
-                          neg_pos_ratio=1, path=work_yuval,
+                          window=25, neg_pos_ratio=1, path=work_yuval,
                           ims_path=ims_path, hydro_path=hydro_path,
                           concat_Xy=False):
     if isinstance(hs_ids, int):
