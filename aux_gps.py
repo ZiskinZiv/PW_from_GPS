@@ -2433,7 +2433,13 @@ def get_unique_index(da, dim='time', verbose=False):
 def Zscore_xr(da, dim='time'):
     """input is a dattarray of data and output is a dattarray of Zscore
     for the dim"""
+    attrs = da.attrs
     z = (da - da.mean(dim=dim)) / da.std(dim=dim)
+    z.attrs = attrs
+    if 'units' in attrs.keys():
+        z.attrs['old_units'] = attrs['units']
+    z.attrs['action'] = 'converted to Z-score'
+    z.attrs['units'] = 'std'
     return z
 
 
