@@ -9,23 +9,143 @@ from sklearn_xarray import RegressorWrapper
 from PW_paths import work_yuval
 climate_path = work_yuval / 'climate'
 era5_path = work_yuval / 'ERA5'
+lat_box = [10, 50]
+lon_box = [10, 60]
+lat_hemi_box = [0, 80]
+lon_hemi_box = [-80, 80]
+
+# what worked: z500 is OK, compare to other large scale cirulations ?
 
 
-# what worked: z300_3, tp_2, tp_4, tcwv_1, slhf_3, sshf_3, str_1_2_3
+def plot_eof_from_ds(ds, var='v1000', mode=1, ax=None):
+    var_name_in_ds = '{}_eofs'.format(var)
+    eof = ds[var_name_in_ds].sel(mode=mode)
+    
+def create_index_from_ds_eofs(ds, var='v1000', savepath=climate_path):
+    from aux_gps import save_ncfile
+    var_name_in_ds = '{}_pcs'.format(var)
+    pc_ds = ds[var_name_in_ds].to_dataset('mode')
+    names = [x for x in pc_ds]
+    new_names = ['{}_{}'.format(var, x) for x in names]
+    nd = dict(zip(names, new_names))
+    pc_ds = pc_ds.rename(nd)
+    if savepath is not None:
+        filename = '{}_index.nc'.format(var)
+        save_ncfile(pc_ds, savepath, filename)
+    return pc_ds
 
-def produce_local_index_from_eof_analysis(da, npcs=2, with_mean=False,
-                                          savepath=None, plot=False):
+
+def run_EOFs_on_level_field(da, level_bins=[1000, 700, 500, 300, 1], npcs=4,
+                            level_mean=True, level_dim='level', savepath=None):
+    from aux_gps import save_ncfile
+    import xarray as xr
+    da = da.sortby(level_dim, ascending=False)
+    pc_list = []
+    eof_list = []
+    for previous, current in zip(level_bins, level_bins[1:]):
+        da_bin = da.sel({level_dim: slice(previous, current)})
+        da_bin.name = '{}{}'.format(da.name, previous)
+        if level_mean:
+            print('mean on {} to {} hPa'.format(previous, current))
+            da_bin = da_bin.mean(level_dim)
+        pc, eof = eof_analysis(da_bin, npcs=npcs, return_all=True, plot=False)
+        pc_list.append(pc)
+        eof_list.append(eof)
+    ds_eof = xr.merge(eof_list)
+    ds_pc = xr.merge(pc_list)
+    ds = xr.merge([ds_eof, ds_pc])
+    ds.attrs['level_bins'] = level_bins
+    ds.attrs['level_mean'] = int(level_mean)
+    if savepath is not None:
+        if level_mean:
+            filename = 'ERA5_pc_eofs_{}_plevels_mean.nc'.format(da.name)
+        else:
+            filename = 'ERA5_pc_eofs_{}_plevels.nc'.format(da.name)
+        save_ncfile(ds, savepath, filename)
+    return ds
+
+
+def prepare_ERA5_field(da, lon_roll=True, expver=1, time_dim='time', name=None,
+                       lat_dim='latitude', lon_dim='longitude',
+                       scope='global', savepath=None):
+    from aux_gps import save_ncfile
+    if 'expver' in da.dims:
+        da = da.sel(expver=expver).reset_coords(drop=True)
+    if lat_dim in da.dims:
+        da = da.sortby(lat_dim)
+    if lon_dim in da.dims:
+        if lon_roll:
+            if min(da[lon_dim]) >= 0:
+                da = da.roll({lon_dim: -180}, roll_coords=False)
+                da = da.assign_coords({lon_dim: da[lon_dim] - 180})
+            else:
+                print('no need to lon_roll.')
+    da = da.dropna(time_dim)
+    if name is not None:
+        da.name = name
+    if savepath is not None:
+        filename = 'ERA5_{}_mm_{}_1979-2020.nc'.format(da.name, scope)
+        save_ncfile(da, savepath, filename)
+    return da
+
+
+def create_single_vars_indices(path=era5_path, savepath=climate_path,
+                               var='msl', lats=lat_box, lons=lon_box,
+                               anomalize_before_eof=True, lon_dim='longitude',
+                               lat_dim='latitude'):
+    import xarray as xr
+    from aux_gps import path_glob
+    print('creating {} index.'.format(var))
+    files = path_glob(path, 'ERA5_{}_mm_global_*.nc'.format(var))
+    v = xr.open_dataset(files[0])[var]
+    v_box = v.sel({lat_dim: slice(*lats), lon_dim: slice(*lons)})
+    print('subsetting to lats: {}-{}, lons: {}-{}'.format(*lats, *lons))
+    pc_var = produce_local_index_from_eof_analysis(v_box, npcs=4,
+                                                   with_mean=False,
+                                                   savepath=savepath,
+                                                   plot=True,
+                                                   anomalize_before_eof=anomalize_before_eof)
+    return pc_var
+
+
+def produce_local_stations_anomalies_index(da, savepath=climate_path,
+                                           plot=False):
     from aux_gps import anomalize_xr
     from aux_gps import save_ncfile
-    da = anomalize_xr(da, 'MS', time_dim='time')
+    from PW_stations import produce_era5_field_at_gnss_coords
+    da_at_st = produce_era5_field_at_gnss_coords(da, savepath=None)
+    da_at_st = da_at_st.dropna('time')
+    da_anoms = anomalize_xr(da_at_st, 'MS', time_dim='time')
+    da_ind = da_anoms.to_array('st').mean('st')
+    da_ind.name = da.name
+    da_ind.attrs = da.attrs
+    if plot:
+        da_ind.plot()
+    filename = 'ERA5_{}_index.nc'.format(da.attrs['long_name'])
+    save_ncfile(da_ind, savepath, filename)
+    return da_ind
+
+
+def produce_local_index_from_eof_analysis(da, npcs=2, with_mean=False,
+                                          savepath=None, plot=False,
+                                          anomalize_before_eof=True):
+    from aux_gps import anomalize_xr
+    from aux_gps import save_ncfile
+    from aux_gps import keep_iqr
+    if anomalize_before_eof:
+        print('anomalizing before EOF')
+        da = anomalize_xr(da, 'MS', time_dim='time')
     pc = eof_analysis(da, npcs, plot)
     pc_mean = pc.mean('mode')
     pc_mean.name = pc.name + '_mean'
+#    pc = keep_iqr(pc)
     pc_ds = pc.to_dataset('mode')
     names = [x for x in pc_ds]
     new_names = [x.replace('pc', da.name) for x in names]
     nd = dict(zip(names, new_names))
     pc_ds = pc_ds.rename(nd)
+    if not anomalize_before_eof:
+        pc_ds = anomalize_xr(pc_ds, 'MS')
     if with_mean:
         pc_ds[pc_mean.name] = pc_mean
     if savepath is not None:
@@ -34,7 +154,7 @@ def produce_local_index_from_eof_analysis(da, npcs=2, with_mean=False,
     return pc_ds
 
 
-def eof_analysis(da, npcs=2, plot=True):
+def eof_analysis(da, npcs=2, return_all=False, plot=True):
     from eofs.xarray import Eof
     import matplotlib.pyplot as plt
     import numpy as np
@@ -43,8 +163,8 @@ def eof_analysis(da, npcs=2, plot=True):
     pc = solver.pcs(npcs=npcs, pcscaling=1)
     pc.name = '{}_{}'.format(da.name, pc.name)
     eof.name = '{}_{}'.format(da.name, eof.name)
-    pc['mode'] = ['pc_{}'.format(x + 1) for x in pc.mode.values]
-    eof['mode'] = ['eof_{}'.format(x + 1) for x in eof.mode.values]
+    pc['mode'] = [int('{}'.format(x + 1)) for x in pc.mode.values]
+    eof['mode'] = [int('{}'.format(x + 1)) for x in eof.mode.values]
     vf = solver.varianceFraction(npcs)
     errors = solver.northTest(npcs, vfscaled=True)
     if plot:
@@ -63,7 +183,10 @@ def eof_analysis(da, npcs=2, plot=True):
         ax.grid()
         ax.set_xlabel('Eigen Values')
         plt.show()
-    return pc
+    if return_all:
+        return pc, eof
+    else:
+        return pc
 
 
 def read_VN_table(path=climate_path, savepath=None):
@@ -153,6 +276,57 @@ def read_west_moi(path=climate_path):
     return da
 
 
+def read_iod(path=climate_path):
+    from aux_gps import path_glob
+    from aux_gps import save_ncfile
+    import pandas as pd
+    file = path_glob(path, 'iod.txt')[0]
+    df = pd.read_csv(
+        file,
+        delim_whitespace=True,
+        names=[
+            'year',
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12],
+        na_values=-
+        9999.0)
+    df = pd.melt(df, id_vars='year', var_name='month', value_name='iod')
+    df['time'] = df['year'].astype(str) + '-' + df['month'].astype(str)
+    df['time'] = pd.to_datetime(df['time'])
+    df = df.set_index('time')
+    df = df.sort_index()
+    df = df.drop(['year', 'month'], axis=1)
+    da = df.to_xarray()
+    save_ncfile(da, path, 'iod_index.nc')
+    return da
+
+
+def read_scand_index(path=climate_path, savepath=climate_path):
+    from aux_gps import save_ncfile
+    from aux_gps import path_glob
+    import pandas as pd
+    file = path_glob(path, 'scand_index.tim')[0]
+    df = pd.read_csv(file, names=['year', 'month', 'scand'], delim_whitespace=True, header=8)
+    df['time'] = df['year'].astype(str) + '-' + df['month'].astype(str)
+    df['time'] = pd.to_datetime(df['time'])
+    df = df.set_index('time')
+    df = df.sort_index()
+    df = df.drop(['year', 'month'], axis=1)
+    da = df.to_xarray()
+    save_ncfile(da, path, 'scand_index.nc')
+    return da
+
+
 def read_mo_indicies(path=climate_path, moi=1, resample_to_mm=True):
     from aux_gps import path_glob
     from aux_gps import save_ncfile
@@ -176,21 +350,37 @@ def read_mo_indicies(path=climate_path, moi=1, resample_to_mm=True):
     return da
 
 
-def run_best_MLR():
+def run_best_MLR(savepath=None, heatmap=True):
+    from aux_gps import save_ncfile
+    import seaborn as sns
+    import matplotlib.pyplot as plt
     # check for correlation between synoptics and maybe
     # agg some classes and leave everything else
-    df = produce_interannual_df(lags=1, smooth=3, corr_thresh=None, syn='class',
-                                drop_worse_lags=True)
-    dff = df.drop(['moi2+1', 'meiv2+1'], axis=1)
+    df = produce_interannual_df(lags=1, smooth=3, corr_thresh=None, syn=None,
+                                drop_worse_lags=False)
+    keep_inds = ['pwv', 'ea-1', 'MJO_20E+1', 'iod+1', 'wemoi', 'z500_1']
+    keep_inds = ['pwv', 'ea-1', 'iod+1', 'wemoi', 'z500_1']
+    keep_inds = [x for x in df.columns]
+    keep_inds = ['pwv', 'ea-1', 'iod+1', 'wemoi', 'MJO_20E+1', 'v300_2', 'v300_3', 'v500_1', 'v500_2', 'u300_3','u300_1', 'u500_3', 'u500_4', 'u10_2','u10_3','v10_1','v10_4']# , 'v700_1', 'v700_4']
+    keep_inds = ['pwv', 'v300_2', 'v300_3', 'v500_1', 'v500_2', 'u300_3','u300_1', 'u500_3', 'u500_4', 'u10_2','u10_3','v10_1','v10_4']# , 'v700_1', 'v700_4']
+    keep_inds = ['pwv', 'v1000_1', 'v1000_2', 'v500_2', 'v500_4', 'v700_2', 'u300_2','u300_3', 'u500_2', 'u500_4', 'u700_3','u700_4']# , 'v700_1', 'v700_4']
+#    keep_inds = ['pwv', 'MJO_20E+1', 'wemoi', 'z500_1']
+    dff = df[keep_inds]
     X, y = preprocess_interannual_df(dff)
-    model = run_MLR(X, y)
-    return model
+    model, rdf = run_MLR(X, y)
+    if heatmap:
+        corr = X.to_dataset('regressors').to_dataframe().corr()
+        plt.figure()
+        sns.heatmap(corr, annot=True, cmap='bwr', center=0.0, vmax=1, vmin=-1)
+    if savepath is not None:
+        save_ncfile(model.results_, savepath, 'best_MLR_interannual_gnss_pwv.nc')
+    return model, rdf
 
 
 def produce_interannual_df(climate_path=climate_path, work_path=work_yuval,
                            lags=1, corr_thresh=0.2, smooth=False,
                            syn='agg+class', drop_worse_lags=True,
-                           replace_syn=None, times=None):
+                           replace_syn=None, times=None, pick_cols=None):
     import xarray as xr
     from aux_gps import smooth_xr
     from synoptic_procedures import upper_class_dict
@@ -207,16 +397,15 @@ def produce_interannual_df(climate_path=climate_path, work_path=work_yuval,
             pw_mean = smooth_xr(pw_mean)
     df_pw = pw_mean.to_dataframe(name='pwv')
     # load other large circulation indicies:
-    ds = load_all_indicies(path=climate_path)
-    if smooth:
-        ds = smooth_xr(ds)
+    ds = load_all_indicies(path=climate_path, smooth=smooth)
     df = ds.to_dataframe()
     # add lags:
     if lags is not None:
-        inds = df.columns
+        inds = [x for x in df.columns]
         for ind in inds:
-            df['{}+1'.format(ind)] = df[ind].shift(lags)
-            df['{}-1'.format(ind)] = df[ind].shift(-lags)
+            for lag in [x for x in range(1, lags+1)]:
+                df['{}+{}'.format(ind, lag)] = df[ind].shift(lag)
+                df['{}-{}'.format(ind, lag)] = df[ind].shift(-lag)
         if drop_worse_lags:
             df = df_pw.join(df)
             # find the best corr for each ind and its lags:
@@ -267,9 +456,13 @@ def produce_interannual_df(climate_path=climate_path, work_path=work_yuval,
         corr = df.corr()['pwv']
         corr= corr[abs(corr)>corr_thresh]
         inds = corr.index
-        return df[inds]
-    else:
-        return df
+        df = df[inds]
+    if pick_cols is not None:
+        pwv = df['pwv']
+        cols = [x for x in df.columns if pick_cols in x]
+        df = df[cols]
+        df['pwv'] = pwv
+    return df
 
 
 def preprocess_interannual_df(df, yname='pwv', standartize=True):
@@ -284,12 +477,21 @@ def preprocess_interannual_df(df, yname='pwv', standartize=True):
     return X, y
 
 
-def load_all_indicies(path=climate_path):
+def load_all_indicies(path=climate_path, smooth=None, zscore=False):
     from aux_gps import path_glob
+    from aux_gps import smooth_xr
+    from aux_gps import Zscore_xr
     import xarray as xr
     files = path_glob(path, '*_index.nc')
     ds_list = [xr.load_dataset(file) for file in files]
     ds = xr.merge(ds_list)
+    if smooth is not None:
+        if isinstance(smooth, int):
+            ds = ds.rolling(time=smooth, center=True, keep_attrs=True).mean(keep_attrs=True)
+        elif isinstance(smooth, str):
+            ds = smooth_xr(ds)
+    if zscore:
+        ds = Zscore_xr(ds)
     return ds
 
 
@@ -423,7 +625,9 @@ def run_MLR(X, y, make_RI=True, plot=True):
     model.fit(X, y)
     if make_RI:
         model.make_RI(X, y)
-    print(model.results_['explained_variance'])
+    stats = model.results_[['r2', 'r2_adj', 'dw_score', 'explained_variance']]
+    sdf = stats.expand_dims('score').to_dataframe().T
+    print(sdf)
     results = model.results_['original'].to_dataframe()
     results['predict'] = model.results_['predict'].to_dataframe()
     df = model.results_[['params', 'pvalues', 'RI']].to_dataframe()
@@ -432,7 +636,7 @@ def run_MLR(X, y, make_RI=True, plot=True):
     pd.options.display.float_format = '{:.3f}'.format
     print(df)
     if plot:
-        ax = results.plot()
+        ax = results.plot(figsize=(14, 5))
         ax.set_ylabel('PWV anomalies [mm]')
         ax.set_title('PWV monthly means anomalies and reconstruction')
         ax.grid()
