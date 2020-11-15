@@ -12,6 +12,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from PW_paths import savefig_path
 import matplotlib.ticker as ticker
+import matplotlib.dates as mdates
 tela_results_path = work_yuval / 'GNSS_stations/tela/rinex/30hr/results'
 tela_solutions = work_yuval / 'GNSS_stations/tela/gipsyx_solutions'
 sound_path = work_yuval / 'sounding'
@@ -23,6 +24,7 @@ era5_path = work_yuval / 'ERA5'
 hydro_path = work_yuval / 'hydro'
 ceil_path = work_yuval / 'ceilometers'
 aero_path = work_yuval / 'AERONET'
+climate_path = work_yuval / 'climate'
 
 
 rc = {
@@ -824,6 +826,41 @@ def plot_means_box_plots(path=work_yuval, thresh=50, kind='box',
     return fg
 
 
+def plot_interannual_MLR_results(path=climate_path, fontsize=16, save=True):
+    import xarray as xr
+    import matplotlib.pyplot as plt
+    rds = xr.load_dataset(path / 'best_MLR_interannual_gnss_pwv.nc')
+    fig, axes = plt.subplots(2, 1, sharex=True, sharey=False, figsize=(15, 7))
+    origln = rds['original'].plot(ax=axes[0])
+    predln = rds['predict'].plot(ax=axes[0])
+    axes[0].legend(origln+predln, ['PWV', 'MLR reconstruction'], fontsize=fontsize)
+    axes[0].grid()
+    axes[0].set_xlabel('')
+    axes[0].set_ylabel('PWV anomalies [mm]', fontsize=fontsize)
+    axes[0].tick_params(labelsize=fontsize)
+    axes[0].grid(which='minor', color='k', linestyle='--')
+    rds['resid'].plot(ax=axes[1], color='k')
+    axes[1].grid()
+    axes[1].set_ylabel('Residuals [mm]', fontsize=fontsize)
+    axes[1].tick_params(labelsize=fontsize)
+    axes[1].set_xlabel('')
+    years_fmt = mdates.DateFormatter('%Y')
+    # ax.figure.autofmt_xdate()
+    axes[1].xaxis.set_major_locator(mdates.YearLocator(2))
+    axes[1].xaxis.set_minor_locator(mdates.YearLocator(1)) 
+    axes[1].xaxis.set_major_formatter(years_fmt)
+    axes[1].grid(which='minor', color='k', linestyle='--')
+    # ax.xaxis.set_minor_locator(mdates.MonthLocator())
+    axes[1].figure.autofmt_xdate()
+
+    fig.tight_layout()
+    fig.subplots_adjust()
+    if save:
+        filename = 'pw_interannual_MLR_comparison.png'
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
+    return fig
+
+    
 def plot_annual_pw(path=work_yuval, fontsize=20, labelsize=18, compare='uerra',
                    ylim=[7.5, 40], save=True, kind='violin', bins=None):
     """kind can be violin or hist, for violin choose ylim=7.5,40 and for hist
