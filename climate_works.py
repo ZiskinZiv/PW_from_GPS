@@ -416,29 +416,29 @@ def run_best_MLR(savepath=None, heatmap=True):
         'u500_2',
         'u500_4',
         'u700_3',
-        'u700_4']  # , 'v700_1', 'v700_4']
-    u_cols = ['u_anoms_225',
-              'u_anoms_350',
-              'u_anoms_300',
-              'u_anoms_200',
-              'u_anoms_250',
-              'u_anoms_400']
-    v_cols = ['v_anoms_775',
-              'v_anoms_900',
-              'v_anoms_825',
-              'v_anoms_700',
-              'v_anoms_950',
-              'v_anoms_650',
-              'v_anoms_550',
-              'v_anoms_850',
-              'v_anoms_600',
-              'v_anoms_875',
-              'v_anoms_925',
-              'v_anoms_750',
-              'v_anoms_800']
-    keep_inds = ['pwv', 'ea-1', 'iod+1', 'wemoi', 'MJO_20E+1']
-    keep_inds = ['pwv'] + u_cols + v_cols
-    keep_inds = ['pwv', 'ea-1', 'iod+1', 'wemoi', 'z500_1', 'z500_2', 'z500_3']
+        'u700_4','ea-1', 'iod+1', 'wemoi', 'MJO_20E+1']  # , 'v700_1', 'v700_4']
+#    u_cols = ['u_anoms_225',
+#              'u_anoms_350',
+#              'u_anoms_300',
+#              'u_anoms_200',
+#              'u_anoms_250',
+#              'u_anoms_400']
+#    v_cols = ['v_anoms_775',
+#              'v_anoms_900',
+#              'v_anoms_825',
+#              'v_anoms_700',
+#              'v_anoms_950',
+#              'v_anoms_650',
+#              'v_anoms_550',
+#              'v_anoms_850',
+#              'v_anoms_600',
+#              'v_anoms_875',
+#              'v_anoms_925',
+#              'v_anoms_750',
+#              'v_anoms_800']
+#    keep_inds = ['pwv', 'ea-1', 'iod+1', 'wemoi', 'MJO_20E+1']
+#    keep_inds = ['pwv'] + u_cols + v_cols
+#    keep_inds = ['pwv', 'ea-1', 'iod+1', 'wemoi', 'z500_1', 'z500_2', 'z500_3']
 #    keep_inds = ['pwv', 'MJO_20E+1', 'wemoi', 'z500_1']
     dff = df[keep_inds]
     X, y = preprocess_interannual_df(dff)
