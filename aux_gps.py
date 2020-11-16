@@ -41,20 +41,37 @@ def normality_test_xr(da_ts, sample=None, alpha=0.05, test='lili',
     return mean, pvalue, normal
 
 
-def homogeneity_test(da_ts, hg_test_func, dropna=True, alpha=0.05, verbose=True):
+def homogeneity_test_xr(da_ts, hg_test_func, dropna=True, alpha=0.05,
+                        sim=None, verbose=True):
+    """False means data is homogenous, True means non-homogenous with significance alpha"""
     import xarray as xr
     import pandas as pd
     time_dim = list(set(da_ts.dims))[0] 
     if dropna:
         da_ts = da_ts.dropna(time_dim)
-    h, cp, p, U, mu = hg_test_func(da_ts, alpha)
-    cpl = pd.to_datetime(da_ts.isel({time_dim: cp})[time_dim].values)
-    da = xr.DataArray([h, cpl, p, U, mu], dims=['results'])
-    da['results'] = ['h', 'cp_dt', 'pvalue', 'stat', 'means']
+    h, cp, p, U, mu = hg_test_func(da_ts, alpha=alpha, sim=sim)
+    result = hg_test_func(da_ts, alpha=alpha, sim=sim)
+    name = type(result).__name__
+    if verbose:
+        print('running homogeneity {} with alpha {} and sim {}'.format(name, alpha, sim))
+
+    cpl = pd.to_datetime(da_ts.isel({time_dim: result.cp})[time_dim].values)
+    if 'U' in result._fields:
+        stat = result.U
+    elif 'T' in result._fields:
+        stat = result.T
+    elif 'Q' in result._fields:
+        stat = result.Q
+    elif 'R' in result._fields:
+        stat = result.R
+    elif 'V' in result._fields:
+        stat = result.V
+    da = xr.DataArray([name, result.h, cpl, result.p, stat, result.avg], dims=['results'])
+    da['results'] = ['name', 'h', 'cp_dt', 'pvalue', 'stat', 'means']
     return da
 
 
-def VN_ratio_trend_test(da_ts, dropna=True, alpha=0.05, loadpath=work_yuval,
+def VN_ratio_trend_test_xr(da_ts, dropna=True, alpha=0.05, loadpath=work_yuval,
                         verbose=True, return_just_trend=False):
     """calculate the Von Nuemann ratio test statistic and test for trend."""
     import xarray as xr
