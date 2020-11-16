@@ -356,6 +356,41 @@ def build_df_lat_lon_alt_gnss_stations(gnss_path=GNSS, savepath=None):
     return df
 
 
+def produce_homogeniety_results_xr(ds, alpha=0.05, test='snht', sim=20000):
+    import pyhomogeneity as hg
+    import xarray as xr
+    from aux_gps import homogeneity_test_xr
+    hg_tests_dict = {
+        'snht': hg.snht_test,
+        'pett': hg.pettitt_test,
+        'b_like': hg.buishand_likelihood_ratio_test,
+        'b_u': hg.buishand_u_test,
+        'b_q': hg.buishand_q_test,
+        'b_range': hg.buishand_range_test}
+    if test == 'all':
+        tests = [x for x in hg_tests_dict.keys()]
+        ds_list = []
+        for t in tests:
+            print('running {} test...'.format(t))
+            rds = ds.map(homogeneity_test_xr, hg_test_func=hg_tests_dict[t],
+                         alpha=alpha, sim=sim, verbose=False)
+            rds = rds.to_array('station').to_dataset('results')
+            ds_list.append(rds)
+        rds = xr.concat(ds_list, 'test')
+        rds['test'] = tests
+        rds.attrs['alpha'] = alpha
+        rds.attrs['sim'] = sim
+    else:
+        rds = ds.map(homogeneity_test_xr, hg_test_func=hg_tests_dict[test],
+                     alpha=alpha, sim=sim, verbose=False)
+        rds = rds.to_array('station').to_dataset('results')
+        rds.attrs['alpha'] = alpha
+        rds.attrs['sim'] = sim
+#    df=rds.to_array('st').to_dataset('results').to_dataframe()
+    print('Done!')
+    return rds
+
+
 def run_error_analysis(station='tela', task='edit30hr'):
     station_on_geo = geo_path / 'Work_Files/PW_yuval/GNSS_stations'
     if task == 'edit30hr':
