@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 from PW_paths import savefig_path
 import matplotlib.ticker as ticker
 import matplotlib.dates as mdates
+from PW_stations import produce_geo_gnss_solved_stations
 tela_results_path = work_yuval / 'GNSS_stations/tela/rinex/30hr/results'
 tela_solutions = work_yuval / 'GNSS_stations/tela/gipsyx_solutions'
 sound_path = work_yuval / 'sounding'
@@ -25,8 +26,8 @@ hydro_path = work_yuval / 'hydro'
 ceil_path = work_yuval / 'ceilometers'
 aero_path = work_yuval / 'AERONET'
 climate_path = work_yuval / 'climate'
-
-
+df_gnss = produce_geo_gnss_solved_stations(plot=False,add_distance_to_coast=True)
+st_order_climate = [x for x in df_gnss.dropna().sort_values(['groups_climate', 'lat', 'lon'],ascending=[1,0,0]).index]
 rc = {
     'font.family': 'serif',
     'xtick.labelsize': 'large',
@@ -860,7 +861,7 @@ def plot_interannual_MLR_results(path=climate_path, fontsize=16, save=True):
         plt.savefig(savefig_path / filename, bbox_inches='tight')
     return fig
 
-    
+
 def plot_annual_pw(path=work_yuval, fontsize=20, labelsize=18, compare='uerra',
                    ylim=[7.5, 40], save=True, kind='violin', bins=None):
     """kind can be violin or hist, for violin choose ylim=7.5,40 and for hist
@@ -868,6 +869,7 @@ def plot_annual_pw(path=work_yuval, fontsize=20, labelsize=18, compare='uerra',
     import xarray as xr
     from synoptic_procedures import slice_xr_with_synoptic_class
     gnss_filename = 'GNSS_PW_monthly_thresh_50_homogenized.nc'
+#    gnss_filename = 'first_climatol_try.nc'
     pw = xr.load_dataset(path / gnss_filename)
     df_annual = pw.to_dataframe()
     hue = None
@@ -2021,6 +2023,32 @@ def produce_table_mann_kendall(thresh=50, alpha=0.05, load_data='pwv-homo'):
     return table
 
 
+def plot_filled_and_unfilled_pwv_monthly_anomalies(pw_da, anomalize=True,
+                                                   max_gap=6,
+                                                   method='cubic',
+                                                   ax=None):
+    from aux_gps import anomalize_xr
+    import matplotlib.pyplot as plt
+    import numpy as np
+    if anomalize:
+        pw_da = anomalize_xr(pw_da, 'MS')
+    max_gap_td = np.timedelta64(max_gap, 'M')
+    filled = pw_da.interpolate_na('time', method=method, max_gap=max_gap_td)
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(15, 5))
+    filledln = filled.plot.line('b-', ax=ax)
+    origln = pw_da.plot.line('r-', ax=ax)
+    ax.legend(origln + filledln,
+              ['original time series',
+               'filled using {} interpolation with max gap of {} months'.format(method,
+                                                                                max_gap)])
+    ax.grid()
+    ax.set_xlabel('')
+    ax.set_ylabel('PWV [mm]')
+    ax.set_title('PWV station {}'.format(pw_da.name.upper()))
+    return ax
+
+
 def plot_pwv_statistic_vs_height(pwv_ds, stat='mean', x='alt', season=None,
                                  ax=None, color='b'):
     from PW_stations import produce_geo_gnss_solved_stations
@@ -3011,6 +3039,119 @@ def plot_diurnal_pw_all_seasons(path=work_yuval, season='ALL', synoptic=None,
 #        plt.savefig(savefig_path / filename, bbox_inches='tight')
         plt.savefig(savefig_path / filename, orientation='portrait')
     return fg
+
+
+def plot_climate_classification(path=climate_path, gis_path=gis_path,
+                                fontsize=16):
+    import xarray as xr
+    from climate_works import read_climate_classification_legend
+    from PW_stations import produce_geo_gnss_solved_stations
+    import numpy as np
+    from matplotlib import colors
+
+    ras = xr.open_rasterio(path / 'Beck_KG_V1_present_0p0083.tif')
+    ds = ras.isel(band=0)
+    minx = 34.0
+    miny = 29.0
+    maxx = 36.5
+    maxy = 34.0
+    ds = ds.sortby('y')
+    ds = ds.sel(x=slice(minx, maxx), y=slice(miny, maxy))
+    ds = ds.astype(int)
+    ds = ds.reset_coords(drop=True)
+    ax_map = plot_israel_map(
+        gis_path=gis_path,
+        ax=None,
+        ticklabelsize=fontsize)
+    df = read_climate_classification_legend(path)
+    # get color pixels to dict:
+    d = df['color'].to_dict()
+    sort_idx = np.argsort([x for x in d.keys()])
+    idx = np.searchsorted([x for x in d.keys()], ds.values, sorter=sort_idx)
+    out = np.asarray([x for x in d.values()])[sort_idx][idx]
+    ds_as_color = xr.DataArray(out, dims=['y', 'x', 'c'])
+    ds_as_color['y'] = ds['y']
+    ds_as_color['x'] = ds['x']
+    ds_as_color['c'] = ['R', 'G', 'B']
+    # overlay with dem data:
+#    cmap = plt.get_cmap('terrain', 41)
+#    df_gnss = produce_geo_gnss_solved_stations(plot=False)
+#    c_colors = df.set_index('class_code').loc[df_gnss['code'].unique()]['color'].values
+    c_colors = df['color'].values
+    c_li = [c for c in c_colors]
+    c_colors = np.asarray(c_li)
+    c_colors = np.unique(ds_as_color.stack(coor=['x', 'y']).T.values, axis=0)
+    # remove black:
+#    c_colors = c_colors[:-1]
+    int_code = np.unique(ds.stack(coor=['x', 'y']).T.values, axis=0)
+    ticks = [df.loc[x]['class_code'] for x in int_code[1:]]
+    cc = [df.set_index('class_code').loc[x]['color'] for x in ticks]
+    cc_as_hex = [colors.rgb2hex(x) for x in cc]
+    tickd = dict(zip(cc_as_hex, ticks))
+#    ticks.append('Water')
+#    ticks.reverse()
+    bounds = [x for x in range(len(c_colors) + 1)]
+    chex = [colors.rgb2hex(x) for x in c_colors]
+    ticks = [tickd.get(x, 'Water') for x in chex]
+    cmap = colors.ListedColormap(chex)
+    norm = colors.BoundaryNorm(bounds, cmap.N)
+#    vmin = ds_as_color.min().item()
+#    vmax = ds_as_color.max().item()
+    im = ds_as_color.plot.imshow(
+        ax=ax_map,
+        alpha=.7,
+        add_colorbar=False,
+        cmap=cmap,
+        interpolation='antialiased',
+        origin='lower',
+        norm=norm)
+#    colours = im.cmap(im.norm(np.unique(ds_as_color)))
+#    chex = [colors.rgb2hex(x) for x in colours]
+#    cmap = colors.ListedColormap(chex)
+#    bounds=[x for x in range(len(colours))]
+    cbar_kwargs = {'fraction': 0.1, 'aspect': 50, 'pad': 0.03}
+    cb = plt.colorbar(
+        im,
+        boundaries=bounds,
+        ticks=None,
+        ax=ax_map,
+        **cbar_kwargs)
+    cb.set_label(
+        label='climate classification',
+        size=fontsize,
+        weight='normal')
+    n = len(c_colors)
+    tick_locs = (np.arange(n) + 0.5) * (n) / n
+    cb.set_ticks(tick_locs)
+    # set tick labels (as before)
+    cb.set_ticklabels(ticks)
+    cb.ax.tick_params(labelsize=fontsize)
+    ax_map.set_xlabel('')
+    ax_map.set_ylabel('')
+    # now for the gps stations:
+    gps = produce_geo_gnss_solved_stations(plot=False)
+    removed = ['hrmn', 'gilb', 'lhav', 'nizn', 'spir']
+    removed = []
+    print('removing {} stations from map.'.format(removed))
+#    merged = ['klhv', 'lhav', 'mrav', 'gilb']
+    merged = []
+    gps_list = [x for x in gps.index if x not in merged and x not in removed]
+    gps.loc[gps_list, :].plot(ax=ax_map, edgecolor='black', marker='s',
+             alpha=1.0, markersize=35, facecolor="None", linewidth=2, zorder=3)
+    gps_stations = gps_list
+    to_plot_offset = []
+    for x, y, label in zip(gps.loc[gps_stations, :].lon, gps.loc[gps_stations,
+                                                                 :].lat, gps.loc[gps_stations, :].index.str.upper()):
+        if label.lower() in to_plot_offset:
+            ax_map.annotate(label, xy=(x, y), xytext=(4, -6),
+                            textcoords="offset points", color='k',
+                            fontweight='bold', fontsize=fontsize - 2)
+        else:
+            ax_map.annotate(label, xy=(x, y), xytext=(3, 3),
+                            textcoords="offset points", color='k',
+                            fontweight='bold', fontsize=fontsize - 2)
+    return fg
+    
 
 
 def group_sites_to_xarray(upper=False, scope='diurnal'):
