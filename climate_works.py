@@ -20,7 +20,79 @@ lon_hemi_box = [-80, 80]
 def plot_eof_from_ds(ds, var='v1000', mode=1, ax=None):
     var_name_in_ds = '{}_eofs'.format(var)
     eof = ds[var_name_in_ds].sel(mode=mode)
-    
+
+
+#def read_climate_classification(path=climate_path):
+#    import pandas as pd
+#    import numpy as np
+#    file = path / 'Koeppen-Geiger-ASCII.txt'
+#    df = pd.read_csv(file, delim_whitespace=True)
+#    df.columns = ['latitude', 'longitude', 'Climate_Class']
+#    ds = df.groupby(['latitude', 'longitude']).first().to_xarray()
+#    return ds
+def read_climate_classification_legend(path=climate_path):
+    import pandas as pd
+    import numpy as np
+    file = path / 'koppen_legend.txt'
+    df = pd.read_csv(file, header=None, sep=':')
+    df.columns = [
+        'class_int',
+        'class_code',
+        'class_description',
+        'pixel_range']
+    df.drop(df.tail(6).index, inplace=True)
+    df['class_int'] = df['class_int'].astype(int)
+    df['class_code'] = df['class_code'].str.replace(' ', '')
+    df = df.set_index('class_int')
+    df['pixel_range'] = df['pixel_range'].str.lstrip()
+    df['pixel_range'] = df['pixel_range'].str.replace(' ', ',')
+    li = df['pixel_range'].str.split(',').tolist()
+    p1 = [int(x[0].replace('[', '')) for x in li]
+    p2 = [int(x[1]) for x in li]
+    p3 = [int(x[2].replace(']', '')) for x in li]
+    df['pixel1'] = p1
+    df['pixel2'] = p2
+    df['pixel3'] = p3
+    df['color'] = list(zip(df['pixel1'].astype(float) / 255,
+                           df['pixel2'].astype(float) / 255,
+                           df['pixel3'].astype(float) / 255))
+    df['color'] 
+    df.drop('pixel_range', axis=1, inplace=True)
+    df.drop('pixel1', axis=1, inplace=True)
+    df.drop('pixel2', axis=1, inplace=True)
+    df.drop('pixel3', axis=1, inplace=True)
+    return df
+
+
+def assign_climate_classification_to_gnss(path=climate_path):
+    import xarray as xr
+    import pandas as pd
+    from PW_stations import produce_era5_field_at_gnss_coords
+    ras = xr.open_rasterio(climate_path / 'Beck_KG_V1_present_0p0083.tif')
+    ds = ras.isel(band=0)
+    ds = ds.rename({'x': 'longitude', 'y': 'latitude'})
+    cc = produce_era5_field_at_gnss_coords(ds)
+    cc = cc.astype(int)
+    # corrections:
+    cc['csar'] = 8
+    cc['yrcm'] = 6
+    cc['drag'] = 6
+    cc['ramo'] = 4
+    cc = cc.expand_dims('class_int')
+    cc_ser = cc.to_dataframe().T
+    # read classification legend:
+    df = read_climate_classification_legend(path=path)
+    d = df['class_code'].to_dict()
+    c_code_ser = cc_ser[0].map(d)
+    d = df['class_description'].to_dict()
+    c_desc_ser = cc_ser[0].map(d)
+    df = pd.concat([cc_ser, c_code_ser, c_desc_ser], axis=1)
+    df.columns = ['climate_int', 'code', 'description']
+    df.index.name = 'station'
+    df.to_csv(path / 'gnss_station_climate_code.csv')
+    return df
+
+
 def create_index_from_ds_eofs(ds, var='v1000', savepath=climate_path):
     from aux_gps import save_ncfile
     var_name_in_ds = '{}_pcs'.format(var)
