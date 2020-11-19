@@ -18,17 +18,18 @@ def normality_test_xr(da_ts, sample=None, alpha=0.05, test='lili',
     from statsmodels.stats.diagnostic import lilliefors
     from scipy.stats import shapiro
     from scipy.stats import normaltest
+    import xarray as xr
     time_dim = list(set(da_ts.dims))[0]
     if sample is not None:
         da_ts = da_ts.resample({time_dim: sample}).mean()
     if dropna:
         da_ts = da_ts.dropna(time_dim)
     if test == 'shapiro':
-        mean, pvalue = shapiro(da_ts)
+        stat, pvalue = shapiro(da_ts)
     elif test == 'lili':
-        mean, pvalue = lilliefors(da_ts, dist='norm', pvalmethod='table')
+        stat, pvalue = lilliefors(da_ts, dist='norm', pvalmethod='table')
     elif test == 'normaltest':
-        mean, pvalue = normaltest(da_ts)
+        stat, pvalue = normaltest(da_ts)
     if pvalue < alpha:
         Not = 'NOT'
         normal = False
@@ -36,9 +37,11 @@ def normality_test_xr(da_ts, sample=None, alpha=0.05, test='lili',
         Not = ''
         normal = True
     if verbose:
-        print('Mean: {:.4f}, pvalue: {:.4f}'.format(mean, pvalue))
+        print('Mean: {:.4f}, pvalue: {:.4f}'.format(stat, pvalue))
         print('Thus, the data is {} Normally distributed with alpha {}'.format(Not, alpha))
-    return mean, pvalue, normal
+    da = xr.DataArray([stat, pvalue, normal], dims=['result'])
+    da['result'] = ['stat', 'pvalue', 'h']
+    return da
 
 
 def homogeneity_test_xr(da_ts, hg_test_func, dropna=True, alpha=0.05,
@@ -367,17 +370,29 @@ def line_and_num_for_phrase_in_file(phrase='the dog barked', filename='file.txt'
     return None, None
 
 
-def grab_n_consecutive_epochs_from_ts(da_ts, sep='nan', n=10):
+def grab_n_consecutive_epochs_from_ts(da_ts, sep='nan', n=10, time_dim=None,
+                                      return_largest=False):
     """grabs n consecutive epochs from time series (xarray dataarrays)
     and return list of either dataarrays"""
+    if time_dim is None:
+        time_dim = list(set(da_ts.dims))[0]
     df = da_ts.to_dataframe()
     A = consecutive_runs(df, num='nan')
     A = A.sort_values('total_not-nan', ascending=False)
+    max_n = len(A)
+    if return_largest:
+        start = A.iloc[0, 0]
+        end = A.iloc[0, 1]
+        da = da_ts.isel({time_dim:slice(start, end)})
+        return da
+    if n > max_n:
+        print('{} epoches requested but only {} available'.format(n, max_n))
+        n = max_n
     da_list = []
     for i in range(n):
         start = A.iloc[i, 0]
         end = A.iloc[i, 1]
-        da = da_ts.isel(time=slice(start, end))
+        da = da_ts.isel({time_dim: slice(start, end)})
         da_list.append(da)
     return da_list
 
@@ -1925,14 +1940,24 @@ def dt_to_np64(time_coord, unit='m', convert_back=False):
     return new_time
 
 
-def xr_reindex_with_date_range(ds, drop=True, time_dim=None, freq='5min'):
+def xr_reindex_with_date_range(ds, drop=True, time_dim=None, freq='5min',
+                               dt_min=None, dt_max=None):
+    """be careful when drop=True in datasets that have various nans in dataarrays"""
     import pandas as pd
     if time_dim is None:
         time_dim = list(set(ds.dims))[0]
     if drop:
         ds = ds.dropna(time_dim)
-    start = pd.to_datetime(ds[time_dim].min().item())
-    end = pd.to_datetime(ds[time_dim].max().item())
+    if dt_min is not None:
+        dt_min = pd.to_datetime(dt_min)
+        start = pd.to_datetime(dt_min)
+    else:
+        start = pd.to_datetime(ds[time_dim].min().item())
+    if dt_max is not None:
+        dt_max = pd.to_datetime(dt_max)
+        end = pd.to_datetime(dt_max)
+    else:
+        end = pd.to_datetime(ds[time_dim].max().item())
     new_time = pd.date_range(start, end, freq=freq)
     ds = ds.reindex({time_dim: new_time})
     return ds
