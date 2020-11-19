@@ -27,6 +27,7 @@ garner_path = work_yuval / 'garner'
 ims_path = work_yuval / 'IMS_T'
 gis_path = work_yuval / 'gis'
 sound_path = work_yuval / 'sounding'
+climate_path = work_yuval / 'climate'
 dem_path = work_yuval / 'AW3D30'
 phys_soundings = sound_path / 'bet_dagan_phys_sounding_2007-2019.nc'
 tela_zwd = work_yuval / 'gipsyx_results/tela_newocean/TELA_PPP_1996-2019.nc'
@@ -1151,10 +1152,12 @@ def produce_pw_statistics(path=work_yuval, resample_to_mm=True, thresh=50,
 def produce_geo_gnss_solved_stations(path=gis_path,
                                      file='israeli_gnss_coords.txt',
                                      add_distance_to_coast=False,
+                                     climate_path=climate_path,
                                      plot=True):
     import geopandas as gpd
     import pandas as pd
     from pathlib import Path
+    from climate_works import assign_climate_classification_to_gnss
     from ims_procedures import get_israeli_coast_line
     cwd = Path().cwd()
     df = pd.read_csv(cwd / file, delim_whitespace=True)
@@ -1172,6 +1175,7 @@ def produce_geo_gnss_solved_stations(path=gis_path,
             point = stations.to_crs('epsg:2039').loc[station, 'geometry']
             stations.loc[station, 'distance'] = min(
                 [x.distance(point) for x in coast_lines]) / 1000.0
+    # define groups for longterm analysis, north to south, west to east:
     coastal_dict = {key: 0 for (key) in['kabr', 'bshm', 'csar', 'tela', 'alon', 'slom']}
     highland_dict = {key: 1 for (key) in 
         ['nzrt', 'mrav', 'yosh', 'jslm', 'klhv', 'yrcm', 'ramo']}
@@ -1179,6 +1183,21 @@ def produce_geo_gnss_solved_stations(path=gis_path,
         ['elro', 'katz', 'drag', 'dsea', 'nrif', 'elat']}
     groups_dict = {**coastal_dict, **highland_dict, **eastern_dict}
     stations['groups_annual'] = pd.Series(groups_dict)
+    # define groups with climate code
+    gr1_dict = {key: 0 for (key) in['kabr', 'bshm', 'csar', 'tela', 'alon', 'nzrt', 'mrav', 'yosh', 'jslm', 'elro', 'katz']}
+    gr2_dict = {key: 1 for (key) in 
+        ['slom', 'klhv', 'yrcm', 'drag']}
+    gr3_dict = {key: 2 for (key) in 
+        ['ramo', 'dsea', 'nrif', 'elat']}
+    groups_dict = {**gr1_dict, **gr2_dict, **gr3_dict}
+    stations['groups_climate'] = pd.Series(groups_dict)
+    cc = pd.read_csv(climate_path / 'gnss_station_climate_code.csv',
+                     index_col='station')
+    stations = stations.join(cc)
+    
+#    cc, ccc = assign_climate_classification_to_gnss(path=climate_path)
+#    stations['climate_class'] = cc
+#    stations['climate_code'] = ccc
     if plot:
         ax = isr.plot()
         stations.plot(ax=ax, column='alt', cmap='Greens',
@@ -3983,6 +4002,46 @@ def process_mkt_from_dataset(ds_in, alpha=0.05, seasonal=False, factor=120,
         ci_cols = [x for x in df.columns if 'CI' in x]
         df[ci_cols] = df[ci_cols] * factor
     return df
+
+
+def fill_pwv_stations(pw_ds, method='cubic', max_gap=6, savepath=None,
+                      compare_station='drag', daily=False):
+    from aux_gps import anomalize_xr
+    import matplotlib.pyplot as plt
+    import numpy as np
+    print('using {} interpolation with max gap of {} months.'.format(method, max_gap))
+    longterm_mm = pw_ds.groupby('time.month').mean(keep_attrs=True)
+    pw_anoms = anomalize_xr(pw_ds, 'MS')
+    if daily:
+        max_gap_td = np.timedelta64(max_gap, 'D')
+    else:
+        max_gap_td = np.timedelta64(max_gap, 'M')
+    filled = pw_anoms.interpolate_na('time', method=method, max_gap=max_gap_td)
+    reconstructed = filled.groupby('time.month') + longterm_mm
+    reconstructed = reconstructed.reset_coords(drop=True)
+    for da in pw_ds:
+        reconstructed[da].attrs = pw_ds[da].attrs
+    reconstructed.attrs = pw_ds.attrs
+    reconstructed.attrs['action'] = 'interpolated using {} method'.format(method)
+    if daily:
+        reconstructed.attrs['max_gap'] = '{} days'.format(max_gap)
+    else:
+        reconstructed.attrs['max_gap'] = '{} months'.format(max_gap)
+    if compare_station is not None:
+        pw_da = pw_ds[compare_station]
+        pw_filled = reconstructed[compare_station]
+    filledln = pw_filled.plot.line('b-')
+    origln = pw_da.plot.line('r-')
+    ax = plt.gca()
+    ax.legend(origln + filledln,
+              ['original time series',
+               'filled using {} interpolation with max gap of {} months'.format(method,
+                                                                                max_gap)])
+    ax.grid()
+    ax.set_xlabel('')
+    ax.set_ylabel('PWV [mm]')
+    ax.set_title('PWV station {}'.format(pw_da.name.upper()))
+    return reconstructed
 
 
 def homogenize_pw_dataset(path=work_yuval, thresh=50, savepath=work_yuval):
