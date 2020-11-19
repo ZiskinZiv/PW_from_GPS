@@ -1140,7 +1140,7 @@ def produce_pw_statistics(path=work_yuval, resample_to_mm=True, thresh=50,
         'index').to_dataframe('Kurtosis')
     df = pd.concat([mean, std, median, q5, q95,
                     maximum, minimum, sk, kurt], axis=1)
-    cols=[]
+    cols = []
     cols.append('Site ID')
     cols += [x for x in df.columns]
     df['Site ID'] = df.index.str.upper()
@@ -1152,12 +1152,11 @@ def produce_pw_statistics(path=work_yuval, resample_to_mm=True, thresh=50,
 def produce_geo_gnss_solved_stations(path=gis_path,
                                      file='israeli_gnss_coords.txt',
                                      add_distance_to_coast=False,
-                                     climate_path=climate_path,
+                                     climate_path=None,
                                      plot=True):
     import geopandas as gpd
     import pandas as pd
     from pathlib import Path
-    from climate_works import assign_climate_classification_to_gnss
     from ims_procedures import get_israeli_coast_line
     cwd = Path().cwd()
     df = pd.read_csv(cwd / file, delim_whitespace=True)
@@ -1176,25 +1175,45 @@ def produce_geo_gnss_solved_stations(path=gis_path,
             stations.loc[station, 'distance'] = min(
                 [x.distance(point) for x in coast_lines]) / 1000.0
     # define groups for longterm analysis, north to south, west to east:
-    coastal_dict = {key: 0 for (key) in['kabr', 'bshm', 'csar', 'tela', 'alon', 'slom']}
-    highland_dict = {key: 1 for (key) in 
-        ['nzrt', 'mrav', 'yosh', 'jslm', 'klhv', 'yrcm', 'ramo']}
-    eastern_dict = {key: 2 for (key) in 
-        ['elro', 'katz', 'drag', 'dsea', 'nrif', 'elat']}
+    coastal_dict = {
+        key: 0 for (key) in [
+            'kabr',
+            'bshm',
+            'csar',
+            'tela',
+            'alon',
+            'slom']}
+    highland_dict = {key: 1 for (key) in
+                     ['nzrt', 'mrav', 'yosh', 'jslm', 'klhv', 'yrcm', 'ramo']}
+    eastern_dict = {key: 2 for (key) in
+                    ['elro', 'katz', 'drag', 'dsea', 'nrif', 'elat']}
     groups_dict = {**coastal_dict, **highland_dict, **eastern_dict}
     stations['groups_annual'] = pd.Series(groups_dict)
     # define groups with climate code
-    gr1_dict = {key: 0 for (key) in['kabr', 'bshm', 'csar', 'tela', 'alon', 'nzrt', 'mrav', 'yosh', 'jslm', 'elro', 'katz']}
-    gr2_dict = {key: 1 for (key) in 
-        ['slom', 'klhv', 'yrcm', 'drag']}
-    gr3_dict = {key: 2 for (key) in 
-        ['ramo', 'dsea', 'nrif', 'elat']}
+    gr1_dict = {
+        key: 0 for (key) in [
+            'kabr',
+            'bshm',
+            'csar',
+            'tela',
+            'alon',
+            'nzrt',
+            'mrav',
+            'yosh',
+            'jslm',
+            'elro',
+            'katz']}
+    gr2_dict = {key: 1 for (key) in
+                ['slom', 'klhv', 'yrcm', 'drag']}
+    gr3_dict = {key: 2 for (key) in
+                ['ramo', 'dsea', 'nrif', 'elat']}
     groups_dict = {**gr1_dict, **gr2_dict, **gr3_dict}
     stations['groups_climate'] = pd.Series(groups_dict)
-    cc = pd.read_csv(climate_path / 'gnss_station_climate_code.csv',
-                     index_col='station')
-    stations = stations.join(cc)
-    
+    if climate_path is not None:
+        cc = pd.read_csv(climate_path / 'gnss_station_climate_code.csv',
+                         index_col='station')
+        stations = stations.join(cc)
+
 #    cc, ccc = assign_climate_classification_to_gnss(path=climate_path)
 #    stations['climate_class'] = cc
 #    stations['climate_code'] = ccc
