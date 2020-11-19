@@ -284,6 +284,18 @@ def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
     from string import digits
     import numpy as np
     import xarray as xr
+    # first if RF chosen, replace the cyclic coords of DOY (sin and cos) with
+    # the DOY itself.
+    if model_name == 'RF':
+        doy = X['sample'].dt.dayofyear
+        sel_doy = [x for x in X.feature.values if 'doy_sin' in x]
+        doy_X = doy.broadcast_like(X.sel(feature=sel_doy))
+        doy_X['feature'] = [
+            'doy_{}'.format(x) for x in range(
+                doy_X.feature.size)]
+        no_doy = [x for x in X.feature.values if 'doy' not in x]
+        X = X.sel(feature=no_doy)
+        X = xr.concat([X, doy_X], 'feature')
     # first slice X for features:
     if isinstance(features, str):
         f = [x for x in X.feature.values if features in x]
@@ -293,6 +305,8 @@ def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
         for f in features:
             fs += [x for x in X.feature.values if f in x]
         X = X.sel(feature=fs)
+    if diagnostic:
+        print(np.unique(X.feature.values))
     # configure the cross-validation procedure
     cv_inner = StratifiedKFold(n_splits=inner_splits, shuffle=True,
                                random_state=seed)
@@ -1011,13 +1025,17 @@ def produce_X_y(pw_station='drag', hs_id=48125, pressure_station='bet-dagan',
     import xarray as xr
     from aux_gps import anomalize_xr
     from PW_stations import produce_geo_gnss_solved_stations
+    import numpy as np
     # call preprocess_hydro_station
     hdf, y_meta = preprocess_hydro_station(hs_id, hydro_path, max_flow=max_flow)
     # load PWV and other features and combine them to fdf:
     pw = xr.open_dataset(path / 'GNSS_PW_anom_hourly_50_hour_dayofyear.nc')
     fdf = pw[pw_station].to_dataframe(name='pwv_{}'.format(pw_station))
     # add Day of year to fdf:
-    fdf['doy'] = fdf.index.dayofyear
+    doy = fdf.index.dayofyear
+    # scale doy to cyclic with amp ~1:
+    fdf['doy_sin'] = np.sin(doy * np.pi / 183)
+    fdf['doy_cos'] = np.cos(doy * np.pi / 183)
     if pressure_station is not None:
         p = xr.load_dataset(
             ims_path /
@@ -1030,8 +1048,8 @@ def produce_X_y(pw_station='drag', hs_id=48125, pressure_station='bet-dagan',
     # check the the last date of hdf is bigger than the first date of fdf,
     # i.e., there is at least one overlapping event in the data:
     if hdf.index[-1] < fdf.index[0]:
-            raise KeyError('Data not overlapping, hdf for {} stops at {} and fdf starts at {}'.format(
-                hs_id, hdf.index[-1], fdf.index[0]))
+        raise KeyError('Data not overlapping, hdf for {} stops at {} and fdf starts at {}'.format(
+            hs_id, hdf.index[-1], fdf.index[0]))
     # finally, call add_features_and_produce_X_y
     X, y = add_features_and_produce_X_y(hdf, fdf, window_size=window,
                                         seed=seed,
