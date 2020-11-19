@@ -380,6 +380,94 @@ def run_RHtests_function(name='FindU', station='tela', sample='monthly',
     return
 
 
+def prepare_pwv_for_climatol(path=work_yuval, freq='daily',
+                             savepath=homo_path, first_year='1998',
+                             last_year='2019', pwv_ds=None, group=None):
+    """freq can be daily or monthly.
+    climatol params used:
+        std=2 since the PDF is positively skewed,
+        na.strings="-999.9" this is for NA values,
+        dz.max=7 this is 7 sigma std outliers max,
+        homogen('PWV',1998,2019, na.strings="-999.9",dz.max=7,std=2)
+        dahstat('PWV',1998,2019,stat='series',long=TRUE)"""
+    import xarray as xr
+    import csv
+    from aux_gps import xr_reindex_with_date_range
+    from PW_stations import produce_geo_gnss_solved_stations
+    from PW_from_gps_figures import st_order_climate
+    freq_dict = {'daily': 'D', 'monthly': 'MS'}
+    if pwv_ds is not None:
+        ds = pwv_ds
+    else:
+        ds = xr.load_dataset(path / 'GNSS_PW_{}_thresh_50.nc'.format(freq))
+    ds = xr_reindex_with_date_range(
+        ds,
+        freq=freq_dict[freq],
+        dt_min='{}-01-01'.format(first_year),
+        dt_max='{}-12-31'.format(last_year),
+        drop=False)
+    df_gnss = produce_geo_gnss_solved_stations(plot=False)
+#    sites = df.dropna()[['lat', 'alt', 'groups_annual']].sort_values(by=['groups_annual', 'lat'],ascending=[1,0]).index
+    df = df_gnss.loc[st_order_climate, :]
+    df['site'] = df.index
+    df['name'] = df['site'].str.upper()
+    df = df[['lat', 'lon', 'alt', 'site', 'name']]
+    data = ds.to_dataframe().T
+    if group is not None:  # can be 0 to 2
+        inds = [x for x in df_gnss[df_gnss['groups_climate']==group].index]
+        df = df.loc[inds, :]
+        data = data.loc[inds, :]
+    else:
+        inds = [x for x in df_gnss.index if x in ds]
+        df = df.loc[inds, :]
+    if group is not None:
+        if freq == 'daily':
+            filename = 'PWV{}-d_{}-{}.est'.format(group, first_year, last_year)
+        else:
+            filename = 'PWV_{}_{}-{}.est'.format(group, first_year, last_year)
+    else:
+        filename = 'PWV_{}-{}.est'.format(first_year, last_year)
+    df.to_csv(
+        savepath /
+        filename,
+        sep=' ',
+        index=False,
+        header=False,
+        quotechar='"',
+        quoting=csv.QUOTE_NONNUMERIC)
+    filename = filename.replace('.est', '.dat')
+    df = data
+    df = df.round(3)
+    df.to_csv(
+        savepath /
+        filename,
+        sep=' ',
+        index=False,
+        header=False, line_terminator='\n', na_rep=-999.9)
+    return
+
+
+def read_climatol_results(var='PWV', first_year='1998', last_year='2019',
+                          path=homo_path):
+    import pandas as pd
+    import xarray as xr
+    ser_file = path / '{}_{}-{}_series.csv'.format(var, first_year, last_year)
+    flag_file = path / '{}_{}-{}_flags.csv'.format(var, first_year, last_year)
+    data = pd.read_csv(ser_file, header=0)
+    flag = pd.read_csv(flag_file, header=0)
+    data['Date'] = pd.to_datetime(data['Date'])
+    flag['Date'] = pd.to_datetime(flag['Date'])
+    data = data.set_index('Date')
+    flag = flag.set_index('Date')
+    data.index.name = 'time'
+    flag.index.name = 'time'
+#    flag.columns = [x + '_flag' for x in flag.columns]
+    ds = data.to_xarray()
+    ds_flag = flag.to_xarray()
+#    if remove_splits:
+#        ds = ds[[x for x in ds if '-' not in x]]
+#        ds_flag = ds_flag[[x for x in ds_flag if '-' not in x]]
+    return ds, ds_flag
 #def run_RH_tests(station='tela', path=None, sample='monthly', field='PW',
 #                 args=None):
 #    import rpy2.robjects as robjects
