@@ -296,15 +296,16 @@ def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
         no_doy = [x for x in X.feature.values if 'doy' not in x]
         X = X.sel(feature=no_doy)
         X = xr.concat([X, doy_X], 'feature')
-    # first slice X for features:
-    if isinstance(features, str):
-        f = [x for x in X.feature.values if features in x]
-        X = X.sel(feature=f)
-    elif isinstance(features, list):
-        fs = []
-        for f in features:
-            fs += [x for x in X.feature.values if f in x]
-        X = X.sel(feature=fs)
+    else:
+        # first slice X for features:
+        if isinstance(features, str):
+            f = [x for x in X.feature.values if features in x]
+            X = X.sel(feature=f)
+        elif isinstance(features, list):
+            fs = []
+            for f in features:
+                fs += [x for x in X.feature.values if f in x]
+            X = X.sel(feature=fs)
     if diagnostic:
         print(np.unique(X.feature.values))
     # configure the cross-validation procedure
@@ -341,7 +342,7 @@ def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
     tpr_ds = []
     gr_ds = []
     for est in scores_est_dict['estimator']:
-        gr, _ = process_gridsearch_results(est, model_name, split_dim='inner_kfold')
+        gr, _ = process_gridsearch_results(est, model_name, split_dim='inner_kfold', features=X.feature.values)
         # somehow save gr:
         gr_ds.append(gr)
         tpr_ds.append(produce_ROC_curves_from_model(est, X, y, cv_inner))
@@ -832,6 +833,10 @@ def process_gridsearch_results(GridSearchCV, model_name,
     ds.attrs['model_name'] = model_name
     ds.attrs['{}_splits'.format(split_dim)] = ds[split_dim].size
     if GridSearchCV.refit:
+        if hasattr(GridSearchCV.best_estimator_,'feature_importances_'):
+            f_import = xr.DataArray(GridSearchCV.best_estimator_.feature_importances_, dims=['feature'])
+            f_import['feature'] = features
+            ds['feature_impotances'] = f_import
         ds['best_score'] = GridSearchCV.best_score_
 #        ds['best_model'] = GridSearchCV.best_estimator_
         ds.attrs['refitted_scorer'] = GridSearchCV.refit
@@ -845,7 +850,6 @@ def process_gridsearch_results(GridSearchCV, model_name,
 
 
 def save_cv_results(cvr, savepath=hydro_path):
-#    import joblib
     from aux_gps import save_ncfile
     features = '_'.join(cvr.attrs['features'])
     if 'pwv' in features and 'pressure' in features:
