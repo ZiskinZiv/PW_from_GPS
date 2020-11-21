@@ -243,20 +243,32 @@ def produce_ROC_curves_from_model(model, X, y, cv, kfold_name='inner_kfold'):
     from sklearn.metrics import roc_curve
     from sklearn.metrics import roc_auc_score
     from sklearn.model_selection import GridSearchCV
-#    from sklearn.base import clone
+    from sklearn.metrics import precision_recall_curve
+    from sklearn.metrics import average_precision_score
+    # TODO: collect all predictions and y_tests from this, also predict_proba
+    # and save, then calculte everything elsewhere.
     if isinstance(model, GridSearchCV):
         model = model.best_estimator_
     tprs = []
     aucs = []
+    pr = []
+    pr_aucs = []
     mean_fpr = np.linspace(0, 1, 100)
     for i, (train, val) in enumerate(cv.split(X, y)):
         model.fit(X[train], y[train])
         y_pred = model.predict(X[val])
+        lr_probs = model.predict_proba(X[val])
+        # keep probabilities for the positive outcome only
+        lr_probs = lr_probs[:, 1]
         fpr, tpr, _ = roc_curve(y[val], y_pred)
         interp_tpr = np.interp(mean_fpr, fpr, tpr)
         interp_tpr[0] = 0.0
         tprs.append(interp_tpr)
         aucs.append(roc_auc_score(y[val], y_pred))
+        precision, recall, _ = precision_recall_curve(y[val], lr_probs)
+        pr.append(recall)
+        average_precision = average_precision_score(y[val], y_pred)
+        pr_aucs.append(average_precision)
 #    mean_tpr = np.mean(tprs, axis=0)
 #    mean_tpr[-1] = 1.0
 #    mean_auc = auc(mean_fpr, mean_tpr)
