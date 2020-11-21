@@ -4023,44 +4023,65 @@ def process_mkt_from_dataset(ds_in, alpha=0.05, seasonal=False, factor=120,
     return df
 
 
-def fill_pwv_stations(pw_ds, method='cubic', max_gap=6, savepath=None,
-                      compare_station='drag', daily=False):
+def fill_pwv_station(pw_da, method='cubic', max_gap=6, daily=False, plot=False,
+                     verbose=True):
     from aux_gps import anomalize_xr
     import matplotlib.pyplot as plt
     import numpy as np
-    print('using {} interpolation with max gap of {} months.'.format(method, max_gap))
-    longterm_mm = pw_ds.groupby('time.month').mean(keep_attrs=True)
-    pw_anoms = anomalize_xr(pw_ds, 'MS')
+    if verbose:
+        print(
+            'using {} interpolation with max gap of {} months.'.format(
+                method,
+                max_gap))
+    longterm_mm = pw_da.groupby('time.month').mean(keep_attrs=True)
+    pw_anom = anomalize_xr(pw_da, 'MS')
     if daily:
         max_gap_td = np.timedelta64(max_gap, 'D')
     else:
         max_gap_td = np.timedelta64(max_gap, 'M')
-    filled = pw_anoms.interpolate_na('time', method=method, max_gap=max_gap_td)
+    filled = pw_anom.interpolate_na('time', method=method, max_gap=max_gap_td)
     reconstructed = filled.groupby('time.month') + longterm_mm
     reconstructed = reconstructed.reset_coords(drop=True)
-    for da in pw_ds:
-        reconstructed[da].attrs = pw_ds[da].attrs
-    reconstructed.attrs = pw_ds.attrs
-    reconstructed.attrs['action'] = 'interpolated using {} method'.format(method)
+    reconstructed.attrs = pw_da.attrs
+    reconstructed.attrs['action'] = 'interpolated using {} method'.format(
+        method)
     if daily:
         reconstructed.attrs['max_gap'] = '{} days'.format(max_gap)
     else:
         reconstructed.attrs['max_gap'] = '{} months'.format(max_gap)
-    if compare_station is not None:
-        pw_da = pw_ds[compare_station]
-        pw_filled = reconstructed[compare_station]
-    filledln = pw_filled.plot.line('b-')
-    origln = pw_da.plot.line('r-')
-    ax = plt.gca()
-    ax.legend(origln + filledln,
-              ['original time series',
-               'filled using {} interpolation with max gap of {} months'.format(method,
-                                                                                max_gap)])
-    ax.grid()
-    ax.set_xlabel('')
-    ax.set_ylabel('PWV [mm]')
-    ax.set_title('PWV station {}'.format(pw_da.name.upper()))
+    if plot:
+        filledln = reconstructed.plot.line('b-')
+        origln = pw_da.plot.line('r-')
+        ax = plt.gca()
+        ax.legend(origln + filledln,
+                  ['original time series',
+                   'filled using {} interpolation with max gap of {} months'.format(method,
+                                                                                    max_gap)])
+        ax.grid()
+        ax.set_xlabel('')
+        ax.set_ylabel('PWV [mm]')
+        ax.set_title('PWV station {}'.format(pw_da.name.upper()))
     return reconstructed
+
+
+def fill_pwv_stations_and_choose_largest_epoch(pw_ds, method='cubic',
+                                               max_gap=5, savepath=None,
+                                               daily=False, plot=True):
+    from aux_gps import grab_n_consecutive_epochs_from_ts
+    from aux_gps import gantt_chart
+    pw_filled = pw_ds.map(
+        fill_pwv_station,
+        max_gap=max_gap,
+        method=method,
+        verbose=False,
+        plot=False)
+    pw_filled_largest = pw_filled.map(
+        grab_n_consecutive_epochs_from_ts,
+        return_largest=True)
+    if plot:
+        gantt_chart(pw_ds)
+        gantt_chart(pw_filled_largest)
+    return pw_filled_largest
 
 
 def homogenize_pw_dataset(path=work_yuval, thresh=50, savepath=work_yuval):
