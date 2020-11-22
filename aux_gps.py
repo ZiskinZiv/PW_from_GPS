@@ -12,6 +12,45 @@ from PW_paths import work_yuval
 # TODO: if not, build func to replace datetimeindex to numbers and vise versa
 
 
+def split_equal_da_ts_around_datetime(da_ts, dt='2014-05-01'):
+    time_dim = list(set(da_ts.dims))[0]
+    x1 = da_ts.dropna(time_dim).sel({time_dim: slice(None, dt)})
+    x2 = da_ts.dropna(time_dim).sel({time_dim: slice(dt, None)})
+    if x1.size == 0 or x2.size == 0:
+        raise ValueError('one or two of the sub-series is 0 size.')
+    if x1.size > x2.size:
+        x1 = x1.isel({time_dim: slice(-x2.size , None)})
+    elif x1.size < x2.size:
+        x2 = x2.isel({time_dim: slice(0, x1.size)})
+    return x1, x2
+
+
+def wilcoxon_rank_test_xr(
+        da_ts, alpha=0.05,
+        cp_dt='2014-05-01',
+        zero_method='wilcox',
+        correction=False,
+        alternative='two-sided',
+        mode='auto'):
+    import xarray as xr
+    from scipy.stats import wilcoxon
+    x, y = split_equal_da_ts_around_datetime(da_ts, dt=cp_dt)
+    stat, pvalue = wilcoxon(x, y, zero_method=zero_method,
+                            correction=correction, alternative=alternative
+                            )
+    if pvalue < alpha:
+        # the two parts of the time series come from different distributions
+        print('Two distributions!')
+        normal = False
+    else:
+        # same distribution
+        print('Same distribution')
+        normal = True
+    da = xr.DataArray([stat, pvalue, normal], dims=['result'])
+    da['result'] = ['stat', 'pvalue', 'h']
+    return da
+
+
 def normality_test_xr(da_ts, sample=None, alpha=0.05, test='lili',
                       dropna=True, verbose=True):
     """normality tests on da_ts"""
