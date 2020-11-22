@@ -237,6 +237,38 @@ def permutation_scikit(X, y, cv=False, plot=True):
     return
 
 
+def grab_y_true_and_predict_from_sklearn_model(model, X, y, cv,
+                                               kfold_name='inner_kfold'):
+    from sklearn.model_selection import GridSearchCV
+    import xarray as xr
+    import numpy as np
+    if isinstance(model, GridSearchCV):
+        model = model.best_estimator_
+    ds_list = []
+    for i, (train, val) in enumerate(cv.split(X, y)):
+        model.fit(X[train], y[train])
+        y_true = y[val]
+        y_pred = model.predict(X[val])
+        try:
+            lr_probs = model.predict_proba(X[val])
+            # keep probabilities for the positive outcome only
+            lr_probs = lr_probs[:, 1]
+        except AttributeError:
+            lr_probs = model.decision_function(X[val])
+        y_true_da = xr.DataArray(y_true, dims=['sample'])
+        y_pred_da = xr.DataArray(y_pred, dims=['sample'])
+        y_prob_da = xr.DataArray(lr_probs, dims=['sample'])
+        ds = xr.Dataset()
+        ds['y_true'] = y_true_da
+        ds['y_pred'] = y_pred_da
+        ds['y_prob'] = y_prob_da
+        ds['sample'] = np.arange(0, len(X[val]))
+        ds_list.append(ds)
+    ds = xr.concat(ds_list, kfold_name)
+    ds[kfold_name] = np.arange(1, cv.n_splits + 1)
+    return ds
+
+
 def produce_ROC_curves_from_model(model, X, y, cv, kfold_name='inner_kfold'):
     import numpy as np
     import xarray as xr
@@ -257,9 +289,12 @@ def produce_ROC_curves_from_model(model, X, y, cv, kfold_name='inner_kfold'):
     for i, (train, val) in enumerate(cv.split(X, y)):
         model.fit(X[train], y[train])
         y_pred = model.predict(X[val])
-        lr_probs = model.predict_proba(X[val])
-        # keep probabilities for the positive outcome only
-        lr_probs = lr_probs[:, 1]
+        try:
+            lr_probs = model.predict_proba(X[val])
+            # keep probabilities for the positive outcome only
+            lr_probs = lr_probs[:, 1]
+        except AttributeError:
+            lr_probs = model.decision_function(X[val])
         fpr, tpr, _ = roc_curve(y[val], y_pred)
         interp_tpr = np.interp(mean_fpr, fpr, tpr)
         interp_tpr[0] = 0.0
@@ -351,14 +386,15 @@ def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
     ds = xr.Dataset()
     for key in test_keys:
         ds[key] = xr.DataArray(scores_est_dict[key], dims=['outer_kfold'])
-    tpr_ds = []
+    preds_ds = []
     gr_ds = []
     for est in scores_est_dict['estimator']:
         gr, _ = process_gridsearch_results(est, model_name, split_dim='inner_kfold', features=X.feature.values)
         # somehow save gr:
         gr_ds.append(gr)
-        tpr_ds.append(produce_ROC_curves_from_model(est, X, y, cv_inner))
-    dss = xr.concat(tpr_ds, 'outer_kfold')
+        preds_ds.append(grab_y_true_and_predict_from_sklearn_model(est, X, y, cv_inner))
+#        tpr_ds.append(produce_ROC_curves_from_model(est, X, y, cv_inner))
+    dss = xr.concat(preds_ds, 'outer_kfold')
     gr_dss = xr.concat(gr_ds, 'outer_kfold')
     dss['outer_kfold'] = np.arange(1, cv_outer.n_splits + 1)
     gr_dss['outer_kfold'] = np.arange(1, cv_outer.n_splits + 1)
@@ -863,39 +899,17 @@ def process_gridsearch_results(GridSearchCV, model_name,
 
 def save_cv_results(cvr, savepath=hydro_path):
     from aux_gps import save_ncfile
-    features = '_'.join(cvr.attrs['features'])
-    if 'pwv' in features and 'pressure' in features:
-        features = 'pwv+pressure'
-    elif 'pwv' in features:
-        features = 'pwv'
-    elif 'pressure' in features:
-        features = 'pressure'
+    features = '+'.join(cvr.attrs['features'])
     pwv_id = cvr.attrs['pwv_id']
     hs_id = cvr.attrs['hs_id']
     ikfolds = cvr.attrs['inner_kfold_splits']
     okfolds = cvr.attrs['outer_kfold_splits']
-#    test_size = int(cvr.attrs['test_size'] * 100)
     name = cvr.attrs['model_name']
-#    params = cvr.attrs['param_names']
-#    nsplits = cvr.attrs['n_splits']
-#    if best_model is not None:
     refitted_scorer = cvr.attrs['refitted_scorer'].replace('_', '-')
     filename = 'CVR_{}_{}_{}_{}_{}_{}_{}.nc'.format(pwv_id, hs_id,
                                                     name, features, refitted_scorer, ikfolds, okfolds)
-#        filename = 'CVR_{}_{}_{}_splits_{}.nc'.format(
-#                name, '_'.join(params), refitted_scorer, nsplits)
-#    cvr_to_save = cvr[[x for x in cvr if x != 'best_model']]
+
     save_ncfile(cvr, savepath, filename)
-#    model_filename = filename.replace('.nc', '.pkl').replace('CVR', 'CVM')
-##        filepath = savepath / filename.replace('.nc', '.pkl')
-#    filepath = savepath / model_filename
-#    _ = joblib.dump(best_model, filepath,
-#                    compress=9)
-#    else:
-#        filename = 'CVR_{}_{}_{}_{}_{}_{}.nc'.format(pwv_id, hs_id,
-#                                                  name, features, nsplits, test_size)
-#    cvr_to_save = cvr[[x for x in cvr if x != 'best_model']]
-#        save_ncfile(cvr, savepath, filename)
     return
 
 
