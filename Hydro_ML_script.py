@@ -96,9 +96,10 @@ def main_hydro_ML(args):
         savepath = args.savepath
     else:
         savepath = hydro_path
-    if args.model is not None:
-        model_name = args.model
-        for scorer in scorers:
+#    if args.model is not None:
+    model_name = args.model
+    for scorer in scorers:
+        if model_name != 'RF':
             for feature in features:
                 logger.info(
                     'Running {} model with {} test scorer and {},{} (inner, outer) nsplits, features={}'.format(
@@ -114,26 +115,41 @@ def main_hydro_ML(args):
                     verbose=0,
                     diagnostic=False,
                     savepath=savepath)
-    else:
-        logger.info('Running with all three models:')
-        models = ['SVC', 'RF', 'MLP']
-        for model_name in models:
-            for scorer in scorers:
-                for feature in features:
-                    logger.info(
-                        'Running {} model with {} test scorer and {},{} (inner, outer) nsplits, features={}'.format(
-                            model_name, scorer, inner_splits, outer_splits, feature))
-                    model = nested_cross_validation_procedure(
-                        X,
-                        y,
-                        model_name=model_name,
-                        features=feature,
-                        inner_splits=inner_splits,
-                        outer_splits=outer_splits,
-                        refit_scorer=scorer,
-                        verbose=0,
-                        diagnostic=False,
-                        savepath=savepath)
+        else:
+            logger.info(
+                    'Running {} model with {} test scorer and {},{} (inner, outer) nsplits, features={}'.format(
+                        model_name, scorer, inner_splits, outer_splits, f))
+            model = nested_cross_validation_procedure(
+                X,
+                y,
+                model_name=model_name,
+                features=f,
+                inner_splits=inner_splits,
+                outer_splits=outer_splits,
+                refit_scorer=scorer,
+                verbose=0,
+                diagnostic=False,
+                savepath=savepath)
+#    else:
+#        logger.info('Running with all three models:')
+#        models = ['SVC', 'RF', 'MLP']
+#        for model_name in models:
+#            for scorer in scorers:
+#                for feature in features:
+#                    logger.info(
+#                        'Running {} model with {} test scorer and {},{} (inner, outer) nsplits, features={}'.format(
+#                            model_name, scorer, inner_splits, outer_splits, feature))
+#                    model = nested_cross_validation_procedure(
+#                        X,
+#                        y,
+#                        model_name=model_name,
+#                        features=feature,
+#                        inner_splits=inner_splits,
+#                        outer_splits=outer_splits,
+#                        refit_scorer=scorer,
+#                        verbose=0,
+#                        diagnostic=False,
+#                        savepath=savepath)
 
 
 if __name__ == '__main__':
@@ -181,7 +197,7 @@ if __name__ == '__main__':
         help='negative to positive events ratio',
         type=int)
 #    optional.add_argument('--nsplits', help='select number of splits for HP tuning.', type=int)
-    optional.add_argument(
+    required.add_argument(
         '--model',
         help='select ML model.',
         choices=[
@@ -198,6 +214,9 @@ if __name__ == '__main__':
         sys.exit()
     if args.hydro_id is None:
         print('hydro_id is a required argument, run with -h...')
+        sys.exit()
+    if args.model is None:
+        print('model is a required argument, run with -h...')
         sys.exit()
     logger.info('Running pwv station {} with hydro station {}.'.format(args.pw_station, args.hydro_id))
     main_hydro_ML(args)
