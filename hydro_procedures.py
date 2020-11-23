@@ -465,14 +465,14 @@ def plot_hydro_ML_models_results_from_dss(dss, station='drag', std_on='outer',
     import xarray as xr
     import seaborn as sns
     import matplotlib.pyplot as plt
-    cmap = sns.color_palette("colorblind", 3)
+    cmap = sns.color_palette("colorblind", dss['features'].size)
     if len(station) > 4:
         max_flow = 0
         sts = [x for x in station.split('-')]
         hs_ids = [int(x) for x in dss.attrs['hs_id'].split('-')]
         X, y = produce_X_y_from_list(sts, hs_ids, neg_pos_ratio=1, concat_Xy=True)
     else:
-        max_flow = dss.attrs['hydro_max_flow']
+        max_flow = dss.attrs['max_flow']
         X, y = produce_X_y(station, hydro_pw_dict[station], neg_pos_ratio=1,
                            max_flow=max_flow)
     events = int(y[y == 1].sum().item())
@@ -488,11 +488,12 @@ def plot_hydro_ML_models_results_from_dss(dss, station='drag', std_on='outer',
             ax = fg.axes[i, j]
             modelname = dss['model'].isel(model=j).item()
             scoring = dss['scoring'].isel(scoring=i).item()
-            chance_plot = [False, False, True]
-            for k, feat in enumerate(dss['feature'].values):
+            chance_plot = [False for x in dss['features']]
+            chance_plot[-1] = True
+            for k, feat in enumerate(dss['features'].values):
                 name = '{}-{}-{}'.format(modelname, scoring, feat)
                 model = dss.isel({'model': j, 'scoring': i}).sel(
-                    {'feature': feat})
+                    {'features': feat})
                 title = 'ROC of {} model ({})'.format(modelname, scoring)
                 plot_ROC_curve_from_dss(model, outer_dim='outer_kfold',
                                         inner_dim='inner_kfold',
@@ -516,67 +517,67 @@ def plot_hydro_ML_models_results_from_dss(dss, station='drag', std_on='outer',
                            wspace=0.051)
     if save:
         filename = 'hydro_models_on_{}_{}_{}_std_on_{}.png'.format(
-            station, dss.attrs['inner_kfold_splits'], dss.attrs['outer_kfold_splits'], std_on)
+            station, dss['inner_kfold'].size, dss['outer_kfold'].size, std_on)
         plt.savefig(savefig_path / filename, bbox_inches='tight')
     return fg
 
 
-def plot_hydro_ML_models_result(model_da, nsplits=2, station='drag',
-                                test_size=20, n_splits_plot=None, save=False):
-    import xarray as xr
-    import seaborn as sns
-    import matplotlib.pyplot as plt
-    from sklearn.model_selection import train_test_split
-    # TODO: add plot_roc_curve(model, X_other_station, y_other_station)
-    # TODO: add pw_station, hs_id
-    cmap = sns.color_palette("colorblind", 3)
-    X, y = produce_X_y(station, hydro_pw_dict[station], neg_pos_ratio=1)
-    events = int(y[y == 1].sum().item())
-    model_da = model_da.sel(
-        splits=nsplits,
-        test_size=test_size).reset_coords(
-            drop=True)
-#    just_pw = [x for x in X.feature.values if 'pressure' not in x]
-#    X_pw = X.sel(feature=just_pw)
-    fg = xr.plot.FacetGrid(
-        model_da,
-        col='model',
-        row='scoring',
-        sharex=True,
-        sharey=True, figsize=(20, 20))
-    for i in range(fg.axes.shape[0]):  # i is rows
-        for j in range(fg.axes.shape[1]):  # j is cols
-            ax = fg.axes[i, j]
-            modelname = model_da['model'].isel(model=j).item()
-            scoring = model_da['scoring'].isel(scoring=i).item()
-            chance_plot = [False, False, True]
-            for k, feat in enumerate(model_da['feature'].values):
-                name = '{}-{}-{}'.format(modelname, scoring, feat)
-                model = model_da.isel({'model': j, 'scoring': i}).sel({'feature': feat}).item()
-                title = 'ROC of {} model ({})'.format(modelname, scoring)
-                if not '+' in feat:
-                    f = [x for x in X.feature.values if feat in x]
-                    X_f = X.sel(feature=f)
-                else:
-                    X_f = X
-#                X_train, X_test, y_train, y_test = train_test_split(
-#                        X_f, y, test_size=test_size/100, shuffle=True, random_state=42)
-
-                plot_many_ROC_curves(model, X_f, y, name=name,
-                                     color=cmap[k], ax=ax,
-                                     plot_chance=chance_plot[k],
-                                     title=title, n_splits=n_splits_plot)
-    fg.fig.suptitle('{} station: {} total_events, test_events = {}, n_splits = {}'.format(station.upper(), events, int(events* test_size/100), nsplits))
-    fg.fig.tight_layout()
-    fg.fig.subplots_adjust(top=0.937,
-                           bottom=0.054,
-                           left=0.039,
-                           right=0.993,
-                           hspace=0.173,
-                           wspace=0.051)
-    if save:
-        plt.savefig(savefig_path / 'try.png', bbox_inches='tight')
-    return fg
+#def plot_hydro_ML_models_result(model_da, nsplits=2, station='drag',
+#                                test_size=20, n_splits_plot=None, save=False):
+#    import xarray as xr
+#    import seaborn as sns
+#    import matplotlib.pyplot as plt
+#    from sklearn.model_selection import train_test_split
+#    # TODO: add plot_roc_curve(model, X_other_station, y_other_station)
+#    # TODO: add pw_station, hs_id
+#    cmap = sns.color_palette("colorblind", 3)
+#    X, y = produce_X_y(station, hydro_pw_dict[station], neg_pos_ratio=1)
+#    events = int(y[y == 1].sum().item())
+#    model_da = model_da.sel(
+#        splits=nsplits,
+#        test_size=test_size).reset_coords(
+#            drop=True)
+##    just_pw = [x for x in X.feature.values if 'pressure' not in x]
+##    X_pw = X.sel(feature=just_pw)
+#    fg = xr.plot.FacetGrid(
+#        model_da,
+#        col='model',
+#        row='scoring',
+#        sharex=True,
+#        sharey=True, figsize=(20, 20))
+#    for i in range(fg.axes.shape[0]):  # i is rows
+#        for j in range(fg.axes.shape[1]):  # j is cols
+#            ax = fg.axes[i, j]
+#            modelname = model_da['model'].isel(model=j).item()
+#            scoring = model_da['scoring'].isel(scoring=i).item()
+#            chance_plot = [False, False, True]
+#            for k, feat in enumerate(model_da['feature'].values):
+#                name = '{}-{}-{}'.format(modelname, scoring, feat)
+#                model = model_da.isel({'model': j, 'scoring': i}).sel({'feature': feat}).item()
+#                title = 'ROC of {} model ({})'.format(modelname, scoring)
+#                if not '+' in feat:
+#                    f = [x for x in X.feature.values if feat in x]
+#                    X_f = X.sel(feature=f)
+#                else:
+#                    X_f = X
+##                X_train, X_test, y_train, y_test = train_test_split(
+##                        X_f, y, test_size=test_size/100, shuffle=True, random_state=42)
+#
+#                plot_many_ROC_curves(model, X_f, y, name=name,
+#                                     color=cmap[k], ax=ax,
+#                                     plot_chance=chance_plot[k],
+#                                     title=title, n_splits=n_splits_plot)
+#    fg.fig.suptitle('{} station: {} total_events, test_events = {}, n_splits = {}'.format(station.upper(), events, int(events* test_size/100), nsplits))
+#    fg.fig.tight_layout()
+#    fg.fig.subplots_adjust(top=0.937,
+#                           bottom=0.054,
+#                           left=0.039,
+#                           right=0.993,
+#                           hspace=0.173,
+#                           wspace=0.051)
+#    if save:
+#        plt.savefig(savefig_path / 'try.png', bbox_inches='tight')
+#    return fg
 
 
 def load_ML_run_results(path=hydro_ml_path, prefix='CVR', pw_station='drag'):
@@ -584,6 +585,7 @@ def load_ML_run_results(path=hydro_ml_path, prefix='CVR', pw_station='drag'):
     import xarray as xr
 #    from aux_gps import save_ncfile
     import pandas as pd
+    import numpy as np
     model_files = path_glob(path, '{}_*.nc'.format(prefix))
     model_files = sorted(model_files)
     model_files = [x for x in model_files if pw_station in x.as_posix()]
@@ -600,72 +602,185 @@ def load_ML_run_results(path=hydro_ml_path, prefix='CVR', pw_station='drag'):
         tuple(x) for x in zip(
             model_names,
             model_scores,
-            model_features)]  # , model_pwv_hs_id)]
+            model_features)]
     ind = pd.MultiIndex.from_tuples(
         (tups),
         names=[
             'model',
             'scoring',
-            'feature'])  # , 'station'])
+            'features'])
+#    ind1 = pd.MultiIndex.from_product([model_names, model_scores, model_features], names=[
+#                                     'model', 'scoring', 'feature'])
     data_vars = [x for x in ds_list[0] if x.startswith('test')]
-    data_vars += ['AUC', 'TPR']
-    ds_list = [x[data_vars] for x in ds_list]
-    dss = xr.concat(ds_list, dim='dim_0')
+#    data_vars += ['AUC', 'TPR']
+    data_vars += ['y_true', 'y_pred', 'y_prob', 'feature_impotances']
+    # check if all data vars are in each ds and merge them:
+    ds_list = [xr.merge([y[x] for x in data_vars if x in y], combine_attrs='no_conflicts') for y in ds_list]
+#    ds_list = [x[data_vars] for x in ds_list]
+    # complete feature_importances to all ds:
+    fi = [x for x in ds_list if 'feature_impotances' in x][0]
+    fi = fi['feature_impotances'].copy(data=np.zeros(shape=fi['feature_impotances'].shape))
+    new_ds_list = []
+    for ds in ds_list:
+        if 'feature_impotances' not in ds:
+            ds = xr.merge([ds, fi], combine_attrs='no_conflicts')
+        new_ds_list.append(ds)
+    dss = xr.concat(new_ds_list, dim='dim_0')
     dss['dim_0'] = ind
     dss = dss.unstack('dim_0')
-    attrs_to_remove = [
-        'param_names',
-        'model_name',
-        'refitted_scorer',
-        'features']
-    [dss.attrs.pop(x) for x in attrs_to_remove]
+    dss.attrs['pwv_id'] = pw_station
     return dss
 
 
-def load_ML_models(path=hydro_ml_path, station='drag', prefix='CVM', suffix='.pkl'):
-    from aux_gps import path_glob
-    import joblib
-    import matplotlib.pyplot as plt
-    import seaborn as sns
+def calculate_metrics_from_ML_dss(dss):
+    from sklearn.metrics import roc_curve
+    from sklearn.metrics import roc_auc_score
+    from sklearn.metrics import auc
+    from sklearn.metrics import precision_recall_curve
     import xarray as xr
+    import numpy as np
     import pandas as pd
-    model_files = path_glob(path, '{}_*{}'.format(prefix, suffix))
-    model_files = sorted(model_files)
-    model_files = [x for x in model_files if station in x.as_posix()]
-    m_list = [joblib.load(x) for x in model_files]
-    model_files = [x.as_posix().split('/')[-1].split('.')[0] for x in model_files]
-    # fix roc-auc:
-    model_files = [x.replace('roc_auc', 'roc-auc') for x in model_files]
-    print('loading {} station only.'.format(station))
-    model_names = [x.split('_')[3] for x in model_files]
-#    model_pw_stations = [x.split('_')[1] for x in model_files]
-#    model_hydro_stations = [x.split('_')[2] for x in model_files]        
-    model_nsplits = [x.split('_')[6] for x in model_files]
-    model_scores = [x.split('_')[5] for x in model_files]
-    model_features = [x.split('_')[4] for x in model_files]
-    model_test_sizes = []
-    for file in model_files:
-        try:
-            model_test_sizes.append(int(file.split('_')[7]))
-        except IndexError:
-            model_test_sizes.append(20)
-#    model_pwv_hs_id = list(zip(model_pw_stations, model_hydro_stations))
-#    model_pwv_hs_id = ['_'.join(x) for x in model_pwv_hs_id]
-    # transform model_dict to dataarray:
-    tups = [tuple(x) for x in zip(model_names, model_scores, model_nsplits, model_features, model_test_sizes)] #, model_pwv_hs_id)]
-    ind = pd.MultiIndex.from_tuples((tups), names=['model', 'scoring', 'splits', 'feature', 'test_size']) #, 'station'])
-    da = xr.DataArray(m_list, dims='dim_0')
-    da['dim_0'] = ind
-    da = da.unstack('dim_0')
-    da['splits'] = da['splits'].astype(int)
-    da['test_size'].attrs['units'] = '%'
-    return da
+    mean_fpr = np.linspace(0, 1, 100)
+#    fpr = dss['y_true'].copy(deep=False).values
+#    tpr = dss['y_true'].copy(deep=False).values
+#    y_true = dss['y_true'].values
+#    y_prob = dss['y_prob'].values
+    ok = [x for x in dss['outer_kfold'].values]
+    ik = [x for x in dss['inner_kfold'].values]
+    m = [x for x in dss['model'].values]
+    sc = [x for x in dss['scoring'].values]
+    f = [x for x in dss['features'].values]
+    ind = pd.MultiIndex.from_product(
+        [ok, ik, m, sc, f],
+        names=[
+            'outer_kfold',
+            'inner_kfold',
+            'model',
+            'scoring',
+            'features'])  # , 'station'])
+
+    okn = [x for x in range(dss['outer_kfold'].size)]
+    ikn = [x for x in range(dss['inner_kfold'].size)]
+    mn = [x for x in range(dss['model'].size)]
+    scn = [x for x in range(dss['scoring'].size)]
+    fn = [x for x in range(dss['features'].size)]
+    ds_list = []
+    for i in okn:
+        for j in ikn:
+            for k in mn:
+                for n in scn:
+                    for m in fn:
+                        ds = xr.Dataset()
+                        y_true = dss['y_true'].isel(outer_kfold=i, inner_kfold=j, model=k, scoring=n, features=m).reset_coords(drop=True).squeeze()
+                        y_prob = dss['y_prob'].isel(outer_kfold=i, inner_kfold=j, model=k, scoring=n, features=m).reset_coords(drop=True).squeeze()
+                        y_true = y_true.dropna('sample')
+                        y_prob = y_prob.dropna('sample')
+                        if y_prob.size == 0:
+                            fpr_da = xr.DataArray(np.nan*np.ones((1)), dims=['sample'])
+                            fpr_da['sample'] = [x for x in range(fpr_da.size)]
+                            tpr_da = xr.DataArray(np.nan*np.ones((1)), dims=['sample'])
+                            tpr_da['sample'] = [x for x in range(tpr_da.size)]
+                            prn_da = xr.DataArray(np.nan*np.ones((1)), dims=['sample'])
+                            prn_da['sample'] = [x for x in range(prn_da.size)]
+                            rcll_da = xr.DataArray(np.nan*np.ones((1)), dims=['sample'])
+                            rcll_da['sample'] = [x for x in range(rcll_da.size)]
+                            tpr_fpr = xr.DataArray(np.nan*np.ones((100)), dims=['FPR'])
+                            tpr_fpr['FPR'] = mean_fpr
+                            prn_rcll = xr.DataArray(np.nan*np.ones((100)), dims=['RCLL'])
+                            prn_rcll['RCLL'] = mean_fpr
+                            pr_auc_da = xr.DataArray(np.nan)
+                            roc_auc_da = xr.DataArray(np.nan)
+                        else:
+                            fpr, tpr, _ = roc_curve(y_true, y_prob)
+                            interp_tpr = np.interp(mean_fpr, fpr, tpr)
+                            interp_tpr[0] = 0.0
+                            roc_auc = roc_auc_score(y_true, y_prob)
+                            prn, rcll, _ = precision_recall_curve(y_true, y_prob)
+                            interp_prn = np.interp(mean_fpr, rcll[::-1], prn[::-1])
+                            interp_prn[0] = 1.0
+                            pr_auc_score = auc(rcll, prn)
+                            roc_auc_da = xr.DataArray(roc_auc)
+                            pr_auc_da = xr.DataArray(pr_auc_score)
+                            prn_da = xr.DataArray(prn, dims=['sample'])
+                            prn_da['sample'] = [x for x in range(len(prn))]
+                            rcll_da = xr.DataArray(rcll, dims=['sample'])
+                            rcll_da['sample'] = [x for x in range(len(rcll))]
+                            fpr_da = xr.DataArray(fpr, dims=['sample'])
+                            fpr_da['sample'] = [x for x in range(len(fpr))]
+                            tpr_da = xr.DataArray(tpr, dims=['sample'])
+                            tpr_da['sample'] = [x for x in range(len(tpr))]
+                            tpr_fpr = xr.DataArray(interp_tpr, dims=['FPR'])
+                            tpr_fpr['FPR'] = mean_fpr
+                            prn_rcll = xr.DataArray(interp_prn, dims=['RCLL'])
+                            prn_rcll['RCLL'] = mean_fpr
+                        ds['fpr'] = fpr_da
+                        ds['tpr'] = tpr_da
+                        ds['roc-auc'] = roc_auc_da
+                        ds['pr-auc'] = pr_auc_da
+                        ds['prn'] = prn_da
+                        ds['rcll'] = rcll_da
+                        ds['TPR'] = tpr_fpr
+                        ds['PRN'] = prn_rcll
+                        ds_list.append(ds)
+    ds = xr.concat(ds_list, 'dim_0')
+    ds['dim_0'] = ind
+    ds = ds.unstack()
+    ds.attrs = dss.attrs
+    ds['fpr'].attrs['long_name'] = 'False positive rate'
+    ds['tpr'].attrs['long_name'] = 'True positive rate'
+    ds['prn'].attrs['long_name'] = 'Precision'
+    ds['rcll'].attrs['long_name'] = 'Recall'
+    ds['roc-auc'].attrs['long_name'] = 'ROC or FPR-TPR Area under curve'
+    ds['pr-auc'].attrs['long_name'] = 'Precition-Recall Area under curve'
+    ds['PRN'].attrs['long_name'] = 'Precision-Recall'
+    ds['TPR'].attrs['long_name'] = 'TPR-FPR (ROC)'
+    return ds
+
+#
+#def load_ML_models(path=hydro_ml_path, station='drag', prefix='CVM', suffix='.pkl'):
+#    from aux_gps import path_glob
+#    import joblib
+#    import matplotlib.pyplot as plt
+#    import seaborn as sns
+#    import xarray as xr
+#    import pandas as pd
+#    model_files = path_glob(path, '{}_*{}'.format(prefix, suffix))
+#    model_files = sorted(model_files)
+#    model_files = [x for x in model_files if station in x.as_posix()]
+#    m_list = [joblib.load(x) for x in model_files]
+#    model_files = [x.as_posix().split('/')[-1].split('.')[0] for x in model_files]
+#    # fix roc-auc:
+#    model_files = [x.replace('roc_auc', 'roc-auc') for x in model_files]
+#    print('loading {} station only.'.format(station))
+#    model_names = [x.split('_')[3] for x in model_files]
+##    model_pw_stations = [x.split('_')[1] for x in model_files]
+##    model_hydro_stations = [x.split('_')[2] for x in model_files]        
+#    model_nsplits = [x.split('_')[6] for x in model_files]
+#    model_scores = [x.split('_')[5] for x in model_files]
+#    model_features = [x.split('_')[4] for x in model_files]
+#    model_test_sizes = []
+#    for file in model_files:
+#        try:
+#            model_test_sizes.append(int(file.split('_')[7]))
+#        except IndexError:
+#            model_test_sizes.append(20)
+##    model_pwv_hs_id = list(zip(model_pw_stations, model_hydro_stations))
+##    model_pwv_hs_id = ['_'.join(x) for x in model_pwv_hs_id]
+#    # transform model_dict to dataarray:
+#    tups = [tuple(x) for x in zip(model_names, model_scores, model_nsplits, model_features, model_test_sizes)] #, model_pwv_hs_id)]
+#    ind = pd.MultiIndex.from_tuples((tups), names=['model', 'scoring', 'splits', 'feature', 'test_size']) #, 'station'])
+#    da = xr.DataArray(m_list, dims='dim_0')
+#    da['dim_0'] = ind
+#    da = da.unstack('dim_0')
+#    da['splits'] = da['splits'].astype(int)
+#    da['test_size'].attrs['units'] = '%'
+#    return da
 
 
 def plot_ROC_curve_from_dss(dss, outer_dim='outer_kfold',
                             inner_dim='inner_kfold', plot_chance=True, ax=None,
                             color='b', title=None, std_on='inner',
-                            main_label=None, fontsize=14,
+                            main_label=None, fontsize=14, plot_type='ROC',
                             plot_std_legend=True):
     import matplotlib.pyplot as plt
     import numpy as np
@@ -673,10 +788,18 @@ def plot_ROC_curve_from_dss(dss, outer_dim='outer_kfold',
         fig, ax = plt.subplots()
     if title is None:
         title = "Receiver operating characteristic"
-    mean_fpr = dss['fpr'].values
-    mean_tpr = dss['TPR'].mean(outer_dim).mean(inner_dim).values
-    mean_auc = dss['AUC'].mean().item()
-    std_auc = dss['AUC'].std().item()
+    if plot_type == 'ROC':
+        mean_fpr = dss['FPR'].values
+        mean_tpr = dss['TPR'].mean(outer_dim).mean(inner_dim).values
+        mean_auc = dss['roc-auc'].mean().item()
+        std_auc = dss['roc-auc'].std().item()
+        field = 'TPR'
+    elif plot_type == 'PR':
+        mean_fpr = dss['RCLL'].values
+        mean_tpr = dss['PRN'].mean(outer_dim).mean(inner_dim).values
+        mean_auc = dss['pr-auc'].mean().item()
+        std_auc = dss['pr-auc'].std().item()
+        field = 'PRN'
     # plot mean ROC:
     if main_label is None:
         main_label = r'Mean ROC (AUC=%0.2f$\pm$%0.2f)' % (mean_auc, std_auc)
@@ -686,13 +809,13 @@ def plot_ROC_curve_from_dss(dss, outer_dim='outer_kfold',
     ax.plot(mean_fpr, mean_tpr, color=color,
             lw=2, alpha=.8, label=main_label)
     if std_on == 'inner':
-        std_tpr = dss['TPR'].mean(outer_dim).std(inner_dim).values
+        std_tpr = dss[field].mean(outer_dim).std(inner_dim).values
         n = dss[inner_dim].size
     elif std_on == 'outer':
-        std_tpr = dss['TPR'].mean(inner_dim).std(outer_dim).values
+        std_tpr = dss[field].mean(inner_dim).std(outer_dim).values
         n = dss[outer_dim].size
     elif std_on == 'all':
-        std_tpr = dss['TPR'].stack(
+        std_tpr = dss[field].stack(
             dumm=[inner_dim, outer_dim]).std('dumm').values
         n = dss[outer_dim].size * dss[inner_dim].size
     tprs_upper = np.minimum(mean_tpr + std_tpr, 1)
@@ -861,7 +984,8 @@ def process_gridsearch_results(GridSearchCV, model_name,
     tests = []
     for scorer in scoring:
         train_splits_scorer = [x for x in train_splits if scorer in x]
-        trains.append(xr.concat([ds[x] for x in train_splits_scorer], split_dim))
+        trains.append(xr.concat([ds[x]
+                                 for x in train_splits_scorer], split_dim))
         test_splits_scorer = [x for x in test_splits if scorer in x]
         tests.append(xr.concat([ds[x] for x in test_splits_scorer], split_dim))
         splits_scorer = np.arange(1, len(train_splits_scorer) + 1)
@@ -881,10 +1005,12 @@ def process_gridsearch_results(GridSearchCV, model_name,
     ds.attrs['model_name'] = model_name
     ds.attrs['{}_splits'.format(split_dim)] = ds[split_dim].size
     if GridSearchCV.refit:
-        if hasattr(GridSearchCV.best_estimator_,'feature_importances_'):
-            f_import = xr.DataArray(GridSearchCV.best_estimator_.feature_importances_, dims=['feature'])
+        if hasattr(GridSearchCV.best_estimator_, 'feature_importances_'):
+            f_import = xr.DataArray(
+                GridSearchCV.best_estimator_.feature_importances_,
+                dims=['feature'])
             f_import['feature'] = features
-            ds['feature_impotances'] = f_import
+            ds['feature_importances'] = f_import
         ds['best_score'] = GridSearchCV.best_score_
 #        ds['best_model'] = GridSearchCV.best_estimator_
         ds.attrs['refitted_scorer'] = GridSearchCV.refit
