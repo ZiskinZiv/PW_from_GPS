@@ -12,6 +12,54 @@ from PW_paths import work_yuval
 # TODO: if not, build func to replace datetimeindex to numbers and vise versa
 
 
+def linear_fit_using_scipy_da_ts(da_ts, model='TSEN', slope_factor=3650.25,
+                                 plot=False, ax=None, units=None):
+    """linear fit using scipy for dataarray time series,
+    support for theilslopes(TSEN) and lingress(LR), produce 95% CI"""
+    import xarray as xr
+    from scipy.stats.mstats import theilslopes
+    from scipy.stats import linregress
+    import matplotlib.pyplot as plt
+    time_dim = list(set(da_ts.dims))[0]
+    jul, jul_no_nans = get_julian_dates_from_da(da_ts, subtract='median')
+    y = da_ts.dropna(time_dim).values
+    X = jul_no_nans.reshape(-1, 1)
+    if model == 'LR':
+        coef, intercept, r_value, p_value, std_err = linregress(jul_no_nans, y)
+        confidence_interval = 1.96 * std_err
+        coef_lo = coef - confidence_interval
+        coef_hi = coef + confidence_interval
+    elif model == 'TSEN':
+        coef, intercept, coef_lo, coef_hi = theilslopes(y, X)
+    predict = jul * coef + intercept
+    predict_lo = jul * coef_lo + intercept
+    predict_hi = jul * coef_hi + intercept
+    trend_hi = xr.DataArray(predict_hi, dims=[time_dim])
+    trend_lo = xr.DataArray(predict_lo, dims=[time_dim])
+    trend_hi[time_dim] = da_ts[time_dim]
+    trend_lo[time_dim] = da_ts[time_dim]
+    slope_in_factor_scale_lo = coef_lo * slope_factor
+    slope_in_factor_scale_hi = coef_hi * slope_factor
+    trend = xr.DataArray(predict, dims=[time_dim])
+    trend[time_dim] = da_ts[time_dim]
+    slope_in_factor_scale = coef * slope_factor
+    if plot:
+        labels =  ['{}'.format(da_ts.name)]
+        if ax is None:
+            fig, ax = plt.subplots()
+        origln = da_ts.plot.line('k-', marker='o', ax=ax, linewidth=1.5, markersize=2.5)
+        trendln = trend.plot(ax=ax, color='r', linewidth=2)
+        trend_hi.plot.line('r--', ax=ax, linewidth=1.5)
+        trend_lo.plot.line('r--', ax=ax, linewidth=1.5)
+        trend_label = '{} model, slope={:.2f} ({:.2f}, {:.2f}) {}'.format(model, slope_in_factor_scale, slope_in_factor_scale_lo, slope_in_factor_scale_hi, units)
+        handles = origln
+        handles += trendln
+        labels.append(trend_label)
+        ax.legend(handles=handles, labels=labels, loc='upper left')
+        ax.grid()
+    return trend, trend_hi, trend_lo, slope_in_factor_scale, slope_in_factor_scale_hi, slope_in_factor_scale_lo
+
+
 def split_equal_da_ts_around_datetime(da_ts, dt='2014-05-01'):
     time_dim = list(set(da_ts.dims))[0]
     x1 = da_ts.dropna(time_dim).sel({time_dim: slice(None, dt)})
