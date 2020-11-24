@@ -1911,36 +1911,35 @@ def produce_table_stats(thresh=50, add_location=True, add_height=True):
 
 def plot_pwv_longterm_trend(path=work_yuval, model_name='LR', save=True):
     import matplotlib.pyplot as plt
-    from PW_stations import ML_Switcher
+    from aux_gps import linear_fit_using_scipy_da_ts
+#    from PW_stations import ML_Switcher
     import xarray as xr
     from aux_gps import anomalize_xr
-    from aux_gps import get_julian_dates_from_da
     """TSEN and LR for linear fit"""
     # load GNSS Israel:
-    pw = xr.load_dataset(path / 'GNSS_PW_monthly_thresh_50_homogenized.nc')
+#    pw = xr.load_dataset(path / 'GNSS_PW_monthly_thresh_50_homogenized.nc')
+    pw = xr.load_dataset(path / 'GNSS_PW_monthly_thresh_50.nc')
     pw_anoms = anomalize_xr(pw, 'MS', verbose=False)
     pw_mean = pw_anoms.to_array('station').mean('station')
     # init linear models
-    ml = ML_Switcher()
-    model = ml.pick_model(model_name)
+#    ml = ML_Switcher()
+#    model = ml.pick_model(model_name)
     fig, ax = plt.subplots(1, 1, figsize=(15, 5.5))
-    fig.suptitle('PWV mean anomalies and linear trend',fontweight='bold')
-    jul, jul_no_nans = get_julian_dates_from_da(pw_mean)
-    y = pw_mean.dropna('time').values
-    X = jul_no_nans.reshape(-1, 1)
-    model.fit(X, y)
-    predict = model.predict(jul.reshape(-1, 1))
-    coef = model.coef_[0]
-    inter = model.intercept_
-    trend = xr.DataArray(predict, dims=['time'])
-    trend['time'] = pw_mean['time']
-    slope_in_mm_per_decade = coef * 10 * 365.25
+    fig.suptitle('PWV mean anomalies and linear trend', fontweight='bold')
+    trend, trend_hi, trend_lo, slope, slope_hi, slope_lo = linear_fit_using_scipy_da_ts(pw_mean, model=model_name, slope_factor=3650.25,
+                                                                                 plot=False, ax=None, units=None)
     pwln = pw_mean.plot(ax=ax, color='k', marker='o', linewidth=1.5)
     trendln = trend.plot(ax=ax, color='r', linewidth=2)
+    trend_hi.plot.line('r--', ax=ax, linewidth=1.5)
+    trend_lo.plot.line('r--', ax=ax, linewidth=1.5)
+    trend_label = '{} model, slope={:.2f} ({:.2f}, {:.2f}) mm/decade'.format(model_name, slope, slope_lo, slope_hi)
+    handles = pwln+trendln
+    labels = ['PWV-mean']
+    labels.append(trend_label)
+    ax.legend(handles=handles, labels=labels, loc='upper left')
     ax.grid()
     ax.set_xlabel('')
     ax.set_ylabel('PWV mean anomalies [mm]')
-    ax.legend(labels=['PWV-mean', '{} model, slope={:.2f} mm/decade'.format(model_name, slope_in_mm_per_decade)],handles=[pwln[0], trendln[0]])
     fig.tight_layout()
     if save:
         filename = 'pwv_mean_trend_{}.png'.format(model_name)
@@ -2225,9 +2224,12 @@ def plot_monthly_variability_heatmap_from_pwv_anomalies(load_path=work_yuval,
     df = produce_geo_gnss_solved_stations(plot=False,
                                           add_distance_to_coast=True)
     sites = df.dropna()[['lat', 'alt', 'distance','groups_annual']].sort_values(by=sort_by,ascending=[1,1]).index
+#    anoms = xr.load_dataset(
+#        load_path /
+#        'GNSS_PW_monthly_anoms_thresh_{:.0f}_homogenized.nc'.format(thresh))
     anoms = xr.load_dataset(
         load_path /
-        'GNSS_PW_monthly_anoms_thresh_{:.0f}_homogenized.nc'.format(thresh))
+        'GNSS_PW_monthly_anoms_thresh_{:.0f}.nc'.format(thresh))
     df = anoms.groupby('time.month').std().to_dataframe()
 #    sites = group_sites_to_xarray(upper=True, scope='annual').T
 #    sites_flat = [x.lower() for x in sites.values.flatten() if isinstance(x, str)]
@@ -2286,10 +2288,12 @@ def plot_monthly_variability_heatmap_from_pwv_anomalies(load_path=work_yuval,
         plt.savefig(savefig_path / filename, bbox_inches='tight')
     return fig
 
-    
+
 def plot_monthly_means_anomalies_with_station_mean(load_path=work_yuval,
                                                    thresh=50, save=True,
-                                                   anoms=None, agg='mean', fontsize=16):
+                                                   anoms=None, agg='mean',
+                                                   fontsize=16,
+                                                   sort_by=['groups_annual', 'lat']):
     import xarray as xr
     import seaborn as sns
     from palettable.scientific import diverging as divsci
@@ -2300,11 +2304,15 @@ def plot_monthly_means_anomalies_with_station_mean(load_path=work_yuval,
     div_cmap = divsci.Vik_20.mpl_colormap
     df = produce_geo_gnss_solved_stations(plot=False,
                                           add_distance_to_coast=True)
-    sites = df['alt'].sort_values(ascending=False).index
+    sites = df.dropna()[['lat', 'alt', 'distance','groups_annual']].sort_values(by=sort_by,ascending=[1,0]).index
     if anoms is None:
+#        anoms = xr.load_dataset(
+#                load_path /
+#                'GNSS_PW_monthly_anoms_thresh_{:.0f}_homogenized.nc'.format(thresh))
         anoms = xr.load_dataset(
                 load_path /
-                'GNSS_PW_monthly_anoms_thresh_{:.0f}_homogenized.nc'.format(thresh))
+                'GNSS_PW_monthly_anoms_thresh_{:.0f}.nc'.format(thresh))
+
     df = anoms.to_dataframe()
 #    sites = group_sites_to_xarray(upper=True, scope='annual').T
 #    sites_flat = [x.lower() for x in sites.values.flatten() if isinstance(x, str)]
