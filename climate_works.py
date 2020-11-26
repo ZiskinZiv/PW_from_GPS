@@ -11,11 +11,38 @@ climate_path = work_yuval / 'climate'
 era5_path = work_yuval / 'ERA5'
 lat_box = [10, 50]
 lon_box = [10, 60]
+lat_box1 = [10, 60]
+lon_box1 = [-10, 80]
 lat_hemi_box = [0, 80]
 lon_hemi_box = [-80, 80]
 
 # what worked: z500 is OK, compare to other large scale cirulations ?
 
+
+def plot_world_map_with_box(lat_bounds=lat_box, lon_bounds=lon_box, save=True):
+    import geopandas as gpd
+    from shapely.geometry import Point, LineString
+    import matplotlib.pyplot as plt
+    from PW_from_gps_figures import savefig_path
+    world = gpd.read_file(gpd.datasets.get_path('naturalearth_lowres'))
+    point1 = [lon_bounds[0], lat_bounds[0]]
+    point2 = [lon_bounds[0], lat_bounds[1]]
+    point3 = [lon_bounds[1], lat_bounds[1]]
+    point4 = [lon_bounds[1], lat_bounds[0]]
+    line1 = LineString([Point(*point1), Point(*point2)])
+    line2 = LineString([Point(*point2), Point(*point3)])
+    line3 = LineString([Point(*point3), Point(*point4)])
+    line4 = LineString([Point(*point4), Point(*point1)])
+    geo_df = gpd.GeoDataFrame(geometry =[line1, line2, line3, line4])
+    fig, ax = plt.subplots(figsize=(15,10))
+    world.plot(ax=ax)
+    geo_df.plot(ax=ax, color='k')
+    fig.tight_layout()
+    if save:
+        filename = 'world_with_box.png'
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
+    return
+    
 
 def plot_eof_from_ds(ds, var='v1000', mode=1, ax=None):
     var_name_in_ds = '{}_eofs'.format(var)
@@ -433,88 +460,28 @@ def read_mo_indicies(path=climate_path, moi=1, resample_to_mm=True):
     return da
 
 
-def run_best_MLR(savepath=None, heatmap=True):
+def run_best_MLR(savepath=None, heatmap=True, plot=True, keep='lci',
+                 add_trend=True):
     from aux_gps import save_ncfile
     import seaborn as sns
     import matplotlib.pyplot as plt
     # check for correlation between synoptics and maybe
     # agg some classes and leave everything else
-    df = produce_interannual_df(lags=1, smooth=3, corr_thresh=None, syn=None,
+    df = produce_interannual_df(lags=1, smooth=12, corr_thresh=None, syn=None,
                                 drop_worse_lags=False)
-    keep_inds = ['pwv', 'ea-1', 'MJO_20E+1', 'iod+1', 'wemoi', 'z500_1']
-    keep_inds = ['pwv', 'ea-1', 'iod+1', 'wemoi', 'z500_1']
-    keep_inds = [x for x in df.columns]
-    keep_inds = [
-        'pwv',
-        'ea-1',
-        'iod+1',
-        'wemoi',
-        'MJO_20E+1',
-        'v300_2',
-        'v300_3',
-        'v500_1',
-        'v500_2',
-        'u300_3',
-        'u300_1',
-        'u500_3',
-        'u500_4',
-        'u10_2',
-        'u10_3',
-        'v10_1',
-        'v10_4']  # , 'v700_1', 'v700_4']
-    keep_inds = [
-        'pwv',
-        'v300_2',
-        'v300_3',
-        'v500_1',
-        'v500_2',
-        'u300_3',
-        'u300_1',
-        'u500_3',
-        'u500_4',
-        'u10_2',
-        'u10_3',
-        'v10_1',
-        'v10_4']  # , 'v700_1', 'v700_4']
-    keep_inds = [
-        'pwv',
-        'v1000_1',
-        'v1000_2',
-        'v500_2',
-        'v500_4',
-        'v700_2',
-        'u300_2',
-        'u300_3',
-        'u500_2',
-        'u500_4',
-        'u700_3',
-        'u700_4','ea-1', 'iod+1', 'wemoi', 'MJO_20E+1']  # , 'v700_1', 'v700_4']
-#    u_cols = ['u_anoms_225',
-#              'u_anoms_350',
-#              'u_anoms_300',
-#              'u_anoms_200',
-#              'u_anoms_250',
-#              'u_anoms_400']
-#    v_cols = ['v_anoms_775',
-#              'v_anoms_900',
-#              'v_anoms_825',
-#              'v_anoms_700',
-#              'v_anoms_950',
-#              'v_anoms_650',
-#              'v_anoms_550',
-#              'v_anoms_850',
-#              'v_anoms_600',
-#              'v_anoms_875',
-#              'v_anoms_925',
-#              'v_anoms_750',
-#              'v_anoms_800']
-#    keep_inds = ['pwv', 'ea-1', 'iod+1', 'wemoi', 'MJO_20E+1']
-#    keep_inds = ['pwv'] + u_cols + v_cols
-#    keep_inds = ['pwv', 'ea-1', 'iod+1', 'wemoi', 'z500_1', 'z500_2', 'z500_3']
-#    keep_inds = ['pwv', 'MJO_20E+1', 'wemoi', 'z500_1']
+    lci = ['ea', 'iod','moi2', 'meiv2']
+    # can add 3rd EOF if dealing with smaller box:
+    eofi = ['z500_1','z500_2', 'z500_3', 'msl_1', 'msl_2', 'msl_3']
+    if keep == 'lci':
+        keep_inds = ['pwv'] + lci
+    elif keep == 'eofi':
+        keep_inds = ['pwv'] + eofi
+    elif keep == 'both':
+        keep_inds = ['pwv'] + lci + eofi
+#    keep_inds = ['pwv', 'ea', 'MJO_20E+1','iod+1','moi2', 'u500_1', 'u500_2', 'v500_1','v500_3']
     dff = df[keep_inds]
-    X, y = preprocess_interannual_df(dff)
-    model, rdf = run_MLR(X, y)
+    X, y = preprocess_interannual_df(dff, add_trend=add_trend)
+    model, rdf = run_MLR(X, y, plot=plot)
     if heatmap:
         corr = X.to_dataset('regressors').to_dataframe().corr()
         plt.figure()
@@ -533,7 +500,7 @@ def produce_interannual_df(climate_path=climate_path, work_path=work_yuval,
     from synoptic_procedures import upper_class_dict
     pw = xr.load_dataset(
         work_path /
-        'GNSS_PW_monthly_anoms_thresh_50_homogenized.nc')
+        'GNSS_PW_monthly_anoms_thresh_50.nc')
     pw_mean = pw.to_array('station').mean('station')
     if times is not None:
         pw_mean = pw_mean.sel(time=slice(times[0], times[1]))
@@ -612,8 +579,16 @@ def produce_interannual_df(climate_path=climate_path, work_path=work_yuval,
     return df
 
 
-def preprocess_interannual_df(df, yname='pwv', standartize=True):
+def preprocess_interannual_df(df, yname='pwv', standartize=True,
+                              add_trend=True):
     from aux_gps import Zscore_xr
+    import pandas as pd
+    import numpy as np
+    jul = pd.to_datetime(df.index).to_julian_date()
+    med = np.median(jul)
+    jul -= med
+    if add_trend:
+        df['trend'] = jul
     df = df.dropna()
     y = df[yname].to_xarray()
     xnames = [x for x in df.columns if yname not in x]
@@ -777,7 +752,10 @@ def run_MLR(X, y, make_RI=True, plot=True):
     print(sdf)
     results = model.results_['original'].to_dataframe()
     results['predict'] = model.results_['predict'].to_dataframe()
-    df = model.results_[['params', 'pvalues', 'RI']].to_dataframe()
+    if make_RI:
+        df = model.results_[['params', 'pvalues', 'RI']].to_dataframe()
+    else:
+        df = model.results_[['params', 'pvalues']].to_dataframe()
     df = df.sort_values('params')
 #    df['pvalues'] = df['pvalues'].map('{:.4f}'.format)
     pd.options.display.float_format = '{:.3f}'.format
