@@ -482,7 +482,7 @@ def plot_hydro_ML_models_results_from_dss(dss, station='drag', std_on='outer',
         col='model',
         row='scoring',
         sharex=True,
-        sharey=True, figsize=(20, 20))
+        sharey=True, figsize=(10, 20))
     for i in range(fg.axes.shape[0]):  # i is rows
         for j in range(fg.axes.shape[1]):  # j is cols
             ax = fg.axes[i, j]
@@ -613,16 +613,16 @@ def load_ML_run_results(path=hydro_ml_path, prefix='CVR', pw_station='drag'):
 #                                     'model', 'scoring', 'feature'])
     data_vars = [x for x in ds_list[0] if x.startswith('test')]
 #    data_vars += ['AUC', 'TPR']
-    data_vars += ['y_true', 'y_pred', 'y_prob', 'feature_impotances']
+    data_vars += ['y_true', 'y_pred', 'y_prob', 'feature_importances']
     # check if all data vars are in each ds and merge them:
     ds_list = [xr.merge([y[x] for x in data_vars if x in y], combine_attrs='no_conflicts') for y in ds_list]
 #    ds_list = [x[data_vars] for x in ds_list]
     # complete feature_importances to all ds:
-    fi = [x for x in ds_list if 'feature_impotances' in x][0]
-    fi = fi['feature_impotances'].copy(data=np.zeros(shape=fi['feature_impotances'].shape))
+    fi = [x for x in ds_list if 'feature_importances' in x][0]
+    fi = fi['feature_importances'].copy(data=np.zeros(shape=fi['feature_importances'].shape))
     new_ds_list = []
     for ds in ds_list:
-        if 'feature_impotances' not in ds:
+        if 'feature_importances' not in ds:
             ds = xr.merge([ds, fi], combine_attrs='no_conflicts')
         new_ds_list.append(ds)
     dss = xr.concat(new_ds_list, dim='dim_0')
@@ -794,12 +794,16 @@ def plot_ROC_curve_from_dss(dss, outer_dim='outer_kfold',
         mean_auc = dss['roc-auc'].mean().item()
         std_auc = dss['roc-auc'].std().item()
         field = 'TPR'
+        xlabel = 'False Positive Rate'
+        ylabel = 'True Positive Rate'
     elif plot_type == 'PR':
         mean_fpr = dss['RCLL'].values
         mean_tpr = dss['PRN'].mean(outer_dim).mean(inner_dim).values
         mean_auc = dss['pr-auc'].mean().item()
         std_auc = dss['pr-auc'].std().item()
         field = 'PRN'
+        xlabel = 'Recall'
+        ylabel = 'Precision'
     # plot mean ROC:
     if main_label is None:
         main_label = r'Mean ROC (AUC=%0.2f$\pm$%0.2f)' % (mean_auc, std_auc)
@@ -836,6 +840,8 @@ def plot_ROC_curve_from_dss(dss, outer_dim='outer_kfold',
     ax.set_title(title, fontsize=fontsize)
     ax.tick_params(axis='y', labelsize=fontsize)
     ax.tick_params(axis='x', labelsize=fontsize)
+    ax.set_xlabel(xlabel, fontsize=fontsize)
+    ax.set_ylabel(ylabel, fontsize=fontsize)
     handles, labels = ax.get_legend_handles_labels()
     if not plot_std_legend:
         if len(handles) == 7:
