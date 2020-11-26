@@ -828,19 +828,30 @@ def plot_means_box_plots(path=work_yuval, thresh=50, kind='box',
 
 
 def plot_interannual_MLR_results(path=climate_path, fontsize=16, save=True):
-    import xarray as xr
     import matplotlib.pyplot as plt
-    rds = xr.load_dataset(path / 'best_MLR_interannual_gnss_pwv.nc')
+    from climate_works import run_best_MLR
+#    rds = xr.load_dataset(path / 'best_MLR_interannual_gnss_pwv.nc')
+    model_lci, rdf_lci = run_best_MLR(plot=False, heatmap=False, keep='lci',
+                                      add_trend=True)
+    rds_lci = model_lci.results_
+    model_eofi, rdf_eofi = run_best_MLR(plot=False, heatmap=False, keep='eofi',
+                                        add_trend=False)
+    rds_eofi = model_eofi.results_
     fig, axes = plt.subplots(2, 1, sharex=True, sharey=False, figsize=(15, 7))
-    origln = rds['original'].plot(ax=axes[0])
-    predln = rds['predict'].plot(ax=axes[0])
-    axes[0].legend(origln+predln, ['PWV', 'MLR reconstruction'], fontsize=fontsize)
+    origln = rds_lci['original'].plot.line('k-.', ax=axes[0], linewidth=1.5)
+    predln_lci = rds_lci['predict'].plot.line('b-', ax=axes[0], linewidth=1.5)
+    predln_eofi = rds_eofi['predict'].plot.line('g-', ax=axes[0], linewidth=1.5)
+    r2_lci = rds_lci['r2_adj'].item()
+    r2_eofi = rds_eofi['r2_adj'].item()
+    axes[0].legend(origln+predln_lci+predln_eofi, ['mean PWV (12m-mean)', 'MLR with LCI (Adj R$^2$:{:.2f})'.format(r2_lci), 'MLR with EOFs (Adj R$^2$:{:.2f})'.format(r2_eofi)], fontsize=fontsize-2)
     axes[0].grid()
     axes[0].set_xlabel('')
     axes[0].set_ylabel('PWV anomalies [mm]', fontsize=fontsize)
     axes[0].tick_params(labelsize=fontsize)
     axes[0].grid(which='minor', color='k', linestyle='--')
-    rds['resid'].plot(ax=axes[1], color='k')
+    residln_lci = rds_lci['resid'].plot.line('b-', ax=axes[1])
+    residln_eofi = rds_eofi['resid'].plot.line('g-', ax=axes[1])
+    axes[1].legend(residln_lci+residln_eofi, ['MLR with LCI', 'MLR with EOFs'], fontsize=fontsize-2)
     axes[1].grid()
     axes[1].set_ylabel('Residuals [mm]', fontsize=fontsize)
     axes[1].tick_params(labelsize=fontsize)
@@ -1909,7 +1920,8 @@ def produce_table_stats(thresh=50, add_location=True, add_height=True):
     return df
 
 
-def plot_pwv_longterm_trend(path=work_yuval, model_name='LR', save=True):
+def plot_pwv_longterm_trend(path=work_yuval, model_name='LR', save=True,
+                            fontsize=16):
     import matplotlib.pyplot as plt
     from aux_gps import linear_fit_using_scipy_da_ts
 #    from PW_stations import ML_Switcher
@@ -1925,7 +1937,7 @@ def plot_pwv_longterm_trend(path=work_yuval, model_name='LR', save=True):
 #    ml = ML_Switcher()
 #    model = ml.pick_model(model_name)
     fig, ax = plt.subplots(1, 1, figsize=(15, 5.5))
-    fig.suptitle('PWV mean anomalies and linear trend', fontweight='bold')
+    fig.suptitle('PWV mean anomalies and linear trend', fontweight='bold', fontsize=fontsize)
     trend, trend_hi, trend_lo, slope, slope_hi, slope_lo = linear_fit_using_scipy_da_ts(pw_mean, model=model_name, slope_factor=3650.25,
                                                                                  plot=False, ax=None, units=None)
     pwln = pw_mean.plot(ax=ax, color='k', marker='o', linewidth=1.5)
@@ -1936,10 +1948,12 @@ def plot_pwv_longterm_trend(path=work_yuval, model_name='LR', save=True):
     handles = pwln+trendln
     labels = ['PWV-mean']
     labels.append(trend_label)
-    ax.legend(handles=handles, labels=labels, loc='upper left')
+    ax.legend(handles=handles, labels=labels, loc='upper left',
+              fontsize=fontsize)
     ax.grid()
     ax.set_xlabel('')
-    ax.set_ylabel('PWV mean anomalies [mm]')
+    ax.set_ylabel('PWV mean anomalies [mm]', fontsize=fontsize)
+    ax.tick_params(labelsize=fontsize)
     fig.tight_layout()
     if save:
         filename = 'pwv_mean_trend_{}.png'.format(model_name)
