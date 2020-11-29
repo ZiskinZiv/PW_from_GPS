@@ -416,6 +416,7 @@ def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
     else:
         dss.attrs['hs_id'] = y.attrs['hydro_station_id']
     dss.attrs['hydro_max_flow'] = y.attrs['max_flow']
+    dss.attrs['neg_pos_ratio'] = y.attrs['neg_pos_ratio']
     # save results to file:
     if savepath is not None:
         save_cv_results(dss, savepath=savepath)
@@ -495,7 +496,7 @@ def plot_hydro_ML_models_results_from_dss(dss, station='drag', std_on='outer',
                 model = dss.isel({'model': j, 'scoring': i}).sel(
                     {'features': feat})
                 title = 'ROC of {} model ({})'.format(modelname, scoring)
-                plot_ROC_curve_from_dss(model, outer_dim='outer_kfold',
+                plot_ROC_PR_curve_from_dss(model, outer_dim='outer_kfold',
                                         inner_dim='inner_kfold',
                                         plot_chance=chance_plot[k],
                                         main_label=feat,
@@ -586,6 +587,7 @@ def load_ML_run_results(path=hydro_ml_path, prefix='CVR', pw_station='drag'):
 #    from aux_gps import save_ncfile
     import pandas as pd
     import numpy as np
+    print('loading hydro ML results for station {}'.format(pw_station))
     model_files = path_glob(path, '{}_*.nc'.format(prefix))
     model_files = sorted(model_files)
     model_files = [x for x in model_files if pw_station in x.as_posix()]
@@ -629,6 +631,11 @@ def load_ML_run_results(path=hydro_ml_path, prefix='CVR', pw_station='drag'):
     dss['dim_0'] = ind
     dss = dss.unstack('dim_0')
     dss.attrs['pwv_id'] = pw_station
+    # fix roc_auc to roc-auc in dss datavars
+    dss = dss.rename({'test_roc_auc': 'test_roc-auc'})
+    print('calculating ROC, PR metrics.')
+    dss = calculate_metrics_from_ML_dss(dss)
+    print('Done!')
     return dss
 
 
@@ -676,6 +683,7 @@ def calculate_metrics_from_ML_dss(dss):
                         y_true = y_true.dropna('sample')
                         y_prob = y_prob.dropna('sample')
                         if y_prob.size == 0:
+                            # in case of NaNs in the results:
                             fpr_da = xr.DataArray(np.nan*np.ones((1)), dims=['sample'])
                             fpr_da['sample'] = [x for x in range(fpr_da.size)]
                             tpr_da = xr.DataArray(np.nan*np.ones((1)), dims=['sample'])
@@ -690,7 +698,10 @@ def calculate_metrics_from_ML_dss(dss):
                             prn_rcll['RCLL'] = mean_fpr
                             pr_auc_da = xr.DataArray(np.nan)
                             roc_auc_da = xr.DataArray(np.nan)
+                            no_skill = xr.DataArray(np.nan)
                         else:
+                            no_skill = len(y_true[y_true==1]) / len(y_true)
+                            no_skill_da = xr.DataArray(no_skill)
                             fpr, tpr, _ = roc_curve(y_true, y_prob)
                             interp_tpr = np.interp(mean_fpr, fpr, tpr)
                             interp_tpr[0] = 0.0
@@ -721,6 +732,7 @@ def calculate_metrics_from_ML_dss(dss):
                         ds['rcll'] = rcll_da
                         ds['TPR'] = tpr_fpr
                         ds['PRN'] = prn_rcll
+                        ds['no_skill'] = no_skill_da
                         ds_list.append(ds)
     ds = xr.concat(ds_list, 'dim_0')
     ds['dim_0'] = ind
@@ -734,7 +746,8 @@ def calculate_metrics_from_ML_dss(dss):
     ds['pr-auc'].attrs['long_name'] = 'Precition-Recall Area under curve'
     ds['PRN'].attrs['long_name'] = 'Precision-Recall'
     ds['TPR'].attrs['long_name'] = 'TPR-FPR (ROC)'
-    return ds
+    dss = xr.merge([dss, ds], combine_attrs='no_conflicts')
+    return dss
 
 #
 #def load_ML_models(path=hydro_ml_path, station='drag', prefix='CVM', suffix='.pkl'):
@@ -777,11 +790,68 @@ def calculate_metrics_from_ML_dss(dss):
 #    return da
 
 
-def plot_ROC_curve_from_dss(dss, outer_dim='outer_kfold',
-                            inner_dim='inner_kfold', plot_chance=True, ax=None,
-                            color='b', title=None, std_on='inner',
-                            main_label=None, fontsize=14, plot_type='ROC',
-                            plot_std_legend=True):
+def plot_feature_importances(
+        dss,
+        feat_dim='features',
+        scoring='f1',
+        axes=None):
+    import matplotlib.pyplot as plt
+    all_feats = dss[feat_dim].max().item()
+    dss = dss.sel({feat_dim: all_feats})
+    tests_ds = dss[[x for x in dss if 'test' in x]]
+    tests_ds = tests_ds.sel(scoring=scoring)
+    score_ds = tests_ds['test_{}'.format(scoring)]
+    max_score = score_ds.idxmax('outer_kfold').values
+    feats = all_feats.split('+')
+    fn = len(feats)
+    if axes is None:
+        fig, axes = plt.subplots(1, fn, sharey=True, figsize=(15, 20))
+    for i, f in enumerate(feats):
+        fe = [x for x in dss['feature'].values if f in x]
+        dsf = dss['feature_importances'].sel(
+            feature=fe,
+            outer_kfold=max_score).reset_coords(
+            drop=True)
+        dsf = dsf.to_dataset('scoring').to_dataframe(
+        ).reset_index(drop=True) * 100
+        title = '{} - {}'.format(f, scoring)
+        dsf.plot.bar(ax=axes[i], title=title, rot=0, legend=False)
+        dsf_sum = dsf.sum().tolist()
+        handles, labels = axes[i].get_legend_handles_labels()
+        labels = [
+            '{} ({:.1f} %)'.format(
+                x, y) for x, y in zip(
+                labels, dsf_sum)]
+        axes[i].legend(handles=handles, labels=labels)
+        axes[i].set_ylabel('Feature importance [%]')
+    return
+
+
+def plot_feature_importances_for_all_scorings(dss, model='RF'):
+    import matplotlib.pyplot as plt
+    dss = dss.sel(model=model).reset_coords(drop=True)
+    fns = len(dss['features'].max().values.tolist().split('+'))
+    scores = dss['scoring'].values
+    fig, axes = plt.subplots(len(scores), fns, sharey=True, figsize=(15, 20))
+    for i, score in enumerate(scores):
+        plot_feature_importances(dss, scoring=score, axes=axes[i, :])
+    return dss
+
+
+def plot_ROC_PR_curve_from_dss(
+        dss,
+        outer_dim='outer_kfold',
+        inner_dim='inner_kfold',
+        plot_chance=True,
+        ax=None,
+        color='b',
+        title=None,
+        std_on='inner',
+        main_label=None,
+        fontsize=14,
+        plot_type='ROC',
+        plot_std_legend=True):
+    """plot classifier metrics, plot_type=ROC or PR"""
     import matplotlib.pyplot as plt
     import numpy as np
     if ax is None:
@@ -801,14 +871,16 @@ def plot_ROC_curve_from_dss(dss, outer_dim='outer_kfold',
         mean_tpr = dss['PRN'].mean(outer_dim).mean(inner_dim).values
         mean_auc = dss['pr-auc'].mean().item()
         std_auc = dss['pr-auc'].std().item()
+        no_skill = dss['no_skill'].mean(outer_dim).mean(inner_dim).item()
         field = 'PRN'
         xlabel = 'Recall'
         ylabel = 'Precision'
     # plot mean ROC:
     if main_label is None:
-        main_label = r'Mean ROC (AUC=%0.2f$\pm$%0.2f)' % (mean_auc, std_auc)
+        main_label = r'Mean {} (AUC={:.2f}$\pm${:.2f})'.format(plot_type, mean_auc, std_auc)
     else:
-        textstr = '\n'.join(['Mean ROC {}'.format(main_label), r'(AUC={:.2f}$\pm${:.2f})'.format(mean_auc, std_auc)])
+        textstr = '\n'.join(['Mean ROC {}'.format(
+            main_label), r'(AUC={:.2f}$\pm${:.2f})'.format(mean_auc, std_auc)])
         main_label = textstr
     ax.plot(mean_fpr, mean_tpr, color=color,
             lw=2, alpha=.8, label=main_label)
@@ -826,15 +898,19 @@ def plot_ROC_curve_from_dss(dss, outer_dim='outer_kfold',
     tprs_lower = np.maximum(mean_tpr - std_tpr, 0)
     # plot Chance line:
     if plot_chance:
-        ax.plot([0, 1], [0, 1], linestyle='--', lw=2, color='r',
-                label='Chance', alpha=.8)
+        if plot_type == 'ROC':
+            ax.plot([0, 1], [0, 1], linestyle='--', lw=2, color='r',
+                    label='Chance', alpha=.8)
+        elif plot_type == 'PR':
+            ax.plot([0, 1], [no_skill, no_skill], linestyle='--', color='r',
+                    lw=2, label='No Skill', alpha=.8)
     # plot ROC STD range:
     ax.fill_between(
         mean_fpr,
         tprs_lower,
         tprs_upper,
         color='grey',
-        alpha=.2, label= r'$\pm$ 1 std. dev. ({} {} splits)'.format(n, std_on))
+        alpha=.2, label=r'$\pm$ 1 std. dev. ({} {} splits)'.format(n, std_on))
     ax.grid()
     ax.set(xlim=[-0.05, 1.05], ylim=[-0.05, 1.05])
     ax.set_title(title, fontsize=fontsize)
@@ -1034,12 +1110,13 @@ def save_cv_results(cvr, savepath=hydro_path):
     features = '+'.join(cvr.attrs['features'])
     pwv_id = cvr.attrs['pwv_id']
     hs_id = cvr.attrs['hs_id']
+    neg_pos_ratio = cvr.attrs['neg_pos_ratio']
     ikfolds = cvr.attrs['inner_kfold_splits']
     okfolds = cvr.attrs['outer_kfold_splits']
     name = cvr.attrs['model_name']
     refitted_scorer = cvr.attrs['refitted_scorer'].replace('_', '-')
     filename = 'CVR_{}_{}_{}_{}_{}_{}_{}.nc'.format(pwv_id, hs_id,
-                                                    name, features, refitted_scorer, ikfolds, okfolds)
+                                                    name, features, refitted_scorer, ikfolds, okfolds, neg_pos_ratio)
 
     save_ncfile(cvr, savepath, filename)
     return
@@ -1225,6 +1302,7 @@ def produce_X_y(pw_station='drag', hs_id=48125, pressure_station='bet-dagan',
         X.attrs.update(p_attrs)
     y.attrs = y_meta
     y.attrs['hydro_station_id'] = hs_id
+    y.attrs['neg_pos_ratio'] = neg_pos_ratio
     # calculate distance to hydro station:
     lat1 = X.attrs['pwv_lat']
     lon1 = X.attrs['pwv_lon']
