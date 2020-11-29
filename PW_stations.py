@@ -2159,6 +2159,16 @@ def read_zwd_from_tdp_final(tdp_path, st_name='TELA', scatter_plot=True):
     return ds
 
 
+def read_rnx_headers(path=work_yuval/'rnx_headers', station='tela'):
+    from aux_gps import path_glob
+    import pandas as pd
+    file = path_glob(path, '{}_rnxheaders.csv'.format(station))[0]
+    df = pd.read_csv(file, header=0, index_col='nameDateStr')
+    df = df.sort_index()
+    df = df.drop('Unnamed: 0', axis=1)
+    return df
+
+
 def check_anton_tela_station(anton_path, ims_path=ims_path, plot=True):
     import pandas as pd
     from datetime import datetime, timedelta
