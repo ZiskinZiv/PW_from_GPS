@@ -874,7 +874,7 @@ def plot_interannual_MLR_results(path=climate_path, fontsize=16, save=True):
 
 
 def plot_annual_pw(path=work_yuval, fontsize=20, labelsize=18, compare='uerra',
-                   ylim=[7.5, 40], save=True, kind='violin', bins=None):
+                   ylim=[7.5, 40], save=True, kind='violin', bins=None, ds=None):
     """kind can be violin or hist, for violin choose ylim=7.5,40 and for hist
     choose ylim=0,0.3"""
     import xarray as xr
@@ -885,7 +885,7 @@ def plot_annual_pw(path=work_yuval, fontsize=20, labelsize=18, compare='uerra',
     df_annual = pw.to_dataframe()
     hue = None
     if compare is not None:
-        df_annual = prepare_reanalysis_monthly_pwv_to_dataframe(path, re=compare)
+        df_annual = prepare_reanalysis_monthly_pwv_to_dataframe(path, re=compare, ds=ds)
         hue = 'source'
     fg = plot_pw_geographical_segments(
         df_annual, scope='annual',
@@ -3275,7 +3275,8 @@ def group_sites_to_xarray(upper=False, scope='diurnal'):
 #    return fg
 
 
-def prepare_reanalysis_monthly_pwv_to_dataframe(path=work_yuval, re='era5'):
+def prepare_reanalysis_monthly_pwv_to_dataframe(path=work_yuval, re='era5',
+                                                ds=None):
     import xarray as xr
     import pandas as pd
     if re == 'era5':
@@ -3284,6 +3285,9 @@ def prepare_reanalysis_monthly_pwv_to_dataframe(path=work_yuval, re='era5'):
     elif re == 'uerra':
         reanalysis = xr.load_dataset(work_yuval / 'GNSS_uerra_monthly_PW.nc')
         re_name = 'UERRA-HARMONIE'
+    elif re is not None and ds is not None:
+        reanalysis = ds
+        re_name = re
     df_re = reanalysis.to_dataframe()
     df_re['month'] = df_re.index.month
     pw_mm = xr.load_dataset(
