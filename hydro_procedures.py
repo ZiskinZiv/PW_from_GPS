@@ -328,6 +328,7 @@ def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
     from sklearn.model_selection import cross_validate
     from sklearn.model_selection import StratifiedKFold
     from sklearn.model_selection import GridSearchCV
+    from sklearn.inspection import permutation_importance
     from string import digits
     import numpy as np
     import xarray as xr
@@ -381,6 +382,15 @@ def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
                                      scoring=('f1', 'roc_auc', 'accuracy'),
                                      cv=cv_outer, n_jobs=-1,
                                      return_estimator=True, verbose=verbose)
+    perm = []
+    for i, (train, val) in enumerate(cv_outer.split(X, y)):
+        gr_model = scores_est_dict['estimator'][i]
+        gr_model.fit(X[train], y[train])
+        r = permutation_importance(gr_model, X[val], y[val],scoring='f1',
+                                   n_repeats=30, n_jobs=-1,
+                                   random_state=0)
+        perm.append(r)
+    return perm
     # get the test scores:
     test_keys = [x for x in scores_est_dict.keys() if 'test' in x]
     ds = xr.Dataset()
@@ -587,6 +597,20 @@ def load_ML_run_results(path=hydro_ml_path, prefix='CVR', pw_station='drag'):
 #    from aux_gps import save_ncfile
     import pandas as pd
     import numpy as np
+
+    def smart_add_dataarray_to_ds_list(dsl, da_name='feature_importances'):
+        """add data array to ds_list even if it does not exist, use shape of
+        data array that exists in other part of ds list"""
+        fi = [x for x in dsl if da_name in x][0]
+        print(da_name, fi[da_name].shape)
+        fi = fi[da_name].copy(data=np.zeros(shape=fi[da_name].shape))
+        new_dsl = []
+        for ds in dsl:
+            if da_name not in ds:
+                ds = xr.merge([ds, fi], combine_attrs='no_conflicts')
+            new_dsl.append(ds)
+        return new_dsl
+
     print('loading hydro ML results for station {}'.format(pw_station))
     model_files = path_glob(path, '{}_*.nc'.format(prefix))
     model_files = sorted(model_files)
@@ -613,20 +637,20 @@ def load_ML_run_results(path=hydro_ml_path, prefix='CVR', pw_station='drag'):
             'features'])
 #    ind1 = pd.MultiIndex.from_product([model_names, model_scores, model_features], names=[
 #                                     'model', 'scoring', 'feature'])
+#    ds_list = [x[data_vars] for x in ds_list]
+    # complete non-existant fields like best and fi for all ds:
     data_vars = [x for x in ds_list[0] if x.startswith('test')]
 #    data_vars += ['AUC', 'TPR']
-    data_vars += ['y_true', 'y_pred', 'y_prob', 'feature_importances']
-    # check if all data vars are in each ds and merge them:
-    ds_list = [xr.merge([y[x] for x in data_vars if x in y], combine_attrs='no_conflicts') for y in ds_list]
-#    ds_list = [x[data_vars] for x in ds_list]
-    # complete feature_importances to all ds:
-    fi = [x for x in ds_list if 'feature_importances' in x][0]
-    fi = fi['feature_importances'].copy(data=np.zeros(shape=fi['feature_importances'].shape))
+    data_vars += ['y_true', 'y_pred', 'y_prob']
+    bests = [[x for x in y if x.startswith('best')] for y in ds_list]
+    data_vars += list(set([y for x in bests for y in x]))
+    data_vars += ['feature_importances']
     new_ds_list = []
-    for ds in ds_list:
-        if 'feature_importances' not in ds:
-            ds = xr.merge([ds, fi], combine_attrs='no_conflicts')
-        new_ds_list.append(ds)
+    for dvar in data_vars:
+        ds_list = smart_add_dataarray_to_ds_list(ds_list, dvar)
+#    # check if all data vars are in each ds and merge them:
+    new_ds_list = [xr.merge([y[x] for x in data_vars if x in y], combine_attrs='no_conflicts') for y in ds_list]
+    # concat all
     dss = xr.concat(new_ds_list, dim='dim_0')
     dss['dim_0'] = ind
     dss = dss.unstack('dim_0')
