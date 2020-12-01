@@ -344,11 +344,14 @@ def create_index_from_synoptics(path=climate_path, syn_cat='normal',
     ds = da.to_dataset('syn_cls')
     ds = anomalize_xr(ds, 'MS')
     ds = ds.fillna(0)
-    if normalize == 'zscore':
-        return Zscore_xr(ds)
-    elif normalize == 'longterm':
-        ds = annual_standertize(ds)
-        ds = ds.fillna(0)
+    if normalize is not None:
+        if normalize == 'zscore':
+            return Zscore_xr(ds)
+        elif normalize == 'longterm':
+            ds = annual_standertize(ds)
+            ds = ds.fillna(0)
+            return ds
+    else:
         return ds
 
 
@@ -465,11 +468,14 @@ def run_best_MLR(savepath=None, heatmap=True, plot=True, keep='lci',
     from aux_gps import save_ncfile
     import seaborn as sns
     import matplotlib.pyplot as plt
+    import numpy as np
     # check for correlation between synoptics and maybe
     # agg some classes and leave everything else
-    df = produce_interannual_df(lags=1, smooth=12, corr_thresh=None, syn=None,
+    df = produce_interannual_df(lags=1, smooth=12, corr_thresh=None, syn='class',
                                 drop_worse_lags=False)
-    lci = ['ea', 'iod','moi2', 'meiv2']
+    syn_class = np.arange(1, 20)
+    syn_class = [str(x) for x in syn_class]
+    lci = ['ea', 'iod', 'moi2', 'meiv2']
     # can add 3rd EOF if dealing with smaller box:
     eofi = ['z500_1','z500_2', 'z500_3', 'msl_1', 'msl_2', 'msl_3']
     if keep == 'lci':
@@ -478,6 +484,8 @@ def run_best_MLR(savepath=None, heatmap=True, plot=True, keep='lci',
         keep_inds = ['pwv'] + eofi
     elif keep == 'both':
         keep_inds = ['pwv'] + lci + eofi
+    elif keep == 'syn+lci':
+        keep_inds = ['pwv'] + lci + syn_class
 #    keep_inds = ['pwv', 'ea', 'MJO_20E+1','iod+1','moi2', 'u500_1', 'u500_2', 'v500_1','v500_3']
     dff = df[keep_inds]
     X, y = preprocess_interannual_df(dff, add_trend=add_trend)
@@ -535,9 +543,9 @@ def produce_interannual_df(climate_path=climate_path, work_path=work_yuval,
             df = df.drop('pwv', axis=1)
     # load synoptics:
     ds = create_index_from_synoptics(path=climate_path, syn_cat='upper',
-                                     normalize='longterm')
+                                     normalize=None)
     ds_cls = create_index_from_synoptics(path=climate_path, syn_cat='normal',
-                                         normalize='longterm')
+                                         normalize=None)
 #    if smooth:
 #        ds = smooth_xr(ds)
 #        ds_cls = smooth_xr(ds_cls)
