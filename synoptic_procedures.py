@@ -12,6 +12,41 @@ climate_path = work_yuval / 'climate'
 #cwd = Path().cwd()
 
 
+def choose_color_for_synoptic_classification():
+    import numpy as np
+    import seaborn as sns
+    syn_cls = np.arange(1, 20)
+    colors = sns.color_palette('tab20', 19)
+    col_dict = dict(zip(syn_cls, colors))
+    return col_dict
+
+
+def visualize_synoptic_class_on_time_series(da_ts, path=climate_path, ax=None):
+    import xarray as xr
+    import matplotlib.pyplot as plt
+    time_dim = list(set(da_ts.dims))[0]
+    assert xr.infer_freq(da_ts[time_dim]) == 'D'
+    if ax is None:
+        fig, ax = plt.subplots()
+    da_ts.plot.line('k-', lw=2, ax=ax, marker='s')
+    ax.grid()
+    ymin, ymax = ax.get_ylim()
+    df = read_synoptic_classification(path, report=False)
+    ind = da_ts.to_dataframe().index
+    df = df.loc[ind]
+    color_dict = choose_color_for_synoptic_classification()
+#    df['color'] = df['class'].map(color_dict)
+    grp_dict = df.groupby('class').groups
+    for key_class, key_ind in grp_dict.items():
+        color = color_dict[key_class]
+        abbr = add_class_abbr(key_class)
+#    for ind, row in df.iterrows():
+        ax.vlines(key_ind, ymin, ymax, colors=color, alpha=0.4, lw=10,
+                  label=abbr)
+    ax.legend()
+    return ax
+
+
 def val_counts(ser):
     s = ser.value_counts()
     # s=s.drop(0)
@@ -178,7 +213,7 @@ def find_consecutive_classes(df):
     return df_clas
 
 
-def agg_month_consecutive_syn_class(path=climate_path):
+def agg_month_consecutive_syn_class(path=climate_path, normalize=True):
     import numpy as np
     import pandas as pd
     from aux_gps import save_ncfile
@@ -194,11 +229,13 @@ def agg_month_consecutive_syn_class(path=climate_path):
     new_df.set_index(dt, inplace=True)
     new_df = new_df.sort_index()
     new_df.index.name = 'time'
+    if normalize:
+        new_df = new_df.divide(new_df.index.days_in_month, axis=0)
     da = new_df.to_xarray().to_array('class')
     ds = da.to_dataset(name='consecutive')
     filename = 'GNSS_synoptic_class_consecutive.nc'
     save_ncfile(ds, work_yuval, filename)
-    return da
+    return ds
 
 
 def agg_month_count_syn_class(path=climate_path, syn_category='normal',
