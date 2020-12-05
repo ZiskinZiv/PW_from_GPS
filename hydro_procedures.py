@@ -382,15 +382,14 @@ def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
                                      scoring=('f1', 'roc_auc', 'accuracy'),
                                      cv=cv_outer, n_jobs=-1,
                                      return_estimator=True, verbose=verbose)
-    perm = []
-    for i, (train, val) in enumerate(cv_outer.split(X, y)):
-        gr_model = scores_est_dict['estimator'][i]
-        gr_model.fit(X[train], y[train])
-        r = permutation_importance(gr_model, X[val], y[val],scoring='f1',
-                                   n_repeats=30, n_jobs=-1,
-                                   random_state=0)
-        perm.append(r)
-    return perm
+#    perm = []
+#    for i, (train, val) in enumerate(cv_outer.split(X, y)):
+#        gr_model = scores_est_dict['estimator'][i]
+#        gr_model.fit(X[train], y[train])
+#        r = permutation_importance(gr_model, X[val], y[val],scoring='f1',
+#                                   n_repeats=30, n_jobs=-1,
+#                                   random_state=0)
+#        perm.append(r)
     # get the test scores:
     test_keys = [x for x in scores_est_dict.keys() if 'test' in x]
     ds = xr.Dataset()
@@ -1139,8 +1138,8 @@ def save_cv_results(cvr, savepath=hydro_path):
     okfolds = cvr.attrs['outer_kfold_splits']
     name = cvr.attrs['model_name']
     refitted_scorer = cvr.attrs['refitted_scorer'].replace('_', '-')
-    filename = 'CVR_{}_{}_{}_{}_{}_{}_{}.nc'.format(pwv_id, hs_id,
-                                                    name, features, refitted_scorer, ikfolds, okfolds, neg_pos_ratio)
+    filename = 'CVR_{}_{}_{}_{}_{}_{}_{}_{}.nc'.format(pwv_id, hs_id,
+                                                       name, features, refitted_scorer, ikfolds, okfolds, neg_pos_ratio)
 
     save_ncfile(cvr, savepath, filename)
     return
