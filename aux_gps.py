@@ -12,6 +12,97 @@ from PW_paths import work_yuval
 # TODO: if not, build func to replace datetimeindex to numbers and vise versa
 
 
+def calculate_divergence(u, v, lat_dim='latitude', lon_dim='longitude',
+                         level_dim='level', time_dim='time', savepath=None):
+    from metpy.calc import divergence
+    from metpy.calc import lat_lon_grid_deltas
+    from aux_gps import save_ncfile
+    import xarray as xr
+    dx, dy = lat_lon_grid_deltas(u[lon_dim], u[lat_dim])
+    u = u.transpose(..., lat_dim, lon_dim)
+    v = v.transpose(..., lat_dim, lon_dim)
+    if level_dim in u.dims and time_dim in u.dims:
+        min_year = u[time_dim].dt.year.min().item()
+        max_year = u[time_dim].dt.year.max().item()
+        level_cnt = u[level_dim].size
+        label = '{}_{}-{}.nc'.format(level_cnt, min_year, max_year)
+        times = []
+        for time in u[time_dim]:
+            print('{}-{}'.format(time[time_dim].dt.month.item(), time[time_dim].dt.year.item()))
+            levels = []
+            for level in u[level_dim]:
+                utl = u.sel({time_dim: time, level_dim: level})
+                vtl = v.sel({time_dim: time, level_dim: level})
+                div = divergence(utl, vtl, dx=dx, dy=dy)
+                div_da = xr.DataArray(div.magnitude, dims=[lat_dim, lon_dim])
+                div_da.attrs['units'] = div.units.format_babel()
+                levels.append(div_da)
+            times.append(xr.concat(levels, level_dim))
+        da = xr.concat(times, time_dim)
+        da[level_dim] = u[level_dim]
+        da[time_dim] = u[time_dim]
+        da[lat_dim] = u[lat_dim]
+        da[lon_dim] = u[lon_dim]
+        da.name = '{}{}_div'.format(u.name, v.name)
+    else:
+        if level_dim in u.dims:
+            level_cnt = u[level_dim].size
+            label = '{}.nc'.format(level_cnt)
+            levels = []
+            for level in u[level_dim]:
+                ul = u.sel({level_dim: level})
+                vl = v.sel({level_dim: level})
+                div = divergence(ul, vl, dx=dx, dy=dy)
+                div_da = xr.DataArray(div.magnitude, dims=[lat_dim, lon_dim])
+                div_da.attrs['units'] = div.units.format_babel()
+                levels.append(div_da)
+            da = xr.concat(levels, level_dim)
+            da[level_dim] = u[level_dim]
+        elif time_dim in u.dims:
+            min_year = u[time_dim].dt.year.min().item()
+            max_year = u[time_dim].dt.year.max().item()
+            min_year = u[time_dim].dt.year.min().item()
+            max_year = u[time_dim].dt.year.max().item()
+            times = []
+            for time in u[time_dim]:
+                ut = u.sel({time_dim: time})
+                vt = v.sel({time_dim: time})
+                div = divergence(ut, vt, dx=dx, dy=dy)
+                div_da = xr.DataArray(div.magnitude, dims=[lat_dim, lon_dim])
+                div_da.attrs['units'] = div.units.format_babel()
+                times.append(div_da)
+            da = xr.concat(times, time_dim)
+            da[time_dim] = u[time_dim]
+        da[lat_dim] = u[lat_dim]
+        da[lon_dim] = u[lon_dim]
+        da.name = '{}{}_div'.format(u.name, v.name)
+    if savepath is not None:
+        filename = '{}{}_div_{}'.format(u.name, v.name, label)
+        save_ncfile(da, savepath, filename)
+    return da
+
+    
+def calculate_pressure_integral(da, pdim='level'):
+    import numpy as np
+    # first sort to decending levels:
+    da = da.sortby(pdim, ascending=False)
+    try:
+        units = da[pdim].attrs['units']
+    except KeyError:
+        print('no units attrs found, assuming units are hPa')
+        units = 'hPa'
+    # transform to Pa:
+    if units != 'Pa':
+        print('{} units detected, converting to Pa!'.format(units))
+        da[pdim] = da[pdim] * 1000
+    # P_{i+1} - P_i:
+    plevel_diff = np.abs(da[pdim].diff(pdim, label='lower'))
+    # var_i + var_{i+1}:
+    da_sum = da.shift(level=-1) + da
+    p_int = ((da_sum * plevel_diff) / 2.0).sum(pdim)
+    return p_int
+
+
 def linear_fit_using_scipy_da_ts(da_ts, model='TSEN', slope_factor=3650.25,
                                  plot=False, ax=None, units=None):
     """linear fit using scipy for dataarray time series,
