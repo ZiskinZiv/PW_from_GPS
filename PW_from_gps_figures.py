@@ -1921,7 +1921,7 @@ def produce_table_stats(thresh=50, add_location=True, add_height=True):
 
 
 def plot_pwv_longterm_trend(path=work_yuval, model_name='LR', save=True,
-                            fontsize=16):
+                            fontsize=16, add_era5=True):
     import matplotlib.pyplot as plt
     from aux_gps import linear_fit_using_scipy_da_ts
 #    from PW_stations import ML_Switcher
@@ -1933,40 +1933,115 @@ def plot_pwv_longterm_trend(path=work_yuval, model_name='LR', save=True,
     pw = xr.load_dataset(path / 'GNSS_PW_monthly_thresh_50.nc')
     pw_anoms = anomalize_xr(pw, 'MS', verbose=False)
     pw_mean = pw_anoms.to_array('station').mean('station')
+    # add ERA5:
+    era5 = xr.load_dataset(work_yuval / 'GNSS_era5_monthly_PW.nc')
+    era5_anoms = anomalize_xr(era5, 'MS', verbose=False)
+    era5_mean = era5_anoms.to_array('station').mean('station')
+    era5_mean = era5_mean.sel(time=slice(pw_mean.time.min(), pw_mean.time.max()))
     # init linear models
 #    ml = ML_Switcher()
 #    model = ml.pick_model(model_name)
-    fig, ax = plt.subplots(1, 1, figsize=(15, 5.5))
-    fig.suptitle('PWV mean anomalies and linear trend', fontweight='bold', fontsize=fontsize)
-    trend, trend_hi, trend_lo, slope, slope_hi, slope_lo = linear_fit_using_scipy_da_ts(pw_mean, model=model_name, slope_factor=3650.25,
+    if add_era5:
+        fig, ax = plt.subplots(2, 1, figsize=(15, 7.5))
+        trend, trend_hi, trend_lo, slope, slope_hi, slope_lo = linear_fit_using_scipy_da_ts(pw_mean, model=model_name, slope_factor=3650.25,
+                                                                         plot=False, ax=None, units=None)
+        pwln = pw_mean.plot(ax=ax[0], color='k', marker='o', linewidth=1.5)
+        trendln = trend.plot(ax=ax[0], color='r', linewidth=2)
+        trend_hi.plot.line('r--', ax=ax[0], linewidth=1.5)
+        trend_lo.plot.line('r--', ax=ax[0], linewidth=1.5)
+        trend_label = '{} model, slope={:.2f} ({:.2f}, {:.2f}) mm/decade'.format(model_name, slope, slope_lo, slope_hi)
+        handles = pwln+trendln
+        labels = ['PWV-mean']
+        labels.append(trend_label)
+        ax[0].legend(handles=handles, labels=labels, loc='upper left',
+                  fontsize=fontsize)
+        ax[0].grid()
+        ax[0].set_xlabel('')
+        ax[0].set_ylabel('PWV mean anomalies [mm]', fontsize=fontsize)
+        ax[0].tick_params(labelsize=fontsize)
+        trend1, trend_hi1, trend_lo1, slope1, slope_hi1, slope_lo1 = linear_fit_using_scipy_da_ts(era5_mean, model=model_name, slope_factor=3650.25,
                                                                                  plot=False, ax=None, units=None)
-    pwln = pw_mean.plot(ax=ax, color='k', marker='o', linewidth=1.5)
-    trendln = trend.plot(ax=ax, color='r', linewidth=2)
-    trend_hi.plot.line('r--', ax=ax, linewidth=1.5)
-    trend_lo.plot.line('r--', ax=ax, linewidth=1.5)
-    trend_label = '{} model, slope={:.2f} ({:.2f}, {:.2f}) mm/decade'.format(model_name, slope, slope_lo, slope_hi)
-    handles = pwln+trendln
-    labels = ['PWV-mean']
-    labels.append(trend_label)
-    ax.legend(handles=handles, labels=labels, loc='upper left',
-              fontsize=fontsize)
-    ax.grid()
-    ax.set_xlabel('')
-    ax.set_ylabel('PWV mean anomalies [mm]', fontsize=fontsize)
-    ax.tick_params(labelsize=fontsize)
+
+        era5ln = era5_mean.plot(ax=ax[1], color='k', marker='o', linewidth=1.5)
+        trendln1 = trend1.plot(ax=ax[1], color='r', linewidth=2)
+        trend_hi1.plot.line('r--', ax=ax[1], linewidth=1.5)
+        trend_lo1.plot.line('r--', ax=ax[1], linewidth=1.5)
+        trend_label = '{} model, slope={:.2f} ({:.2f}, {:.2f}) mm/decade'.format(model_name, slope1, slope_lo1, slope_hi1)
+        handles = era5ln+trendln1
+        labels = ['ERA5-mean']
+        labels.append(trend_label)
+        ax[1].legend(handles=handles, labels=labels, loc='upper left',
+                  fontsize=fontsize)
+        ax[1].grid()
+        ax[1].set_xlabel('')
+        ax[1].set_ylabel('PWV mean anomalies [mm]', fontsize=fontsize)
+        ax[1].tick_params(labelsize=fontsize)
+    else:
+        fig, ax = plt.subplots(1, 1, figsize=(15, 5.5))
+        trend, trend_hi, trend_lo, slope, slope_hi, slope_lo = linear_fit_using_scipy_da_ts(pw_mean, model=model_name, slope_factor=3650.25,
+                                                                         plot=False, ax=None, units=None)
+        pwln = pw_mean.plot(ax=ax, color='k', marker='o', linewidth=1.5)
+        trendln = trend.plot(ax=ax, color='r', linewidth=2)
+        trend_hi.plot.line('r--', ax=ax, linewidth=1.5)
+        trend_lo.plot.line('r--', ax=ax, linewidth=1.5)
+        trend_label = '{} model, slope={:.2f} ({:.2f}, {:.2f}) mm/decade'.format(model_name, slope, slope_lo, slope_hi)
+        handles = pwln+trendln
+        labels = ['PWV-mean']
+        labels.append(trend_label)
+        ax.legend(handles=handles, labels=labels, loc='upper left',
+                  fontsize=fontsize)
+        ax.grid()
+        ax.set_xlabel('')
+        ax.set_ylabel('PWV mean anomalies [mm]', fontsize=fontsize)
+        ax.tick_params(labelsize=fontsize)
+    fig.suptitle('PWV mean anomalies and linear trend', fontweight='bold', fontsize=fontsize)
+
     fig.tight_layout()
     if save:
         filename = 'pwv_mean_trend_{}.png'.format(model_name)
-        plt.savefig(savefig_path / filename, bbox_inches='tight')
+        plt.savefig(savefig_path / filename, orientation='portrait')
     return ax
 
 
-def produce_table_mann_kendall(thresh=50, alpha=0.05, load_data='pwv-homo'):
+def produce_filled_pwv_and_era5_mann_kendall_table(path=work_yuval):
+    import xarray as xr
+    from aux_gps import path_glob
+    file = sorted(path_glob(path, 'GNSS_PW_monthly_homogenized_filled_*.nc'))[0]
+    gnss = xr.load_dataset(path / file)
+    era5 = xr.load_dataset(path / 'GNSS_era5_monthly_PW.nc')
+    era5 = era5.sel(time=slice(gnss.time.min(), gnss.time.max()))
+    df = add_comparison_to_mann_kendall_table(gnss, era5, 'GNSS', 'ERA5')
+    print(df.to_latex(header=False, index=False))
+    return df    
+
+
+def add_comparison_to_mann_kendall_table(ds1, ds2, name1='GNSS', name2='ERA5',
+                                         alpha=0.05):
+    df1 = produce_table_mann_kendall(ds1, alpha=alpha)
+    df2 = produce_table_mann_kendall(ds2, alpha=alpha)
+    df = df1['Site ID'].to_frame()
+    df[name1+'1'] = df1["Kendall's Tau"]
+    df[name2+'1'] = df2["Kendall's Tau"]
+    df[name1+'2'] = df1['P-value']
+    df[name2+'2'] = df2['P-value']
+    df[name1+'3'] = df1["Sen's slope"]
+    df[name2+'3'] = df2["Sen's slope"]
+    df[name1+'4'] = df1["Percent change"]
+    df[name2+'4'] = df2["Percent change"]
+    return df
+
+
+def produce_table_mann_kendall(pwv_ds, alpha=0.05,
+                               sort_by=['groups_annual', 'lat']):
     from PW_stations import process_mkt_from_dataset
+    from PW_stations import produce_geo_gnss_solved_stations
     from aux_gps import reduce_tail_xr
     import xarray as xr
 
     def table_process_df(df, means):
+        df_sites = produce_geo_gnss_solved_stations(plot=False,
+                                                    add_distance_to_coast=True)
+        sites = df_sites.dropna()[['lat', 'alt', 'distance','groups_annual']].sort_values(by=sort_by,ascending=[1,0]).index
         # calculate percent changes from last decade means:
         df['CI95'] = '(' + df['CI_95_low'].map('{:.2f}'.format).astype(str) + ', ' + df['CI_95_high'].map('{:.2f}'.format).astype(str) + ')'
         df['means'] = means
@@ -1980,15 +2055,15 @@ def produce_table_mann_kendall(thresh=50, alpha=0.05, load_data='pwv-homo'):
         df['id'] = df.index.str.upper()
         df = df[['id', 'Tau', 'p', 'slope', 'CI95', 'Pct_change', 'Pct_change_CI95']]# , 'Temperature change']]
         # filter for non significant trends:
-        df['slope'] = df['slope'][df['p'] < 0.05]
-        df['Pct_change'] = df['Pct_change'][df['p'] < 0.05]
-        df['CI95'] = df['CI95'][df['p'] < 0.05]
-        df['Pct_change_CI95'] = df['Pct_change_CI95'][df['p'] < 0.05]
+#        df['slope'] = df['slope'][df['p'] < 0.05]
+#        df['Pct_change'] = df['Pct_change'][df['p'] < 0.05]
+#        df['CI95'] = df['CI95'][df['p'] < 0.05]
+#        df['Pct_change_CI95'] = df['Pct_change_CI95'][df['p'] < 0.05]
         # higher and better results:
-        df.loc[:, 'p'][df['p'] < 0.0001] = '<0.0001'
-        df['p'][df['p'] != '<0.0001'] = df['p'][df['p'] !=
-                                                '<0.0001'].astype(float).map('{:,.4f}'.format)
-        df['Tau'] = df['Tau'].map('{:,.4f}'.format)
+        df.loc[:, 'p'][df['p'] < 0.001] = '<0.001'
+        df['p'][df['p'] != '<0.001'] = df['p'][df['p'] !=
+                                                '<0.001'].astype(float).map('{:,.3f}'.format)
+        df['Tau'] = df['Tau'].map('{:,.3f}'.format)
         df['slope'] = df['slope'].map('{:,.2f}'.format)
         df['slope'][df['slope'] == 'nan'] = '-'
         df.columns = [
@@ -2009,27 +2084,34 @@ def produce_table_mann_kendall(thresh=50, alpha=0.05, load_data='pwv-homo'):
 #        df['Temperature change'] = df[df["Sen's slope"] != '-']['Temperature change']
 #        df['Temperature change'] = df['Temperature change'].fillna('-')
         # last, reindex according to geography:
-        gr = group_sites_to_xarray(scope='annual')
-        new = [x for x in gr.T.values.ravel() if isinstance(x, str)]
+#        gr = group_sites_to_xarray(scope='annual')
+#        new = [x for x in gr.T.values.ravel() if isinstance(x, str)]
+        new = [x for x in sites if x in df.index]
         df = df.reindex(new)
         return df
 
-    if load_data == 'pwv-homo':
-        data = xr.load_dataset(work_yuval /
-                               'GNSS_PW_monthly_thresh_{:.0f}_homogenized.nc'.format(thresh))
-    elif load_data == 'pwv-orig':
-        data = xr.load_dataset(work_yuval /
-                               'GNSS_PW_monthly_thresh_{:.0f}.nc'.format(thresh))
-    elif load_data == 'pwv-era5':
-        data = xr.load_dataset(work_yuval / 'GNSS_era5_monthly_PW.nc')
+#    if load_data == 'pwv-homo':
+#        print('loading homogenized (RH) pwv dataset.')
+#        data = xr.load_dataset(work_yuval /
+#                               'GNSS_PW_monthly_thresh_{:.0f}_homogenized.nc'.format(thresh))
+#    elif load_data == 'pwv-orig':
+#        print('loading original pwv dataset.')
+#        data = xr.load_dataset(work_yuval /
+#                               'GNSS_PW_monthly_thresh_{:.0f}.nc'.format(thresh))
+#    elif load_data == 'pwv-era5':
+#        print('loading era5 pwv dataset.')
+#        data = xr.load_dataset(work_yuval / 'GNSS_era5_monthly_PW.nc')
+#    if pwv_ds is not None:
+#        print('loading user-input pwv dataset.')
+#     data = pwv_ds
     df = process_mkt_from_dataset(
-        data,
+        pwv_ds,
         alpha=alpha,
         season_selection=None,
         seasonal=False,
         factor=120,
         anomalize=True, CI=True)
-    df_mean = reduce_tail_xr(data, reduce='mean', records=120,
+    df_mean = reduce_tail_xr(pwv_ds, reduce='mean', records=120,
                              return_df=True)
     table = table_process_df(df, df_mean)
 #    print(table.to_latex(index=False))
@@ -3404,7 +3486,7 @@ def plot_long_term_anomalies(path=work_yuval, era5_path=era5_path,
     fig.subplots_adjust(right=0.946)
     if save:
         filename = 'pwv_long_term_anomalies_era5_comparison.png'
-        plt.savefig(savefig_path / filename, bbox_inches='tight')
+        plt.savefig(savefig_path / filename, orientation='portrait')
     return df
 
 
