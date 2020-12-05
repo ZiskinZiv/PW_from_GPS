@@ -447,6 +447,29 @@ def prepare_pwv_for_climatol(path=work_yuval, freq='daily',
     return
 
 
+def perform_pwv_filling_last_decade(path=work_yuval, fyear='2009', lyear='2019',
+                                    drop=['slom', 'elro']):
+    import xarray as xr
+    from aux_gps import save_ncfile
+    pw = xr.load_dataset(path / 'GNSS_PW_monthly_thresh_50.nc')
+    pw = pw.sel(time=slice(fyear, lyear))
+    pw = pw.drop_vars(drop)
+    prepare_pwv_for_climatol(
+        freq='monthly',
+        first_year=fyear,
+        last_year=lyear,
+        pwv_ds=pw)
+    # then run these two lines in R:
+    # homogen('PWV',2009,2019, na.strings="-999.9",dz.max=7,std=2)
+    # dahstat('PWV',2009,2019,stat='series',long=TRUE)
+    ds, ds_flag = read_climatol_results(first_year=fyear, last_year=lyear)
+    filename = 'GNSS_PW_monthly_homogenized_filled_{}-{}.nc'.format(fyear, lyear)
+    save_ncfile(ds, path, filename)
+    filename = 'GNSS_PW_monthly_homogenized_filled_flags_{}-{}.nc'.format(fyear, lyear)
+    save_ncfile(ds_flag, path, filename)
+    return
+
+
 def read_climatol_results(var='PWV', first_year='1998', last_year='2019',
                           path=homo_path):
     import pandas as pd
@@ -464,6 +487,9 @@ def read_climatol_results(var='PWV', first_year='1998', last_year='2019',
 #    flag.columns = [x + '_flag' for x in flag.columns]
     ds = data.to_xarray()
     ds_flag = flag.to_xarray()
+    ds_flag.attrs['0'] = 'observed'
+    ds_flag.attrs['1'] = 'filled in'
+    ds_flag.attrs['2'] = 'corrected'
 #    if remove_splits:
 #        ds = ds[[x for x in ds if '-' not in x]]
 #        ds_flag = ds_flag[[x for x in ds_flag if '-' not in x]]
