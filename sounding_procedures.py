@@ -11,6 +11,7 @@ sound_path = work_yuval / 'sounding'
 era5_path = work_yuval / 'ERA5'
 edt_path = sound_path / 'edt'
 ceil_path = work_yuval / 'ceilometers'
+des_path = work_yuval / 'deserve'
 
 
 def load_field_from_radiosonde(
@@ -332,15 +333,27 @@ def process_new_field_from_radiosonde_data(phys_ds, dim='sound_time',
         elif field_name == 'tm':
             long_name = 'Water vapor mean air temperature'
             P = phys_ds['P'].isel({dim: i})
-            VP = phys_ds['VP'].isel({dim: i})
             T = phys_ds['T'].isel({dim: i})
-            Rho = phys_ds['Rho'].isel({dim: i})
+            RH = phys_ds['RH'].isel({dim: i})
+            if 'VP' not in phys_ds:
+                if 'MR' not in phys_ds:
+                    MR = wrap_xr_metpy_mixing_ratio(P, T, RH, verbose=False)
+                VP = wrap_xr_metpy_vapor_pressure(P, MR)
+            else:
+                VP = phys_ds['VP'].isel({dim: i})
+            if 'Rho' not in phys_ds:
+                Rho = wrap_xr_metpy_density(P, T, MR, verbose=False)
+            else:
+                Rho = phys_ds['Rho'].isel({dim: i})
             field, unit = calculate_tm_via_pressure_sum(VP, T, Rho, P,
                                                         bottom=bottom,
                                                         top=top)
         elif field_name == 'ts':
             long_name = 'Surface temperature'
-            dropped = phys_ds['T'].isel({dim: i}).dropna('Height')
+            if 'Height' in phys_ds['T'].dims:
+                dropped = phys_ds['T'].isel({dim: i}).dropna('Height')
+            elif 'time' in phys_ds['T'].dims:
+                dropped = phys_ds['T'].isel({dim: i}).dropna('time')
             field = dropped[0].values.item() + 273.15
             unit = 'K'
         field_list.append(field)
@@ -359,10 +372,10 @@ def process_new_field_from_radiosonde_data(phys_ds, dim='sound_time',
 
 
 def process_radiosonde_data(path=sound_path, savepath=sound_path,
-                            data_type='phys', verbose=False):
+                            data_type='phys', station='bet_dagan', verbose=False):
     import xarray as xr
     from aux_gps import path_glob
-    file = path_glob(path, 'bet_dagan_{}_sounding_*.nc'.format(data_type))
+    file = path_glob(path, '{}_{}_sounding_*.nc'.format(data_type, station))
     phys_ds = xr.load_dataset(file[0])
     ds = xr.Dataset()
     ds['PW'] = process_new_field_from_radiosonde_data(phys_ds, dim='sound_time',
@@ -384,7 +397,7 @@ def process_radiosonde_data(path=sound_path, savepath=sound_path,
         ds['max_time'] = phys_ds['max_time']
     yr_min = ds['sound_time'].min().dt.year.item()
     yr_max = ds['sound_time'].max().dt.year.item()
-    filename = 'bet_dagan_{}_PW_Tm_Ts_{}-{}.nc'.format(data_type, yr_min, yr_max)
+    filename = '{}_{}_PW_Tm_Ts_{}-{}.nc'.format(station, data_type, yr_min, yr_max)
     print('saving {} to {}'.format(filename, savepath))
     ds.to_netcdf(savepath / filename, 'w')
     print('Done!')
@@ -1875,7 +1888,6 @@ def wrap_xr_metpy_density(P, T, MR, verbose=False):
     from metpy.units import units
     try:
         MR_unit = MR.attrs['units']
-        assert MR_unit == 'g/kg'
     except KeyError:
         MR_unit = 'g/kg'
         if verbose:
@@ -2170,6 +2182,92 @@ def check_sound_time(df):
 #        tpw = calculate_tpw_with_method(method=method)
 #        chosen_method = method
 #    return tpw, chosen_method
+
+
+def read_all_deserve_soundings(path=des_path, savepath=None):
+    from aux_gps import path_glob
+    import xarray as xr
+    from aux_gps import save_ncfile
+    radio_path = path / 'radiosonde'
+    files = path_glob(radio_path, '*.txt')
+    mas_files = [x for x in files if 'MAS' in x.as_posix()]
+    maz_files = [x for x in files if 'MAZ' in x.as_posix()]
+    ds_list = []
+    for file in mas_files:
+        ds_list.append(read_one_deserve_record(file))
+    ds_mas = xr.concat(ds_list, 'sound_time')
+    ds_mas = ds_mas.sortby('sound_time')
+    ds_list = []
+    for file in maz_files:
+        ds_list.append(read_one_deserve_record(file))
+    ds_maz = xr.concat(ds_list, 'sound_time')
+    ds_maz = ds_maz.sortby('sound_time')
+    if savepath is not None:
+        filename = 'deserve_massada_sounding_2014-2014.nc'
+        save_ncfile(ds_mas, savepath, filename)
+        filename = 'deserve_mazzra_sounding_2014-2014.nc'
+        save_ncfile(ds_maz, savepath, filename)
+    return ds_mas, ds_maz
+
+
+def get_loc_sound_time_from_deserve_filepath(filepath):
+    import pandas as pd
+    txt_filepath = filepath.as_posix().split('/')[-1]
+    loc = txt_filepath.split('_')[0]
+    sound_time = txt_filepath.split('_')[1]
+    sound_time = pd.to_datetime(sound_time, format='%Y%m%d%H')
+    return loc, sound_time
+
+
+def read_one_deserve_record(filepath):
+    import pandas as pd
+    loc, sound_time = get_loc_sound_time_from_deserve_filepath(filepath)
+    df = pd.read_csv(filepath, header=None, skiprows=1, delim_whitespace=True)
+    df.columns = [
+        'time',
+        'P',
+        'T',
+        'RH',
+        'WS',
+        'WD',
+        'lon',
+        'lat',
+        'alt',
+        'Dewpt',
+        'vi_te']
+    units = [
+        'mm:ss',
+        'hPa',
+        'degC',
+        '%',
+        'm/s',
+        'deg',
+        'deg',
+        'deg',
+        'm',
+        'degC',
+        'degC']
+    units_dict = dict(zip(df.columns, units))
+    df['time'] = '00:' + df['time'].astype(str)
+    df['time'] = pd.to_timedelta(df['time'], errors='coerce', unit='sec')
+    df['time'] = df['time'].dt.total_seconds()
+    df.set_index('time', inplace=True)
+    ds = df.to_xarray()
+    ds = ds.sortby('time')
+    for key, val in units_dict.items():
+        try:
+            ds[key].attrs['units'] = val
+        except KeyError:
+            pass
+    long_names = {'T': 'Air temperature', 'Dewpt': 'Dew point', 'RH': 'Relative humidity',
+                  'WS': 'Wind speed', 'WD': 'Wind direction',
+                  'P': 'Air pressure', 'lon': 'Longitude', 'lat': 'Latitude',
+                  'alt': 'Altitude a.s.l'}
+    for var, long_name in long_names.items():
+        ds[var].attrs['long_name'] = long_name
+    ds['sound_time'] = sound_time
+    ds['location'] = loc
+    return ds
 
 
 def read_one_EDT_record(filepath, year=None):
