@@ -471,7 +471,7 @@ def run_best_MLR(savepath=None, heatmap=True, plot=True, keep='lci',
     import numpy as np
     # check for correlation between synoptics and maybe
     # agg some classes and leave everything else
-    df = produce_interannual_df(lags=1, smooth=12, corr_thresh=None, syn='class',
+    df = produce_interannual_df(lags=1, smooth=4, corr_thresh=None, syn='class',
                                 drop_worse_lags=False)
     syn_class = np.arange(1, 20)
     syn_class = [str(x) for x in syn_class]
@@ -479,13 +479,15 @@ def run_best_MLR(savepath=None, heatmap=True, plot=True, keep='lci',
     # can add 3rd EOF if dealing with smaller box:
     eofi = ['z500_1','z500_2', 'z500_3', 'msl_1', 'msl_2', 'msl_3']
     if keep == 'lci':
-        keep_inds = ['pwv'] + lci
+        keep_inds = ['pwv', 'qflux', 'mc'] + lci
     elif keep == 'eofi':
-        keep_inds = ['pwv'] + eofi
+        keep_inds = ['pwv', 'qflux', 'mc'] + eofi
     elif keep == 'both':
         keep_inds = ['pwv'] + lci + eofi
     elif keep == 'syn+lci':
         keep_inds = ['pwv'] + lci + syn_class
+    elif keep == 'qflux':
+        keep_inds = ['pwv', 'mc']
 #    keep_inds = ['pwv', 'ea', 'MJO_20E+1','iod+1','moi2', 'u500_1', 'u500_2', 'v500_1','v500_3']
     dff = df[keep_inds]
     X, y = preprocess_interannual_df(dff, add_trend=add_trend)
@@ -497,6 +499,51 @@ def run_best_MLR(savepath=None, heatmap=True, plot=True, keep='lci',
     if savepath is not None:
         save_ncfile(model.results_, savepath, 'best_MLR_interannual_gnss_pwv.nc')
     return model, rdf
+
+
+def create_qflux_index(era5_path=era5_path, climate_path=climate_path):
+    from aux_gps import save_ncfile
+    from aux_gps import anomalize_xr
+    from PW_stations import produce_PWV_flux_from_ERA5_UVQ
+    qflux = produce_PWV_flux_from_ERA5_UVQ(path=era5_path,
+                                           return_magnitude=True)
+    qflux = anomalize_xr(qflux, 'MS')
+    qflux_index = qflux.to_array('st').mean('st')
+    qflux_index.name = 'qflux'
+    save_ncfile(qflux_index, climate_path, 'qflux_index.nc')
+    return qflux_index
+
+
+def create_moisture_convergence_index(era5_path=era5_path,
+                                      climate_path=climate_path):
+    from aux_gps import save_ncfile
+    from aux_gps import anomalize_xr
+    import xarray as xr
+    ds_wv = xr.load_dataset(
+        era5_path /
+        'ERA5_water_vapor_single_vars_israel_mm_1979-2020.nc')
+    ds_wv = ds_wv.sel(expver=1).reset_coords(drop=True)
+    vimd = anomalize_xr(ds_wv['mvimd'], 'MS', time_dim='time')
+    vimd = -1 * vimd.mean('longitude').mean('latitude')
+    vimd.name = 'vimd'
+    save_ncfile(vimd, climate_path, 'vimd_index.nc')
+    return vimd
+
+
+def create_qflux_convergence_index(era5_path=era5_path,
+                                   climate_path=climate_path):
+    from aux_gps import save_ncfile
+    from aux_gps import anomalize_xr
+    import xarray as xr
+    ds_wv = xr.load_dataset(
+        era5_path /
+        'ERA5_water_vapor_single_vars_israel_mm_1979-2020.nc')
+    ds_wv = ds_wv.sel(expver=1).reset_coords(drop=True)
+    mc = anomalize_xr(ds_wv['p84.162'], 'MS', time_time='time')
+    mc = -1 * mc.mean('longitude').mean('latitude')
+    mc.name = 'mc'
+    save_ncfile(mc, climate_path, 'mc_index.nc')
+    return mc
 
 
 def produce_interannual_df(climate_path=climate_path, work_path=work_yuval,
