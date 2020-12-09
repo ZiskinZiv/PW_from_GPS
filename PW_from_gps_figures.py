@@ -191,6 +191,85 @@ def fix_time_axis_ticks(ax, limits=None, margin=15):
     return ax
 
 
+def plot_qflux_climatotlogy_israel(path=era5_path, save=True, reduce='mean',
+                                   plot_type='uv'):
+    import xarray as xr
+    import matplotlib.pyplot as plt
+    import numpy as np
+    ds = xr.load_dataset(path / 'ERA5_UVQ_mm_israel_1979-2020.nc')
+    ds = ds.sel(expver=1).reset_coords(drop=True)
+    if plot_type == 'uv':
+        f1 = ds['q'] * ds['u']
+        f2 = ds['q'] * ds['v']
+    elif plot_type == 'md':
+        qu = ds['q'] * ds['u']
+        qv = ds['q'] * ds['v']
+        f1 = np.sqrt(qu**2 + qv**2)
+        f2 = np.rad2deg(np.arctan2(qv, qu))
+    if reduce == 'mean':
+        f1_clim = f1.groupby('time.month').mean().mean(
+            'longitude').mean('latitude')
+        f2_clim = f2.groupby('time.month').mean().mean(
+            'longitude').mean('latitude')
+        center = 0
+        cmap = 'bwr'
+    elif reduce == 'std':
+        f1_clim = f1.groupby('time.month').std().mean(
+            'longitude').mean('latitude')
+        f2_clim = f2.groupby('time.month').std().mean(
+            'longitude').mean('latitude')
+        center = None
+        cmap = 'viridis'
+    ds_clim = xr.concat([f1_clim, f2_clim], 'direction')
+    ds_clim['direction'] = ['zonal', 'meridional']
+    if plot_type == 'md':
+        fg, axes = plt.subplots(1, 2, figsize=(14, 7))
+        f1_clim.sel(
+            level=slice(
+                300,
+                1000)).T.plot.contourf(levels=41,
+                                       yincrease=False,
+                                       cmap=cmap,
+                                       center=center, ax=axes[0])
+        f2_clim.sel(
+            level=slice(
+                300,
+                1000)).T.plot.contourf(levels=41,
+                                       yincrease=False,
+                                       cmap=cmap,
+                                       center=center, ax=axes[1])
+    else:
+        fg = ds_clim.sel(
+            level=slice(
+                300,
+                1000)).T.plot.contourf(
+            levels=41,
+            yincrease=False,
+            cmap=cmap,
+            center=center,
+            col='direction',
+            figsize=(
+                15,
+                6))
+    fg.fig.suptitle('Moisture flux climatology over Israel')
+#    fig, axes = plt.subplots(1, 2, figsize=(15, 5))
+#    qu_clim.sel(level=slice(300,1000)).T.plot.contourf(levels=41, yincrease=False, ax=axes[0], cmap='bwr', center=0)
+#    qv_clim.sel(level=slice(300,1000)).T.plot.contourf(levels=41, yincrease=False, ax=axes[1], cmap='bwr', center=0)
+    fg.fig.subplots_adjust(top=0.923,
+                           bottom=0.102,
+                           left=0.058,
+                           right=0.818,
+                           hspace=0.2,
+                           wspace=0.045)
+    if save:
+        filename = 'moisture_clim_from_ERA5_over_israel.png'
+#        plt.savefig(savefig_path / filename, bbox_inches='tight')
+        plt.savefig(savefig_path / filename, orientation='landscape')
+    return fg
+
+    
+
+
 def plot_mean_std_count(da_ts, time_reduce='hour', reduce='mean',
                         count_factor=1):
     import xarray as xr
