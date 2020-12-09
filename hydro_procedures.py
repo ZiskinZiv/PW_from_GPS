@@ -324,7 +324,7 @@ def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
                                       outer_splits=4, inner_splits=2,
                                       refit_scorer='roc_auc',
                                       seed=42, savepath=None, verbose=0,
-                                      diagnostic=False):
+                                      diagnostic=False, n_jobs=-1):
     from sklearn.model_selection import cross_validate
     from sklearn.model_selection import StratifiedKFold
     from sklearn.model_selection import GridSearchCV
@@ -370,7 +370,7 @@ def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
     search_space = ml.param_grid
     # define search
     gr_search = GridSearchCV(estimator=sk_model, param_grid=search_space,
-                             cv=cv_inner, n_jobs=-1,
+                             cv=cv_inner, n_jobs=n_jobs,
                              scoring=['f1', 'roc_auc', 'accuracy'],
                              verbose=verbose,
                              refit=refit_scorer, return_train_score=True)
@@ -380,7 +380,7 @@ def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
     # execute the nested cross-validation
     scores_est_dict = cross_validate(gr_search, X, y,
                                      scoring=('f1', 'roc_auc', 'accuracy'),
-                                     cv=cv_outer, n_jobs=-1,
+                                     cv=cv_outer, n_jobs=n_jobs,
                                      return_estimator=True, verbose=verbose)
 #    perm = []
 #    for i, (train, val) in enumerate(cv_outer.split(X, y)):
