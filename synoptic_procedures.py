@@ -71,6 +71,15 @@ def class_to_upper(class_da, class_type='upper1', name='upper_class'):
     return da
 
 
+def align_synoptic_class_with_daily_dataset(ds, time_dim='time'):
+    import xarray as xr
+    assert xr.infer_freq(ds[time_dim]) == 'D'
+#    ds = ds.resample({time_dim: '1D'}, keep_attrs=True).mean(keep_attrs=True)
+    syn = read_synoptic_classification().to_xarray()
+    ds['syn_class'] = syn['class']
+    return ds
+
+
 def align_synoptic_class_with_pw(path):
     import xarray as xr
     from aux_gps import dim_intersection
