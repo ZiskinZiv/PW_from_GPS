@@ -211,11 +211,12 @@ def produce_gnss_pw_from_uerra(era5_path=era5_path,
 def produce_PWV_flux_from_ERA5_UVQ(
         path=era5_path,
         savepath=None,
-        pw_path=work_yuval):
+        pw_path=work_yuval, return_magnitude=False):
     import xarray as xr
     from aux_gps import calculate_pressure_integral
     from aux_gps import calculate_g
     from aux_gps import save_ncfile
+    import numpy as np
     ds = xr.load_dataset(era5_path / 'ERA5_UVQ_mm_israel_1979-2020.nc')
     ds = ds.sel(expver=1).reset_coords(drop=True)
     g = calculate_g(ds['latitude']).mean().item()
@@ -233,9 +234,14 @@ def produce_PWV_flux_from_ERA5_UVQ(
         qu, savepath=None, pw_path=pw_path)
     qv_gnss = produce_era5_field_at_gnss_coords(
         qv, savepath=None, pw_path=pw_path)
-    return qu_gnss, qv_gnss
-    
-    
+    if return_magnitude:
+        qflux = np.sqrt(qu_gnss**2 + qv_gnss**2)
+        qflux.attrs['units'] = 'mm/sec'
+        return qflux
+    else:
+        return qu_gnss, qv_gnss
+
+
 def produce_era5_field_at_gnss_coords(era5_da, savepath=None,
                                       pw_path=work_yuval):
     import xarray as xr
