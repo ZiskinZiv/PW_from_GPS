@@ -53,6 +53,14 @@ def main_hydro_ML(args):
     from hydro_procedures import produce_X_y_from_list
     from hydro_procedures import nested_cross_validation_procedure
     from aux_gps import get_all_possible_combinations_from_list
+    if args.verbose is None:
+        verbose=0
+    else:
+        verbose = args.verbose
+    if args.n_jobs is None:
+        n_jobs = -1
+    else:
+        n_jobs = args.n_jobs
     if args.max_flow is None:
         max_flow = 0
     else:
@@ -112,9 +120,9 @@ def main_hydro_ML(args):
                     inner_splits=inner_splits,
                     outer_splits=outer_splits,
                     refit_scorer=scorer,
-                    verbose=0,
+                    verbose=verbose,
                     diagnostic=False,
-                    savepath=savepath)
+                    savepath=savepath, n_jobs=n_jobs)
         else:
             logger.info(
                     'Running {} model with {} test scorer and {},{} (inner, outer) nsplits, features={}'.format(
@@ -127,9 +135,9 @@ def main_hydro_ML(args):
                 inner_splits=inner_splits,
                 outer_splits=outer_splits,
                 refit_scorer=scorer,
-                verbose=0,
+                verbose=verbose,
                 diagnostic=False,
-                savepath=savepath)
+                savepath=savepath, n_jobs=n_jobs)
 #    else:
 #        logger.info('Running with all three models:')
 #        models = ['SVC', 'RF', 'MLP']
@@ -195,6 +203,14 @@ if __name__ == '__main__':
     optional.add_argument(
         '--neg_pos_ratio',
         help='negative to positive events ratio',
+        type=int)
+    optional.add_argument(
+        '--n_jobs',
+        help='number of CPU threads to do gridsearch and cross-validate',
+        type=int)
+    optional.add_argument(
+        '--verbose',
+        help='verbosity 0, 1, 2',
         type=int)
 #    optional.add_argument('--nsplits', help='select number of splits for HP tuning.', type=int)
     required.add_argument(
