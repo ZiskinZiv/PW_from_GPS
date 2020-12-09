@@ -12,6 +12,160 @@ from PW_paths import work_yuval
 # TODO: if not, build func to replace datetimeindex to numbers and vise versa
 
 
+def replace_xarray_time_series_with_its_group(da, grp='month', time_dim='time'):
+    """run the same func on each dim in da"""
+    import xarray as xr
+    dims = [x for x in da.dims if time_dim not in x]
+    if len(dims) == 0:
+        # no other dim except time:
+        da = replace_time_series_with_its_group(da, grp=grp)
+        return da
+    dims_attrs = [da[x].attrs for x in dims]
+    dims_attrs_dict = dict(zip(dims, dims_attrs))
+    if len(dims) == 1:
+        dim0_list = []
+        for dim0 in da[dims[0]]:
+            da0 = da.sel({dims[0]: dim0})
+            da0 = replace_time_series_with_its_group(da0, grp=grp)
+            dim0_list.append(da0)
+        da_transformed = xr.concat(dim0_list, dims[0])
+        da_transformed[dims[0]] = da[dims[0]]
+        da_transformed.attrs[dims[0]] = dims_attrs_dict.get(dims[0])
+    elif len(dims) == 2:
+        dim0_list = []
+        for dim0 in da[dims[0]]:
+            dim1_list = []
+            for dim1 in da[dims[1]]:
+                da0 = da.sel({dims[0]: dim0, dims[1]: dim1})
+                da0 = replace_time_series_with_its_group(da0, grp=grp)
+                dim1_list.append(da0)
+            dim0_list.append(xr.concat(dim1_list, dims[1]))
+        da_transformed = xr.concat(dim0_list, dims[0])
+        da_transformed[dims[0]] = da[dims[0]]
+        da_transformed[dims[1]] = da[dims[1]]
+        da_transformed.attrs[dims[0]] = dims_attrs_dict.get(dims[0])
+        da_transformed.attrs[dims[1]] = dims_attrs_dict.get(dims[1])
+    elif len(dims) == 3:
+        dim0_list = []
+        for dim0 in da[dims[0]]:
+            dim1_list = []
+            for dim1 in da[dims[1]]:
+                dim2_list = []
+                for dim2 in da[dims[2]]:
+                    da0 = da.sel({dims[0]: dim0, dims[1]: dim1, dims[2]: dim2})
+                    da0 = replace_time_series_with_its_group(da0, grp=grp)
+                    dim2_list.append(da0)
+                dim1_list.append(xr.concat(dim2_list, dims[2]))
+            dim0_list.append(xr.concat(dim1_list, dims[1]))
+        da_transformed = xr.concat(dim0_list, dims[0])
+        da_transformed[dims[0]] = da[dims[0]]
+        da_transformed[dims[1]] = da[dims[1]]
+        da_transformed[dims[2]] = da[dims[2]]
+        da_transformed.attrs[dims[0]] = dims_attrs_dict.get(dims[0])
+        da_transformed.attrs[dims[1]] = dims_attrs_dict.get(dims[1])
+        da_transformed.attrs[dims[2]] = dims_attrs_dict.get(dims[2])
+    return da_transformed
+
+
+def replace_time_series_with_its_group(da_ts, grp='month'):
+    """ replace an xarray time series with its mean grouping e.g., time.month, 
+    time.dayofyear, time.hour etc.., basiaclly implement .transform method 
+    on 1D dataarray, index must be datetime"""
+    import xarray as xr
+    import pandas as pd
+    da_ts = da_ts.reset_coords(drop=True)
+    attrs = da_ts.attrs
+    df = da_ts.to_dataframe(da_ts.name)
+    if grp == 'month':
+        grp_ind = df.index.month
+    df = df.groupby(grp_ind).transform('mean')
+    ds = df.to_xarray()
+    da = ds[da_ts.name]
+    da.attrs = attrs
+    return da
+
+
+def calculate_gradient(f, lat_dim='latitude', lon_dim='longitude',
+                       level_dim='level', time_dim='time', savepath=None):
+    from metpy.calc import lat_lon_grid_deltas
+    from metpy.calc import gradient
+    from aux_gps import save_ncfile
+    import xarray as xr
+    name = f.name
+    dx, dy = lat_lon_grid_deltas(f[lon_dim], f[lat_dim])
+#    f = f.transpose(..., lat_dim, lon_dim)
+#    fy, fx = gradient(f, deltas=(dy, dx))
+    if level_dim in f.dims and time_dim in f.dims:
+        min_year = f[time_dim].dt.year.min().item()
+        max_year = f[time_dim].dt.year.max().item()
+        level_cnt = f[level_dim].size
+        label = '{}_{}-{}.nc'.format(level_cnt, min_year, max_year)
+        times = []
+        for time in f[time_dim]:
+            print('{}-{}'.format(time[time_dim].dt.month.item(), time[time_dim].dt.year.item()))
+            levels = []
+            for level in f[level_dim]:
+                ftl = f.sel({time_dim: time, level_dim: level})
+                fy, fx = gradient(ftl, deltas=(dy, dx))
+                fx_da = xr.DataArray(fx.magnitude, dims=[lat_dim, lon_dim])
+                fx_da.name = '{}x'.format(name)
+                fy_da = xr.DataArray(fy.magnitude, dims=[lat_dim, lon_dim])
+                fy_da.name = '{}y'.format(name)
+                fx_da.attrs['units'] = fx.units.format_babel()
+                fy_da.attrs['units'] = fy.units.format_babel()
+                grad = xr.merge([fx_da, fy_da])
+                levels.append(grad)
+            times.append(xr.concat(levels, level_dim))
+        ds = xr.concat(times, time_dim)
+        ds[level_dim] = f[level_dim]
+        ds[time_dim] = f[time_dim]
+        ds[lat_dim] = f[lat_dim]
+        ds[lon_dim] = f[lon_dim]
+    else:
+        if level_dim in f.dims:
+            level_cnt = f[level_dim].size
+            label = '{}.nc'.format(level_cnt)
+            levels = []
+            for level in f[level_dim]:
+                fl = f.sel({level_dim: level})
+                fy, fx = gradient(fl, deltas=(dy, dx))
+                fx_da = xr.DataArray(fx.magnitude, dims=[lat_dim, lon_dim])
+                fx_da.name = '{}x'.format(name)
+                fy_da = xr.DataArray(fy.magnitude, dims=[lat_dim, lon_dim])
+                fy_da.name = '{}y'.format(name)
+                fx_da.attrs['units'] = fx.units.format_babel()
+                fy_da.attrs['units'] = fy.units.format_babel()
+                grad = xr.merge([fx_da, fy_da])
+                levels.append(grad)
+            da = xr.concat(levels, level_dim)
+            da[level_dim] = f[level_dim]
+        elif time_dim in f.dims:
+            min_year = f[time_dim].dt.year.min().item()
+            max_year = f[time_dim].dt.year.max().item()
+            min_year = f[time_dim].dt.year.min().item()
+            max_year = f[time_dim].dt.year.max().item()
+            times = []
+            for time in f[time_dim]:
+                ft = f.sel({time_dim: time})
+                fy, fx = gradient(ft, deltas=(dy, dx))
+                fx_da = xr.DataArray(fx.magnitude, dims=[lat_dim, lon_dim])
+                fx_da.name = '{}x'.format(name)
+                fy_da = xr.DataArray(fy.magnitude, dims=[lat_dim, lon_dim])
+                fy_da.name = '{}y'.format(name)
+                fx_da.attrs['units'] = fx.units.format_babel()
+                fy_da.attrs['units'] = fy.units.format_babel()
+                grad = xr.merge([fx_da, fy_da])
+                times.append(grad)
+            ds = xr.concat(times, time_dim)
+            ds[time_dim] = f[time_dim]
+        ds[lat_dim] = f[lat_dim]
+        ds[lon_dim] = f[lon_dim]
+    if savepath is not None:
+        filename = '{}_grad_{}'.format(f.name, label)
+        save_ncfile(ds, savepath, filename)
+    return ds
+
+
 def calculate_divergence(u, v, lat_dim='latitude', lon_dim='longitude',
                          level_dim='level', time_dim='time', savepath=None):
     from metpy.calc import divergence
