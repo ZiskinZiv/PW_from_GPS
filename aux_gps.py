@@ -235,7 +235,7 @@ def calculate_divergence(u, v, lat_dim='latitude', lon_dim='longitude',
         save_ncfile(da, savepath, filename)
     return da
 
-    
+
 def calculate_pressure_integral(da, pdim='level'):
     import numpy as np
     # first sort to decending levels:
@@ -248,7 +248,7 @@ def calculate_pressure_integral(da, pdim='level'):
     # transform to Pa:
     if units != 'Pa':
         print('{} units detected, converting to Pa!'.format(units))
-        da[pdim] = da[pdim] * 1000
+        da[pdim] = da[pdim] * 100
     # P_{i+1} - P_i:
     plevel_diff = np.abs(da[pdim].diff(pdim, label='lower'))
     # var_i + var_{i+1}:

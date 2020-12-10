@@ -33,8 +33,8 @@ def plot_world_map_with_box(lat_bounds=lat_box, lon_bounds=lon_box, save=True):
     line2 = LineString([Point(*point2), Point(*point3)])
     line3 = LineString([Point(*point3), Point(*point4)])
     line4 = LineString([Point(*point4), Point(*point1)])
-    geo_df = gpd.GeoDataFrame(geometry =[line1, line2, line3, line4])
-    fig, ax = plt.subplots(figsize=(15,10))
+    geo_df = gpd.GeoDataFrame(geometry=[line1, line2, line3, line4])
+    fig, ax = plt.subplots(figsize=(15, 10))
     world.plot(ax=ax)
     geo_df.plot(ax=ax, color='k')
     fig.tight_layout()
@@ -42,14 +42,14 @@ def plot_world_map_with_box(lat_bounds=lat_box, lon_bounds=lon_box, save=True):
         filename = 'world_with_box.png'
         plt.savefig(savefig_path / filename, bbox_inches='tight')
     return
-    
+
 
 def plot_eof_from_ds(ds, var='v1000', mode=1, ax=None):
     var_name_in_ds = '{}_eofs'.format(var)
     eof = ds[var_name_in_ds].sel(mode=mode)
 
 
-#def read_climate_classification(path=climate_path):
+# def read_climate_classification(path=climate_path):
 #    import pandas as pd
 #    import numpy as np
 #    file = path / 'Koeppen-Geiger-ASCII.txt'
@@ -83,7 +83,7 @@ def read_climate_classification_legend(path=climate_path):
     df['color'] = list(zip(df['pixel1'].astype(float) / 255,
                            df['pixel2'].astype(float) / 255,
                            df['pixel3'].astype(float) / 255))
-    df['color'] 
+    df['color']
     df.drop('pixel_range', axis=1, inplace=True)
     df.drop('pixel1', axis=1, inplace=True)
     df.drop('pixel2', axis=1, inplace=True)
@@ -264,7 +264,8 @@ def eof_analysis(da, npcs=2, return_all=False, plot=True,
     import matplotlib.pyplot as plt
     import numpy as np
     if lat_weights_on is not None:
-        coslat = np.cos(np.deg2rad(da.coords[lat_weights_on].values)).clip(0., 1.)
+        coslat = np.cos(np.deg2rad(
+            da.coords[lat_weights_on].values)).clip(0., 1.)
         wgts = np.sqrt(coslat)[..., np.newaxis]
     else:
         wgts = None
@@ -360,7 +361,8 @@ def read_ea_index(path=climate_path):
     from aux_gps import save_ncfile
     import pandas as pd
     file = path_glob(path, 'ea_index.txt')[0]
-    df = pd.read_csv(file, names=['year', 'month', 'ea'], delim_whitespace=True, header=9)
+    df = pd.read_csv(file, names=['year', 'month',
+                                  'ea'], delim_whitespace=True, header=9)
     df['time'] = df['year'].astype(str) + '-' + df['month'].astype(str)
     df['time'] = pd.to_datetime(df['time'])
     df = df.set_index('time')
@@ -377,7 +379,7 @@ def read_west_moi(path=climate_path):
     import pandas as pd
     file = path_glob(path, 'Western_MOI.txt')[0]
     df = pd.read_csv(file, delim_whitespace=True)
-    df['year']=df.index
+    df['year'] = df.index
     df = pd.melt(df, id_vars='year', var_name='month', value_name='wemoi')
     df['time'] = df['year'].astype(str) + '-' + df['month'].astype(str)
     df['time'] = pd.to_datetime(df['time'])
@@ -429,7 +431,8 @@ def read_scand_index(path=climate_path, savepath=climate_path):
     from aux_gps import path_glob
     import pandas as pd
     file = path_glob(path, 'scand_index.tim')[0]
-    df = pd.read_csv(file, names=['year', 'month', 'scand'], delim_whitespace=True, header=8)
+    df = pd.read_csv(file, names=['year', 'month',
+                                  'scand'], delim_whitespace=True, header=8)
     df['time'] = df['year'].astype(str) + '-' + df['month'].astype(str)
     df['time'] = pd.to_datetime(df['time'])
     df = df.set_index('time')
@@ -446,8 +449,8 @@ def read_mo_indicies(path=climate_path, moi=1, resample_to_mm=True):
     import pandas as pd
     file = path_glob(path, 'moi{}.dat'.format(moi))[0]
     df = pd.read_fwf(file,
-        names=['year', 'date', 'moi{}'.format(moi)],
-        widths=[4, 8, 5])
+                     names=['year', 'date', 'moi{}'.format(moi)],
+                     widths=[4, 8, 5])
     df['date'] = df['date'].str.strip('.')
     df['date'] = df['date'].str.strip(' ')
     df['date'] = df['date'].str.replace(' ', '0')
@@ -477,17 +480,17 @@ def run_best_MLR(savepath=None, heatmap=True, plot=True, keep='lci',
     syn_class = [str(x) for x in syn_class]
     lci = ['ea', 'iod', 'moi2', 'meiv2']
     # can add 3rd EOF if dealing with smaller box:
-    eofi = ['z500_1','z500_2', 'z500_3', 'msl_1', 'msl_2', 'msl_3']
+    eofi = ['z500_1', 'z500_2', 'z500_3', 'msl_1', 'msl_2', 'msl_3']
     if keep == 'lci':
-        keep_inds = ['pwv', 'qflux', 'mc'] + lci
+        keep_inds = ['pwv', 'qf700'] + lci
     elif keep == 'eofi':
-        keep_inds = ['pwv', 'qflux', 'mc'] + eofi
+        keep_inds = ['pwv', 'qf700'] + eofi
     elif keep == 'both':
         keep_inds = ['pwv'] + lci + eofi
     elif keep == 'syn+lci':
         keep_inds = ['pwv'] + lci + syn_class
     elif keep == 'qflux':
-        keep_inds = ['pwv', 'mc']
+        keep_inds = ['pwv', 'qf700']
 #    keep_inds = ['pwv', 'ea', 'MJO_20E+1','iod+1','moi2', 'u500_1', 'u500_2', 'v500_1','v500_3']
     dff = df[keep_inds]
     X, y = preprocess_interannual_df(dff, add_trend=add_trend)
@@ -497,7 +500,8 @@ def run_best_MLR(savepath=None, heatmap=True, plot=True, keep='lci',
         plt.figure()
         sns.heatmap(corr, annot=True, cmap='bwr', center=0.0, vmax=1, vmin=-1)
     if savepath is not None:
-        save_ncfile(model.results_, savepath, 'best_MLR_interannual_gnss_pwv.nc')
+        save_ncfile(model.results_, savepath,
+                    'best_MLR_interannual_gnss_pwv.nc')
     return model, rdf
 
 
@@ -604,9 +608,11 @@ def produce_interannual_df(climate_path=climate_path, work_path=work_yuval,
             df_syn = df_syn.join(df_syn_cls)
             if replace_syn is not None:
                 for agg in replace_syn:
-                    print('dropping {} and keeping {}'.format(upper_class_dict[agg], agg))
+                    print('dropping {} and keeping {}'.format(
+                        upper_class_dict[agg], agg))
                     df_syn = df_syn.drop(upper_class_dict[agg], axis=1)
-                other_to_drop = list(set(upper_class_dict).difference(set(replace_syn)))
+                other_to_drop = list(
+                    set(upper_class_dict).difference(set(replace_syn)))
                 df_syn = df_syn.drop(other_to_drop, axis=1)
                 print('dropping {}.'.format(other_to_drop))
         elif syn == 'agg':
@@ -623,7 +629,7 @@ def produce_interannual_df(climate_path=climate_path, work_path=work_yuval,
     df = df_pw.join(df)
     if corr_thresh is not None:
         corr = df.corr()['pwv']
-        corr= corr[abs(corr)>corr_thresh]
+        corr = corr[abs(corr) > corr_thresh]
         inds = corr.index
         df = df[inds]
     if pick_cols is not None:
@@ -664,7 +670,8 @@ def load_all_indicies(path=climate_path, smooth=None, zscore=False):
     ds = xr.merge(ds_list)
     if smooth is not None:
         if isinstance(smooth, int):
-            ds = ds.rolling(time=smooth, center=True, keep_attrs=True).mean(keep_attrs=True)
+            ds = ds.rolling(time=smooth, center=True,
+                            keep_attrs=True).mean(keep_attrs=True)
         elif isinstance(smooth, str):
             ds = smooth_xr(ds)
     if zscore:
@@ -707,7 +714,8 @@ def read_old_ncp(savepath=climate_path):
     import pandas as pd
     df = pd.read_csv(savepath / 'ncp.dat', delim_whitespace=True)
     df.columns = ['year', 'month', 'ncpi']
-    df['dt'] = pd.to_datetime(df['year'].astype(str) + '-' + df['month'].astype(str))
+    df['dt'] = pd.to_datetime(df['year'].astype(
+        str) + '-' + df['month'].astype(str))
     df.set_index('dt', inplace=True)
     df = df.drop(['year', 'month'], axis=1)
     df = df.sort_index()
@@ -735,7 +743,8 @@ def DI_and_PWV_lag_analysis(bin_di, path=work_yuval, station='tela',
     import xarray as xr
     from aux_gps import xr_reindex_with_date_range
     bin_di = xr_reindex_with_date_range(bin_di, freq='5min')
-    pw = xr.open_dataset(path /'GNSS_PW_thresh_50_for_diurnal_analysis.nc')[station]
+    pw = xr.open_dataset(
+        path / 'GNSS_PW_thresh_50_for_diurnal_analysis.nc')[station]
     print('loaded {} pwv station.'.format(station))
     pw.load()
     df = pw.to_dataframe()
@@ -743,7 +752,7 @@ def DI_and_PWV_lag_analysis(bin_di, path=work_yuval, station='tela',
     cats = df['bins'].value_counts().index.values
     pw_time_cat_list = []
 #    for di_cat in cats:
-#                
+#
 #    return df
 
 
@@ -974,7 +983,7 @@ class ImprovedRegressor(RegressorWrapper):
             rds['r2'] = xr.DataArray(r2)
         if feature_dim:
             r2_adj = 1.0 - (1.0 - rds['r2']) * (len(y) - 1.0) / \
-                 (len(y) - X.shape[1])
+                (len(y) - X.shape[1])
         else:
             r2_adj = 1.0 - (1.0 - rds['r2']) * (len(y) - 1.0) / (len(y))
         rds['r2_adj'] = r2_adj
@@ -983,8 +992,8 @@ class ImprovedRegressor(RegressorWrapper):
         rds['resid'].attrs = y.attrs
         rds['resid'].attrs['long_name'] = 'Residuals'
         rds['dw_score'] = (rds['resid'].diff(self.sample_dim)**2).sum(self.sample_dim,
-                                                                  keep_attrs=True) / (rds['resid']**2).sum(self.sample_dim, keep_attrs=True)
-        exp_var =  explained_variance_score(y, rds['predict'].values)
+                                                                      keep_attrs=True) / (rds['resid']**2).sum(self.sample_dim, keep_attrs=True)
+        exp_var = explained_variance_score(y, rds['predict'].values)
         rds['explained_variance'] = exp_var
 
 #        rds['corrcoef'] = self.corrcoef(X, y)
@@ -1130,7 +1139,7 @@ class ImprovedRegressor(RegressorWrapper):
                 suptitle = rds[field].name
             plt_error = {**plt_kwargs}
             plt_error.update({'cmap': 'viridis', 'add_colorbar': True,
-                             'figsize': (6, 8)})
+                              'figsize': (6, 8)})
             plt_error.update(kwargs)
             if 'lon' in rds[field].dims:
                 error_field = aux.xr_weighted_mean(rds[field],
@@ -1148,7 +1157,7 @@ class ImprovedRegressor(RegressorWrapper):
                 return
             except ValueError:
                 con = error_field.plot(xscale='log', xincrease=False,
-                                      figsize=(6, 8))
+                                       figsize=(6, 8))
                 ax = plt.gca()
                 ax.xaxis.set_major_formatter(ScalarFormatter())
                 plt.suptitle(suptitle, fontsize=12, fontweight=750)
