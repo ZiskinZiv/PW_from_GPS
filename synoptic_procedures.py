@@ -75,8 +75,9 @@ def align_synoptic_class_with_daily_dataset(ds, time_dim='time'):
     import xarray as xr
     assert xr.infer_freq(ds[time_dim]) == 'D'
 #    ds = ds.resample({time_dim: '1D'}, keep_attrs=True).mean(keep_attrs=True)
-    syn = read_synoptic_classification().to_xarray()
+    syn = read_synoptic_classification(report=False).to_xarray()
     ds['syn_class'] = syn['class']
+    ds['upper_class'] = syn['upper_class']
     return ds
 
 
@@ -87,7 +88,7 @@ def align_synoptic_class_with_pw(path):
     from aux_gps import xr_reindex_with_date_range
     pw = xr.load_dataset(path / 'GNSS_PW_thresh_50_homogenized.nc')
     pw = pw[[x for x in pw if '_error' not in x]]
-    syn = read_synoptic_classification().to_xarray()
+    syn = read_synoptic_classification(report=False).to_xarray()
     # syn = syn.drop(['Name-EN', 'Name-HE'])
     syn = syn['class']
     syn = syn.sel(time=slice('1996', None))
@@ -277,4 +278,21 @@ def agg_month_count_syn_class(path=climate_path, syn_category='normal',
     if freq:
         da.attrs['units'] = 'relative frequency in a month'
     return da
-    
+
+# TODO: continue this func:
+# TODO: plot corr to daily_pwv, when selecting different syn_classes using 
+# qU daily 12UTC levels data...
+def agg_month_syn_class_continous_variable(
+        da, path=climate_path, syn_cat='RST'):
+    import pandas as pd
+    syn_da = align_synoptic_class_with_daily_dataset(da)
+    df = syn_da.to_dataframe()
+    if isinstance(syn_cat, int):
+        df = df.drop('upper_class', axis=1)
+    elif isinstance(syn_cat, str):
+        df = df.drop('syn_class', axis=1)
+        df = df.rename({'upper_class': 'syn_class'}, axis='columns')
+        df['month'] = df.index.month
+    df['year'] = df.index.year
+    df['months'] = df['year'].astype(str) + '-' + df['month'].astype(str)
+    return df
