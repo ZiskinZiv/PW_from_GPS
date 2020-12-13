@@ -7,7 +7,47 @@ Created on Mon Nov 30 14:20:40 2020
 """
 from PW_stations import work_yuval
 from PW_paths import savefig_path
+des_path = work_yuval / 'deserve'
 
+
+def load_wrf_output_and_save_field(path=des_path, varname="pw", savepath=None):
+    """
+    load WRF output field and save it to savepath
+
+    Parameters
+    ----------
+    path : Path() or str, optional
+        the WRF loadpath. The default is des_path.
+    varname : str, optional
+        can be 'temp', 'pres', etc.. The default is 'pw'.
+    savepath : Path() or str, optional
+        The field savepath. The default is None.
+
+    Returns
+    -------
+    var_list : list
+        field dataarrays list.
+
+    """
+    import wrf
+    import xarray as xr
+    from aux_gps import path_glob
+    from aux_gps import save_ncfile
+    files = path_glob(path, 'wrfout_*.nc')
+    var_list = []
+    for file in files:
+        ds = xr.open_dataset(file)
+        wrfin = ds._file_obj.ds
+        wrfvar = wrf.getvar(wrfin=wrfin, varname=varname, timeidx=wrf.ALL_TIMES)
+        if savepath is not None:
+            if wrfvar.attrs['projection'] is not None:
+                wrfvar.attrs['projection'] = wrfvar.attrs['projection'].proj4()
+            filename_to_save = '{}_{}'.format(varname, file.as_posix().split('/')[-1])
+            save_ncfile(wrfvar, savepath, filename_to_save)
+        var_list.append(wrfvar)
+    return var_list
+
+    
 def get_pwv_dsea_foehn_paper(pwv_dsea, pwv_dsea_error=None, plot=True,
                              xlims=(13, 19), ylims=(10,50), save=True):
     import numpy as np
