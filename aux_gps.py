@@ -2687,6 +2687,7 @@ def calculate_distance_between_two_lat_lon_points(
 
 def get_nearest_lat_lon_for_xy(lat_da, lon_da, points):
     """used to access UERRA reanalysis, where the variable has x,y as coords"""
+    # add case if points is just one point
     import numpy as np
     from scipy.spatial import cKDTree
     if isinstance(points, np.ndarray):
