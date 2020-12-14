@@ -26,6 +26,39 @@ def calibrate_zwd_with_ts_tm_from_deserve(path=work_yuval, des_path=des_path, im
     return dsea
 
 
+def compare_radio_and_wrf_massada(des_path=des_path, plot=True):
+    import xarray as xr
+    from aux_gps import dim_intersection
+    import matplotlib.pyplot as plt
+    radio = xr.load_dataset(des_path/'massada_deserve_PW_Tm_Ts_2014-2014.nc')
+    radio = radio['PW'].rename({'sound_time': 'time'}).to_dataset(name='radiosonde')
+    wrf = get_wrf_pw_at_dsea_gnss_coord(point=[31.3177, 35.3725])
+    wrf = wrf['pw'].rename({'Time': 'time'}).to_dataset(name='wrf')
+    # new_time = dim_intersection([ds, wrf])
+    # wrf = wrf.sel(time=new_time)
+    # ds = ds.sel(time=new_time)
+    radio88 = radio.sel(time=slice('2014-08-07', '2014-08-08'))
+    wrf88 = wrf.sel(time=slice('2014-08-07', '2014-08-08'))
+    wrf1517 = wrf.sel(time=slice('2014-08-14', '2014-08-17'))
+    radio1517 = radio.sel(time=slice('2014-08-14', '2014-08-17'))
+    if plot:
+        fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+        radio88.to_dataframe()['radiosonde'].plot(ax=axes[1], marker='s', lw=2, markersize=5)
+        wrf88.to_dataframe()['wrf'].plot(ax=axes[1], marker='o', lw=2, markersize=2)
+        radio1517.to_dataframe()['radiosonde'].plot(ax=axes[0], marker='s', lw=2, markersize=5)
+        wrf1517.to_dataframe()['wrf'].plot(ax=axes[0], marker='o', lw=2, markersize=2)
+        axes[0].set_ylim(10, 45)
+        axes[0].set_ylabel('PWV [mm]')
+        axes[0].grid()
+        axes[0].legend()
+        axes[1].set_ylim(10, 45)
+        axes[1].set_ylabel('PWV [mm]')
+        axes[1].grid()
+        axes[1].legend()
+        fig.suptitle('WRF vs. Radiosonde PWV at massada station (31.3177N, 35.3725E)')
+    return
+
+
 def compare_gnss_dsea_with_wrf(des_path=des_path, work_path=work_yuval, dsea_da=None, plot=True):
     import xarray as xr
     from aux_gps import dim_intersection
@@ -34,29 +67,37 @@ def compare_gnss_dsea_with_wrf(des_path=des_path, work_path=work_yuval, dsea_da=
         gnss = dsea_da
     else:
         gnss = xr.open_dataset(work_path / 'GNSS_PW_thresh_50.nc')['dsea']
-    ds = gnss.to_dataset(name='gnss')
+    gnss = gnss.to_dataset(name='gnss')
     wrf = get_wrf_pw_at_dsea_gnss_coord(des_path, work_path)
-    wrf = wrf['pw'].rename({'Time': 'time'})
-    new_time = dim_intersection([gnss, wrf])
-    wrf = wrf.sel(time=new_time)
-    ds = ds.sel(time=new_time)
-    ds['wrf'] = wrf
-    ds79 = ds.sel(time=slice('2014-08-07', '2014-08-09'))
-    ds1517 = ds.sel(time=slice('2014-08-14', '2014-08-17'))
+    wrf = wrf['pw'].rename({'Time': 'time'}).to_dataset(name='wrf')
+    # new_time = dim_intersection([gnss, wrf])
+    # wrf = wrf.sel(time=new_time)
+    # ds = ds.sel(time=new_time)
+    # ds['wrf'] = wrf
+    gnss79 = gnss.sel(time=slice('2014-08-07', '2014-08-08'))
+    gnss1517 = gnss.sel(time=slice('2014-08-15', '2014-08-16'))
+    wrf79 = wrf.sel(time=slice('2014-08-07', '2014-08-08'))
+    wrf1517 = wrf.sel(time=slice('2014-08-15', '2014-08-16'))
+    
     if plot:
         fig, axes = plt.subplots(1, 2, figsize=(10, 5))
-        ds79.to_dataframe()[['gnss','wrf']].plot(ax=axes[1], lw=2)
-        ds1517.to_dataframe()[['gnss','wrf']].plot(ax=axes[0], lw=2)
+        wrf79.to_dataframe()['wrf'].plot(ax=axes[1], lw=2)
+        gnss79.to_dataframe()['gnss'].plot(ax=axes[1], lw=2)
+        wrf1517.to_dataframe()['wrf'].plot(ax=axes[0], lw=2)
+        gnss1517.to_dataframe()['gnss'].plot(ax=axes[0], lw=2)
         axes[0].set_ylim(10, 40)
         axes[0].set_ylabel('PWV [mm]')
         axes[0].grid()
+        axes[0].legend()
         axes[1].set_ylim(10, 40)
         axes[1].set_ylabel('PWV [mm]')
         axes[1].grid()
-    return ds
+        axes[1].legend()
+        fig.suptitle('WRF vs. GNSS PWV at DSEA station (31.037N, 35.369E), ~31 km south to massada st.')
+    return
 
 
-def get_wrf_pw_at_dsea_gnss_coord(path=des_path, work_path=work_yuval):
+def get_wrf_pw_at_dsea_gnss_coord(path=des_path, work_path=work_yuval, point=None):
     from PW_stations import produce_geo_gnss_solved_stations
     import xarray as xr
     from aux_gps import get_nearest_lat_lon_for_xy
@@ -70,6 +111,9 @@ def get_wrf_pw_at_dsea_gnss_coord(path=des_path, work_path=work_yuval):
         pw_all = xr.load_dataset(file)
         freq = xr.infer_freq(pw_all['Time'])
         # print(freq)
+        if point is not None:
+            print('looking for {} at wrf.'.format(point))
+            dsea_point = point
         loc = get_nearest_lat_lon_for_xy(pw_all['XLAT'], pw_all['XLONG'], dsea_point)
         pw = pw_all.isel(south_north=loc[0][0], west_east=loc[0][1])
         pw_list.append(pw)
