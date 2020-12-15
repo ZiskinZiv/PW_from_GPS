@@ -3898,6 +3898,32 @@ def plot_october_2015(path=work_yuval):
     return ax
 
 
+def plot_correlation_pwv_mean_anoms_and_qflux_anoms(era5_path=era5_path,
+                                                    work_path=work_yuval):
+    import xarray as xr
+    from aux_gps import anomalize_xr
+    import matplotlib.pyplot as plt
+    # first load pw and produce mean anomalies:
+    pw = xr.load_dataset(work_path/'GNSS_PW_monthly_thresh_50.nc')
+    pw_anoms = anomalize_xr(pw, 'MS')
+    pw_anoms_mean = pw_anoms.to_array('s').mean('s')
+    # now load qflux and resmaple to mm:
+    ds = xr.load_dataset(
+        era5_path/'ERA5_MF_anomalies_daily_israel_mean_1996-2019.nc')
+    qf_mm = ds['qf'].resample(time='MS').mean()
+    # now produce corr for each level:
+    dsl = [xr.corr(qf_mm.sel(level=x), pw_anoms_mean) for x in ds['level']]
+    dsl = xr.concat(dsl, 'level')
+    corr = xr.concat(dsl, 'level')
+    fig, ax = plt.subplots(figsize=(8, 6))
+    corr.plot(ax=ax, lw=2)
+    ax.grid()
+    ax.set_ylabel('pearson correlation coefficient')
+    ax.set_xlabel('pressure level [hPa]')
+    ax.axvline(750, color='k')
+    return ax
+
+
 def plot_pwv_anomalies_histogram(path=work_yuval):
     import xarray as xr
     import numpy as np
@@ -3934,5 +3960,7 @@ def plot_pwv_anomalies_histogram(path=work_yuval):
                   '2-Sigma: {:.2f} mm'.format(2 * std)]
     ax.legend([ln[0], ln_std, ln_std2], leg_labels)
     ax.set_xlabel('PWV anomalies [mm]')
+    return ax
+
     return ax
 
