@@ -19,6 +19,81 @@ lon_hemi_box = [-80, 80]
 # what worked: z500 is OK, compare to other large scale cirulations ?
 
 
+def prepare_ERA5_moisture_flux(era5_path=era5_path):
+    """
+    loads 12UTC q, u and v ERA5 fields above Israel (pressure levels)
+    and produces q*u and q*v and save them to files, also produces mean
+    anomalies.
+
+    Parameters
+    ----------
+    era5_path : TYPE, optional
+        save and load path. The default is era5_path.
+
+    Returns
+    -------
+    None.
+
+    """
+    import xarray as xr
+    from aux_gps import save_ncfile
+    from aux_gps import anomalize_xr
+    import numpy as np
+    ds = xr.load_dataset(
+        era5_path / 'ERA5_UVQ_hourly_12UTC_israel_1996-2019.nc')
+    ds = ds.resample(time='D', keep_attrs=True).mean(keep_attrs=True)
+    ds.attrs['action'] = 'resampled to 1D from 12:00UTC data points'
+    mf = (ds['q'] * ds['u']).to_dataset(name='qu')
+    mf.attrs = ds.attrs
+    mf['qu'].attrs['units'] = ds['u'].attrs['units']
+    mf['qu'].attrs['long_name'] = 'U component of moisture flux'
+    mf['qu'].attrs['standard_name'] = 'eastward moisture flux'
+    mf['qv'] = ds['q'] * ds['v']
+    mf['qv'].attrs['units'] = ds['v'].attrs['units']
+    mf['qv'].attrs['long_name'] = 'V component moisture flux'
+    mf['qv'].attrs['standard_name'] = 'northward moisture flux'
+    mf['qf'] = np.sqrt(mf['qu']**2 + mf['qv']**2)
+    mf['qf'].attrs['units'] = ds['v'].attrs['units']
+    mf['qf'].attrs['long_name'] = 'moisture flux magnitude'
+    mf['qfdir'] = np.rad2deg(np.arctan2(mf['qv'], mf['qu']))
+    mf['qfdir'].attrs['units'] = 'deg'
+    mf['qfdir'].attrs['long_name'] = 'moisture flux direction'
+    mf = mf.sortby('latitude')
+    mf = mf.sortby('level', ascending=False)
+    save_ncfile(mf, era5_path, 'ERA5_MF_daily_israel_1996-2019.nc')
+    mf_anoms = anomalize_xr(mf, freq='MS', time_dim='time')
+    mf_anoms_mean = mf_anoms.mean('latitude').mean('longitude')
+    save_ncfile(mf_anoms_mean, era5_path,
+                'ERA5_MF_anomalies_daily_israel_mean_1996-2019.nc')
+    return
+
+
+def create_synoptic_mean_qflux_index(era5_path=era5_path, level=750,
+                                     syn_class='upper', savepath=None):
+    from synoptic_procedures import agg_month_syn_class_continous_variable
+    import xarray as xr
+    from aux_gps import anomalize_xr
+    from aux_gps import save_ncfile
+    from aux_gps import rename_data_vars
+    ds = xr.load_dataset(
+        era5_path/'ERA5_MF_anomalies_daily_israel_mean_1996-2019.nc')
+    if syn_class == 'upper':
+        syn_cat = 'RST'
+    elif syn_class == 'isabella':
+        syn_cat = 1
+    qf = ds['qf'].sel(level=level, method='nearest')
+    level = qf.level.item()
+    qf = qf.reset_coords(drop=True)
+    da_agg = agg_month_syn_class_continous_variable(qf, syn_cat=syn_cat,
+                                                    return_all_syn_cats=True)
+    syns = anomalize_xr(da_agg, 'MS').fillna(0).to_dataset('syn_class')
+    syns = rename_data_vars(syns, suffix='')
+    if savepath is not None:
+        filename = 'qf_{}_{}_class_index.nc'.format(level, syn_class)
+        save_ncfile(syns, savepath, filename)
+    return syns
+
+
 def plot_world_map_with_box(lat_bounds=lat_box, lon_bounds=lon_box, save=True):
     import geopandas as gpd
     from shapely.geometry import Point, LineString
@@ -474,7 +549,7 @@ def run_best_MLR(savepath=None, heatmap=True, plot=True, keep='lci',
     import numpy as np
     # check for correlation between synoptics and maybe
     # agg some classes and leave everything else
-    df = produce_interannual_df(lags=1, smooth=4, corr_thresh=None, syn='class',
+    df = produce_interannual_df(lags=1, smooth=4, corr_thresh=None, syn=None,
                                 drop_worse_lags=False)
     syn_class = np.arange(1, 20)
     syn_class = [str(x) for x in syn_class]
@@ -491,6 +566,12 @@ def run_best_MLR(savepath=None, heatmap=True, plot=True, keep='lci',
         keep_inds = ['pwv'] + lci + syn_class
     elif keep == 'qflux':
         keep_inds = ['pwv', 'qf700']
+    elif keep == 'syn_upper':
+        keep_inds = ['pwv', 'PT', 'RST', 'H']
+    elif keep == 'syn_class':
+        keep_inds = ['pwv'] + [str(x) for x in np.arange(1, 20)]
+    elif keep == 'qf':
+        keep_inds = ['pwv', 'qf750']
 #    keep_inds = ['pwv', 'ea', 'MJO_20E+1','iod+1','moi2', 'u500_1', 'u500_2', 'v500_1','v500_3']
     dff = df[keep_inds]
     X, y = preprocess_interannual_df(dff, add_trend=add_trend)
