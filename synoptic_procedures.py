@@ -279,11 +279,12 @@ def agg_month_count_syn_class(path=climate_path, syn_category='normal',
         da.attrs['units'] = 'relative frequency in a month'
     return da
 
-# TODO: continue this func:
-# TODO: plot corr to daily_pwv, when selecting different syn_classes using 
+# TODO: plot corr to daily_pwv, when selecting different syn_classes using
 # qU daily 12UTC levels data...
+
+
 def agg_month_syn_class_continous_variable(
-        da, path=climate_path, syn_cat='RST'):
+        da, path=climate_path, syn_cat='RST', return_all_syn_cats=False):
     import pandas as pd
     syn_da = align_synoptic_class_with_daily_dataset(da)
     df = syn_da.to_dataframe()
@@ -292,7 +293,22 @@ def agg_month_syn_class_continous_variable(
     elif isinstance(syn_cat, str):
         df = df.drop('syn_class', axis=1)
         df = df.rename({'upper_class': 'syn_class'}, axis='columns')
-        df['month'] = df.index.month
+    df['month'] = df.index.month
     df['year'] = df.index.year
     df['months'] = df['year'].astype(str) + '-' + df['month'].astype(str)
-    return df
+    # do a mean on syn_class and months:
+    new_df = df[da.name].groupby([df['syn_class'], df['months']]).mean()
+    new_df = new_df.to_frame('class_mean')
+    dfmm = pd.pivot_table(new_df, index='months', columns='syn_class')
+    dfmm.set_index(pd.to_datetime(dfmm.index), inplace=True)
+    dfmm = dfmm.sort_index()
+    dfmm.columns = dfmm.columns.droplevel()
+    dfmm.index.name = 'time'
+    if return_all_syn_cats:
+        da_agg = dfmm.to_xarray().to_array('syn_class')
+        da_agg.name = 'syn_classes'
+    else:
+        da_agg = dfmm.to_xarray()[syn_cat]
+    da_agg = da_agg.sortby('time')
+    da_agg.name = str(da_agg.name)
+    return da_agg
