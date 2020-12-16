@@ -258,22 +258,40 @@ def calculate_pressure_integral(da, pdim='level'):
 
 
 def linear_fit_using_scipy_da_ts(da_ts, model='TSEN', slope_factor=3650.25,
-                                 plot=False, ax=None, units=None):
+                                 plot=False, ax=None, units=None,
+                                 method='simple', weights=None):
     """linear fit using scipy for dataarray time series,
     support for theilslopes(TSEN) and lingress(LR), produce 95% CI"""
     import xarray as xr
     from scipy.stats.mstats import theilslopes
     from scipy.stats import linregress
     import matplotlib.pyplot as plt
+    from scipy.optimize import curve_fit
+    import numpy as np
     time_dim = list(set(da_ts.dims))[0]
     jul, jul_no_nans = get_julian_dates_from_da(da_ts, subtract='median')
     y = da_ts.dropna(time_dim).values
     X = jul_no_nans.reshape(-1, 1)
     if model == 'LR':
-        coef, intercept, r_value, p_value, std_err = linregress(jul_no_nans, y)
-        confidence_interval = 1.96 * std_err
-        coef_lo = coef - confidence_interval
-        coef_hi = coef + confidence_interval
+        if method == 'simple':
+            coef, intercept, r_value, p_value, std_err = linregress(jul_no_nans, y)
+            confidence_interval = 1.96 * std_err
+            coef_lo = coef - confidence_interval
+            coef_hi = coef + confidence_interval
+        elif method == 'curve_fit':
+            func = lambda x, a, b: a * x + b
+            if weights is not None:
+                sigma = weights.dropna(time_dim).values
+            else:
+                sigma = None
+            best_fit_ab, covar = curve_fit(func, jul_no_nans, y,
+                                           sigma = sigma,p0=[0, 0],
+                                           absolute_sigma = False)
+            sigma_ab = np.sqrt(np.diagonal(covar))
+            coef = best_fit_ab[0]
+            intercept = best_fit_ab[1]
+            coef_lo = coef - sigma_ab[0]
+            coef_hi = coef + sigma_ab[0]
     elif model == 'TSEN':
         coef, intercept, coef_lo, coef_hi = theilslopes(y, X)
     predict = jul * coef + intercept
