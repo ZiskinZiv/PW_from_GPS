@@ -12,7 +12,7 @@ era5_path = work_yuval / 'ERA5'
 lat_box = [10, 50]
 lon_box = [10, 60]
 lat_box1 = [10, 60]
-lon_box1 = [-10, 80]
+lon_box1 = [-10, 60]
 lat_hemi_box = [0, 80]
 lon_hemi_box = [-80, 80]
 
@@ -40,9 +40,9 @@ def prepare_ERA5_moisture_flux(era5_path=era5_path):
     from aux_gps import anomalize_xr
     import numpy as np
     ds = xr.load_dataset(
-        era5_path / 'ERA5_UVQ_hourly_12UTC_israel_1996-2019.nc')
-    ds = ds.resample(time='D', keep_attrs=True).mean(keep_attrs=True)
-    ds.attrs['action'] = 'resampled to 1D from 12:00UTC data points'
+        era5_path / 'ERA5_UVQ_4Xdaily_israel_1996-2019.nc')
+    # ds = ds.resample(time='D', keep_attrs=True).mean(keep_attrs=True)
+    # ds.attrs['action'] = 'resampled to 1D from 12:00UTC data points'
     mf = (ds['q'] * ds['u']).to_dataset(name='qu')
     mf.attrs = ds.attrs
     mf['qu'].attrs['units'] = ds['u'].attrs['units']
@@ -334,7 +334,6 @@ def produce_local_index_from_eof_analysis(da, npcs=2, with_mean=False,
 
 def eof_analysis(da, npcs=2, return_all=False, plot=True,
                  lat_weights_on='latitude'):
-    # TODO: add costlat weights
     from eofs.xarray import Eof
     import matplotlib.pyplot as plt
     import numpy as np
