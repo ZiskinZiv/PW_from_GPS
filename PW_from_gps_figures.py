@@ -2009,21 +2009,24 @@ def plot_pwv_longterm_trend(path=work_yuval, model_name='LR', save=True,
     """TSEN and LR for linear fit"""
     # load GNSS Israel:
 #    pw = xr.load_dataset(path / 'GNSS_PW_monthly_thresh_50_homogenized.nc')
-    pw = xr.load_dataset(path / 'GNSS_PW_monthly_thresh_50.nc')
+    pw = xr.load_dataset(path / 'GNSS_PW_monthly_thresh_50.nc').sel(time=slice('1998', None))
     pw_anoms = anomalize_xr(pw, 'MS', verbose=False)
     pw_mean = pw_anoms.to_array('station').mean('station')
+    pw_std = pw_anoms.to_array('station').std('station')
+    pw_weights = 1 / pw_anoms.to_array('station').count('station')
     # add ERA5:
     era5 = xr.load_dataset(work_yuval / 'GNSS_era5_monthly_PW.nc')
     era5_anoms = anomalize_xr(era5, 'MS', verbose=False)
+    era5_anoms = era5_anoms.sel(time=slice(pw_mean.time.min(), pw_mean.time.max()))
     era5_mean = era5_anoms.to_array('station').mean('station')
-    era5_mean = era5_mean.sel(time=slice(pw_mean.time.min(), pw_mean.time.max()))
+    era5_std = era5_anoms.to_array('station').std('station')
     # init linear models
 #    ml = ML_Switcher()
 #    model = ml.pick_model(model_name)
     if add_era5:
         fig, ax = plt.subplots(2, 1, figsize=(15, 7.5))
         trend, trend_hi, trend_lo, slope, slope_hi, slope_lo = linear_fit_using_scipy_da_ts(pw_mean, model=model_name, slope_factor=3650.25,
-                                                                         plot=False, ax=None, units=None)
+                                                                         plot=False, ax=None, units=None, method='curve_fit', weights=pw_weights)
         pwln = pw_mean.plot(ax=ax[0], color='k', marker='o', linewidth=1.5)
         trendln = trend.plot(ax=ax[0], color='r', linewidth=2)
         trend_hi.plot.line('r--', ax=ax[0], linewidth=1.5)
@@ -2039,7 +2042,7 @@ def plot_pwv_longterm_trend(path=work_yuval, model_name='LR', save=True,
         ax[0].set_ylabel('PWV mean anomalies [mm]', fontsize=fontsize)
         ax[0].tick_params(labelsize=fontsize)
         trend1, trend_hi1, trend_lo1, slope1, slope_hi1, slope_lo1 = linear_fit_using_scipy_da_ts(era5_mean, model=model_name, slope_factor=3650.25,
-                                                                                 plot=False, ax=None, units=None)
+                                                                                 plot=False, ax=None, units=None, method='curve_fit', weights=era5_std)
 
         era5ln = era5_mean.plot(ax=ax[1], color='k', marker='o', linewidth=1.5)
         trendln1 = trend1.plot(ax=ax[1], color='r', linewidth=2)
@@ -2495,6 +2498,7 @@ def plot_monthly_means_anomalies_with_station_mean(load_path=work_yuval,
     cols = [x for x in sites if x in df.columns]
     df = df[cols]
     df.columns = [x.upper() for x in df.columns]
+    weights = df.count(axis=1).shift(periods=-1, freq='15D').astype(int)
     fig = plt.figure(figsize=(20, 10))
     grid = plt.GridSpec(
         2, 1, height_ratios=[
@@ -2529,7 +2533,12 @@ def plot_monthly_means_anomalies_with_station_mean(load_path=work_yuval,
     # xticks = dt_as_int[::6]
     # xticks = ts.index
     # ts.index = dt_as_int
-    ts.plot(ax=ax_group, color='k', fontsize=fontsize)
+    ts.plot(ax=ax_group, color='k', fontsize=fontsize, lw=2)
+    barax = ax_group.twinx()
+    barax.bar(ts.index, weights.values, width=35, color='k', alpha=0.3)
+    barax.yaxis.set_major_locator(ticker.MaxNLocator(6))
+    barax.set_ylabel('Stations [#]', fontsize=fontsize)
+    barax.tick_params(labelsize=fontsize)
     # group_limit = ax_heat.get_xlim()
     ax_group.set_xlim(ts.index.min(), ts.index.max() +
                       pd.Timedelta(15, unit='D'))
@@ -3473,7 +3482,7 @@ def plot_long_term_anomalies(path=work_yuval, era5_path=era5_path,
     from scipy.stats.mstats import theilslopes
     # TODO: add merra2, 3 panel plot and trend
     # load GNSS Israel:
-    pw = xr.load_dataset(path / 'GNSS_PW_monthly_thresh_50_homogenized.nc')
+    pw = xr.load_dataset(path / 'GNSS_PW_monthly_thresh_50.nc').sel(time=slice('1998', None))
     pw_anoms = anomalize_xr(pw, 'MS', verbose=False)
     pw_mean = pw_anoms.to_array('station').mean('station')
     # load ERA5:
@@ -3499,9 +3508,9 @@ def plot_long_term_anomalies(path=work_yuval, era5_path=era5_path,
 #    df['GNSS'].plot(ax=ax, color='k')
 #    df['ERA5'].plot(ax=ax, color='r')
 #    df['AERONET'].plot(ax=ax, color='b')
-    pwln = pw_mean.plot.line('k-', marker='o', ax=ax, linewidth=1.5, markersize=2.5)
-    era5ln = era5_to_plot.plot.line('b-', marker='s', ax=ax, linewidth=1.5, markersize=2.5)
-    merra2ln = merra2_to_plot.plot.line('g-', marker='d', ax=ax, linewidth=1.5, markersize=2.5)
+    pwln = pw_mean.plot.line('k-', marker='o', ax=ax, linewidth=2, markersize=2.5)
+    era5ln = era5_to_plot.plot.line('b-', marker='s', ax=ax, linewidth=2, markersize=2.5)
+    merra2ln = merra2_to_plot.plot.line('g-', marker='d', ax=ax, linewidth=2, markersize=2.5)
     era5corr = df.corr().loc['GNSS', 'ERA5']
     merra2corr = df.corr().loc['GNSS', 'MERRA2']
     handles = pwln + era5ln + merra2ln
@@ -3539,10 +3548,10 @@ def plot_long_term_anomalies(path=work_yuval, era5_path=era5_path,
         trend['time'] = pw_mean['time']
         slope_in_mm_per_decade = coef * 10 * 365.25
         # pwln = pw_mean.plot(ax=ax, color='k', marker='o', linewidth=1.5)
-        trendln = trend.plot(ax=ax, color='r', linewidth=2)
+        trendln = trend.plot(ax=ax, color='r', linewidth=1.2, alpha=0.8)
         if scipy:
-            trend_hi.plot.line('r--', ax=ax, linewidth=1.5)
-            trend_lo.plot.line('r--', ax=ax, linewidth=1.5)
+            trend_hi.plot.line('r--', ax=ax, linewidth=1.0, alpha=0.7)
+            trend_lo.plot.line('r--', ax=ax, linewidth=1.0, alpha=0.7)
         # ax.grid()
         # ax.set_xlabel('')
         # ax.set_ylabel('PWV mean anomalies [mm]')
