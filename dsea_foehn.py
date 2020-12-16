@@ -9,7 +9,7 @@ from PW_stations import work_yuval
 from PW_paths import savefig_path
 des_path = work_yuval / 'deserve'
 ims_path = work_yuval / 'IMS_T'
-# TODO: add comparisons of radiosonde and wrf in massada, and wrf and gnss at gnss coords.
+
 
 def calibrate_zwd_with_ts_tm_from_deserve(path=work_yuval, des_path=des_path, ims_path=ims_path):
     import xarray as xr
@@ -42,7 +42,7 @@ def compare_radio_and_wrf_massada(des_path=des_path, plot=True):
     wrf1517 = wrf.sel(time=slice('2014-08-14', '2014-08-17'))
     radio1517 = radio.sel(time=slice('2014-08-14', '2014-08-17'))
     if plot:
-        fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+        fig, axes = plt.subplots(1, 2, figsize=(15, 5))
         radio88.to_dataframe()['radiosonde'].plot(ax=axes[1], marker='s', lw=2, markersize=5)
         wrf88.to_dataframe()['wrf'].plot(ax=axes[1], marker='o', lw=2, markersize=2)
         radio1517.to_dataframe()['radiosonde'].plot(ax=axes[0], marker='s', lw=2, markersize=5)
@@ -56,6 +56,7 @@ def compare_radio_and_wrf_massada(des_path=des_path, plot=True):
         axes[1].grid()
         axes[1].legend()
         fig.suptitle('WRF vs. Radiosonde PWV at massada station (31.3177N, 35.3725E)')
+        fig.tight_layout()
     return
 
 
@@ -80,11 +81,11 @@ def compare_gnss_dsea_with_wrf(des_path=des_path, work_path=work_yuval, dsea_da=
     wrf1517 = wrf.sel(time=slice('2014-08-15', '2014-08-16'))
     
     if plot:
-        fig, axes = plt.subplots(1, 2, figsize=(10, 5))
-        wrf79.to_dataframe()['wrf'].plot(ax=axes[1], lw=2)
+        fig, axes = plt.subplots(1, 2, figsize=(15, 5))
         gnss79.to_dataframe()['gnss'].plot(ax=axes[1], lw=2)
-        wrf1517.to_dataframe()['wrf'].plot(ax=axes[0], lw=2)
+        wrf79.to_dataframe()['wrf'].plot(ax=axes[1], lw=2)
         gnss1517.to_dataframe()['gnss'].plot(ax=axes[0], lw=2)
+        wrf1517.to_dataframe()['wrf'].plot(ax=axes[0], lw=2)
         axes[0].set_ylim(10, 40)
         axes[0].set_ylabel('PWV [mm]')
         axes[0].grid()
@@ -94,6 +95,7 @@ def compare_gnss_dsea_with_wrf(des_path=des_path, work_path=work_yuval, dsea_da=
         axes[1].grid()
         axes[1].legend()
         fig.suptitle('WRF vs. GNSS PWV at DSEA station (31.037N, 35.369E), ~31 km south to massada st.')
+        fig.tight_layout()
     return
 
 
