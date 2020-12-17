@@ -3908,29 +3908,48 @@ def plot_october_2015(path=work_yuval):
 
 
 def plot_correlation_pwv_mean_anoms_and_qflux_anoms(era5_path=era5_path,
-                                                    work_path=work_yuval):
+                                                    work_path=work_yuval,
+                                                    all_months=False,
+                                                    add_hline=750, title=None):
     import xarray as xr
     from aux_gps import anomalize_xr
     import matplotlib.pyplot as plt
+    import seaborn as sns
     # first load pw and produce mean anomalies:
     pw = xr.load_dataset(work_path/'GNSS_PW_monthly_thresh_50.nc')
     pw_anoms = anomalize_xr(pw, 'MS')
     pw_anoms_mean = pw_anoms.to_array('s').mean('s')
     # now load qflux and resmaple to mm:
     ds = xr.load_dataset(
-        era5_path/'ERA5_MF_anomalies_daily_israel_mean_1996-2019.nc')
+        era5_path/'ERA5_MF_anomalies_4xdaily_israel_mean_1996-2019.nc')
     qf_mm = ds['qf'].resample(time='MS').mean()
     # now produce corr for each level:
     dsl = [xr.corr(qf_mm.sel(level=x), pw_anoms_mean) for x in ds['level']]
     dsl = xr.concat(dsl, 'level')
     corr = xr.concat(dsl, 'level')
-    fig, ax = plt.subplots(figsize=(8, 6))
-    corr.plot(ax=ax, lw=2)
-    ax.grid()
-    ax.set_ylabel('pearson correlation coefficient')
-    ax.set_xlabel('pressure level [hPa]')
-    ax.axvline(750, color='k')
-    return ax
+    if all_months:
+        df = pw_anoms_mean.to_dataframe('pwv')
+        df = df.join(qf_mm.to_dataset('level').to_dataframe())
+        corr = df.groupby(df.index.month).corr()['pwv'].unstack()
+        corr = corr.drop('pwv', axis=1).T
+        corr = corr.sort_index(ascending=True)
+        corr.index.name = 'month'
+        fig, ax = plt.subplots(figsize=(8, 9))
+        sns.heatmap(corr, annot=True, center=0, cmap='bwr', ax=ax)
+        ax.set_ylabel('pressure level [hPa]')
+        ax.set_xlabel('month')
+        fig.tight_layout()
+    else:
+        fig, ax = plt.subplots(figsize=(8, 6))
+        corr.plot(ax=ax, lw=2)
+        ax.grid()
+        ax.set_ylabel('pearson correlation coefficient')
+        ax.set_xlabel('pressure level [hPa]')
+        if add_hline is not None:
+            ax.axvline(add_hline, color='k')
+    if title is not None:
+        fig.suptitle(title)
+    return fig
 
 
 def plot_pwv_anomalies_histogram(path=work_yuval):
