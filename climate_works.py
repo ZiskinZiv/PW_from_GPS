@@ -40,7 +40,7 @@ def prepare_ERA5_moisture_flux(era5_path=era5_path):
     from aux_gps import anomalize_xr
     import numpy as np
     ds = xr.load_dataset(
-        era5_path / 'ERA5_UVQ_4Xdaily_israel_1996-2019.nc')
+        era5_path / 'ERA5_UVQ_4xdaily_israel_1996-2019.nc')
     # ds = ds.resample(time='D', keep_attrs=True).mean(keep_attrs=True)
     # ds.attrs['action'] = 'resampled to 1D from 12:00UTC data points'
     mf = (ds['q'] * ds['u']).to_dataset(name='qu')
@@ -60,11 +60,11 @@ def prepare_ERA5_moisture_flux(era5_path=era5_path):
     mf['qfdir'].attrs['long_name'] = 'moisture flux direction'
     mf = mf.sortby('latitude')
     mf = mf.sortby('level', ascending=False)
-    save_ncfile(mf, era5_path, 'ERA5_MF_daily_israel_1996-2019.nc')
+    save_ncfile(mf, era5_path, 'ERA5_MF_4xdaily_israel_1996-2019.nc')
     mf_anoms = anomalize_xr(mf, freq='MS', time_dim='time')
     mf_anoms_mean = mf_anoms.mean('latitude').mean('longitude')
     save_ncfile(mf_anoms_mean, era5_path,
-                'ERA5_MF_anomalies_daily_israel_mean_1996-2019.nc')
+                'ERA5_MF_anomalies_4xdaily_israel_mean_1996-2019.nc')
     return
 
 
@@ -72,21 +72,21 @@ def create_synoptic_mean_qflux_index(era5_path=era5_path, level=750,
                                      syn_class='upper', savepath=None):
     from synoptic_procedures import agg_month_syn_class_continous_variable
     import xarray as xr
-    from aux_gps import anomalize_xr
     from aux_gps import save_ncfile
     from aux_gps import rename_data_vars
     ds = xr.load_dataset(
-        era5_path/'ERA5_MF_anomalies_daily_israel_mean_1996-2019.nc')
+        era5_path/'ERA5_MF_anomalies_4xdaily_israel_mean_1996-2019.nc')
     if syn_class == 'upper':
         syn_cat = 'RST'
     elif syn_class == 'isabella':
         syn_cat = 1
     qf = ds['qf'].sel(level=level, method='nearest')
+    qf = qf.resample(time='D').mean()
     level = qf.level.item()
     qf = qf.reset_coords(drop=True)
     da_agg = agg_month_syn_class_continous_variable(qf, syn_cat=syn_cat,
                                                     return_all_syn_cats=True)
-    syns = anomalize_xr(da_agg, 'MS').fillna(0).to_dataset('syn_class')
+    syns = da_agg.fillna(0).to_dataset('syn_class')
     syns = rename_data_vars(syns, suffix='')
     if savepath is not None:
         filename = 'qf_{}_{}_class_index.nc'.format(level, syn_class)
@@ -258,7 +258,9 @@ def prepare_ERA5_field(da, lon_roll=True, expver=1, time_dim='time', name=None,
     if name is not None:
         da.name = name
     if savepath is not None:
-        filename = 'ERA5_{}_mm_{}_1979-2020.nc'.format(da.name, scope)
+        yrmin = da[time_dim].min().dt.year.item()
+        yrmax = da[time_dim].max().dt.year.item()
+        filename = 'ERA5_{}_mm_{}_{}-{}.nc'.format(da.name, scope, yrmin, yrmax)
         save_ncfile(da, savepath, filename)
     return da
 
@@ -566,7 +568,7 @@ def run_best_MLR(savepath=None, heatmap=True, plot=True, keep='lci',
     elif keep == 'qflux':
         keep_inds = ['pwv', 'qf700']
     elif keep == 'syn_upper':
-        keep_inds = ['pwv', 'PT', 'RST', 'H']
+        keep_inds = ['pwv', 'PT', 'RST', 'H', 'CL', 'DS']
     elif keep == 'syn_class':
         keep_inds = ['pwv'] + [str(x) for x in np.arange(1, 20)]
     elif keep == 'qf':
