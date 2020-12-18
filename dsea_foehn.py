@@ -112,11 +112,12 @@ def get_wrf_pw_at_dsea_gnss_coord(path=des_path, work_path=work_yuval, point=Non
     for file in files:
         pw_all = xr.load_dataset(file)
         freq = xr.infer_freq(pw_all['Time'])
-        # print(freq)
+        print(freq)
         if point is not None:
             print('looking for {} at wrf.'.format(point))
             dsea_point = point
         loc = get_nearest_lat_lon_for_xy(pw_all['XLAT'], pw_all['XLONG'], dsea_point)
+        print(loc)
         pw = pw_all.isel(south_north=loc[0][0], west_east=loc[0][1])
         pw_list.append(pw)
     pw_ts = xr.concat(pw_list, 'Time')
