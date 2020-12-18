@@ -259,7 +259,7 @@ def calculate_pressure_integral(da, pdim='level'):
 
 def linear_fit_using_scipy_da_ts(da_ts, model='TSEN', slope_factor=3650.25,
                                  plot=False, ax=None, units=None,
-                                 method='simple', weights=None):
+                                 method='simple', weights=None, not_time=False):
     """linear fit using scipy for dataarray time series,
     support for theilslopes(TSEN) and lingress(LR), produce 95% CI"""
     import xarray as xr
@@ -269,9 +269,14 @@ def linear_fit_using_scipy_da_ts(da_ts, model='TSEN', slope_factor=3650.25,
     from scipy.optimize import curve_fit
     import numpy as np
     time_dim = list(set(da_ts.dims))[0]
-    jul, jul_no_nans = get_julian_dates_from_da(da_ts, subtract='median')
     y = da_ts.dropna(time_dim).values
-    X = jul_no_nans.reshape(-1, 1)
+    if not_time:
+        X = da_ts[time_dim].values.reshape(-1, 1)
+        jul_no_nans = da_ts.dropna(time_dim)[time_dim].values
+        jul = da_ts[time_dim].values
+    else:
+        jul, jul_no_nans = get_julian_dates_from_da(da_ts, subtract='median')
+        X = jul_no_nans.reshape(-1, 1)
     if model == 'LR':
         if method == 'simple':
             coef, intercept, r_value, p_value, std_err = linregress(jul_no_nans, y)
@@ -298,12 +303,15 @@ def linear_fit_using_scipy_da_ts(da_ts, model='TSEN', slope_factor=3650.25,
     predict_lo = jul * coef_lo + intercept
     predict_hi = jul * coef_hi + intercept
     trend_hi = xr.DataArray(predict_hi, dims=[time_dim])
+    trend_hi.name = 'trend_hi'
     trend_lo = xr.DataArray(predict_lo, dims=[time_dim])
+    trend_lo.name = 'trend_lo'
     trend_hi[time_dim] = da_ts[time_dim]
     trend_lo[time_dim] = da_ts[time_dim]
     slope_in_factor_scale_lo = coef_lo * slope_factor
     slope_in_factor_scale_hi = coef_hi * slope_factor
     trend = xr.DataArray(predict, dims=[time_dim])
+    trend.name = 'trend'
     trend[time_dim] = da_ts[time_dim]
     slope_in_factor_scale = coef * slope_factor
     if plot:
@@ -320,7 +328,10 @@ def linear_fit_using_scipy_da_ts(da_ts, model='TSEN', slope_factor=3650.25,
         labels.append(trend_label)
         ax.legend(handles=handles, labels=labels, loc='upper left')
         ax.grid()
-    return trend, trend_hi, trend_lo, slope_in_factor_scale, slope_in_factor_scale_hi, slope_in_factor_scale_lo
+    trend_ds = xr.merge([trend, trend_hi, trend_lo])
+    results_dict = {'slope_hi': slope_in_factor_scale_hi, 'slope_lo': slope_in_factor_scale_lo, 'slope': slope_in_factor_scale}
+    results_dict['intercept'] = intercept
+    return trend_ds, results_dict
 
 
 def split_equal_da_ts_around_datetime(da_ts, dt='2014-05-01'):
