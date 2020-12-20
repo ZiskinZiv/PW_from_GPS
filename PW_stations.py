@@ -2077,6 +2077,20 @@ def kappa(T, Tmul=0.72, T_offset=70.2, k2=22.1, k3=3.776e5, Tm_input=False):
     return k
 
 
+def calculate_ZHD(pressure, lat=30.0, ht_km=0.5):
+    import numpy as np
+    import xarray as xr
+    lat_rad = np.deg2rad(lat)
+    ZHD = 0.22794 * pressure / \
+        (1 - 0.00266 * np.cos(2 * lat_rad) - 0.00028 * ht_km)
+    if not isinstance(ZHD, xr.DataArray):
+        ZHD = xr.DataArray(ZHD, dims=['time'])
+    ZHD.name = 'ZHD'
+    ZHD.attrs['units'] = 'cm'
+    ZHD.attrs['long_name'] = 'Zenith Hydrostatic Delay'
+    return ZHD
+
+
 def minimize_kappa_tela_sound(sound_path=sound_path, gps=garner_path,
                               ims_path=ims_path, station='TELA', bounds=None,
                               x0=None, times=None, season=None):
