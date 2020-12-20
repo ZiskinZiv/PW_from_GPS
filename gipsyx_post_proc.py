@@ -749,6 +749,40 @@ def read_one_station_gipsyx_results(path, savepath=None,
     return ds, errors
 
 
+def read_tropnominal_tdp_file(file, keys=['DryZ'], plot=False):
+    import pandas as pd
+    import matplotlib.pyplot as plt
+    df_raw = pd.read_csv(file, header=None, delim_whitespace=True)
+    # keys = ['WetZ', 'DryZ']
+    # get all the vars from smoothFinal.tdp file and put it in a df_list:
+    df_list = [df_raw[df_raw.iloc[:, -1].str.contains(x)] for x in keys]
+    # make sure that all keys in df have the same length:
+    assert len(set([len(x) for x in df_list])) == 1
+    # translate the seconds col to datetime:
+    seconds = df_list[0].iloc[:, 0]
+    dt = pd.to_datetime('2000-01-01T12:00:00')
+    time = dt + pd.to_timedelta(seconds, unit='sec')
+    # build a new df that contains all the vars(from keys):
+    ppp = pd.DataFrame(index=time)
+    ppp.index.name = 'time'
+    for i, df in enumerate(df_list):
+        df.columns = ['seconds', 'to_drop', keys[i], keys[i] + '_error',
+                      'meta']
+        ppp[keys[i]] = df[keys[i]].values
+        ppp[keys[i] + '_error'] = df[keys[i] + '_error'].values
+    # desc = ['Zenith Wet Delay', 'Zenith Dry Delay']
+    # units = ['cm', 'cm']
+    # fields = ['WetZ', 'DryZ']
+    # units_dict = dict(zip(fields, units))
+    # desc_dict = dict(zip(fields, desc))
+    # meta = {'units': units_dict, 'desc': desc_dict}
+    # convert tropospheric products to cm, rest stay in meters:
+    # trop_cols = ppp.columns.values[0:4]
+    # ppp[trop_cols] = ppp[trop_cols].mul(100.0)
+    ppp = ppp.mul(100.0)
+    return ppp
+
+
 def process_one_day_gipsyx_output(path_and_file, plot=False):
     # path_and_file = work_yuval / 'smoothFinal.tdp'
     import pandas as pd
