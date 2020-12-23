@@ -267,7 +267,7 @@ def plot_qflux_climatotlogy_israel(path=era5_path, save=True, reduce='mean',
         plt.savefig(savefig_path / filename, orientation='landscape')
     return fg
 
-    
+
 
 
 def plot_mean_std_count(da_ts, time_reduce='hour', reduce='mean',
@@ -449,7 +449,7 @@ def plot_MLR_GNSS_PW_harmonics_facetgrid(path=work_yuval, season='JJA',
         col_wrap=3,
         sharex=False,
         sharey=False, figsize=(20, 20))
-    
+
     for i in range(fg.axes.shape[0]):  # i is rows
         for j in range(fg.axes.shape[1]):  # j is cols
             site = sites.values[i, j]
@@ -493,7 +493,7 @@ def plot_MLR_GNSS_PW_harmonics_facetgrid(path=work_yuval, season='JJA',
 #                        ax.set_ylabel('PW anomalies [mm]', fontsize=12)
             except TypeError:
                 ax.set_axis_off()
-                
+
 #    for i, (site, ax) in enumerate(zip(da['GNSS'].values, fg.axes.flatten())):
 #        harm_site = harmonics[[x for x in harmonics if sites[i] in x]]
 #        if site in ['elat', 'nrif']:
@@ -938,7 +938,7 @@ def plot_interannual_MLR_results(path=climate_path, fontsize=16, save=True):
     years_fmt = mdates.DateFormatter('%Y')
     # ax.figure.autofmt_xdate()
     axes[1].xaxis.set_major_locator(mdates.YearLocator(2))
-    axes[1].xaxis.set_minor_locator(mdates.YearLocator(1)) 
+    axes[1].xaxis.set_minor_locator(mdates.YearLocator(1))
     axes[1].xaxis.set_major_formatter(years_fmt)
     axes[1].grid(which='minor', color='k', linestyle='--')
     # ax.xaxis.set_minor_locator(mdates.MonthLocator())
@@ -1040,7 +1040,7 @@ def plot_multi_box_xr(pw, kind='violin', x='month', sharex=False, sharey=False,
         #     pw_sta = pw_sta.groupby('time.dayofyear') - pw_sta.groupby('time.dayofyear').mean('time')
         # elif x == 'month':
         #     # remove daily signal:
-        #     pw_sta = pw_sta.groupby('time.hour') - pw_sta.groupby('time.hour').mean('time')            
+        #     pw_sta = pw_sta.groupby('time.hour') - pw_sta.groupby('time.hour').mean('time')
             df = pw_sta.to_dataframe(sta)
             if twin is not None:
                 twin_sta = twin.sel(station=sta).reset_coords(drop=True)
@@ -1167,7 +1167,7 @@ def plot_means_pw(load_path=work_yuval, ims_path=ims_path, thresh=50,
     pw = pw[[x for x in pw.data_vars if '_error' not in x]]
     if means == 'hour':
         # remove long term monthly means:
-        pw_clim = pw.groupby('time.month') - pw.groupby('time.month').mean('time')    
+        pw_clim = pw.groupby('time.month') - pw.groupby('time.month').mean('time')
         pw_clim = pw_clim.groupby('time.{}'.format(means)).mean('time')
     else:
         pw_clim = pw.groupby('time.{}'.format(means)).mean('time')
@@ -1929,7 +1929,7 @@ def produce_table_1(removed=['hrmn', 'nizn', 'spir'], merged={'klhv': ['klhv', '
     and remove_distance=False"""
     from PW_stations import produce_geo_gnss_solved_stations
     import pandas as pd
-    sites = group_sites_to_xarray(upper=False, scope=scope) 
+    sites = group_sites_to_xarray(upper=False, scope=scope)
     df_gnss = produce_geo_gnss_solved_stations(plot=False,
                                                add_distance_to_coast=True)
     new = sites.T.values.ravel()
@@ -1966,14 +1966,14 @@ def produce_table_stats(thresh=50, add_location=True, add_height=True):
     from PW_stations import produce_geo_gnss_solved_stations
     import pandas as pd
     import xarray as xr
-    sites = group_sites_to_xarray(upper=False, scope='annual') 
+    sites = group_sites_to_xarray(upper=False, scope='annual')
     new = sites.T.values.ravel()
     sites = group_sites_to_xarray(upper=False, scope='annual')
     new = [x for x in new.astype(str) if x != 'nan']
     pw_mm = xr.load_dataset(
             work_yuval /
              'GNSS_PW_monthly_thresh_{:.0f}_homogenized.nc'.format(thresh))
-    
+
     pw_mm = pw_mm[new]
     df = produce_pw_statistics(thresh=thresh, resample_to_mm=False
                                , pw_input=pw_mm)
@@ -2094,7 +2094,7 @@ def produce_filled_pwv_and_era5_mann_kendall_table(path=work_yuval):
     era5 = era5.sel(time=slice(gnss.time.min(), gnss.time.max()))
     df = add_comparison_to_mann_kendall_table(gnss, era5, 'GNSS', 'ERA5')
     print(df.to_latex(header=False, index=False))
-    return df    
+    return df
 
 
 def add_comparison_to_mann_kendall_table(ds1, ds2, name1='GNSS', name2='ERA5',
@@ -2855,7 +2855,7 @@ def plot_time_series_as_barplot(ts, anoms=False, ts_ontop=None):
         ax.set_ylim(l2)
     else:
         title_add = ''
-        
+
     ax.grid(None)
     ax.set_xlim([pd.to_datetime('1996'), pd.to_datetime('2020')])
     ax.set_title('Multivariate ENSO Index Version 2 {}'.format(title_add))
@@ -2866,7 +2866,7 @@ def plot_time_series_as_barplot(ts, anoms=False, ts_ontop=None):
     years_fmt = mdates.DateFormatter('%Y')
     # ax.figure.autofmt_xdate()
     ax.xaxis.set_major_locator(mdates.YearLocator(2))
-    ax.xaxis.set_minor_locator(mdates.YearLocator(1)) 
+    ax.xaxis.set_minor_locator(mdates.YearLocator(1))
     ax.xaxis.set_major_formatter(years_fmt)
 
     # ax.xaxis.set_minor_locator(mdates.MonthLocator())
@@ -2928,7 +2928,7 @@ def plot_tide_pw_lags(path=hydro_path, pw_anom=False, rolling='1H', save=True):
 #    ax.xaxis.set_major_locator(locator)
 #    ax.xaxis.set_major_formatter(formatter)
     # title = 'Mean PW for tide stations near all GNSS stations'
-    # ax.set_title(title)    
+    # ax.set_title(title)
     return
 
 
@@ -3343,7 +3343,7 @@ def plot_climate_classification(path=climate_path, gis_path=gis_path,
                             textcoords="offset points", color='k',
                             fontweight='bold', fontsize=fontsize - 2)
     return fg
-    
+
 
 
 def group_sites_to_xarray(upper=False, scope='diurnal'):
@@ -3516,7 +3516,7 @@ def plot_long_term_anomalies(path=work_yuval, era5_path=era5_path,
     handles = pwln + era5ln + merra2ln
     labels =  ['GNSS', 'ERA5, r={:.2f}'.format(era5corr), 'MERRA2, r={:.2f}'.format(merra2corr)]
 #    if aero_path is not None:
-#        aeroln = aero.plot.line('b-.', ax=ax, alpha=0.8)    
+#        aeroln = aero.plot.line('b-.', ax=ax, alpha=0.8)
 #        aerocorr = df.corr().loc['GNSS', 'AERONET']
 #        aero_label = 'AERONET, r={:.2f}'.format(aerocorr)
 #        handles += aeroln
@@ -3641,7 +3641,7 @@ def plot_day_night_pwv_monthly_mean_std_heatmap(
     axes[1].set_title('Day only ({}-{}) {} in mm'.format(*day_time, title))
     [ax.set_xlabel('month') for ax in axes]
     fig.tight_layout(rect=[0, 0, .9, 1])
-    
+
 #    fig, axes = plt.subplots(1, 2, sharex=False, sharey=False, figsize=(17, 10))
 #    ax_mean = sns.heatmap(df_mm_mean.T, annot=True, ax=axes[0])
 #    ax_mean.set_title('All mean in mm')
@@ -3910,10 +3910,11 @@ def plot_october_2015(path=work_yuval):
 def plot_correlation_pwv_mean_anoms_and_qflux_anoms(era5_path=era5_path,
                                                     work_path=work_yuval,
                                                     all_months=False,
-                                                    add_hline=750, title=None):
+                                                    add_hline=750, title=None, save=True):
     import xarray as xr
     from aux_gps import anomalize_xr
     import matplotlib.pyplot as plt
+    from aux_gps import calculate_pressure_integral
     import seaborn as sns
     # first load pw and produce mean anomalies:
     pw = xr.load_dataset(work_path/'GNSS_PW_monthly_thresh_50.nc')
@@ -3923,22 +3924,30 @@ def plot_correlation_pwv_mean_anoms_and_qflux_anoms(era5_path=era5_path,
     ds = xr.load_dataset(
         era5_path/'ERA5_MF_anomalies_4xdaily_israel_mean_1996-2019.nc')
     qf_mm = ds['qf'].resample(time='MS').mean()
+    # add pressure integral:
+    iqf = calculate_pressure_integral(qf_mm)/9.79
+    iqf = iqf.expand_dims('level')
+    iqf['level'] = ['integrated']
+    qf_mm = xr.concat([qf_mm.sortby('level'), iqf], 'level')
     # now produce corr for each level:
     dsl = [xr.corr(qf_mm.sel(level=x), pw_anoms_mean) for x in ds['level']]
     dsl = xr.concat(dsl, 'level')
+    # corr = xr.concat(dsl + [iqf], 'level')
     corr = xr.concat(dsl, 'level')
     if all_months:
         df = pw_anoms_mean.to_dataframe('pwv')
         df = df.join(qf_mm.to_dataset('level').to_dataframe())
         corr = df.groupby(df.index.month).corr()['pwv'].unstack()
         corr = corr.drop('pwv', axis=1).T
-        corr = corr.sort_index(ascending=True)
         corr.index.name = 'month'
         fig, ax = plt.subplots(figsize=(8, 9))
-        sns.heatmap(corr, annot=True, center=0, cmap='bwr', ax=ax)
+        sns.heatmap(corr, annot=True, center=0, cmap='coolwarm', ax=ax, cbar_kws={'label': 'pearson correlation coefficient ', 'aspect': 40})
         ax.set_ylabel('pressure level [hPa]')
         ax.set_xlabel('month')
+        # add line to separate integrated from level
+        ax.hlines([37], *ax.get_xlim(), color='k')
         fig.tight_layout()
+        filename = 'pwv_qflux_levels_correlations_months.png'
     else:
         fig, ax = plt.subplots(figsize=(8, 6))
         corr.plot(ax=ax, lw=2)
@@ -3947,8 +3956,11 @@ def plot_correlation_pwv_mean_anoms_and_qflux_anoms(era5_path=era5_path,
         ax.set_xlabel('pressure level [hPa]')
         if add_hline is not None:
             ax.axvline(add_hline, color='k')
+        filename = 'pwv_qflux_levels_correlations.png'
     if title is not None:
         fig.suptitle(title)
+    if save:
+        plt.savefig(savefig_path / filename, orientation='portrait')
     return fig
 
 
@@ -3992,3 +4004,197 @@ def plot_pwv_anomalies_histogram(path=work_yuval):
 
     return ax
 
+
+def plot_quiver_panels(u, v, tcwv,
+                       times=['2015-10', '2013-10'], level=750):
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import Normalize
+    from mpl_toolkits.axes_grid1 import AxesGrid
+    import matplotlib.cm as cm
+    import pandas as pd
+    from palettable.colorbrewer import sequential as seq_cmap
+    from palettable.colorbrewer import diverging as div_cmap
+    from aux_gps import anomalize_xr
+    cmap_yl = seq_cmap.YlOrRd_9.mpl_colormap
+    cmap_rb = div_cmap.PuOr_11.mpl_colormap
+    cmap = cmap_rb
+    times = pd.to_datetime(times)
+    tcwv = slice_time_level_geo_field(tcwv, level=None, time=times,
+                                      anoms=True,
+                                      lats=[17, 47], lons=[17, 47])
+    qu = slice_time_level_geo_field(u, level=750, time=times,
+                                    anoms=True,
+                                    lats=[17, 47], lons=[17, 47])
+    qv = slice_time_level_geo_field(v, level=750, time=times,
+                                    anoms=True,
+                                    lats=[17, 47], lons=[17, 47])
+    fig = plt.figure(figsize=(15, 5))
+    # fig, axes = plt.subplots(1, 2, figsize=(15, 5))
+    grid = AxesGrid(fig, 111,          # as in plt.subplot(111)
+                    nrows_ncols=(1, 2),
+                    axes_pad=0.15,
+                    share_all=True,
+                    cbar_location="right",
+                    cbar_mode="single",
+                    cbar_size="7%",
+                    cbar_pad=0.15,
+                    )
+    # normalizer=Normalize(-6,6)
+    vmax= abs(max(abs(tcwv.min().values), abs(tcwv.max().values)))
+    vmin = -vmax
+    print(vmin, vmax)
+    # vmax = tcwv.max().item()
+    cs1 = plot_contourf_field_with_map_overlay(tcwv.sel(time=times[0]), ax=grid[0],
+                                               vmin=vmin, vmax=vmax, cmap=cmap,
+                                               colorbar=False, title='2015-10',
+                                               cbar_label='', extend=None,
+                                               alpha=0.5, levels=21)
+    cs2 = plot_contourf_field_with_map_overlay(tcwv.sel(time=times[1]), ax=grid[1],
+                                               vmin=vmin, vmax=vmax, cmap=cmap,
+                                               colorbar=False, title='2013-10',
+                                               cbar_label='', extend=None,
+                                               alpha=0.5, levels=21)
+    cbar = grid[0].cax.colorbar(cs2)
+    # cbar = grid.cbar_axes[0].colorbar(cs2)
+    label = 'PWV anomalies [mm]'
+    cbar.set_label_text(label)
+    # for cax in grid.cbar_axes:
+    #     cax.toggle_label(False)
+    # im=cm.ScalarMappable(norm=normalizer)
+    return fig
+
+
+def slice_time_level_geo_field(field, level=750, lat_dim='latitude',
+                               lon_dim='longitude', time='2012-10',
+                               level_dim='level', time_dim='time',
+                               lats=[None, None], lons=[None, None],
+                               anoms=False, clim_month=None):
+    from aux_gps import anomalize_xr
+
+    if level is not None:
+        field = field.sel({level_dim: level})
+    if time is not None and anoms and clim_month is None:
+        field = field.load()
+        field = anomalize_xr(field, freq='MS', time_dim=time_dim)
+    if time is not None and clim_month is None:
+        field = field.sel({time_dim: time})
+    elif time is None and clim_month is not None:
+        field = field.load()
+        field = field.groupby('{}.month'.format(time_dim)).mean().sel(month=clim_month)
+    field= field.sortby(lat_dim).squeeze().load()
+    field = field.load().squeeze().sel({lat_dim: slice(*lats), lon_dim: slice(*lons)})
+    return field
+
+
+def plot_contourf_field_with_map_overlay(field, lat_dim='latitude',
+                                         lon_dim='longitude', ax=None,
+                                         vmin=None, vmax=None, cmap='viridis',
+                                         colorbar=False, title=None,
+                                         cbar_label='', extend=None,
+                                         alpha=0.5, levels=11):
+    import salem
+    import matplotlib.pyplot as plt
+    field = field.transpose(lon_dim, lat_dim, ...)
+    if ax is None:
+        f, ax = plt.subplots(figsize=(10, 8))
+    # plot the salem map background, make countries in grey
+    smap = field.salem.get_map(countries=False)
+    smap.set_shapefile(countries=False, oceans=True, lakes=True, color='grey')
+    smap.plot(ax=ax)
+    # transform the coordinates to the map reference system and contour the data
+    xx, yy = smap.grid.transform(field[lat_dim].values, field[lon_dim].values,
+                                 crs=field.salem.grid.proj)
+
+    cs = ax.contourf(xx, yy, field, cmap=cmap, levels=levels,
+                     alpha=alpha, vmin=vmin, vmax=vmax, extend=extend)
+    if colorbar:
+        f.colorbar(cs, ax=ax, aspect=40, label=cbar_label)
+    if title is not None:
+        ax.set_title(title)
+    return cs
+
+
+def plot_quiver_ontop_map(u, v, ax=None, lat_dim='latitude',
+                          lon_dim='longitude', plot_map=False,
+                          qp=5, qkey=True):
+    import salem
+    import matplotlib.pyplot as plt
+    import numpy as np
+    u = u.transpose(lon_dim, lat_dim, ...)
+    v = v.transpose(lon_dim, lat_dim, ...)
+    if ax is None:
+        f, ax = plt.subplots(figsize=(10, 8))
+    # plot the salem map background, make countries in grey
+    smap = u.salem.get_map(countries=False)
+    smap.set_shapefile(countries=False, oceans=True, lakes=True, color='grey')
+    if plot_map:
+        smap.plot(ax=ax)
+    # transform the coordinates to the map reference system and contour the data
+    xx, yy = smap.grid.transform(u[lat_dim].values, u[lon_dim].values,
+                                 crs=u.salem.grid.proj)
+    # Quiver only every 7th grid point
+    u = u[4::qp, 4::qp]
+    v = v[4::qp, 4::qp]
+    # transform their coordinates to the map reference system and plot the arrows
+    xx, yy = smap.grid.transform(u[lat_dim].values, u[lon_dim].values,
+                                 crs=u.salem.grid.proj)
+    xx, yy = np.meshgrid(xx, yy)
+    qu = ax.quiver(xx, yy, u.values, v.values)
+    if qkey:
+        qk = ax.quiverkey(qu, 0.7, 1.05, 2, '2 msec',
+                          labelpos='E', coordinates='axes')
+    return ax
+
+
+def plot_scaler_field_ontop_map_cartopy(field, col='time', levels=21,
+                                        cmap='bwr', alpha=1,
+                                        labelsize=14, figsize=(15, 6)):
+    import cartopy.crs as ccrs
+    import cartopy.feature as cfeature
+    fg = field.plot.contourf(levels=levels, col=col, transform=ccrs.PlateCarree(),
+                             cmap=cmap, alpha=alpha, figsize=figsize,
+                             subplot_kws={"projection": ccrs.PlateCarree()})
+    for ax in fg.axes.flat:
+        ax.add_feature(cfeature.LAND.with_scale('110m'))
+        # ax.add_image(tiler, 6)
+        ax.coastlines('50m')
+        gl = ax.gridlines(draw_labels=True, dms=True, x_inline=False, y_inline=False)
+        gl.top_labels = False
+        gl.left_labels = False
+        gl.xlabel_style = {'size': labelsize, 'color': 'k'}
+        gl.ylabel_style = {'size': labelsize, 'color': 'k'}
+        ax.tick_params(axis="y", direction="out", length=8)
+    return fg
+
+
+def plot_vector_arrows_ontop_map_cartopy(u, v, lon_dim='longitude',
+                                         lat_dim='latitude', fg=None,
+                                         qp=5, col='time', qkey=True):
+    import cartopy.crs as ccrs
+    import matplotlib.pyplot as plt
+    import numpy as np
+    if fg is None:
+        fg = plt.figure(figsize=(8, 10))
+        ax = plt.subplot(1, 1, 1, projection=ccrs.PlateCarree())
+        x = u[lon_dim].values
+        y = u[lat_dim].values
+        ax.quiver(x, y, u, v, transform=ccrs.PlateCarree())
+    for i, ax in enumerate(fg.axes.flat):
+        scale = np.sqrt(u**2+u**2).max().item()
+        # set displayed arrow length for longest arrow
+        displayed_arrow_length = 2
+        scale_factor = scale / displayed_arrow_length
+        u1 = u.isel({col: i})
+        v1 = v.isel({col: i})
+        # Quiver only every 7th grid point
+        u1 = u1[4::qp, 4::qp]
+        v1 = v1[4::qp, 4::qp]
+        x = u1[lon_dim].values
+        y = u1[lat_dim].values
+        q = ax.quiver(x, y, u1, v1, units='xy', width=0.1,
+                      scale=scale_factor, scale_units='xy', transform=ccrs.PlateCarree())
+    if qkey:
+        qk = ax.quiverkey(q, 0.7, 1.05, 0.02, '0.02 msec',
+                          labelpos='E', coordinates='axes')
+
+    return fg
