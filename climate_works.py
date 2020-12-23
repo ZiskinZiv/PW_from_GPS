@@ -19,6 +19,57 @@ lon_hemi_box = [-80, 80]
 # what worked: z500 is OK, compare to other large scale cirulations ?
 
 
+def prepare_ERA5_single_var_EM(era5_path=era5_path, var='tcwv'):
+    import xarray as xr
+    from aux_gps import save_ncfile
+    ds = xr.open_dataset(
+        era5_path / 'ERA5_single_vars_mm_EM_area_1979-2020.nc')
+    da = ds[var]
+    da = da.sel(expver=1)
+    save_ncfile(da, era5_path, 'ERA5_{}_mm_EM_area_1979-2020.nc'.format(var))
+    return
+
+
+def prepare_ERA5_moisture_flux_mm_using_dask(era5_path=era5_path):
+    import xarray as xr
+    from dask.diagnostics import ProgressBar
+    u = xr.open_dataset(
+        era5_path/'ERA5_U_mm_EM_area_1979-2020.nc', chunks={"time": 40})['u']
+    v = xr.open_dataset(
+        era5_path/'ERA5_V_mm_EM_area_1979-2020.nc', chunks={"time": 40})['v']
+    q = xr.open_dataset(
+        era5_path/'ERA5_Q_mm_EM_area_1979-2020.nc', chunks={"time": 40})['q']
+    u = u.sel(expver=1).reset_coords(drop=True)
+    v = v.sel(expver=1).reset_coords(drop=True)
+    q = q.sel(expver=1).reset_coords(drop=True)
+    qu = q * u
+    qu.name = 'qu'
+    qv = q * v
+    qv.name = 'qv'
+    qu.attrs['units'] = u.attrs['units']
+    qv.attrs['units'] = v.attrs['units']
+    qu.attrs['long_name'] = 'U component of moisture flux'
+    qu.attrs['standard_name'] = 'eastward moisture flux'
+    qv.attrs['long_name'] = 'V component moisture flux'
+    qv.attrs['standard_name'] = 'northward moisture flux'
+    # ds = ds.sortby('latitude')
+    # ds = ds.sortby('level', ascending=False)
+    comp = dict(zlib=True, complevel=9)
+    encoding_qu = {var: comp for var in qu.to_dataset()}
+    encoding_qv = {var: comp for var in qv.to_dataset()}
+    qu_filename = 'ERA5_QU_mm_EM_area_1979-2020.nc'
+    qv_filename = 'ERA5_QV_mm_EM_area_1979-2020.nc'
+    qu_delayed = qu.to_netcdf(era5_path / qu_filename,
+                              'w', encoding=encoding_qu, compute=False)
+    qv_delayed = qv.to_netcdf(era5_path / qv_filename,
+                              'w', encoding=encoding_qv, compute=False)
+    with ProgressBar():
+        results = qu_delayed.compute()
+    with ProgressBar():
+        results = qv_delayed.compute()
+    return
+
+
 def prepare_ERA5_moisture_flux(era5_path=era5_path):
     """
     loads 12UTC q, u and v ERA5 fields above Israel (pressure levels)
