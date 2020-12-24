@@ -207,3 +207,31 @@ def get_pwv_dsea_foehn_paper(pwv_dsea, pwv_dsea_error=None, plot=True,
             filename = 'gnss_pwv_dsea_foehn_2014-08-08_16.png'
             plt.savefig(savefig_path / filename, orientation='portrait')
     return fig
+
+
+def read_all_WRF_GNSS_files(path=des_path, var='pw', point=None):
+    from aux_gps import path_glob
+    from aux_gps import get_nearest_lat_lon_for_xy
+    import xarray as xr
+    import wrf
+    files = path_glob(path, 'wrfout_d04_*_GNSS.nc')
+    dsl = [xr.open_dataset(file) for file in files]
+    if var is not None:
+        var_list = []
+        for ds in dsl:
+            wrfin = ds._file_obj.ds
+            wrfvar = wrf.getvar(wrfin=wrfin, varname=var, timeidx=wrf.ALL_TIMES)
+            var_list.append(wrfvar)
+        ds = xr.concat(var_list, 'Time')
+        ds = ds.sortby('Time')
+    if point is not None:
+        print('looking for {} at wrf.'.format(point))
+        loc = get_nearest_lat_lon_for_xy(ds['XLAT'], ds['XLONG'], point)
+        print(loc)
+        ds = ds.isel(south_north=loc[0][0], west_east=loc[0][1])
+        ds = ds.sortby('Time')
+    # ds = xr.concat(dsl, 'Time')
+    return ds
+
+
+    
