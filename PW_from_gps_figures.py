@@ -3909,7 +3909,7 @@ def plot_october_2015(path=work_yuval):
 
 def plot_correlation_pwv_mean_anoms_and_qflux_anoms(era5_path=era5_path,
                                                     work_path=work_yuval,
-                                                    all_months=False,
+                                                    all_months=False, mf='qf',
                                                     add_hline=750, title=None, save=True):
     import xarray as xr
     from aux_gps import anomalize_xr
@@ -3923,7 +3923,7 @@ def plot_correlation_pwv_mean_anoms_and_qflux_anoms(era5_path=era5_path,
     # now load qflux and resmaple to mm:
     ds = xr.load_dataset(
         era5_path/'ERA5_MF_anomalies_4xdaily_israel_mean_1996-2019.nc')
-    qf_mm = ds['qf'].resample(time='MS').mean()
+    qf_mm = ds[mf].resample(time='MS').mean()
     # add pressure integral:
     iqf = calculate_pressure_integral(qf_mm)/9.79
     iqf = iqf.expand_dims('level')
@@ -4005,63 +4005,116 @@ def plot_pwv_anomalies_histogram(path=work_yuval):
     return ax
 
 
-def plot_quiver_panels(u, v, tcwv,
-                       times=['2015-10', '2013-10'], level=750):
+# def plot_quiver_panels(u, v, tcwv,
+#                        times=['2015-10', '2013-10'], level=750):
+#     import matplotlib.pyplot as plt
+#     from matplotlib.colors import Normalize
+#     from mpl_toolkits.axes_grid1 import AxesGrid
+#     import matplotlib.cm as cm
+#     import pandas as pd
+#     from palettable.colorbrewer import sequential as seq_cmap
+#     from palettable.colorbrewer import diverging as div_cmap
+#     from aux_gps import anomalize_xr
+#     cmap_yl = seq_cmap.YlOrRd_9.mpl_colormap
+#     cmap_rb = div_cmap.PuOr_11.mpl_colormap
+#     cmap = cmap_rb
+#     times = pd.to_datetime(times)
+#     tcwv = slice_time_level_geo_field(tcwv, level=None, time=times,
+#                                       anoms=True,
+#                                       lats=[17, 47], lons=[17, 47])
+#     qu = slice_time_level_geo_field(u, level=750, time=times,
+#                                     anoms=True,
+#                                     lats=[17, 47], lons=[17, 47])
+#     qv = slice_time_level_geo_field(v, level=750, time=times,
+#                                     anoms=True,
+#                                     lats=[17, 47], lons=[17, 47])
+#     fig = plt.figure(figsize=(15, 5))
+#     # fig, axes = plt.subplots(1, 2, figsize=(15, 5))
+#     grid = AxesGrid(fig, 111,          # as in plt.subplot(111)
+#                     nrows_ncols=(1, 2),
+#                     axes_pad=0.15,
+#                     share_all=True,
+#                     cbar_location="right",
+#                     cbar_mode="single",
+#                     cbar_size="7%",
+#                     cbar_pad=0.15,
+#                     )
+#     # normalizer=Normalize(-6,6)
+#     vmax= abs(max(abs(tcwv.min().values), abs(tcwv.max().values)))
+#     vmin = -vmax
+#     print(vmin, vmax)
+#     # vmax = tcwv.max().item()
+#     cs1 = plot_contourf_field_with_map_overlay(tcwv.sel(time=times[0]), ax=grid[0],
+#                                                vmin=vmin, vmax=vmax, cmap=cmap,
+#                                                colorbar=False, title='2015-10',
+#                                                cbar_label='', extend=None,
+#                                                alpha=0.5, levels=21)
+#     cs2 = plot_contourf_field_with_map_overlay(tcwv.sel(time=times[1]), ax=grid[1],
+#                                                vmin=vmin, vmax=vmax, cmap=cmap,
+#                                                colorbar=False, title='2013-10',
+#                                                cbar_label='', extend=None,
+#                                                alpha=0.5, levels=21)
+#     cbar = grid[0].cax.colorbar(cs2)
+#     # cbar = grid.cbar_axes[0].colorbar(cs2)
+#     label = 'PWV anomalies [mm]'
+#     cbar.set_label_text(label)
+#     # for cax in grid.cbar_axes:
+#     #     cax.toggle_label(False)
+#     # im=cm.ScalarMappable(norm=normalizer)
+#     return fig
+
+# TODO:  calculate long term monthly mean from slice and incorporate it easily:
+
+def plot_quiver_panels(u, v, sf,
+                       times=['2013-10', '2015-10'], level=750,
+                       anoms=False):
     import matplotlib.pyplot as plt
-    from matplotlib.colors import Normalize
-    from mpl_toolkits.axes_grid1 import AxesGrid
-    import matplotlib.cm as cm
     import pandas as pd
-    from palettable.colorbrewer import sequential as seq_cmap
-    from palettable.colorbrewer import diverging as div_cmap
-    from aux_gps import anomalize_xr
-    cmap_yl = seq_cmap.YlOrRd_9.mpl_colormap
-    cmap_rb = div_cmap.PuOr_11.mpl_colormap
-    cmap = cmap_rb
-    times = pd.to_datetime(times)
-    tcwv = slice_time_level_geo_field(tcwv, level=None, time=times,
-                                      anoms=True,
+    # from palettable.colorbrewer import sequential as seq_cmap
+    from palettable.cartocolors import sequential as seq_cmap
+    from palettable.cartocolors import diverging as div_cmap
+    import cartopy.crs as ccrs
+    import xarray as xr
+    cmap_seq = seq_cmap.BluYl_7.mpl_colormap
+    cmap_div = div_cmap.Tropic_7.mpl_colormap
+    cmap_quiver = seq_cmap.BrwnYl_2.mpl_colormap
+    cmap = cmap_seq
+    if anoms:
+        cmap = cmap_div
+    times_dt = pd.to_datetime(times)
+    cb_label = 'PWV [mm]'
+    tcwv = slice_time_level_geo_field(sf, level=None, time=times_dt,
+                                      anoms=anoms,clim_month=10,
                                       lats=[17, 47], lons=[17, 47])
-    qu = slice_time_level_geo_field(u, level=750, time=times,
-                                    anoms=True,
+    qu = slice_time_level_geo_field(u, level=750, time=times_dt,
+                                    anoms=anoms, clim_month=10,
                                     lats=[17, 47], lons=[17, 47])
-    qv = slice_time_level_geo_field(v, level=750, time=times,
-                                    anoms=True,
+    qv = slice_time_level_geo_field(v, level=750, time=times_dt,
+                                    anoms=anoms, clim_month=10,
                                     lats=[17, 47], lons=[17, 47])
-    fig = plt.figure(figsize=(15, 5))
-    # fig, axes = plt.subplots(1, 2, figsize=(15, 5))
-    grid = AxesGrid(fig, 111,          # as in plt.subplot(111)
-                    nrows_ncols=(1, 2),
-                    axes_pad=0.15,
-                    share_all=True,
-                    cbar_location="right",
-                    cbar_mode="single",
-                    cbar_size="7%",
-                    cbar_pad=0.15,
-                    )
-    # normalizer=Normalize(-6,6)
-    vmax= abs(max(abs(tcwv.min().values), abs(tcwv.max().values)))
-    vmin = -vmax
-    print(vmin, vmax)
-    # vmax = tcwv.max().item()
-    cs1 = plot_contourf_field_with_map_overlay(tcwv.sel(time=times[0]), ax=grid[0],
-                                               vmin=vmin, vmax=vmax, cmap=cmap,
-                                               colorbar=False, title='2015-10',
-                                               cbar_label='', extend=None,
-                                               alpha=0.5, levels=21)
-    cs2 = plot_contourf_field_with_map_overlay(tcwv.sel(time=times[1]), ax=grid[1],
-                                               vmin=vmin, vmax=vmax, cmap=cmap,
-                                               colorbar=False, title='2013-10',
-                                               cbar_label='', extend=None,
-                                               alpha=0.5, levels=21)
-    cbar = grid[0].cax.colorbar(cs2)
-    # cbar = grid.cbar_axes[0].colorbar(cs2)
-    label = 'PWV anomalies [mm]'
-    cbar.set_label_text(label)
-    # for cax in grid.cbar_axes:
-    #     cax.toggle_label(False)
-    # im=cm.ScalarMappable(norm=normalizer)
-    return fig
+    fg = plot_scaler_field_ontop_map_cartopy(tcwv, col='time', levels=21,
+                                             cmap=cmap, alpha=0.8, cbar_label=cb_label,
+                                             labelsize=12, figsize=(17, 6))
+    fg = plot_vector_arrows_ontop_map_cartopy(qu, qv, lon_dim='longitude',
+                                              lat_dim='latitude', fg=fg,
+                                              qp=5, col='time', qkey=True,
+                                              cmap=cmap_quiver, zorder=20)
+    gdf = box_lat_lon_polygon_as_gpd(lat_bounds=[29, 34], lon_bounds=[34, 36])
+    for i, ax in enumerate(fg.axes.flat):
+        ax.add_geometries(gdf['geometry'].values, crs=ccrs.PlateCarree(),
+                          edgecolor='r', alpha=0.8)
+        if i <= 1:
+            ax.set_title(times_dt[i].strftime('%b %Y'))
+        else:
+            ax.set_title('Mean Oct')
+    fg.fig.subplots_adjust(top=0.899,
+                           bottom=0.111,
+                           left=0.03,
+                           right=0.94,
+                           hspace=0.17,
+                           wspace=0.0)
+
+    return fg
 
 
 def slice_time_level_geo_field(field, level=750, lat_dim='latitude',
@@ -4070,9 +4123,14 @@ def slice_time_level_geo_field(field, level=750, lat_dim='latitude',
                                lats=[None, None], lons=[None, None],
                                anoms=False, clim_month=None):
     from aux_gps import anomalize_xr
+    import pandas as pd
+    import xarray as xr
 
     if level is not None:
         field = field.sel({level_dim: level})
+    if field[lat_dim].diff(lat_dim).median() < 0:
+        lats = lats[::-1]
+    field = field.sel({lat_dim: slice(*lats), lon_dim: slice(*lons)}).load()
     if time is not None and anoms and clim_month is None:
         field = field.load()
         field = anomalize_xr(field, freq='MS', time_dim=time_dim)
@@ -4081,86 +4139,96 @@ def slice_time_level_geo_field(field, level=750, lat_dim='latitude',
     elif time is None and clim_month is not None:
         field = field.load()
         field = field.groupby('{}.month'.format(time_dim)).mean().sel(month=clim_month)
-    field= field.sortby(lat_dim).squeeze().load()
-    field = field.load().squeeze().sel({lat_dim: slice(*lats), lon_dim: slice(*lons)})
+    elif time is not None and clim_month is not None:
+        clim = field.groupby('{}.month'.format(time_dim)).mean().sel(month=clim_month)
+        clim = clim.rename({'month': time_dim})
+        clim[time_dim] = pd.to_datetime('2200-{}'.format(clim_month), format='%Y-%m')
+        field = field.sel({time_dim: time})
+        field = xr.concat([field, clim], time_dim)
+    field= field.sortby(lat_dim).squeeze()
     return field
 
 
-def plot_contourf_field_with_map_overlay(field, lat_dim='latitude',
-                                         lon_dim='longitude', ax=None,
-                                         vmin=None, vmax=None, cmap='viridis',
-                                         colorbar=False, title=None,
-                                         cbar_label='', extend=None,
-                                         alpha=0.5, levels=11):
-    import salem
-    import matplotlib.pyplot as plt
-    field = field.transpose(lon_dim, lat_dim, ...)
-    if ax is None:
-        f, ax = plt.subplots(figsize=(10, 8))
-    # plot the salem map background, make countries in grey
-    smap = field.salem.get_map(countries=False)
-    smap.set_shapefile(countries=False, oceans=True, lakes=True, color='grey')
-    smap.plot(ax=ax)
-    # transform the coordinates to the map reference system and contour the data
-    xx, yy = smap.grid.transform(field[lat_dim].values, field[lon_dim].values,
-                                 crs=field.salem.grid.proj)
+# def plot_contourf_field_with_map_overlay(field, lat_dim='latitude',
+#                                          lon_dim='longitude', ax=None,
+#                                          vmin=None, vmax=None, cmap='viridis',
+#                                          colorbar=False, title=None,
+#                                          cbar_label='', extend=None,
+#                                          alpha=0.5, levels=11):
+#     import salem
+#     import matplotlib.pyplot as plt
+#     field = field.transpose(lon_dim, lat_dim, ...)
+#     if ax is None:
+#         f, ax = plt.subplots(figsize=(10, 8))
+#     # plot the salem map background, make countries in grey
+#     smap = field.salem.get_map(countries=False)
+#     smap.set_shapefile(countries=False, oceans=True, lakes=True, color='grey')
+#     smap.plot(ax=ax)
+#     # transform the coordinates to the map reference system and contour the data
+#     xx, yy = smap.grid.transform(field[lat_dim].values, field[lon_dim].values,
+#                                  crs=field.salem.grid.proj)
 
-    cs = ax.contourf(xx, yy, field, cmap=cmap, levels=levels,
-                     alpha=alpha, vmin=vmin, vmax=vmax, extend=extend)
-    if colorbar:
-        f.colorbar(cs, ax=ax, aspect=40, label=cbar_label)
-    if title is not None:
-        ax.set_title(title)
-    return cs
+#     cs = ax.contourf(xx, yy, field, cmap=cmap, levels=levels,
+#                      alpha=alpha, vmin=vmin, vmax=vmax, extend=extend)
+#     if colorbar:
+#         f.colorbar(cs, ax=ax, aspect=40, label=cbar_label)
+#     if title is not None:
+#         ax.set_title(title)
+#     return cs
 
 
-def plot_quiver_ontop_map(u, v, ax=None, lat_dim='latitude',
-                          lon_dim='longitude', plot_map=False,
-                          qp=5, qkey=True):
-    import salem
-    import matplotlib.pyplot as plt
-    import numpy as np
-    u = u.transpose(lon_dim, lat_dim, ...)
-    v = v.transpose(lon_dim, lat_dim, ...)
-    if ax is None:
-        f, ax = plt.subplots(figsize=(10, 8))
-    # plot the salem map background, make countries in grey
-    smap = u.salem.get_map(countries=False)
-    smap.set_shapefile(countries=False, oceans=True, lakes=True, color='grey')
-    if plot_map:
-        smap.plot(ax=ax)
-    # transform the coordinates to the map reference system and contour the data
-    xx, yy = smap.grid.transform(u[lat_dim].values, u[lon_dim].values,
-                                 crs=u.salem.grid.proj)
-    # Quiver only every 7th grid point
-    u = u[4::qp, 4::qp]
-    v = v[4::qp, 4::qp]
-    # transform their coordinates to the map reference system and plot the arrows
-    xx, yy = smap.grid.transform(u[lat_dim].values, u[lon_dim].values,
-                                 crs=u.salem.grid.proj)
-    xx, yy = np.meshgrid(xx, yy)
-    qu = ax.quiver(xx, yy, u.values, v.values)
-    if qkey:
-        qk = ax.quiverkey(qu, 0.7, 1.05, 2, '2 msec',
-                          labelpos='E', coordinates='axes')
-    return ax
+# def plot_quiver_ontop_map(u, v, ax=None, lat_dim='latitude',
+#                           lon_dim='longitude', plot_map=False,
+#                           qp=5, qkey=True):
+#     import salem
+#     import matplotlib.pyplot as plt
+#     import numpy as np
+#     u = u.transpose(lon_dim, lat_dim, ...)
+#     v = v.transpose(lon_dim, lat_dim, ...)
+#     if ax is None:
+#         f, ax = plt.subplots(figsize=(10, 8))
+#     # plot the salem map background, make countries in grey
+#     smap = u.salem.get_map(countries=False)
+#     smap.set_shapefile(countries=False, oceans=True, lakes=True, color='grey')
+#     if plot_map:
+#         smap.plot(ax=ax)
+#     # transform the coordinates to the map reference system and contour the data
+#     xx, yy = smap.grid.transform(u[lat_dim].values, u[lon_dim].values,
+#                                  crs=u.salem.grid.proj)
+#     # Quiver only every 7th grid point
+#     u = u[4::qp, 4::qp]
+#     v = v[4::qp, 4::qp]
+#     # transform their coordinates to the map reference system and plot the arrows
+#     xx, yy = smap.grid.transform(u[lat_dim].values, u[lon_dim].values,
+#                                  crs=u.salem.grid.proj)
+#     xx, yy = np.meshgrid(xx, yy)
+#     qu = ax.quiver(xx, yy, u.values, v.values)
+#     if qkey:
+#         qk = ax.quiverkey(qu, 0.7, 1.05, 2, '2 msec',
+#                           labelpos='E', coordinates='axes')
+#     return ax
 
 
 def plot_scaler_field_ontop_map_cartopy(field, col='time', levels=21,
                                         cmap='bwr', alpha=1,
-                                        labelsize=14, figsize=(15, 6)):
+                                        labelsize=14, figsize=(15, 6),
+                                        cbar_label=''):
     import cartopy.crs as ccrs
     import cartopy.feature as cfeature
     fg = field.plot.contourf(levels=levels, col=col, transform=ccrs.PlateCarree(),
-                             cmap=cmap, alpha=alpha, figsize=figsize,
+                             cmap=cmap, alpha=alpha, figsize=figsize, add_colorbar=False,
                              subplot_kws={"projection": ccrs.PlateCarree()})
+    # add an axes, lower left corner in [0.83, 0.1] measured in figure coordinate with axes width 0.02 and height 0.8
+    cbar_ax = fg.fig.add_axes([0.94, 0.1, 0.01, 0.8])
+    fg.add_colorbar(cax=cbar_ax, label=cbar_label)
     for ax in fg.axes.flat:
         ax.add_feature(cfeature.LAND.with_scale('110m'))
         # ax.add_image(tiler, 6)
         ax.coastlines('50m')
-        gl = ax.gridlines(draw_labels=True, dms=True, x_inline=False, y_inline=False)
+        gl = ax.gridlines(alpha=0.5, color='k', linestyle='--', draw_labels=True,
+                          dms=True, x_inline=False, y_inline=False, linewidth=1)
         gl.top_labels = False
-        gl.left_labels = False
+        # gl.left_labels = False
         gl.xlabel_style = {'size': labelsize, 'color': 'k'}
         gl.ylabel_style = {'size': labelsize, 'color': 'k'}
         ax.tick_params(axis="y", direction="out", length=8)
@@ -4169,16 +4237,35 @@ def plot_scaler_field_ontop_map_cartopy(field, col='time', levels=21,
 
 def plot_vector_arrows_ontop_map_cartopy(u, v, lon_dim='longitude',
                                          lat_dim='latitude', fg=None,
-                                         qp=5, col='time', qkey=True):
+                                         qp=5, col='time', qkey=True,
+                                         cmap=None, zorder=None):
     import cartopy.crs as ccrs
     import matplotlib.pyplot as plt
+    import cartopy.feature as cfeature
     import numpy as np
     if fg is None:
         fg = plt.figure(figsize=(8, 10))
         ax = plt.subplot(1, 1, 1, projection=ccrs.PlateCarree())
+        ax.add_feature(cfeature.LAND.with_scale('110m'))
+        # ax.add_image(tiler, 6)
+        ax.coastlines('50m')
+        gl = ax.gridlines(alpha=0.5, color='k', linestyle='--', draw_labels=True,
+                          dms=True, x_inline=False, y_inline=False, linewidth=1)
+                # Quiver only every 7th grid point
+        u = u[4::qp, 4::qp]
+        v = v[4::qp, 4::qp]
         x = u[lon_dim].values
         y = u[lat_dim].values
-        ax.quiver(x, y, u, v, transform=ccrs.PlateCarree())
+        scale = np.sqrt(u**2+u**2).max().item()
+        # set displayed arrow length for longest arrow
+        displayed_arrow_length = 2
+        scale_factor = scale / displayed_arrow_length
+
+        ax.quiver(x, y, u, v, units='xy',
+                  width=0.1, zorder=zorder,
+                  scale=scale_factor, scale_units='xy',
+                  transform=ccrs.PlateCarree())
+        return fg
     for i, ax in enumerate(fg.axes.flat):
         scale = np.sqrt(u**2+u**2).max().item()
         # set displayed arrow length for longest arrow
@@ -4191,10 +4278,35 @@ def plot_vector_arrows_ontop_map_cartopy(u, v, lon_dim='longitude',
         v1 = v1[4::qp, 4::qp]
         x = u1[lon_dim].values
         y = u1[lat_dim].values
-        q = ax.quiver(x, y, u1, v1, units='xy', width=0.1,
-                      scale=scale_factor, scale_units='xy', transform=ccrs.PlateCarree())
+        if cmap is not None:
+            colors = np.sqrt(u1**2+v1**2)
+            q = ax.quiver(x, y, u1, v1, colors, units='xy',
+                          width=0.1, cmap=cmap,
+                          scale=scale_factor, scale_units='xy',
+                          transform=ccrs.PlateCarree(),
+                          zorder=zorder)
+        else:
+            q = ax.quiver(x, y, u1, v1, units='xy',
+                          width=0.1, zorder=zorder,
+                          scale=scale_factor, scale_units='xy',
+                          transform=ccrs.PlateCarree())
     if qkey:
-        qk = ax.quiverkey(q, 0.7, 1.05, 0.02, '0.02 msec',
+        qk = ax.quiverkey(q, 0.7, 1.05, 0.03, r'0.03 m$\cdot$sec$^{-1}$',
                           labelpos='E', coordinates='axes')
 
     return fg
+
+
+def box_lat_lon_polygon_as_gpd(lat_bounds=[29, 34], lon_bounds=[34, 36.5]):
+    import geopandas as gpd
+    from shapely.geometry import Point, LineString
+    point1 = [lon_bounds[0], lat_bounds[0]]
+    point2 = [lon_bounds[0], lat_bounds[1]]
+    point3 = [lon_bounds[1], lat_bounds[1]]
+    point4 = [lon_bounds[1], lat_bounds[0]]
+    line1 = LineString([Point(*point1), Point(*point2)])
+    line2 = LineString([Point(*point2), Point(*point3)])
+    line3 = LineString([Point(*point3), Point(*point4)])
+    line4 = LineString([Point(*point4), Point(*point1)])
+    geo_df = gpd.GeoDataFrame(geometry=[line1, line2, line3, line4])
+    return geo_df
