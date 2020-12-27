@@ -4084,7 +4084,7 @@ def plot_quiver_panels(u, v, sf,
     times_dt = pd.to_datetime(times)
     cb_label = 'PWV [mm]'
     tcwv = slice_time_level_geo_field(sf, level=None, time=times_dt,
-                                      anoms=anoms,clim_month=10,
+                                      anoms=anoms, clim_month=10,
                                       lats=[17, 47], lons=[17, 47])
     qu = slice_time_level_geo_field(u, level=750, time=times_dt,
                                     anoms=anoms, clim_month=10,
@@ -4094,7 +4094,7 @@ def plot_quiver_panels(u, v, sf,
                                     lats=[17, 47], lons=[17, 47])
     fg = plot_scaler_field_ontop_map_cartopy(tcwv, col='time', levels=21,
                                              cmap=cmap, alpha=0.8, cbar_label=cb_label,
-                                             labelsize=12, figsize=(17, 6))
+                                             labelsize=12, figsize=(18, 6))
     fg = plot_vector_arrows_ontop_map_cartopy(qu, qv, lon_dim='longitude',
                                               lat_dim='latitude', fg=fg,
                                               qp=5, col='time', qkey=True,
