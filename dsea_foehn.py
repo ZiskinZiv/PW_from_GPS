@@ -4,22 +4,28 @@
 Created on Mon Nov 30 14:20:40 2020
 
 @author: shlomi
-"""
+"""    
 from PW_stations import work_yuval
 from PW_paths import savefig_path
 des_path = work_yuval / 'deserve'
 ims_path = work_yuval / 'IMS_T'
+dsea_gipsy_path = work_yuval / 'dsea_gipsyx'
 
 
-def calibrate_zwd_with_ts_tm_from_deserve(path=work_yuval, des_path=des_path, ims_path=ims_path):
+
+def calibrate_zwd_with_ts_tm_from_deserve(path=work_yuval, des_path=des_path,
+                                          ims_path=ims_path, zwd=None):
     import xarray as xr
     from PW_stations import ml_models_T_from_sounding
     from PW_stations import produce_kappa_ml_with_cats
     radio = xr.load_dataset(des_path/'massada_deserve_PW_Tm_Ts_2014-2014.nc')
     mda = ml_models_T_from_sounding(
         physical_file=radio, times=None, station='massada')
-    dsea_zwd = xr.open_dataset(path / 'ZWD_unselected_israel_1996-2020.nc')['dsea']
-    dsea_zwd.load()
+    if zwd is not None:
+        dsea_zwd = zwd
+    else:
+        dsea_zwd = xr.open_dataset(path / 'ZWD_unselected_israel_1996-2020.nc')['dsea']
+        dsea_zwd.load()
     ts = xr.open_dataset(ims_path / 'GNSS_5mins_TD_ALL_1996_2020.nc')['dsea']
     k, dk = produce_kappa_ml_with_cats(ts, mda=mda, model_name='TSEN')
     dsea = k * dsea_zwd
@@ -234,4 +240,75 @@ def read_all_WRF_GNSS_files(path=des_path, var='pw', point=None):
     return ds
 
 
-    
+def assemble_WRF_pwv(path=des_path, work_path=work_yuval):
+    from PW_stations import produce_geo_gnss_solved_stations
+    import xarray as xr
+    from aux_gps import save_ncfile
+    from aux_gps import get_nearest_lat_lon_for_xy
+    from aux_gps import get_unique_index
+    df = produce_geo_gnss_solved_stations(path=work_path / 'gis', plot=False)
+    dsea_point = df.loc['dsea'][['lat', 'lon']].astype(float).values
+    wrf_pw = read_all_WRF_GNSS_files(path, var='pw', point=dsea_point)
+    wrf_pw8 = xr.load_dataarray(path / 'pw_wrfout_d04_2014-08-08_40lev.nc').sel(Time='2014-08-08')
+    wrf_pw16 = xr.load_dataarray(path / 'pw_wrfout_d04_2014-08-16_40lev.nc').sel(Time='2014-08-16')
+    wrf_pw_8_16 = xr.concat([wrf_pw8, wrf_pw16], 'Time')
+    print('looking for {} at wrf.'.format(dsea_point))
+    loc = get_nearest_lat_lon_for_xy(wrf_pw_8_16['XLAT'], wrf_pw_8_16['XLONG'], dsea_point)
+    print(loc)
+    wrf_pw_8_16 = wrf_pw_8_16.isel(south_north=loc[0][0], west_east=loc[0][1])
+    wrf_pw = xr.concat([wrf_pw, wrf_pw_8_16], 'Time')
+    wrf_pw = wrf_pw.rename({'Time': 'time'})
+    wrf_pw = wrf_pw.sortby('time')
+    wrf_pw = get_unique_index(wrf_pw)
+    if wrf_pw.attrs['projection'] is not None:
+        wrf_pw.attrs['projection'] = wrf_pw.attrs['projection'].proj4()
+    filename = 'pwv_wrf_dsea_gnss_point_2014-08.nc'
+    save_ncfile(wrf_pw, des_path, filename)
+    return wrf_pw
+
+
+def compare_WRF_GNSS_pwv(path=des_path, work_path=work_yuval, plot=True):
+    import xarray as xr
+    import matplotlib.pyplot as plt
+    # load GNSS dsea:
+    gnss = xr.open_dataset(work_path / 'GNSS_PW_thresh_50_homogenized.nc')['dsea']
+    # load WRF:
+    wrf = xr.load_dataset(path / 'pwv_wrf_dsea_gnss_point_2014-08.nc')
+    ds = xr.Dataset()
+    ds['WRF'] = wrf['pw']
+    ds['GNSS'] = gnss
+    ds = ds.reset_coords(drop=True)
+    if plot:
+        fig, ax = plt.subplots(figsize=(18, 5.5))
+        ds.to_dataframe().plot(ax=ax)
+        ax.grid()
+        ax.set_ylabel('PWV [mm]')
+        fig.tight_layout()
+    return ds
+
+
+def read_all_final_tdps_dsea(path=dsea_gipsy_path/'results', return_mean=True):
+    from aux_gps import path_glob
+    from gipsyx_post_proc import process_one_day_gipsyx_output
+    import xarray as xr
+    files = path_glob(path, 'dsea*_smoothFinal.tdp')
+    df_list = []
+    for file in files:
+        df, _ = process_one_day_gipsyx_output(file)
+        df_list.append(df['WetZ'])
+    # dts = []
+    da_list = []
+    for i, df in enumerate(df_list):
+        # dt = df.index[0]
+        # dts.append(dt)
+        # df.index = df.index - dt
+        da = df.to_xarray()
+        da.name = 'dsea_{}'.format(i)
+        da_list.append(da)
+    ds = xr.merge(da_list)
+    # ds['datetime'] = dts
+    # ds = ds.sortby('datetime')
+    if return_mean:
+        ds = ds.to_array('s').mean('s')
+    return ds
+
