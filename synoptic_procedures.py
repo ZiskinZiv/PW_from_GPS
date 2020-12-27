@@ -199,10 +199,10 @@ def read_synoptic_classification(
     df.index.name = 'time'
     df['class_abbr'] = df['class'].apply(add_class_abbr)
     if report:
-        for code in sorted(df['class'].unique()):
+        for i, code in enumerate(sorted(df['class'].unique())):
             percent = 100 * (df['class'] == code).sum() / df['class'].size
             name = df['Name-EN'][df['class'] == code].unique().item()
-            print('{} : {:.1f} %'.format(name, percent))
+            print('{}) {} : {:.1f} %'.format(i+1, name, percent))
     return df
 
 
@@ -279,9 +279,20 @@ def agg_month_count_syn_class(path=climate_path, syn_category='normal',
         da.attrs['units'] = 'relative frequency in a month'
     return da
 
-# TODO: plot corr to daily_pwv, when selecting different syn_classes using
-# qU daily 12UTC levels data...
 
+def agg_month_syn_class_continous_variable_with_level(da, level_dim='level',
+                                                      path=climate_path,
+                                                      syn_cat='RST',
+                                                      return_all_syn_cats=True):
+    import xarray as xr
+    ds_list = []
+    for lev in da[level_dim]:
+        ds = agg_month_syn_class_continous_variable(da.sel(
+            {level_dim: lev}), syn_cat=syn_cat, return_all_syn_cats=return_all_syn_cats)
+        ds_list.append(ds)
+    dss = xr.concat(ds_list, level_dim)
+    dss[level_dim] = da[level_dim]
+    return dss
 
 def agg_month_syn_class_continous_variable(
         da, path=climate_path, syn_cat='RST', return_all_syn_cats=False):
