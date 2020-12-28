@@ -4,7 +4,7 @@
 Created on Mon Nov 30 14:20:40 2020
 
 @author: shlomi
-"""    
+"""
 from PW_stations import work_yuval
 from PW_paths import savefig_path
 des_path = work_yuval / 'deserve'
@@ -85,7 +85,7 @@ def compare_gnss_dsea_with_wrf(des_path=des_path, work_path=work_yuval, dsea_da=
     gnss1517 = gnss.sel(time=slice('2014-08-15', '2014-08-16'))
     wrf79 = wrf.sel(time=slice('2014-08-07', '2014-08-08'))
     wrf1517 = wrf.sel(time=slice('2014-08-15', '2014-08-16'))
-    
+
     if plot:
         fig, axes = plt.subplots(1, 2, figsize=(15, 5))
         gnss79.to_dataframe()['gnss'].plot(ax=axes[1], lw=2)
@@ -168,7 +168,7 @@ def load_wrf_output_and_save_field(path=des_path, varname="pw", savepath=None):
         var_list.append(wrfvar)
     return var_list
 
-    
+
 def get_pwv_dsea_foehn_paper(pwv_dsea, pwv_dsea_error=None, plot=True,
                              xlims=(13, 19), ylims=(10,50), save=True):
     import numpy as np
@@ -270,8 +270,11 @@ def assemble_WRF_pwv(path=des_path, work_path=work_yuval):
 def compare_WRF_GNSS_pwv(path=des_path, work_path=work_yuval, plot=True):
     import xarray as xr
     import matplotlib.pyplot as plt
+    import numpy as np
+    from PW_from_gps_figures import plot_mean_with_fill_between_std
     # load GNSS dsea:
-    gnss = xr.open_dataset(work_path / 'GNSS_PW_thresh_50_homogenized.nc')['dsea']
+    gnss = xr.open_dataset(
+        work_path / 'GNSS_PW_thresh_50_homogenized.nc')['dsea']
     # load WRF:
     wrf = xr.load_dataset(path / 'pwv_wrf_dsea_gnss_point_2014-08.nc')
     ds = xr.Dataset()
@@ -283,6 +286,22 @@ def compare_WRF_GNSS_pwv(path=des_path, work_path=work_yuval, plot=True):
         ds.to_dataframe().plot(ax=ax)
         ax.grid()
         ax.set_ylabel('PWV [mm]')
+        fig.suptitle(
+            'PWV Time series comparison (2014-08) between GNSS and WRF at DSEA point')
+        fig.tight_layout()
+        fig, ax = plt.subplots(figsize=(9, 7))
+        ds_hour = ds.groupby('time.hour').mean()
+        wrfln = plot_mean_with_fill_between_std(ds['WRF'], grp='hour', mean_dim='time', ax=ax,
+                                                color='tab:blue', marker='s', alpha=0.2)
+        gnssln = plot_mean_with_fill_between_std(ds['GNSS'], grp='hour', mean_dim='time', ax=ax,
+                                                 color='tab:orange', marker='o', alpha=0.2)
+        ax.xaxis.set_ticks(np.arange(0, 24, 1))
+        ax.legend(wrfln+gnssln, ['WRF', 'GNSS'])
+        ax.grid()
+        ax.set_ylabel('PWV [mm]')
+        ax.set_xlabel('hour of the day [UTC]')
+        fig.suptitle(
+            'Diurnal PWV comparison (2014-08) between GNSS and WRF at DSEA point')
         fig.tight_layout()
     return ds
 
