@@ -3057,6 +3057,19 @@ def plot_field_with_fill_between(da, dim='hour', mean_dim=None, ax=None,
     return line
 
 
+def plot_mean_with_fill_between_std(da, grp='hour', mean_dim='time', ax=None,
+                                    color='b', marker='s', alpha=0.5):
+    da_mean = da.groupby('{}.{}'.format(mean_dim, grp)).mean('{}'.format(mean_dim))
+    da_std = da.groupby('{}.{}'.format(mean_dim, grp)).std('{}'.format(mean_dim))
+    da_minus = da_mean - da_std
+    da_plus = da_mean + da_std
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 6))
+    line = da_mean.plot(color=color, marker=marker, ax=ax)
+    ax.fill_between(da_mean[grp], da_minus, da_plus, color=color, alpha=alpha)
+    return line
+
+
 def plot_hist_with_seasons(da_ts):
     import seaborn as sns
     fig, ax = plt.subplots(figsize=(10, 7))
@@ -4067,17 +4080,24 @@ def plot_pwv_anomalies_histogram(path=work_yuval):
 
 def plot_quiver_panels(u, v, sf,
                        times=['2013-10', '2015-10'], level=750,
-                       anoms=False):
+                       anoms=False, suptitle='', labelsize=12):
     import matplotlib.pyplot as plt
     import pandas as pd
     # from palettable.colorbrewer import sequential as seq_cmap
+    from palettable.colorbrewer import sequential as colorbrewer_seq
+    from palettable.scientific import sequential as scientific_seq
+    from palettable.cmocean import sequential as cmocean_seq
     from palettable.cartocolors import sequential as seq_cmap
     from palettable.cartocolors import diverging as div_cmap
     import cartopy.crs as ccrs
     import xarray as xr
     cmap_seq = seq_cmap.BluYl_7.mpl_colormap
+    cmap_seq = colorbrewer_seq.Blues_9.mpl_colormap
     cmap_div = div_cmap.Tropic_7.mpl_colormap
-    cmap_quiver = seq_cmap.BrwnYl_2.mpl_colormap
+    cmap_quiver = seq_cmap.SunsetDark_7.mpl_colormap
+    # cmap_quiver = colorbrewer_seq.YlOrRd_9.mpl_colormap
+    # cmap_quiver = scientific_seq.LaJolla_20.mpl_colormap
+    # cmap_quiver = cmocean_seq.Solar_20.mpl_colormap
     cmap = cmap_seq
     if anoms:
         cmap = cmap_div
@@ -4094,19 +4114,36 @@ def plot_quiver_panels(u, v, sf,
                                     lats=[17, 47], lons=[17, 47])
     fg = plot_scaler_field_ontop_map_cartopy(tcwv, col='time', levels=21,
                                              cmap=cmap, alpha=0.8, cbar_label=cb_label,
-                                             labelsize=12, figsize=(18, 6))
+                                             labelsize=labelsize, figsize=(18, 6))
     fg = plot_vector_arrows_ontop_map_cartopy(qu, qv, lon_dim='longitude',
                                               lat_dim='latitude', fg=fg,
                                               qp=5, col='time', qkey=True,
                                               cmap=cmap_quiver, zorder=20)
     gdf = box_lat_lon_polygon_as_gpd(lat_bounds=[29, 34], lon_bounds=[34, 36])
     for i, ax in enumerate(fg.axes.flat):
+        # add the box over Israel:
         ax.add_geometries(gdf['geometry'].values, crs=ccrs.PlateCarree(),
-                          edgecolor='r', alpha=0.8)
+                          edgecolor='k', linestyle='--', alpha=1, linewidth=2)
+        # add gridlines:
+        gl = ax.gridlines(alpha=0.5, color='k', linestyle='--', draw_labels=True,
+                          dms=True, x_inline=False, y_inline=False, linewidth=1)
+        gl.top_labels = False
+        # gl.left_labels = False
+        gl.xlabel_style = {'size': labelsize, 'color': 'k'}
+        gl.ylabel_style = {'size': labelsize, 'color': 'k'}
+        if i == 0:
+            gl.right_labels = False
+        elif i == 1:
+            gl.right_labels = False
+            gl.left_labels = False
+        elif i == 2:
+            gl.right_labels = False
+            gl.left_labels = False
         if i <= 1:
             ax.set_title(times_dt[i].strftime('%b %Y'))
         else:
             ax.set_title('Mean Oct')
+    fg.fig.suptitle(suptitle)
     fg.fig.subplots_adjust(top=0.899,
                            bottom=0.111,
                            left=0.03,
@@ -4222,15 +4259,14 @@ def plot_scaler_field_ontop_map_cartopy(field, col='time', levels=21,
     cbar_ax = fg.fig.add_axes([0.94, 0.1, 0.01, 0.8])
     fg.add_colorbar(cax=cbar_ax, label=cbar_label)
     for ax in fg.axes.flat:
-        ax.add_feature(cfeature.LAND.with_scale('110m'))
+        # land_50m = cfeature.NaturalEarthFeature('physical', 'lakes', '10m',
+        #                                 edgecolor='face',
+        #                                 facecolor='b', alpha=0.3)
+        # ax.add_feature(land_50m, zorder=30)
+        # ax.add_feature(cfeature.LAKES.with_scale('110m'), facecolor='b')
         # ax.add_image(tiler, 6)
         ax.coastlines('50m')
-        gl = ax.gridlines(alpha=0.5, color='k', linestyle='--', draw_labels=True,
-                          dms=True, x_inline=False, y_inline=False, linewidth=1)
-        gl.top_labels = False
-        # gl.left_labels = False
-        gl.xlabel_style = {'size': labelsize, 'color': 'k'}
-        gl.ylabel_style = {'size': labelsize, 'color': 'k'}
+        # ax.background_img(extent=[17, 47, 17, 47])
         ax.tick_params(axis="y", direction="out", length=8)
     return fg
 
@@ -4243,6 +4279,8 @@ def plot_vector_arrows_ontop_map_cartopy(u, v, lon_dim='longitude',
     import matplotlib.pyplot as plt
     import cartopy.feature as cfeature
     import numpy as np
+    scale = np.sqrt(u**2+v**2).max().item()
+    import numpy as np
     if fg is None:
         fg = plt.figure(figsize=(8, 10))
         ax = plt.subplot(1, 1, 1, projection=ccrs.PlateCarree())
@@ -4251,12 +4289,11 @@ def plot_vector_arrows_ontop_map_cartopy(u, v, lon_dim='longitude',
         ax.coastlines('50m')
         gl = ax.gridlines(alpha=0.5, color='k', linestyle='--', draw_labels=True,
                           dms=True, x_inline=False, y_inline=False, linewidth=1)
-                # Quiver only every 7th grid point
+        # Quiver only every 7th grid point
         u = u[4::qp, 4::qp]
         v = v[4::qp, 4::qp]
         x = u[lon_dim].values
         y = u[lat_dim].values
-        scale = np.sqrt(u**2+u**2).max().item()
         # set displayed arrow length for longest arrow
         displayed_arrow_length = 2
         scale_factor = scale / displayed_arrow_length
@@ -4267,19 +4304,19 @@ def plot_vector_arrows_ontop_map_cartopy(u, v, lon_dim='longitude',
                   transform=ccrs.PlateCarree())
         return fg
     for i, ax in enumerate(fg.axes.flat):
-        scale = np.sqrt(u**2+u**2).max().item()
         # set displayed arrow length for longest arrow
         displayed_arrow_length = 2
         scale_factor = scale / displayed_arrow_length
         u1 = u.isel({col: i})
         v1 = v.isel({col: i})
+        # colors1 = colors.isel({col: i})
         # Quiver only every 7th grid point
         u1 = u1[4::qp, 4::qp]
         v1 = v1[4::qp, 4::qp]
+        colors = np.sqrt(u1**2 + v1**2) / scale
         x = u1[lon_dim].values
         y = u1[lat_dim].values
         if cmap is not None:
-            colors = np.sqrt(u1**2+v1**2)
             q = ax.quiver(x, y, u1, v1, colors, units='xy',
                           width=0.1, cmap=cmap,
                           scale=scale_factor, scale_units='xy',
