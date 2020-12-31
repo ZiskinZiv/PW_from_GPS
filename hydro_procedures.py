@@ -480,7 +480,8 @@ def plot_hydro_ML_models_results_from_dss(dss, station='drag', std_on='outer',
         max_flow = 0
         sts = [x for x in station.split('-')]
         hs_ids = [int(x) for x in dss.attrs['hs_id'].split('-')]
-        X, y = produce_X_y_from_list(sts, hs_ids, neg_pos_ratio=1, concat_Xy=True)
+        X, y = produce_X_y_from_list(
+            sts, hs_ids, neg_pos_ratio=1, concat_Xy=True)
     else:
         max_flow = dss.attrs['max_flow']
         X, y = produce_X_y(station, hydro_pw_dict[station], neg_pos_ratio=1,
@@ -506,12 +507,12 @@ def plot_hydro_ML_models_results_from_dss(dss, station='drag', std_on='outer',
                     {'features': feat})
                 title = 'ROC of {} model ({})'.format(modelname, scoring)
                 plot_ROC_PR_curve_from_dss(model, outer_dim='outer_kfold',
-                                        inner_dim='inner_kfold',
-                                        plot_chance=chance_plot[k],
-                                        main_label=feat,
-                                        plot_std_legend=False, ax=ax,
-                                        color=cmap[k], title=title,
-                                        std_on=std_on, fontsize=fontsize)
+                                           inner_dim='inner_kfold',
+                                           plot_chance=chance_plot[k],
+                                           main_label=feat,
+                                           plot_std_legend=False, ax=ax,
+                                           color=cmap[k], title=title,
+                                           std_on=std_on, fontsize=fontsize)
     title = '{} station: {} total events'.format(
             station.upper(), events)
     if max_flow > 0:
@@ -790,7 +791,7 @@ def calculate_metrics_from_ML_dss(dss):
 #    print('loading {} station only.'.format(station))
 #    model_names = [x.split('_')[3] for x in model_files]
 ##    model_pw_stations = [x.split('_')[1] for x in model_files]
-##    model_hydro_stations = [x.split('_')[2] for x in model_files]        
+##    model_hydro_stations = [x.split('_')[2] for x in model_files]
 #    model_nsplits = [x.split('_')[6] for x in model_files]
 #    model_scores = [x.split('_')[5] for x in model_files]
 #    model_features = [x.split('_')[4] for x in model_files]
@@ -999,7 +1000,7 @@ def plot_many_ROC_curves(model, X, y, name='', color='b', ax=None,
         ax.plot(mean_fpr, mean_tpr, color=color,
                 label=r'Mean ROC (AUC = %0.2f $\pm$ %0.2f)' % (mean_auc, std_auc),
                 lw=2, alpha=.8)
-        
+
         std_tpr = np.std(tprs, axis=0)
         tprs_upper = np.minimum(mean_tpr + std_tpr, 1)
         tprs_lower = np.maximum(mean_tpr - std_tpr, 0)
@@ -1213,13 +1214,13 @@ def scikit_fit_predict(X, y, seed=42, with_pressure=True, n_splits=7,
     ax.plot(mean_fpr, mean_tpr, color='b',
             label=r'Mean ROC (AUC = %0.2f $\pm$ %0.2f)' % (mean_auc, std_auc),
             lw=2, alpha=.8)
-    
+
     std_tpr = np.std(tprs, axis=0)
     tprs_upper = np.minimum(mean_tpr + std_tpr, 1)
     tprs_lower = np.maximum(mean_tpr - std_tpr, 0)
     ax.fill_between(mean_fpr, tprs_lower, tprs_upper, color='grey', alpha=.2,
                     label=r'$\pm$ 1 std. dev.')
-    
+
     ax.set(xlim=[-0.05, 1.05], ylim=[-0.05, 1.05],
            title="Receiver operating characteristic example")
     ax.legend(loc="lower right")
@@ -1353,7 +1354,7 @@ def produce_X_y(pw_station='drag', hs_id=48125, pressure_station='bet-dagan',
 #        X_df = pd.concat(event_list)
 #        X_da['sample'] = [x for x in X_df.index[::24]]
 #        return X_da
-#    
+#
 #    df = preprocess_hydro_pw(
 #        pw_station=station,
 #        hs_id=hs_id,
