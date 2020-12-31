@@ -13,37 +13,122 @@ climate_path = work_yuval / 'climate'
 
 
 def choose_color_for_synoptic_classification():
-    import numpy as np
-    import seaborn as sns
-    syn_cls = np.arange(1, 20)
-    colors = sns.color_palette('tab20', 19)
-    col_dict = dict(zip(syn_cls, colors))
-    return col_dict
+    # import numpy as np
+    # import seaborn as sns
+    # from matplotlib.cm import tab20b
+    # from matplotlib.cm import tab20c
+    # from palettable.colorbrewer import sequential as seq
+    from PW_from_gps_figures import create_enhanced_qualitative_color_map
+    colors = create_enhanced_qualitative_color_map(plot=False)
+    # syn_cls = np.arange(1, 20)
+    # colors = sns.color_palette('tab20', 19)
+    col_dict = {}
+    edge_dict = {}
+    east_color = colors[8]  # green
+    west_color = colors[0]   # blue
+    north_color = colors[28]  # gray
+    south_color = colors[12]  # dark orange
+    central_color = [0, 0, 0, 1]  # black
+    # no_color = [0, 0, 1, 1]  # white
+    RST_color = colors[4]  # light orange
+    High_color = colors[16]  # purple
+    cold_low_color = colors[39]
+    sharav_color = colors[35]
+    # RST colors:
+    col_dict[1] = RST_color
+    col_dict[2] = RST_color
+    col_dict[3] = RST_color
+    edge_dict[1] = east_color
+    edge_dict[2] = west_color
+    edge_dict[3] = central_color
+    # PT colors:
+    col_dict[4] = colors[10]
+    col_dict[5] = colors[9]
+    col_dict[6] = colors[8]
+    edge_dict[4] = central_color
+    edge_dict[5] = central_color
+    edge_dict[6] = central_color
+    # High colors:
+    col_dict[7] = High_color
+    col_dict[8] = High_color
+    col_dict[9] = High_color
+    col_dict[10] = High_color
+    edge_dict[7] = east_color
+    edge_dict[8] = west_color
+    edge_dict[9] = north_color
+    edge_dict[10] = central_color
+    # low east deep:
+    col_dict[11] = colors[28]
+    edge_dict[11] = east_color
+    # CL lows:
+    col_dict[12] = colors[36]
+    col_dict[13] = colors[38]
+    col_dict[14] = colors[36]
+    col_dict[15] = colors[38]
+    edge_dict[12] = south_color
+    edge_dict[13] = south_color
+    edge_dict[14] = north_color
+    edge_dict[15] = north_color
+    # cold low west:
+    col_dict[16] = cold_low_color
+    edge_dict[16] = west_color
+    # low east shallow:
+    col_dict[17] = colors[29]
+    edge_dict[17] = east_color
+    # sharav Lows:
+    col_dict[18] = sharav_color
+    col_dict[19] = sharav_color
+    edge_dict[18] = west_color
+    edge_dict[19] = central_color
+    return col_dict, edge_dict
 
 
-def visualize_synoptic_class_on_time_series(da_ts, path=climate_path, ax=None):
+def visualize_synoptic_class_on_time_series(da_ts, path=climate_path,
+                                            ax=None, leg_ncol=1,
+                                            leg_loc=1, second_da_ts=None):
     import xarray as xr
     import matplotlib.pyplot as plt
     time_dim = list(set(da_ts.dims))[0]
     assert xr.infer_freq(da_ts[time_dim]) == 'D'
     if ax is None:
         fig, ax = plt.subplots()
-    da_ts.plot.line('k-', lw=2, ax=ax, marker='s')
-    ax.grid()
-    ymin, ymax = ax.get_ylim()
+    da_ts.plot.line('k-', lw=2, ax=ax, zorder=20)
+    if second_da_ts is not None:
+        second_da_ts.plot.line('k--', lw=2, ax=ax, marker='o')
+    # ymin, ymax = ax.get_ylim()
     df = read_synoptic_classification(path, report=False)
     ind = da_ts.to_dataframe().index
+    da_ts = align_synoptic_class_with_daily_dataset(da_ts)
     df = df.loc[ind]
-    color_dict = choose_color_for_synoptic_classification()
+    color_dict, edge_dict = choose_color_for_synoptic_classification()
 #    df['color'] = df['class'].map(color_dict)
+    # monthly count of synoptics:
+    month_counts = agg_month_count_syn_class(freq=False)
+    min_year = da_ts[time_dim].min().dt.year.item()
+    min_month = da_ts[time_dim].min().dt.month.item()
+    max_year = da_ts[time_dim].max().dt.year.item()
+    max_month = da_ts[time_dim].max().dt.month.item()
+    min_dt = '{}-{}'.format(min_year, min_month)
+    max_dt = '{}-{}'.format(max_year, max_month)
+    month_counts = month_counts.sel(time=slice(min_dt, max_dt))
+    # alternative count since we need not just monthly but by time slice:
     grp_dict = df.groupby('class').groups
     for key_class, key_ind in grp_dict.items():
         color = color_dict[key_class]
+        edge_color = edge_dict[key_class]
         abbr = add_class_abbr(key_class)
+        # abbr_count = month_counts.sel(syn_cls=key_class).sum().item()
+        abbr_count = df[df['class'] == key_class].count().values[0]
+        abbr_label = r'${{{}}}$: {}'.format(abbr, int(abbr_count))
 #    for ind, row in df.iterrows():
-        ax.vlines(key_ind, ymin, ymax, colors=color, alpha=0.4, lw=10,
-                  label=abbr)
-    ax.legend()
+        da_ts[da_ts['syn_class'] == key_class].plot.line(
+            'k-', lw=0, ax=ax, marker='o', markersize=20,
+            markerfacecolor=color, markeredgewidth=2,
+            markeredgecolor=edge_color, label=abbr_label)
+        # ax.vlines(key_ind, 0, 80, colors=color, alpha=0.4, lw=10,
+        #           label=abbr_label)
+    ax.legend(ncol=leg_ncol, labelspacing=1.5, fontsize=12, loc=leg_loc)
+    ax.grid()
     return ax
 
 

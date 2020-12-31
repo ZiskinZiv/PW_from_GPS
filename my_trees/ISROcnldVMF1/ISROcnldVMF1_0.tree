@@ -1,0 +1,388 @@
+#
+# I think it will work for an arbitrary set of stations as well as one, maybe add a ref clock
+# for differential. Data types will need to be adjusted for multi-GNSS applications. For multi-GNSS, note
+# commented out DataLinkSpecs, ConstellationBias for stations, GPS data types (P-code); without changes
+# currently compatible with rinex2.
+
+
+Self
+  Metadata On     # Use "On" to output originating file and line number
+  File debug.tree
+
+# The following variables are defined by gd2e configuration at gd2e runtime
+
+GEOPFILE == 
+GNSSORB_POS  ==
+GNSS_WLPB    ==       # Default is to bias fix, set 'AmbRes Off' below to not ambiguity resolve
+GNSS_ANT_OFF_PCM == 
+#GNSS_SHADOW ==        # uncomment this line if your orb/clks have real shadow files ( almost all do ) for faster runs,
+                      # It will be set to <orbClkDir>/GNSS.shad
+                      # Useful if you have set Satellite.NAME.State.SatelliteTimeSeries.ShadowFinder On, and want to use e.g.:
+                      # Global.Input.ShadowHistory.File $GNSS_SHADOW
+GNSSXYZ_FILE ==
+GNSSLIST     == 
+XYZFILE_STATIONS ==
+STATIONLIST ==  
+GLOBAL_EPOCH ==
+FILTER_STOP  == 
+DATARECORD_FILE == dataRecordFile   # still not sure if we should have a fixed name 
+STA_DB ==                           # $GOA_VAR/sta_info/IGb08_sta_db_newfmt remove new format sometime
+OCEANLOAD == On                  # Default is On unless '-rnxFile' is used.
+StationCovOnOff ==                  # Default Off, unless -gdCov -runType PPP
+
+# Names that change with each iteration,  smooth_n_i.tdp|pos _n_i where n 
+#    is the number of the tree and i is the number of the subiteration,
+#    both start numbering at 0 , final iteration is smoothFinal.tdp|pos
+#    File for TDP_INPUT will be the previous iterations output after iteration 0
+SMOOTHPOS ==
+SMOOTHTDP ==
+TDP_INPUT ==
+
+
+# The following variables maybe adjusted by the user, in the run area
+GLOBAL_DATA_RATE == 300       # maybe not this one since we have to decide on high rate clocks
+                              # but it might make sense for others
+
+
+# Users may adjust other models below, trop, tides, ...? Needs more documentation, can sphinx 
+# grab snippets of documentation like doxygen?
+       
+
+Global
+   Logging
+     Alert   cerr
+     Warn    cout
+     Event   cout
+     
+   Filter
+     Start $GLOBAL_EPOCH
+     Stop  $FILTER_STOP
+
+   MeasGather
+     DecimateSmoothInterval $GLOBAL_DATA_RATE
+     HonorEditorFlags On
+
+     Type DATARECORD
+     FileName $DATARECORD_FILE
+   
+   DataTypes
+     PostSmoothEditGlobals        # Options global to EditPoint across all DataLinkSpecs.
+       MaxIteration 5
+
+     IonoFreeL_1P_2P
+       DataLinkSpec_LC_GPS
+         PostSmoothEdit 2e5 2e4 0.125 0.1 0.05 .025
+         ElDepWeight SqrtSin
+         #ElMin 7
+         SignalPath
+           Platforms .* GPS.*
+         DataBias
+           StochasticAdj 3.0e8 3.0e8 DATADRIVEN WHITENOISE
+             UseItOrLoseItInterval 3600
+
+     IonoFreeC_1P_2P
+       DataLinkSpec_PC_GPS
+         SignalPath
+           Platforms .* GPS.*
+         PostSmoothEdit 2e5 2e4 12.5 10 5 2.5
+         ElDepWeight SqrtSin
+         #ElMin 7
+
+     # IonoFreeL_2I_7I
+     #   DataLinkSpec_LC_BDS
+     #     PostSmoothEdit 2e5 2e4 0.25 0.2 0.1 .05
+     #     SignalPath
+     #       Platforms .* C.*
+     #     DataBias
+     #       StochasticAdj 3.0e8 3.0e8 DATADRIVEN WHITENOISE
+     #         UseItOrLoseItInterval 3600
+             
+     # IonoFreeC_2I_7I
+     #   DataLinkSpec_PC_BDS
+     #     PostSmoothEdit 2e5 2e4 25 20 10 5
+     #     SignalPath
+     #       Platforms .* C.*
+           
+     # IonoFreeL_1C_7Q
+     #   DataLinkSpec_LC_GAL
+     #     PostSmoothEdit 2e5 2e4 0.25 0.2 0.1 .05
+     #     SignalPath
+     #       Platforms .* E.*
+     #     DataBias
+     #       StochasticAdj 3.0e8 3.0e8 DATADRIVEN WHITENOISE
+     #         UseItOrLoseItInterval 3600
+             
+     # IonoFreeC_1C_7Q
+     #   DataLinkSpec_PC_GAL
+     #     PostSmoothEdit 2e5 2e4 25 20 10 5
+     #     SignalPath
+     #       Platforms .* E.*
+ 
+     # IonoFreeL_1C_2P
+     #   DataLinkSpec_LC_GLO
+     #     PostSmoothEdit 2e5 2e4 0.25 0.2 0.1 .05
+     #     SignalPath
+     #       Platforms .* R.*
+     #     DataBias
+     #       StochasticAdj 3.0e8 3.0e8 DATADRIVEN WHITENOISE
+     #         UseItOrLoseItInterval 3600
+             
+     # IonoFreeC_1P_2P
+     #   DataLinkSpec_PC_GLO
+     #     PostSmoothEdit 2e5 2e4 25 20 10 5
+     #     SignalPath
+     #       Platforms .* R.* 
+     #     DataBias
+     #       StochasticAdj 1.0e4 3.40e-4 DATADRIVEN RANDOMWALK  # psig ~0.1m every 24 hours
+     #         UseItOrLoseItInterval 3600
+     #       DataBiasReference GLONASS          
+
+   FilterConfig
+     Parallel
+       NumThreads 1
+     SmootherFormalError
+      SigmaRegex ^\. # compute FormalError for everything but DataBias
+     SmootherCovariance
+       Station $StationCovOnOff
+       CalculationMethod InverseSriRows # with many stations in the same run this may not be efficient
+     SmootherPostProcess
+       Smoother On
+       TdpFile $SMOOTHTDP
+       CovarianceFilename smoothFinal.cov
+          TerminalEpochOnly On
+     FilterParametersAddRemove
+       LinkBias Off
+
+   EarthOrientation
+     GeopTable $GEOPFILE
+
+   Input
+     TimeDepParms
+       NameFilter 
+         Satellite\.[A-Z]\w*.*\.Clk\.Bias  # only read satellite clocks from tdp
+           Degree 0
+           Strict On
+             MaxDx 1.0e-6
+           MaxFormalError 0.12  # 12cm is the cutoff we use when making GIPSY products
+         Station\..*\.Trop.*
+       File
+         Path $TDP_INPUT
+         BufferTime 3600
+         MaxExtrap 0
+
+   Output
+     Residual
+       Prefit
+         File prefitResiduals.out
+       Postfit
+         File postfitResiduals.out
+     TimeDepParms
+       NameFilter ^\.  # output everything starting with a . so no DataBias_ (phase bias params)
+       EstimatedOnly Off # output the input so we can interate 
+       File filter.tdp
+
+   AmbRes On
+  
+       OutputConstraintsFile constraints.txt 
+
+       StatsFile ambres.stats
+
+       Mode inSmoother
+
+       SettingsForGround
+           SmootherIterations 1
+           MinOverlap 3600.0
+   
+           WidelaneMaxDistanceToNearestInt 0.3
+           WidelaneInflation 0.1
+           BackgroundLevel  0.5
+           WidelaneConfidence  0.750
+           WidelaneMaxSigma 1.0
+   
+           NarrowlaneMaxDistanceToNearestInt 0.2
+           NarrowlaneInflation 1.5
+           NarrowlaneConfidence 0.99
+           NarrowlaneMaxSigma 0.1
+           InputWlpb
+               File $GNSS_WLPB
+           Priority 0
+
+           GlobalNarrowLaneSigmaFactor 6.0
+           UseNLOverlapSigmas
+           ComputeAllNLSigmas
+
+
+#------------------------------------------------------------------------------------
+
+# Station info:
+
+# Solve for constant position
+GRN_STATION_CLK_WHITE ==
+    State
+      Pos
+        ConstantAdj 10.0
+    Clk
+      Model On
+      Bias  0.0
+        StochasticAdj 3.0e8 3.0e8 $GLOBAL_DATA_RATE WHITENOISE
+      # ConstellationBias
+      #   Beidou 0.0
+      #     Regex ^C\d+
+      #     StochasticAdj 100 0.0017 $GLOBAL_DATA_RATE RANDOMWALK
+      # ConstellationBias
+      #   Galileo 0.0
+      #     Regex ^E\d+
+      #     StochasticAdj 100 0.0017 $GLOBAL_DATA_RATE RANDOMWALK
+    Trop
+      Model   On
+      Mapping VMF1
+      WetZ    0.1
+        StochasticAdj 0.5 5e-5 $GLOBAL_DATA_RATE RANDOMWALK
+      GradEast 0.0
+        StochasticAdj 1.0 5e-6 $GLOBAL_DATA_RATE RANDOMWALK
+      GradNorth 0.0
+        StochasticAdj 1.0 5e-6 $GLOBAL_DATA_RATE RANDOMWALK
+    Tides 
+      All On
+      OceanLoad $OCEANLOAD
+      OceanLoad On
+      OceanLoadFile $GOA_VAR/sta_info/ocnld_coeff_ISR_stations
+    Antennas
+      Antenna1
+        XyzFile $XYZFILE_STATIONS
+
+Station `cat $STATIONLIST`
+Station `staDb2TreeIn.py -s $STATIONLIST -y2kSecs $GLOBAL_EPOCH -d $STA_DB`
+# Need to put the station xyz file in staDb2TreeIn.py giving it optional antex file list and or stick it in gd2e
+
+#------------------------------------------------------------------------------------
+
+# Satellite info
+GPS_Common_Settings ==
+    State
+      SatelliteTimeSeries
+        Strict On # Do not interpolate over unequal time steps in input orbit
+                  # Use extreme care if you change this especially if processing data
+                  # that span multiple 30-hour (JPL products) or 24-hour (IGS products)
+        BufferTime 10800
+        InterpOrder 11
+        ShadowFinder On
+        PosGOAQuaternions Off
+        PosGOAFile $GNSSORB_POS
+    Clk
+      Model On
+      Bias  0.0
+    Antennas
+      Antenna1
+        XyzFile $GNSSXYZ_FILE
+
+GPS_BlockI_Model ==
+      AttitudeModel gpsBlockI
+
+GPS_BlockII_Model ==
+      AttitudeModel gpsBlockII
+
+GPS_BlockIIA_Model ==
+      AttitudeModel gpsBlockII
+
+GPS_BlockIIR_Model ==
+      AttitudeModel gpsBlockIIR
+      
+GPS_BlockIIF_Model ==
+      AttitudeModel gpsBlockIIF
+
+GPS_BlockIII_Model ==
+      AttitudeModel gpsBlockIIF
+
+BDS_IGSO_MEO ==  # IGSO/MEO    
+    State
+      SatelliteTimeSeries
+        Strict On # Do not interpolate over unequal time steps in input orbit
+        BufferTime 10800
+        InterpOrder 11
+        ShadowFinder On
+        PosGOAQuaternions Off
+        PosGOAFile $GNSSORB_POS
+    Clk
+      Model On
+      Bias  0.0
+    #Antennas # Currently no cal for BDS, but expected in the future
+    #  Antenna1
+    #    XyzFile $GNSSXYZ_FILE
+    Models
+      AttitudeModel yawNormal
+
+BDS_GEO ==  # GEO    
+    State
+      SatelliteTimeSeries
+        Strict On # Do not interpolate over unequal time steps in input orbit
+        BufferTime 10800
+        InterpOrder 11
+        ShadowFinder On
+        PosGOAQuaternions Off
+        PosGOAFile $GNSSORB_POS
+    Clk
+      Model On
+      Bias  0.0
+    #Antennas # Currently no cal for BDS, but expected in the future
+    #  Antenna1 
+    #    XyzFile $GNSSXYZ_FILE 
+    Models
+      AttitudeModel orbitNormal 
+GLONASS_Common_Settings ==
+    State
+      SatelliteTimeSeries
+        Strict On # Do not interpolate over unequal time steps in input orbit
+        BufferTime 10800
+        InterpOrder 11
+        ShadowFinder On
+        PosGOAQuaternions Off
+        PosGOAFile $GNSSORB_POS
+    Clk
+      Model On
+      Bias  0.0
+    #Antennas # Currently no way to use cal for GLO, but expected in the future
+    #  Antenna1
+    #    XyzFile $GNSSXYZ_FILE
+      
+GLO_M_Model ==
+      AttitudeModel glonassM
+
+GLO_K1_Model ==
+      AttitudeModel glonassM
+      
+GALILEO_Common_Settings ==
+    State
+      SatelliteTimeSeries
+        Strict On # Do not interpolate over unequal time steps in input orbit
+        BufferTime 10800
+        InterpOrder 11
+        ShadowFinder On
+        PosGOAQuaternions Off
+        PosGOAFile $GNSSORB_POS
+    Clk
+      Model On
+      Bias  0.0
+    #Antennas # Currently no cal for GAL, but expected in the future
+    #  Antenna1
+    #    XyzFile $GNSSXYZ_FILE
+
+GAL_IOV_Model ==
+      AttitudeModel galileoIOV
+      
+GAL_FOC_Model ==
+      AttitudeModel galileoIOV # needs revising
+
+        
+Satellite `cat $GNSSLIST` 
+
+Satellite `pcm.py -file $GNSS_ANT_OFF_PCM -epoch $GLOBAL_EPOCH -sat $GNSSLIST -param Antenna1`
+
+  Common
+    YawBiasFile $GOA_VAR/etc/yawBiasTable.pcm
+    YawRateFile $GOA_VAR/etc/nominalYawRates.pcm
+      TimeDepParms .Global.Input.TimeDepParms
+          BufferTime 108000 # has to span distance between two shadows in legacy GOA
+          MaxExtrap  108000 # again due to legacy GOA
+    
+#----------------------------------------------------------------------------------------------

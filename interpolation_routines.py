@@ -39,6 +39,37 @@ def slice_var_ds_at_dt_and_convert_to_dataframe(var_ds, df, dt='2018-04-15T22:00
     return hdf
 
 
+def get_pressure_lapse_rate(path=ims_path, model='LR', plot=False):
+    from aux_gps import linear_fit_using_scipy_da_ts
+    import matplotlib.pyplot as plt
+    import xarray as xr
+    from aux_gps import keep_iqr
+    bp = xr.load_dataset(ims_path / 'IMS_BP_israeli_10mins.nc')
+    bps = [keep_iqr(bp[x]) for x in bp]
+    bp = xr.merge(bps)
+    mean_p = bp.mean('time').to_array('alt')
+    mean_p.name = 'mean_pressure'
+    alts = [bp[x].attrs['station_alt'] for x in bp.data_vars]
+    mean_p['alt'] = alts
+    _, results = linear_fit_using_scipy_da_ts(mean_p, model=model, slope_factor=1, not_time=True)
+    slope = results['slope']
+    inter = results['intercept']
+    modeled_var = slope * mean_p['alt'] + inter
+    if plot:
+        fig, ax = plt.subplots()
+        modeled_var.plot(ax=ax, color='r')
+        mean_p.plot.line(linewidth=0., marker='o', ax=ax, color='b')
+        # lr = 1000 * abs(slope)
+        textstr = 'Pressure lapse rate: {:.1f} hPa/km'.format(1000 * slope)
+        props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+        # place a text box in upper left in axes coords
+        ax.text(0.5, 0.95, textstr, transform=ax.transAxes, fontsize=12,
+                verticalalignment='top', bbox=props)
+        ax.set_xlabel('Height a.s.l [m]')
+        ax.set_ylabel('Mean Pressure [hPa]')
+    return results
+
+
 def get_var_lapse_rate(hdf, model='LR', plot=False):
     from aux_gps import linear_fit_using_scipy_da_ts
     import matplotlib.pyplot as plt
@@ -73,7 +104,7 @@ def apply_lapse_rate_change(hdf, H):
     import numpy as np
     # make sure lapse rate is negative:
     assert H > 0
-    new_hdf = hdf.copy() 
+    new_hdf = hdf.copy()
     new_hdf.iloc[:, 0] = hdf.iloc[:, 0] * np.exp(hdf.index / H)
     return new_hdf
 
@@ -303,7 +334,7 @@ def Interpolating_models_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
         if hasattr(estimator, 'best_score_'):
             print('best_score = {:.3f}'.format(estimator.best_score_))
             print('best_params = ', estimator.best_params_)
-        
+
         return estimator
 #    if (cv is not None and not u):
 #        from sklearn import metrics

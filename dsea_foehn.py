@@ -12,6 +12,22 @@ ims_path = work_yuval / 'IMS_T'
 dsea_gipsy_path = work_yuval / 'dsea_gipsyx'
 
 
+def calculate_zenith_hydrostatic_delay_dsea(ims_path=ims_path):
+    from PW_stations import calculate_ZHD
+    from PW_stations import produce_geo_gnss_solved_stations
+    from aux_gps import xr_reindex_with_date_range
+    import xarray as xr
+    pres = xr.open_dataset(ims_path / 'IMS_BP_israeli_10mins.nc')['SEDOM']
+    p_sta_ht_km = pres.attrs['station_alt'] / 1000
+    df = produce_geo_gnss_solved_stations(plot=False)
+    lat = df.loc['dsea', 'lat']
+    ht = df.loc['dsea', 'alt']
+    zhd = calculate_ZHD(pres, lat=lat, ht_km=ht/1000,
+                        pressure_station_height_km=p_sta_ht_km)
+    zhd = xr_reindex_with_date_range(zhd, freq='5T')
+    zhd = zhd.interpolate_na('time', max_gap='1H', method='linear')
+    return zhd
+
 
 def calibrate_zwd_with_ts_tm_from_deserve(path=work_yuval, des_path=des_path,
                                           ims_path=ims_path, zwd=None):
@@ -306,15 +322,22 @@ def compare_WRF_GNSS_pwv(path=des_path, work_path=work_yuval, plot=True):
     return ds
 
 
-def read_all_final_tdps_dsea(path=dsea_gipsy_path/'results', return_mean=True):
+def read_all_final_tdps_dsea(path=dsea_gipsy_path/'results', return_mean=True,
+                             dryz=False):
     from aux_gps import path_glob
     from gipsyx_post_proc import process_one_day_gipsyx_output
     import xarray as xr
     files = path_glob(path, 'dsea*_smoothFinal.tdp')
     df_list = []
     for file in files:
-        df, _ = process_one_day_gipsyx_output(file)
-        df_list.append(df['WetZ'])
+        try:
+            df, _ = process_one_day_gipsyx_output(file, dryz=dryz)
+            if dryz:
+                df_list.append(df[['DryZ', 'WetZ']])
+            else:
+                df_list.append(df['WetZ'])
+        except AssertionError:
+            continue
     # dts = []
     da_list = []
     for i, df in enumerate(df_list):
@@ -322,12 +345,107 @@ def read_all_final_tdps_dsea(path=dsea_gipsy_path/'results', return_mean=True):
         # dts.append(dt)
         # df.index = df.index - dt
         da = df.to_xarray()
-        da.name = 'dsea_{}'.format(i)
+        if dryz:
+            da = da.rename({'WetZ': 'dsea_WetZ_{}'.format(i), 'DryZ': 'dsea_DryZ_{}'.format(i)})
+        else:
+            da.name = 'dsea_WetZ_{}'.format(i)
         da_list.append(da)
     ds = xr.merge(da_list)
     # ds['datetime'] = dts
     # ds = ds.sortby('datetime')
     if return_mean:
-        ds = ds.to_array('s').mean('s')
+        if dryz:
+            dry = [x for x in ds if 'Dry' in x]
+            dry_da = ds[dry].to_array('s').mean('s')
+            dry_da.name = 'DryZ_mean'
+        wet = [x for x in ds if 'Wet' in x]
+        wet_da = ds[wet].to_array('s').mean('s')
+        wet_da.name = 'WetZ_mean'
+        if dryz:
+            ds = xr.merge([dry_da, wet_da])
+            ds['Total_mean'] = ds['DryZ_mean'] + ds['WetZ_mean']
+        else:
+            return wet_da
     return ds
+
+
+def plot_gpt2_vmf1_means(path=dsea_gipsy_path):
+    import xarray as xr
+    import matplotlib.pyplot as plt
+    zhd = calculate_zenith_hydrostatic_delay_dsea().sel(time='2014-08')
+    gpt2_path = path / 'results-gpt2'
+    vmf1_path = path / 'results-vmf1'
+    gpt2 = read_all_final_tdps_dsea(gpt2_path, dryz=True)
+    vmf1 = read_all_final_tdps_dsea(vmf1_path, dryz=True)
+    dss = xr.concat([gpt2, vmf1], 'model')
+    dss['model'] = ['GPT2', 'VMF1']
+    fg = dss.to_array('delay_type').plot.line(
+        row='delay_type', hue='model', sharey=False, figsize=(20, 17))
+    for ax in fg.axes.flat:
+        ax.set_ylabel('Path Delay [cm]')
+        ax.grid()
+    ln = zhd.plot(ax=fg.axes.flat[0])
+    fg.axes.flat[0].legend(ln, ['empirical ZHD'])
+    fg.fig.tight_layout()
+    fg.fig.suptitle('DSEA')
+    zwd = dss['Total_mean'] - zhd
+    zwd.name = 'WetZ_after_eZHD_subtraction'
+    ds = zwd.to_dataset('model')
+    ds1, _ = compare_all_zwd(models=['GMF'])
+    ds['GMF'] = ds1['WetZ_mean_GMF']
+    fig, ax = plt.subplots(figsize=(18, 6))
+    ds.to_array('model').plot.line(hue='model', ax=ax)
+    ax.grid()
+    return fg
+
+
+def get_dryz_from_one_file(file):
+    from aux_gps import line_and_num_for_phrase_in_file
+    import re
+    i, line = line_and_num_for_phrase_in_file('DryZ', file)
+    zhd = re.findall("\d+\.\d+", line)[0]
+    return float(zhd)
+
+
+def get_dryz_from_one_station(path=dsea_gipsy_path/'results'):
+    from aux_gps import path_glob
+    from aux_gps import get_timedate_and_station_code_from_rinex
+    import xarray as xr
+    files = sorted(path_glob(path, '*_debug.tree'))
+    dt_list = []
+    zhd_list = []
+    for file in files:
+        rfn = file.as_posix().split('/')[-1][0:12]
+        dt = get_timedate_and_station_code_from_rinex(rfn, just_dt=True)
+        # print('datetime {}'.format(dt.strftime('%Y-%m-%d')))
+        dt_list.append(dt)
+        zhd = get_dryz_from_one_file(file)
+        zhd_list.append(zhd)
+    zhd_da = xr.DataArray(zhd_list, dims=['time'])
+    zhd_da['time'] = dt_list
+    zhd_da *= 100
+    # zhd_da.name = station
+    zhd_da.attrs['units'] = 'cm'
+    zhd_da.attrs['long_name'] = 'Zenith Hydrostatic Delay'
+    zhd_da = zhd_da.sortby('time')
+    return zhd_da
+
+
+def compare_all_zwd(path=dsea_gipsy_path,
+                    models=['GPT2', 'VMF1', 'WAAS', 'NEILL', 'GMF']):
+    import xarray as xr
+    da_list = []
+    dry_list = []
+    for model in models:
+        p = path / 'results-{}'.format(model)
+        da = read_all_final_tdps_dsea(path=p, return_mean=True,
+                                      dryz=False)
+        da_dry = get_dryz_from_one_station(p)
+        da_dry.name = 'DryZ_{}'.format(model)
+        dry_list.append(da_dry)
+        da.name = 'WetZ_mean_{}'.format(model)
+        da_list.append(da)
+    ds = xr.merge(da_list)
+    ds_dry = xr.merge(dry_list)
+    return ds, ds_dry
 

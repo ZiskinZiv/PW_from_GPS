@@ -8,7 +8,7 @@ work flow for ZWD and PW retreival after python copy_gipsyx_post_from_geo.py:
     3)use mean_ZWD_over_sound_time_and_fit_tstm to obtain the mda (model dataarray)
     3*) can't use produce_kappa_ml_with_cats for hour on 5 mins data, dahhh!
     can do that with dayofyear, month, season (need to implement it first)
-    4)save_GNSS_PW_israeli_stations using mda (e.g., season) from  3 
+    4)save_GNSS_PW_israeli_stations using mda (e.g., season) from  3
     5) do homogenization using Homogenization_R.py and run homogenize_pw_dataset
     6) for hydro analysis and more run produce_all_GNSS_PW_anomalies
 @author: shlomi
@@ -94,7 +94,7 @@ class LinearRegression_with_stats(LinearRegression):
         # Degrees of freedom.
         df = float(n-k-1)
 
-        # Sample variance.     
+        # Sample variance.
         sse = np.sum(np.square(yHat - y),axis=0)
         self.sampleVariance = sse/df
 
@@ -112,7 +112,7 @@ class LinearRegression_with_stats(LinearRegression):
         for i in range(len(self.se)):
             self.betasTStat[i] = self.coef_[i]/self.se[i]
 
-        # P-value for each beta. This is a two sided t-test, since the betas can be 
+        # P-value for each beta. This is a two sided t-test, since the betas can be
         # positive or negative.
         self.betasPValue = 1 - stats.t.cdf(abs(self.betasTStat),df)
         return self
@@ -637,7 +637,7 @@ def produce_zwd_from_sounding_and_compare_to_gps(phys_sound_file=phys_soundings,
         axes[0].set_title('Zenith wet delay from Bet-Dagan radiosonde station and TELA GNSS satation')
         sonde_change_x = pd.to_datetime('2013-08-20')
         axes[1].axvline(sonde_change_x, color='red')
-        axes[1].annotate('changed sonde type from VIZ MK-II to PTU GPS', (mdates.date2num(sonde_change_x), 15), xytext=(15, 15), 
+        axes[1].annotate('changed sonde type from VIZ MK-II to PTU GPS', (mdates.date2num(sonde_change_x), 15), xytext=(15, 15),
             textcoords='offset points', arrowprops=dict(arrowstyle='fancy', color='red'), color='red')
         # axes[1].set_aspect(3)
         plt.tight_layout()
@@ -1072,7 +1072,7 @@ def parameter_study_ts_tm_TELA_bet_dagan(tel_aviv_IMS_file, path=work_yuval,
 #    X = [x for x in allLines if 'XLR coordinate' in x][0].split()[-1]
 #    Y = [x for x in allLines if 'Y coordinate' in x][0].split()[-1]
 #    Z = [x for x in allLines if 'Z coordinate' in x][0].split()[-1]
-# 
+#
 ## Convert JSON to dict and print
 #print(response.json())
 
@@ -2077,10 +2077,17 @@ def kappa(T, Tmul=0.72, T_offset=70.2, k2=22.1, k3=3.776e5, Tm_input=False):
     return k
 
 
-def calculate_ZHD(pressure, lat=30.0, ht_km=0.5):
+def calculate_ZHD(pressure, lat=30.0, ht_km=0.5,
+                  pressure_station_height_km=None):
     import numpy as np
     import xarray as xr
     lat_rad = np.deg2rad(lat)
+    if pressure_station_height_km is not None:
+        # adjust pressure accrding to pressure lapse rate taken empirically
+        # from IMS stations and pressure stations_height in kms:
+        plr_km_hPa = -112.653  # hPa / km
+        height_diff_km = ht_km - pressure_station_height_km
+        pressure += plr_km_hPa * height_diff_km
     ZHD = 0.22794 * pressure / \
         (1 - 0.00266 * np.cos(2 * lat_rad) - 0.00028 * ht_km)
     if not isinstance(ZHD, xr.DataArray):
@@ -2883,7 +2890,7 @@ def formulate_plot(ds, model_names=['LR', 'TSEN'],
                         # axes[i, j].plot(linex, liney, c='r')
                         # axes[i, j].plot(ts.values, ts.values, c='k', alpha=0.2)
                         min_, max_ = axes[i, j].get_ylim()
-    
+
                         [axes[i, j].text(0.01, pos[k],
                                          '{} a: {:.2f}, b: {:.2f}'.format(model_names[k],
                                                                           coefs[k],
@@ -4019,7 +4026,7 @@ def pettitt_test_on_pw(da_ts, sample=None, alpha=0.05):
 #    K=max(abs(U));
 #    pvalue=2*exp((-6*K^2)/(m^3+m^2));
 #    a=[loc; K ;pvalue];
-    return 
+    return
 
 def mann_kendall_trend_analysis(da_ts, alpha=0.05, seasonal=False, CI=False,
                                 season_selection=None, verbose=True):
@@ -4295,9 +4302,9 @@ def read_gps_axis_xlsx(path=work_yuval, field='ZWD'):
     return ds
 
 
-   
+
 #def analyze_sounding_and_formulatxe(sound_path=sound_path,
-    
+
 #                                   model_names = ['TSEN', 'LR'],
 #                                   res_save='LR'):
 #    import xarray as xr
@@ -4529,7 +4536,7 @@ def read_gps_axis_xlsx(path=work_yuval, field='ZWD'):
 ##    results['parameter'] = ['slope', 'intercept']
 #    # results.attrs['all_data_slope'] = a
 #    # results.attrs['all_data_intercept'] = b
-#    return 
+#    return
 
 
 class ML_Switcher(object):
@@ -4544,7 +4551,7 @@ class ML_Switcher(object):
     def LR(self):
         from sklearn.linear_model import LinearRegression
         return LinearRegression(n_jobs=-1, copy_X=True)
-    
+
     def LRS(self):
         lr = LinearRegression(n_jobs=-1, copy_X=True)
         return LinearRegression_with_stats(lr)

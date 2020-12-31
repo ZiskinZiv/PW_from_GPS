@@ -15,7 +15,7 @@ Created on Thu Sep  5 11:24:01 2019
 
 # 2Use List Indexing Sparingly
 # try to use “for item in array” for loops over arrays, before using
-#  “for index in range(len(array))” 
+#  “for index in range(len(array))”
 
 # 3 String Concatenation
 # Instead of “+” for string concatenation, USE ''.join(iterable_object) or
@@ -783,7 +783,7 @@ def read_tropnominal_tdp_file(file, keys=['DryZ'], plot=False):
     return ppp
 
 
-def process_one_day_gipsyx_output(path_and_file, plot=False):
+def process_one_day_gipsyx_output(path_and_file, dryz=False, plot=False):
     # path_and_file = work_yuval / 'smoothFinal.tdp'
     import pandas as pd
     # import pyproj
@@ -791,7 +791,10 @@ def process_one_day_gipsyx_output(path_and_file, plot=False):
     # from aux_gps import get_latlonalt_error_from_geocent_error
     df_raw = pd.read_csv(path_and_file, header=None, delim_whitespace=True)
     # get all the vars from smoothFinal.tdp file and put it in a df_list:
-    keys = ['WetZ', 'GradNorth', 'GradEast', 'Pos.X', 'Pos.Y', 'Pos.Z']
+    if dryz:
+        keys = ['DryZ', 'WetZ', 'GradNorth', 'GradEast', 'Pos.X', 'Pos.Y', 'Pos.Z']
+    else:
+        keys = ['WetZ', 'GradNorth', 'GradEast', 'Pos.X', 'Pos.Y', 'Pos.Z']
     df_list = [df_raw[df_raw.iloc[:, -1].str.contains(x)] for x in keys]
     # make sure that all keys in df have the same length:
     assert len(set([len(x) for x in df_list])) == 1
@@ -809,17 +812,29 @@ def process_one_day_gipsyx_output(path_and_file, plot=False):
         ppp[keys[i] + '_error'] = df[keys[i] + '_error'].values
     # rename all the Pos. to nothing:
     ppp.columns = ppp.columns.str.replace('Pos.', '')
-    desc = ['Zenith Wet Delay', 'North Gradient of Zenith Wet Delay',
-            'East Gradient of Zenith Wet Delay',
-            'WGS84(geocentric) X coordinate',
-            'WGS84(geocentric) Y coordinate', 'WGS84(geocentric) Z coordinate']
-    units = ['cm', 'cm/m', 'cm/m', 'm', 'm', 'm']
-    fields = ['WetZ', 'GradNorth', 'GradEast', 'X', 'Y', 'Z']
+    if dryz:
+        desc = ['Zenith Hydrostatic Delay', 'Zenith Wet Delay',
+                'North Gradient of Zenith Wet Delay',
+                'East Gradient of Zenith Wet Delay',
+                'WGS84(geocentric) X coordinate',
+                'WGS84(geocentric) Y coordinate', 'WGS84(geocentric) Z coordinate']
+        units = ['cm', 'cm', 'cm/m', 'cm/m', 'm', 'm', 'm']
+        fields = ['DryZ', 'WetZ', 'GradNorth', 'GradEast', 'X', 'Y', 'Z']
+    else:
+        desc = ['Zenith Wet Delay', 'North Gradient of Zenith Wet Delay',
+                'East Gradient of Zenith Wet Delay',
+                'WGS84(geocentric) X coordinate',
+                'WGS84(geocentric) Y coordinate', 'WGS84(geocentric) Z coordinate']
+        units = ['cm', 'cm/m', 'cm/m', 'm', 'm', 'm']
+        fields = ['WetZ', 'GradNorth', 'GradEast', 'X', 'Y', 'Z']
     units_dict = dict(zip(fields, units))
     desc_dict = dict(zip(fields, desc))
     meta = {'units': units_dict, 'desc': desc_dict}
     # convert tropospheric products to cm, rest stay in meters:
-    trop_cols = ppp.columns.values[0:6]
+    if dryz:
+        trop_cols = ppp.columns.values[0:8]
+    else:
+        trop_cols = ppp.columns.values[0:6]
     ppp[trop_cols] = ppp[trop_cols].mul(100.0)
     if plot:
         fig, axes = plt.subplots(3, 2, figsize=(12, 10), sharex=True)
