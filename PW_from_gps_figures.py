@@ -435,16 +435,31 @@ def plot_diurnal_wind_hodograph(path=ims_path, station='TEL-AVIV-COAST',
 
 
 def plot_MLR_GNSS_PW_harmonics_facetgrid(path=work_yuval, season='JJA',
-                                         n_max=2, ylim=None, save=True):
+                                         n_max=2, ylim=None, scope='diurnal',
+                                         save=True, era5=False):
     import xarray as xr
-    from aux_gps import run_MLR_diurnal_harmonics
+    from aux_gps import run_MLR_harmonics
     from matplotlib.ticker import AutoMinorLocator
+    from PW_stations import produce_geo_gnss_solved_stations
     import numpy as np
-    harmonics = xr.load_dataset(path / 'GNSS_PW_harmonics_diurnal.nc')
+    geo = produce_geo_gnss_solved_stations(add_distance_to_coast=True, plot=False)
+    if scope == 'diurnal':
+        cunits = 'cpd'
+        ticks = np.arange(0, 23, 3)
+        xlabel = 'Hour of day [UTC]'
+    elif scope == 'annual':
+        cunits = 'cpy'
+        ticks = np.arange(1, 13, 1)
+        xlabel = 'Month'
+    print('producing {} harmonics plot.'.format(scope))
+    if era5:
+        harmonics = xr.load_dataset(path / 'GNSS_PW_ERA5_harmonics_{}.nc'.format('annual'))
+    else:
+        harmonics = xr.load_dataset(path / 'GNSS_PW_harmonics_{}.nc'.format(scope))
 #    sites = sorted(list(set([x.split('_')[0] for x in harmonics])))
 #    da = xr.DataArray([x for x in range(len(sites))], dims='GNSS')
 #    da['GNSS'] = sites
-    sites = group_sites_to_xarray(upper=False, scope='diurnal')
+    sites = group_sites_to_xarray(upper=False, scope=scope)
     sites_flat = [x for x in sites.values.flatten()]
     da = xr.DataArray([x for x in range(len(sites_flat))], dims='GNSS')
     da['GNSS'] = [x for x in range(len(da))]
@@ -469,24 +484,34 @@ def plot_MLR_GNSS_PW_harmonics_facetgrid(path=work_yuval, season='JJA',
 #                    leg_loc = 'upper right'
                 else:
                     leg_loc = None
-                ax = run_MLR_diurnal_harmonics(harm_site, season=season,
-                                               n_max=n_max, plot=True, ax=ax,
-                                               legend_loc=leg_loc, ncol=2,
-                                               legsize=16)
-                ax.set_xlabel('Hour of day [UTC]', fontsize=16)
+                if scope == 'annual':
+                    leg_loc = 'lower right'
+                ax = run_MLR_harmonics(harm_site, season=season, cunits=cunits,
+                                       n_max=n_max, plot=True, ax=ax,
+                                       legend_loc=leg_loc, ncol=2,
+                                       legsize=15, lw=2)
+                ax.set_xlabel(xlabel, fontsize=16)
                 if ylim is not None:
                     ax.set_ylim(*ylim)
                 ax.tick_params(axis='x', which='major', labelsize=18)
+                # if scope == 'diurnal':
                 ax.yaxis.set_major_locator(plt.MaxNLocator(4))
                 ax.yaxis.set_minor_locator(AutoMinorLocator(2))
                 ax.tick_params(axis='y', which='major', labelsize=18)
                 ax.yaxis.tick_left()
-                ax.xaxis.set_ticks(np.arange(0, 23, 3))
+                ax.xaxis.set_ticks(ticks)
                 ax.grid()
                 ax.set_title('')
                 ax.set_ylabel('')
                 ax.grid(axis='y', which='minor', linestyle='--')
-                ax.text(0.1, .85, site.upper(),
+                if scope == 'annual':
+                    site_label = '{} ({:.0f})'.format(
+                        site.upper(), geo.loc[site].alt)
+                    label_coord = [0.17, 0.87]
+                elif scope == 'diurnal':
+                    site_label = site.upper()
+                    label_coord = [0.1, 0.85]
+                ax.text(*label_coord, site_label,
                         horizontalalignment='center', fontweight='bold',
                         transform=ax.transAxes, fontsize=20)
                 if j == 0:
@@ -497,6 +522,7 @@ def plot_MLR_GNSS_PW_harmonics_facetgrid(path=work_yuval, season='JJA',
 #                    if i>5:
 #                        ax.set_ylabel('PW anomalies [mm]', fontsize=12)
             except TypeError:
+                print('{}, {} axis off'.format(i, j))
                 ax.set_axis_off()
 
 #    for i, (site, ax) in enumerate(zip(da['GNSS'].values, fg.axes.flatten())):
@@ -530,9 +556,9 @@ def plot_MLR_GNSS_PW_harmonics_facetgrid(path=work_yuval, season='JJA',
         hspace=0.15,
         wspace=0.12)
     if save:
-        filename = 'pw_diurnal_harmonics_{}_{}.png'.format(n_max, season)
+        filename = 'pw_{}_harmonics_{}_{}.png'.format(scope, n_max, season)
 #        plt.savefig(savefig_path / filename, bbox_inches='tight')
-        plt.savefig(savefig_path / filename, orientation='landscape')
+        plt.savefig(savefig_path / filename, orientation='portrait')
     return fg
 
 
@@ -2327,6 +2353,107 @@ def plot_pwv_statistic_vs_height(pwv_ds, stat='mean', x='alt', season=None,
     return ax
 
 
+def plot_peak_amplitude_altitude_long_term_pwv(path=work_yuval, era5=False,
+                                               add_a1a2=True, save=True):
+    import xarray as xr
+    import pandas as pd
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from fitting_routines import fit_poly_model_xr
+    from aux_gps import remove_suffix_from_ds
+    from PW_stations import produce_geo_gnss_solved_stations
+    # load alt data, distance etc.,
+    df_geo = produce_geo_gnss_solved_stations(
+        plot=False, add_distance_to_coast=True)
+    if era5:
+        dss = xr.load_dataset(path / 'GNSS_PW_ERA5_harmonics_annual.nc')
+    else:
+        dss = xr.load_dataset(path / 'GNSS_PW_harmonics_annual.nc')
+    dss = dss[[x for x in dss if '_params' in x]]
+    dss = remove_suffix_from_ds(dss)
+    df = dss.sel(cpy=1, params='ampl').reset_coords(drop=True).to_dataframe().T
+    df.columns = ['A1', 'A1std']
+    df = df.join(dss.sel(cpy=2, params='ampl').reset_coords(drop=True).to_dataframe().T)
+    # abs bc sometimes the fit get a sine amp negative:
+    df = np.abs(df)
+    df.columns =['A1', 'A1std', 'A2', 'A2std']
+    df['A2A1'] = df['A2'] / df['A1']
+    a2a1std = np.sqrt((df['A2std']/df['A1'])**2 + (df['A2']*df['A1std']/df['A1']**2)**2)
+    df['A2A1std'] = a2a1std
+    # load location data:
+    gr = group_sites_to_xarray(scope='annual')
+    gr_df = gr.to_dataframe('sites')
+    new = gr.T.values.ravel()
+    # remove nans form mixed nans and str numpy:
+    new = new[~pd.isnull(new)]
+    geo = [gr_df[gr_df == x].dropna().index.values.item()[1] for x in new]
+    geo = [x.title() for x in geo]
+    df = df.reindex(new)
+    df['Location'] = geo
+    df['alt'] = df_geo['alt']
+    df = df.set_index('alt')
+    df = df.sort_index()
+    if add_a1a2:
+        fig, axes=plt.subplots(2, 1, sharex=False, figsize=(8, 10))
+        ax = axes[0]
+    else:
+        ax = None
+    ax = sns.scatterplot(data=df, y='A1', x='alt', hue='Location', ax=ax)
+    x_coords = []
+    y_coords = []
+    colors = []
+    for point_pair in ax.collections:
+        colors.append(point_pair.get_facecolor())
+        for x, y in point_pair.get_offsets():
+            x_coords.append(x)
+            y_coords.append(y)
+    ax.errorbar(x_coords, y_coords,
+                yerr=df['A1std'].values, ecolor=colors[0][:,0:-1],
+                ls='', capsize=None, fmt=" ")#, zorder=-1)
+    # linear fit:
+    x = df.index.values
+    y = df['A1'].values
+
+    p = fit_poly_model_xr(x, y, 1, plot=None, ax=None, return_just_p=True)
+    fit_label = 'Linear Fit: {:.2f} mm/km'.format(p[0] * -1000)
+    fit_poly_model_xr(x,y,1,plot='manual', ax=ax, fit_label=fit_label)
+    ax.set_ylabel('PWV annual amplitude [mm]')
+    if add_a1a2:
+        ax.set_xlabel('')
+    else:
+        ax.set_xlabel('GNSS station height [m a.s.l]')
+    ax.grid()
+    ax.legend()
+    if add_a1a2:
+        ax = sns.scatterplot(data=df, y='A2A1', x='alt',
+                             hue='Location', ax=axes[1], legend=True)
+        x_coords = []
+        y_coords = []
+        colors = []
+        for point_pair in ax.collections:
+            colors.append(point_pair.get_facecolor())
+            for x, y in point_pair.get_offsets():
+                x_coords.append(x)
+                y_coords.append(y)
+        ax.errorbar(x_coords, y_coords,
+                    yerr=df['A2A1std'].values, ecolor=colors[0][:,0:-1],
+                    ls='', capsize=None, fmt=" ")#, zorder=-1)
+        y = df['A2A1'].values
+        x = df.index.values
+        p = fit_poly_model_xr(x, y, 2, plot='manual', ax=ax,
+                              return_just_p=False,
+                              fit_label='Parabolic Fit')
+        ax.legend(loc='upper left')
+        ax.set_ylabel('PWV semi-annual to annual amplitude ratio')
+        ax.set_xlabel('GNSS station height [m a.s.l]')
+        ax.grid()
+        fig.tight_layout()
+    if save:
+        filename = 'pwv_peak_amplitude_altitude.png'
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
+    return ax
+
+
 def plot_peak_hour_distance(path=work_yuval, season='JJA',
                             remove_station='dsea', fontsize=22, save=True):
     from PW_stations import produce_geo_gnss_solved_stations
@@ -3944,42 +4071,68 @@ def prepare_diurnal_variability_table(path=work_yuval, rename_cols=True):
     return df
 
 
-def prepare_harmonics_table(path=work_yuval, season='ALL'):
+def prepare_harmonics_table(path=work_yuval, season='ALL',
+                            scope='diurnal', era5=False):
     import xarray as xr
-    from aux_gps import run_MLR_diurnal_harmonics
+    from aux_gps import run_MLR_harmonics
     import pandas as pd
-    ds = xr.load_dataset(work_yuval / 'GNSS_PW_harmonics_diurnal.nc')
+    import numpy as np
+    if scope == 'diurnal':
+        cunits = 'cpd'
+        grp = 'hour'
+        grp_slice = [0, 12]
+        tunits = 'UTC'
+    elif scope == 'annual':
+        cunits = 'cpy'
+        grp = 'month'
+        grp_slice = [7, 12]
+        tunits = 'Month'
+    if era5:
+        ds = xr.load_dataset(work_yuval / 'GNSS_PW_ERA5_harmonics_annual.nc')
+    else:
+        ds = xr.load_dataset(work_yuval / 'GNSS_PW_harmonics_{}.nc'.format(scope))
     stations = list(set([x.split('_')[0] for x in ds]))
     records = []
     for station in stations:
-        diu_ph = ds[station + '_mean'].sel(season=season, cpd=1).argmax()
-        diu_amp = ds[station + '_mean'].sel(season=season, cpd=1).max()
-        semidiu_ph = ds[station +
-                        '_mean'].sel(season=season, cpd=2, hour=slice(0, 12)).argmax()
-        semidiu_amp = ds[station +
-                         '_mean'].sel(season=season, cpd=2, hour=slice(0, 12)).max()
+        if season in ds.dims:
+            diu_ph = ds[station + '_mean'].sel({season: season, cunits: 1}).idxmax()
+            diu_amp = ds[station + '_mean'].sel({season: season, cunits: 1}).max()
+            semidiu_ph = ds[station +
+                        '_mean'].sel({season: season, cunits: 2, grp: slice(*grp_slice)}).idxmax()
+            semidiu_amp = ds[station +
+                        '_mean'].sel({season: season, cunits: 2, grp: slice(*grp_slice)}).max()
+        else:
+            diu_ph = ds[station + '_mean'].sel({cunits: 1}).idxmax()
+            diu_amp = ds[station + '_mean'].sel({cunits: 1}).max()
+            semidiu_ph = ds[station +
+                        '_mean'].sel({cunits: 2, grp: slice(*grp_slice)}).idxmax()
+            semidiu_amp = ds[station +
+                         '_mean'].sel({cunits: 2, grp: slice(*grp_slice)}).max()
+
         ds_for_MLR = ds[['{}'.format(station), '{}_mean'.format(station)]]
-        harm_di = run_MLR_diurnal_harmonics(
-            ds_for_MLR, season=season, plot=False)
+        harm_di = run_MLR_harmonics(
+            ds_for_MLR, season=season, cunits=cunits, plot=False)
         record = [station, diu_amp.item(), diu_ph.item(), harm_di[1],
                   semidiu_amp.item(), semidiu_ph.item(), harm_di[2],
                   harm_di[1] + harm_di[2]]
         records.append(record)
     df = pd.DataFrame(records)
-    df.columns = ['Station', 'A1 [mm]', 'P1 [UTC]', 'V1 [%]', 'A2 [mm]',
-                  'P2 [UTC]', 'V2 [%]', 'VT [%]']
+    df.columns = ['Station', 'A1 [mm]', 'P1 [{}]'.format(tunits), 'V1 [%]', 'A2 [mm]',
+                  'P2 [{}]'.format(tunits), 'V2 [%]', 'VT [%]']
     df = df.set_index('Station')
-    gr = group_sites_to_xarray(scope='diurnal')
+    gr = group_sites_to_xarray(scope=scope)
     gr_df = gr.to_dataframe('sites')
     new = gr.T.values.ravel()
+    # remove nans form mixed nans and str numpy:
+    new = new[~pd.isnull(new)]
     geo = [gr_df[gr_df == x].dropna().index.values.item()[1] for x in new]
     geo = [x.title() for x in geo]
     df = df.reindex(new)
     df['Location'] = geo
     df.index = df.index.str.upper()
     pd.options.display.float_format = '{:.1f}'.format
-    df = df[['Location', 'A1 [mm]', 'A2 [mm]', 'P1 [UTC]',
-             'P2 [UTC]', 'V1 [%]', 'V2 [%]', 'VT [%]']]
+    df = df[['Location', 'A1 [mm]', 'A2 [mm]', 'P1 [{}]'.format(tunits),
+             'P2 [{}]'.format(tunits), 'V1 [%]', 'V2 [%]', 'VT [%]']]
     print(df.to_latex())
     return df
 
@@ -4018,8 +4171,10 @@ def plot_october_2015(path=work_yuval):
 
 def plot_correlation_pwv_mean_anoms_and_qflux_anoms(era5_path=era5_path,
                                                     work_path=work_yuval,
+                                                    anoms=True, pwv_mm=None,
                                                     all_months=False, mf='qf',
-                                                    add_hline=750, title=None, save=True):
+                                                    add_hline=750, title=None,
+                                                    save=True):
     import xarray as xr
     from aux_gps import anomalize_xr
     import matplotlib.pyplot as plt
@@ -4027,11 +4182,20 @@ def plot_correlation_pwv_mean_anoms_and_qflux_anoms(era5_path=era5_path,
     import seaborn as sns
     # first load pw and produce mean anomalies:
     pw = xr.load_dataset(work_path/'GNSS_PW_monthly_thresh_50.nc')
-    pw_anoms = anomalize_xr(pw, 'MS')
-    pw_anoms_mean = pw_anoms.to_array('s').mean('s')
+    if anoms:
+        pw_anoms = anomalize_xr(pw, 'MS')
+        pw_anoms_mean = pw_anoms.to_array('s').mean('s')
+    else:
+        pw_anoms_mean = pw['jslm']
+    if pwv_mm is not None:
+        pw_anoms_mean = pwv_mm
     # now load qflux and resmaple to mm:
-    ds = xr.load_dataset(
-        era5_path/'ERA5_MF_anomalies_4xdaily_israel_mean_1996-2019.nc')
+    if anoms:
+        ds = xr.load_dataset(
+                era5_path/'ERA5_MF_anomalies_4xdaily_israel_mean_1996-2019.nc')
+    else:
+        ds = xr.load_dataset(era5_path / 'ERA5_MF_mm_israel_1996-2019.nc')
+        ds = ds.sel(latitude=32, longitude=35).reset_coords(drop=True)
     qf_mm = ds[mf].resample(time='MS').mean()
     # add pressure integral:
     iqf = calculate_pressure_integral(qf_mm)/9.79
@@ -4451,26 +4615,37 @@ def box_lat_lon_polygon_as_gpd(lat_bounds=[29, 34], lon_bounds=[34, 36.5]):
 
 def plot_synoptic_daily_on_pwv_daily_with_colors(climate_path=climate_path,
                                                  station='tela',
-                                                 times=['2013-09-15', '2015-09-15'],
-                                                 days=47):
+                                                 times=['2013-09-15',
+                                                        '2015-09-15'],
+                                                 days=47, add_era5=True):
     from synoptic_procedures import visualize_synoptic_class_on_time_series
     import matplotlib.pyplot as plt
     import xarray as xr
     import pandas as pd
     import matplotlib.dates as mdates
     from calendar import month_abbr
+    # TODO: add option of plotting 3 stations and/without ERA5
     times_dt = [pd.date_range(x, periods=days) for x in times]
-    pw_daily = xr.open_dataset(
-        work_yuval/'GNSS_PW_daily_thresh_50_homogenized.nc')[station].load()
+    if isinstance(station, list):
+        pw_daily = [xr.open_dataset(
+            work_yuval/'GNSS_PW_daily_thresh_50_homogenized.nc')[x].load() for x in station]
+        pw_daily = xr.merge(pw_daily)
+    else:
+        pw_daily = xr.open_dataset(
+            work_yuval/'GNSS_PW_daily_thresh_50_homogenized.nc')[station].load()
     era5_hourly = xr.open_dataset(work_yuval/'GNSS_era5_hourly_PW.nc')[station]
     era5_daily = era5_hourly.resample(time='D').mean().load()
     fig, axes = plt.subplots(len(times), 1, figsize=(20, 10))
     leg_locs = ['upper right', 'lower right']
     for i, ax in enumerate(axes.flat):
+        if add_era5:
+            second_da_ts = era5_daily.sel(time=times_dt[i])
+        else:
+            second_da_ts = None
         visualize_synoptic_class_on_time_series(pw_daily.sel(time=times_dt[i]),
                                                 path=climate_path, ax=ax,
-                                                second_da_ts=era5_daily.sel(time=times_dt[i]),
-                                                leg_ncol=4, leg_loc=leg_locs[i])
+                                                second_da_ts=second_da_ts,
+                                                leg_ncol=4, leg_loc=leg_locs[i], add_mm=True)
         ax.set_ylabel('PWV [mm]')
         ax.xaxis.set_major_locator(mdates.DayLocator(interval=1))
         # set formatter
@@ -4485,7 +4660,7 @@ def plot_synoptic_daily_on_pwv_daily_with_colors(climate_path=climate_path,
     ylims_high = [ax.get_ylim()[1] for ax in axes]
     [ax.set_ylim(min(ylims_low), max(ylims_high)) for ax in axes]
     fig.suptitle(
-        'Daily PWV and synoptic class for {} station using GNSS(solid) and ERA5(dashed)'.format(station.upper()))
+        'Daily PWV and synoptic class for {} station using GNSS(solid - monthly means in dot-dashed) and ERA5(dashed)'.format(station.upper()))
     fig.tight_layout()
     return
 
