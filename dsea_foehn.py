@@ -256,7 +256,7 @@ def read_all_WRF_GNSS_files(path=des_path, var='pw', point=None):
     return ds
 
 
-def assemble_WRF_pwv(path=des_path, work_path=work_yuval):
+def assemble_WRF_pwv(path=des_path, work_path=work_yuval, radius=1):
     from PW_stations import produce_geo_gnss_solved_stations
     import xarray as xr
     from aux_gps import save_ncfile
@@ -264,21 +264,38 @@ def assemble_WRF_pwv(path=des_path, work_path=work_yuval):
     from aux_gps import get_unique_index
     df = produce_geo_gnss_solved_stations(path=work_path / 'gis', plot=False)
     dsea_point = df.loc['dsea'][['lat', 'lon']].astype(float).values
-    wrf_pw = read_all_WRF_GNSS_files(path, var='pw', point=dsea_point)
+    if radius is not None:
+        point = None
+    else:
+        point = dsea_point
+    wrf_pw = read_all_WRF_GNSS_files(path, var='pw', point=point)
     wrf_pw8 = xr.load_dataarray(path / 'pw_wrfout_d04_2014-08-08_40lev.nc').sel(Time='2014-08-08')
     wrf_pw16 = xr.load_dataarray(path / 'pw_wrfout_d04_2014-08-16_40lev.nc').sel(Time='2014-08-16')
     wrf_pw_8_16 = xr.concat([wrf_pw8, wrf_pw16], 'Time')
     print('looking for {} at wrf.'.format(dsea_point))
     loc = get_nearest_lat_lon_for_xy(wrf_pw_8_16['XLAT'], wrf_pw_8_16['XLONG'], dsea_point)
     print(loc)
-    wrf_pw_8_16 = wrf_pw_8_16.isel(south_north=loc[0][0], west_east=loc[0][1])
+    if radius is not None:
+        print('getting {} radius around {}.'.format(radius, dsea_point))
+        lat_islice = [loc[0][0] - radius, loc[0][0] + radius + 1]
+        lon_islice = [loc[0][1] - radius, loc[0][1] + radius + 1]
+        wrf_pw_8_16 = wrf_pw_8_16.isel(south_north=slice(*lat_islice), west_east=slice(*lon_islice))
+        loc = get_nearest_lat_lon_for_xy(wrf_pw['XLAT'], wrf_pw['XLONG'], dsea_point)
+        lat_islice = [loc[0][0] - radius, loc[0][0] + radius + 1]
+        lon_islice = [loc[0][1] - radius, loc[0][1] + radius + 1]
+        wrf_pw = wrf_pw.isel(south_north=slice(*lat_islice), west_east=slice(*lon_islice))
+    else:
+        wrf_pw_8_16 = wrf_pw_8_16.isel(south_north=loc[0][0], west_east=loc[0][1])
     wrf_pw = xr.concat([wrf_pw, wrf_pw_8_16], 'Time')
     wrf_pw = wrf_pw.rename({'Time': 'time'})
     wrf_pw = wrf_pw.sortby('time')
     wrf_pw = get_unique_index(wrf_pw)
     if wrf_pw.attrs['projection'] is not None:
         wrf_pw.attrs['projection'] = wrf_pw.attrs['projection'].proj4()
-    filename = 'pwv_wrf_dsea_gnss_point_2014-08.nc'
+    if radius is not None:
+        filename = 'pwv_wrf_dsea_gnss_radius_{}_2014-08.nc'.format(radius)
+    else:
+        filename = 'pwv_wrf_dsea_gnss_point_2014-08.nc'
     save_ncfile(wrf_pw, des_path, filename)
     return wrf_pw
 
