@@ -332,6 +332,7 @@ def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
     from string import digits
     import numpy as np
     import xarray as xr
+    all_scorings = ['f1', 'recall', 'roc_auc']
     # first if RF chosen, replace the cyclic coords of DOY (sin and cos) with
     # the DOY itself.
     if model_name == 'RF':
@@ -371,7 +372,7 @@ def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
     # define search
     gr_search = GridSearchCV(estimator=sk_model, param_grid=search_space,
                              cv=cv_inner, n_jobs=n_jobs,
-                             scoring=['f1', 'roc_auc', 'accuracy'],
+                             scoring=all_scorings,
                              verbose=verbose,
                              refit=refit_scorer, return_train_score=True)
 #    gr.fit(X, y)
@@ -379,7 +380,7 @@ def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
     cv_outer = StratifiedKFold(n_splits=outer_splits, shuffle=True, random_state=seed)
     # execute the nested cross-validation
     scores_est_dict = cross_validate(gr_search, X, y,
-                                     scoring=('f1', 'roc_auc', 'accuracy'),
+                                     scoring=all_scorings,
                                      cv=cv_outer, n_jobs=n_jobs,
                                      return_estimator=True, verbose=verbose)
 #    perm = []
@@ -471,54 +472,69 @@ def ML_main_procedure(X, y, estimator=None, model_name='SVC', features='pwv',
 
 
 def plot_hydro_ML_models_results_from_dss(dss, station='drag', std_on='outer',
-                                          save=False, fontsize=16):
+                                          save=False, fontsize=16,
+                                          plot_type='ROC', neg=1,
+                                          feat=['doy+pressure+pwv', 'pwv']):
     import xarray as xr
     import seaborn as sns
     import matplotlib.pyplot as plt
-    cmap = sns.color_palette("colorblind", dss['features'].size)
-    if len(station) > 4:
-        max_flow = 0
-        sts = [x for x in station.split('-')]
-        hs_ids = [int(x) for x in dss.attrs['hs_id'].split('-')]
-        X, y = produce_X_y_from_list(
-            sts, hs_ids, neg_pos_ratio=1, concat_Xy=True)
-    else:
-        max_flow = dss.attrs['max_flow']
-        X, y = produce_X_y(station, hydro_pw_dict[station], neg_pos_ratio=1,
-                           max_flow=max_flow)
-    events = int(y[y == 1].sum().item())
+    import pandas as pd
+    cmap = sns.color_palette("colorblind", len(feat))
+    dss = dss.sel(neg_pos_ratio=neg)
+    # if len(station) > 4:
+    #     max_flow = 0
+    #     sts = [x for x in station.split('-')]
+    #     hs_ids = [int(x) for x in dss.attrs['hs_id'].split('-')]
+    #     X, y = produce_X_y_from_list(
+    #         sts, hs_ids, neg_pos_ratio=1, concat_Xy=True)
+    # else:
+    #     max_flow = dss.attrs['max_flow']
+    #     X, y = produce_X_y(station, hydro_pw_dict[station], neg_pos_ratio=1,
+    #                        max_flow=max_flow)
+    # events = int(y[y == 1].sum().item())
     assert station == dss.attrs['pwv_id']
     fg = xr.plot.FacetGrid(
         dss,
         col='model',
         row='scoring',
         sharex=True,
-        sharey=True, figsize=(10, 20))
+        sharey=True, figsize=(20, 20))
     for i in range(fg.axes.shape[0]):  # i is rows
         for j in range(fg.axes.shape[1]):  # j is cols
             ax = fg.axes[i, j]
             modelname = dss['model'].isel(model=j).item()
             scoring = dss['scoring'].isel(scoring=i).item()
-            chance_plot = [False for x in dss['features']]
+            chance_plot = [False for x in feat]
             chance_plot[-1] = True
-            for k, feat in enumerate(dss['features'].values):
-                name = '{}-{}-{}'.format(modelname, scoring, feat)
-                model = dss.isel({'model': j, 'scoring': i}).sel(
-                    {'features': feat})
-                title = 'ROC of {} model ({})'.format(modelname, scoring)
-                plot_ROC_PR_curve_from_dss(model, outer_dim='outer_kfold',
-                                           inner_dim='inner_kfold',
-                                           plot_chance=chance_plot[k],
-                                           main_label=feat,
-                                           plot_std_legend=False, ax=ax,
-                                           color=cmap[k], title=title,
-                                           std_on=std_on, fontsize=fontsize)
-    title = '{} station: {} total events'.format(
-            station.upper(), events)
-    if max_flow > 0:
-        title = '{} station: {} total events (max flow = {} m^3/sec)'.format(
-            station.upper(), events, max_flow)
-    fg.fig.suptitle(title, fontsize=fontsize)
+            for k, f in enumerate(feat):
+            #     name = '{}-{}-{}'.format(modelname, scoring, feat)
+            # model = dss.isel({'model': j, 'scoring': i}).sel(
+            #     {'features': feat})
+                model = dss.isel({'model': j, 'scoring': i}).sel({'features': f})
+                title = '{} of {} model ({})'.format(plot_type, modelname, scoring)
+                try:
+                    plot_ROC_PR_curve_from_dss(model, outer_dim='outer_kfold',
+                                               inner_dim='inner_kfold',
+                                               plot_chance=[k],
+                                               main_label=f, plot_type=plot_type,
+                                               plot_std_legend=False, ax=ax,
+                                               color=cmap[k], title=title,
+                                               std_on=std_on, fontsize=fontsize)
+                except ValueError:
+                    ax.grid('on')
+                    continue
+            handles, labels = ax.get_legend_handles_labels()
+            hand = pd.Series(labels, index=handles).drop_duplicates().index.values
+            labe = pd.Series(labels, index=handles).drop_duplicates().values
+            ax.legend(handles=hand.tolist(), labels=labe.tolist(), loc="lower right",
+                      fontsize=14)
+            ax.grid('on')
+    # title = '{} station: {} total events'.format(
+    #         station.upper(), events)
+    # if max_flow > 0:
+    #     title = '{} station: {} total events (max flow = {} m^3/sec)'.format(
+    #         station.upper(), events, max_flow)
+    # fg.fig.suptitle(title, fontsize=fontsize)
     fg.fig.tight_layout()
     fg.fig.subplots_adjust(top=0.937,
                            bottom=0.054,
@@ -527,8 +543,9 @@ def plot_hydro_ML_models_results_from_dss(dss, station='drag', std_on='outer',
                            hspace=0.173,
                            wspace=0.051)
     if save:
-        filename = 'hydro_models_on_{}_{}_{}_std_on_{}.png'.format(
-            station, dss['inner_kfold'].size, dss['outer_kfold'].size, std_on)
+        filename = 'hydro_models_on_{}_{}_{}_std_on_{}_{}_neg{}.png'.format(
+            station, dss['inner_kfold'].size, dss['outer_kfold'].size,
+            std_on, plot_type, neg)
         plt.savefig(savefig_path / filename, bbox_inches='tight')
     return fg
 
@@ -591,6 +608,32 @@ def plot_hydro_ML_models_results_from_dss(dss, station='drag', std_on='outer',
 #    return fg
 
 
+def order_features_list(flist):
+    """ order the feature list in load_ML_run_results
+    so i don't get duplicates"""
+    import pandas as pd
+    import numpy as np
+    # first get all features:
+    li = [x.split('+') for x in flist]
+    flat_list = [item for sublist in li for item in sublist]
+    f = list(set(flat_list))
+    nums = np.arange(1, len(f)+1)
+    # now assagin a number for each entry:
+    inds = []
+    for x in flist:
+        for fe, num in zip(f, nums):
+            x = x.replace(fe, str(10**num))
+        inds.append(eval(x))
+    ser = pd.Series(inds)
+    ser.index = flist
+    ser1 = ser.drop_duplicates()
+    di = dict(zip(ser1.values, ser1.index))
+    new_flist = []
+    for ind, feat in zip(inds, flist):
+        new_flist.append(di.get(ind))
+    return new_flist
+
+
 def load_ML_run_results(path=hydro_ml_path, prefix='CVR', pw_station='drag'):
     from aux_gps import path_glob
     import xarray as xr
@@ -621,20 +664,27 @@ def load_ML_run_results(path=hydro_ml_path, prefix='CVR', pw_station='drag'):
     model_names = [x.split('_')[3] for x in model_as_str]
     model_scores = [x.split('_')[5] for x in model_as_str]
     model_features = [x.split('_')[4] for x in model_as_str]
+    new_model_features = order_features_list(model_features)
     model_hs_id = [x.split('_')[2] for x in model_as_str]
+    model_ratio = [int(x.split('_')[-1]) for x in model_as_str]
     assert len(set(model_hs_id)) == 1
 #    hs_id = list(set(model_hs_id))[0]
     tups = [
         tuple(x) for x in zip(
             model_names,
+            new_model_features,
             model_scores,
-            model_features)]
-    ind = pd.MultiIndex.from_tuples(
-        (tups),
-        names=[
+            model_ratio)]
+    ind = pd.MultiIndex.from_arrays(
+        [model_names,
+            new_model_features,
+            model_scores,
+            model_ratio],
+        names=(
             'model',
+            'features',
             'scoring',
-            'features'])
+            'neg_pos_ratio'))
 #    ind1 = pd.MultiIndex.from_product([model_names, model_scores, model_features], names=[
 #                                     'model', 'scoring', 'feature'])
 #    ds_list = [x[data_vars] for x in ds_list]
@@ -681,83 +731,87 @@ def calculate_metrics_from_ML_dss(dss):
     m = [x for x in dss['model'].values]
     sc = [x for x in dss['scoring'].values]
     f = [x for x in dss['features'].values]
+    r = [x for x in dss['neg_pos_ratio'].values]
     ind = pd.MultiIndex.from_product(
-        [ok, ik, m, sc, f],
+        [ok, ik, m, sc, f, r],
         names=[
             'outer_kfold',
             'inner_kfold',
             'model',
             'scoring',
-            'features'])  # , 'station'])
+            'features',
+            'neg_pos_ratio'])  # , 'station'])
 
     okn = [x for x in range(dss['outer_kfold'].size)]
     ikn = [x for x in range(dss['inner_kfold'].size)]
     mn = [x for x in range(dss['model'].size)]
     scn = [x for x in range(dss['scoring'].size)]
     fn = [x for x in range(dss['features'].size)]
+    ra = [x for x in range(dss['neg_pos_ratio'].size)]
     ds_list = []
     for i in okn:
         for j in ikn:
             for k in mn:
                 for n in scn:
                     for m in fn:
-                        ds = xr.Dataset()
-                        y_true = dss['y_true'].isel(outer_kfold=i, inner_kfold=j, model=k, scoring=n, features=m).reset_coords(drop=True).squeeze()
-                        y_prob = dss['y_prob'].isel(outer_kfold=i, inner_kfold=j, model=k, scoring=n, features=m).reset_coords(drop=True).squeeze()
-                        y_true = y_true.dropna('sample')
-                        y_prob = y_prob.dropna('sample')
-                        if y_prob.size == 0:
-                            # in case of NaNs in the results:
-                            fpr_da = xr.DataArray(np.nan*np.ones((1)), dims=['sample'])
-                            fpr_da['sample'] = [x for x in range(fpr_da.size)]
-                            tpr_da = xr.DataArray(np.nan*np.ones((1)), dims=['sample'])
-                            tpr_da['sample'] = [x for x in range(tpr_da.size)]
-                            prn_da = xr.DataArray(np.nan*np.ones((1)), dims=['sample'])
-                            prn_da['sample'] = [x for x in range(prn_da.size)]
-                            rcll_da = xr.DataArray(np.nan*np.ones((1)), dims=['sample'])
-                            rcll_da['sample'] = [x for x in range(rcll_da.size)]
-                            tpr_fpr = xr.DataArray(np.nan*np.ones((100)), dims=['FPR'])
-                            tpr_fpr['FPR'] = mean_fpr
-                            prn_rcll = xr.DataArray(np.nan*np.ones((100)), dims=['RCLL'])
-                            prn_rcll['RCLL'] = mean_fpr
-                            pr_auc_da = xr.DataArray(np.nan)
-                            roc_auc_da = xr.DataArray(np.nan)
-                            no_skill = xr.DataArray(np.nan)
-                        else:
-                            no_skill = len(y_true[y_true==1]) / len(y_true)
-                            no_skill_da = xr.DataArray(no_skill)
-                            fpr, tpr, _ = roc_curve(y_true, y_prob)
-                            interp_tpr = np.interp(mean_fpr, fpr, tpr)
-                            interp_tpr[0] = 0.0
-                            roc_auc = roc_auc_score(y_true, y_prob)
-                            prn, rcll, _ = precision_recall_curve(y_true, y_prob)
-                            interp_prn = np.interp(mean_fpr, rcll[::-1], prn[::-1])
-                            interp_prn[0] = 1.0
-                            pr_auc_score = auc(rcll, prn)
-                            roc_auc_da = xr.DataArray(roc_auc)
-                            pr_auc_da = xr.DataArray(pr_auc_score)
-                            prn_da = xr.DataArray(prn, dims=['sample'])
-                            prn_da['sample'] = [x for x in range(len(prn))]
-                            rcll_da = xr.DataArray(rcll, dims=['sample'])
-                            rcll_da['sample'] = [x for x in range(len(rcll))]
-                            fpr_da = xr.DataArray(fpr, dims=['sample'])
-                            fpr_da['sample'] = [x for x in range(len(fpr))]
-                            tpr_da = xr.DataArray(tpr, dims=['sample'])
-                            tpr_da['sample'] = [x for x in range(len(tpr))]
-                            tpr_fpr = xr.DataArray(interp_tpr, dims=['FPR'])
-                            tpr_fpr['FPR'] = mean_fpr
-                            prn_rcll = xr.DataArray(interp_prn, dims=['RCLL'])
-                            prn_rcll['RCLL'] = mean_fpr
-                        ds['fpr'] = fpr_da
-                        ds['tpr'] = tpr_da
-                        ds['roc-auc'] = roc_auc_da
-                        ds['pr-auc'] = pr_auc_da
-                        ds['prn'] = prn_da
-                        ds['rcll'] = rcll_da
-                        ds['TPR'] = tpr_fpr
-                        ds['PRN'] = prn_rcll
-                        ds['no_skill'] = no_skill_da
-                        ds_list.append(ds)
+                        for r in ra:
+                            ds = xr.Dataset()
+                            y_true = dss['y_true'].isel(outer_kfold=i, inner_kfold=j, model=k, scoring=n, features=m, neg_pos_ratio=r).reset_coords(drop=True).squeeze()
+                            y_prob = dss['y_prob'].isel(outer_kfold=i, inner_kfold=j, model=k, scoring=n, features=m, neg_pos_ratio=r).reset_coords(drop=True).squeeze()
+                            y_true = y_true.dropna('sample')
+                            y_prob = y_prob.dropna('sample')
+                            if y_prob.size == 0:
+                                # in case of NaNs in the results:
+                                fpr_da = xr.DataArray(np.nan*np.ones((1)), dims=['sample'])
+                                fpr_da['sample'] = [x for x in range(fpr_da.size)]
+                                tpr_da = xr.DataArray(np.nan*np.ones((1)), dims=['sample'])
+                                tpr_da['sample'] = [x for x in range(tpr_da.size)]
+                                prn_da = xr.DataArray(np.nan*np.ones((1)), dims=['sample'])
+                                prn_da['sample'] = [x for x in range(prn_da.size)]
+                                rcll_da = xr.DataArray(np.nan*np.ones((1)), dims=['sample'])
+                                rcll_da['sample'] = [x for x in range(rcll_da.size)]
+                                tpr_fpr = xr.DataArray(np.nan*np.ones((100)), dims=['FPR'])
+                                tpr_fpr['FPR'] = mean_fpr
+                                prn_rcll = xr.DataArray(np.nan*np.ones((100)), dims=['RCLL'])
+                                prn_rcll['RCLL'] = mean_fpr
+                                pr_auc_da = xr.DataArray(np.nan)
+                                roc_auc_da = xr.DataArray(np.nan)
+                                no_skill_da = xr.DataArray(np.nan)
+                            else:
+                                no_skill = len(y_true[y_true==1]) / len(y_true)
+                                no_skill_da = xr.DataArray(no_skill)
+                                fpr, tpr, _ = roc_curve(y_true, y_prob)
+                                interp_tpr = np.interp(mean_fpr, fpr, tpr)
+                                interp_tpr[0] = 0.0
+                                roc_auc = roc_auc_score(y_true, y_prob)
+                                prn, rcll, _ = precision_recall_curve(y_true, y_prob)
+                                interp_prn = np.interp(mean_fpr, rcll[::-1], prn[::-1])
+                                interp_prn[0] = 1.0
+                                pr_auc_score = auc(rcll, prn)
+                                roc_auc_da = xr.DataArray(roc_auc)
+                                pr_auc_da = xr.DataArray(pr_auc_score)
+                                prn_da = xr.DataArray(prn, dims=['sample'])
+                                prn_da['sample'] = [x for x in range(len(prn))]
+                                rcll_da = xr.DataArray(rcll, dims=['sample'])
+                                rcll_da['sample'] = [x for x in range(len(rcll))]
+                                fpr_da = xr.DataArray(fpr, dims=['sample'])
+                                fpr_da['sample'] = [x for x in range(len(fpr))]
+                                tpr_da = xr.DataArray(tpr, dims=['sample'])
+                                tpr_da['sample'] = [x for x in range(len(tpr))]
+                                tpr_fpr = xr.DataArray(interp_tpr, dims=['FPR'])
+                                tpr_fpr['FPR'] = mean_fpr
+                                prn_rcll = xr.DataArray(interp_prn, dims=['RCLL'])
+                                prn_rcll['RCLL'] = mean_fpr
+                            ds['fpr'] = fpr_da
+                            ds['tpr'] = tpr_da
+                            ds['roc-auc'] = roc_auc_da
+                            ds['pr-auc'] = pr_auc_da
+                            ds['prn'] = prn_da
+                            ds['rcll'] = rcll_da
+                            ds['TPR'] = tpr_fpr
+                            ds['PRN'] = prn_rcll
+                            ds['no_skill'] = no_skill_da
+                            ds_list.append(ds)
     ds = xr.concat(ds_list, 'dim_0')
     ds['dim_0'] = ind
     ds = ds.unstack()
@@ -814,19 +868,73 @@ def calculate_metrics_from_ML_dss(dss):
 #    return da
 
 
+def plot_heatmaps_for_all_models_and_scorings(dss, station='drag',
+                                              var='roc-auc'): # , save=True):
+    import xarray as xr
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+    assert station == dss.attrs['pwv_id']
+    cmaps = {'roc-auc': sns.color_palette("Blues", as_cmap=True),
+             'pr-auc': sns.color_palette("Greens", as_cmap=True)}
+    fg = xr.plot.FacetGrid(
+            dss,
+            col='model',
+            row='scoring',
+            sharex=True,
+            sharey=True, figsize=(10, 20))
+    dss = dss.mean('inner_kfold', keep_attrs=True)
+    vmin, vmax = dss[var].min(), 1
+    norm = plt.Normalize(vmin=vmin, vmax=vmax)
+    for i in range(fg.axes.shape[0]):  # i is rows
+        for j in range(fg.axes.shape[1]):  # j is cols
+            ax = fg.axes[i, j]
+            modelname = dss['model'].isel(model=j).item()
+            scoring = dss['scoring'].isel(scoring=i).item()
+            model = dss[var].isel({'model': j, 'scoring': i}).reset_coords(drop=True)
+            df = model.to_dataframe()
+            title = '{} model ({})'.format(modelname, scoring)
+            df = df.unstack()
+            mean = df.mean()
+            mean.name = 'mean'
+            df = df.append(mean).T.droplevel(0)
+            ax = sns.heatmap(df, annot=True, cmap=cmaps[var], cbar=False,
+                             ax=ax, norm=norm)
+            ax.set_title(title)
+            ax.vlines([4], 0, 10, color='r', linewidth=2)
+            if j > 0:
+                ax.set_ylabel('')
+            if i < 2:
+                ax.set_xlabel('')
+    cax = fg.fig.add_axes([0.1, 0.025, .8, .015])
+    fg.fig.colorbar(ax.get_children()[0], cax=cax, orientation="horizontal")
+    fg.fig.suptitle('{}: {}'.format(dss.attrs['pwv_id'].upper(), var.upper()), fontweight='bold')
+    fg.fig.tight_layout()
+    fg.fig.subplots_adjust(top=0.937,
+                           bottom=0.099,
+                           left=0.169,
+                           right=0.993,
+                           hspace=0.173,
+                           wspace=0.051)
+    # if save:
+    #     filename = 'hydro_models_heatmaps_on_{}_{}_{}.png'.format(
+    #         station, dss['outer_kfold'].size, var)
+    #     plt.savefig(savefig_path / filename, bbox_inches='tight')
+    return fg
+
+
 def plot_feature_importances(
         dss,
         feat_dim='features',
+        features = 'doy+pressure+pwv',
         scoring='f1',
         axes=None):
     import matplotlib.pyplot as plt
-    all_feats = dss[feat_dim].max().item()
-    dss = dss.sel({feat_dim: all_feats})
+    dss = dss.sel({feat_dim: features})
     tests_ds = dss[[x for x in dss if 'test' in x]]
     tests_ds = tests_ds.sel(scoring=scoring)
     score_ds = tests_ds['test_{}'.format(scoring)]
     max_score = score_ds.idxmax('outer_kfold').values
-    feats = all_feats.split('+')
+    feats = features.split('+')
     fn = len(feats)
     if axes is None:
         fig, axes = plt.subplots(1, fn, sharey=True, figsize=(15, 20))
@@ -838,8 +946,8 @@ def plot_feature_importances(
             drop=True)
         dsf = dsf.to_dataset('scoring').to_dataframe(
         ).reset_index(drop=True) * 100
-        title = '{} - {}'.format(f, scoring)
-        dsf.plot.bar(ax=axes[i], title=title, rot=0, legend=False)
+        title = '{} ({})'.format(f.upper(), scoring)
+        dsf.plot.bar(ax=axes[i], title=title, rot=0, legend=False, zorder=20)
         dsf_sum = dsf.sum().tolist()
         handles, labels = axes[i].get_legend_handles_labels()
         labels = [
@@ -848,17 +956,29 @@ def plot_feature_importances(
                 labels, dsf_sum)]
         axes[i].legend(handles=handles, labels=labels)
         axes[i].set_ylabel('Feature importance [%]')
+        axes[i].grid(axis='y', zorder=1)
     return
 
 
-def plot_feature_importances_for_all_scorings(dss, model='RF'):
+def plot_feature_importances_for_all_scorings(dss,
+                                              features='doy+pressure+pwv',
+                                              model='RF'):
     import matplotlib.pyplot as plt
+    station = dss.attrs['pwv_id'].upper()
     dss = dss.sel(model=model).reset_coords(drop=True)
-    fns = len(dss['features'].max().values.tolist().split('+'))
+    fns = len(features.split('+'))
     scores = dss['scoring'].values
     fig, axes = plt.subplots(len(scores), fns, sharey=True, figsize=(15, 20))
     for i, score in enumerate(scores):
-        plot_feature_importances(dss, scoring=score, axes=axes[i, :])
+        plot_feature_importances(dss, features=features, scoring=score, axes=axes[i, :])
+    fig.suptitle('feature importances of {} model on {} station'.format(model, station))
+    fig.tight_layout()
+    fig.subplots_adjust(top=0.935,
+                        bottom=0.034,
+                        left=0.039,
+                        right=0.989,
+                        hspace=0.19,
+                        wspace=0.027)
     return dss
 
 
@@ -886,6 +1006,8 @@ def plot_ROC_PR_curve_from_dss(
         mean_fpr = dss['FPR'].values
         mean_tpr = dss['TPR'].mean(outer_dim).mean(inner_dim).values
         mean_auc = dss['roc-auc'].mean().item()
+        if np.isnan(mean_auc):
+            return ValueError
         std_auc = dss['roc-auc'].std().item()
         field = 'TPR'
         xlabel = 'False Positive Rate'
@@ -894,6 +1016,8 @@ def plot_ROC_PR_curve_from_dss(
         mean_fpr = dss['RCLL'].values
         mean_tpr = dss['PRN'].mean(outer_dim).mean(inner_dim).values
         mean_auc = dss['pr-auc'].mean().item()
+        if np.isnan(mean_auc):
+            return ValueError
         std_auc = dss['pr-auc'].std().item()
         no_skill = dss['no_skill'].mean(outer_dim).mean(inner_dim).item()
         field = 'PRN'
@@ -942,16 +1066,16 @@ def plot_ROC_PR_curve_from_dss(
     ax.tick_params(axis='x', labelsize=fontsize)
     ax.set_xlabel(xlabel, fontsize=fontsize)
     ax.set_ylabel(ylabel, fontsize=fontsize)
-    handles, labels = ax.get_legend_handles_labels()
-    if not plot_std_legend:
-        if len(handles) == 7:
-            handles = handles[:-2]
-            labels = labels[:-2]
-        else:
-            handles = handles[:-1]
-            labels = labels[:-1]
-    ax.legend(handles=handles, labels=labels, loc="lower right",
-              fontsize=fontsize)
+    # handles, labels = ax.get_legend_handles_labels()
+    # if not plot_std_legend:
+    #     if len(handles) == 7:
+    #         handles = handles[:-2]
+    #         labels = labels[:-2]
+    #     else:
+    #         handles = handles[:-1]
+    #         labels = labels[:-1]
+    # ax.legend(handles=handles, labels=labels, loc="lower right",
+    #           fontsize=fontsize)
     return ax
 
 
