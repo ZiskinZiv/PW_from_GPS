@@ -3246,8 +3246,8 @@ def calculate_diurnal_variability(path=work_yuval, with_amp=False):
     return df
 
 
-def perform_harmonic_analysis_all_GNSS(path=work_yuval, n=6,
-                                       savepath=work_yuval):
+def perform_diurnal_harmonic_analysis_all_GNSS(path=work_yuval, n=6,
+                                               savepath=work_yuval):
     import xarray as xr
     from aux_gps import harmonic_analysis_xr
     from aux_gps import save_ncfile
@@ -3411,6 +3411,34 @@ def produce_all_GNSS_PW_anomalies(load_path=work_yuval, thresh=50,
         GNSS_pw_anom.to_netcdf(savepath / filename, 'w', encoding=encoding)
         print('Done!')
     return GNSS_pw_anom
+
+
+def perform_annual_harmonic_analysis_all_GNSS(path=work_yuval, era5=False, n=6):
+    from aux_gps import harmonic_da_ts
+    from aux_gps import save_ncfile
+    import xarray as xr
+    from aux_gps import anomalize_xr
+    if era5:
+        pw = xr.load_dataset(path / 'GNSS_era5_monthly_PW.nc')
+    else:
+        pw = xr.load_dataset(path / 'GNSS_PW_monthly_thresh_50.nc')
+    pw = anomalize_xr(pw, freq='AS')
+    dss_list = []
+    for site in pw:
+        print('performing annual harmonic analysis for GNSS {} site:'.format(site))
+        # remove site mean:
+        pwv = pw[site] - pw[site].mean('time')
+        dss = harmonic_da_ts(pwv, n=n, grp='month')
+        dss_list.append(dss)
+    dss_all = xr.merge(dss_list)
+    dss_all.attrs['field'] = 'PWV'
+    dss_all.attrs['units'] = 'mm'
+    if era5:
+        filename = 'GNSS_PW_ERA5_harmonics_annual.nc'
+    else:
+        filename = 'GNSS_PW_harmonics_annual.nc'
+    save_ncfile(dss_all, path, filename)
+    return dss_all
 
 
 def produce_PW_anomalies(pw_da, grp1='hour', grp2='dayofyear', plot=True):
