@@ -84,15 +84,29 @@ def choose_color_for_synoptic_classification():
 
 
 def visualize_synoptic_class_on_time_series(da_ts, path=climate_path,
-                                            ax=None, leg_ncol=1,
+                                            ax=None, leg_ncol=1, add_mm=False,
                                             leg_loc=1, second_da_ts=None):
     import xarray as xr
     import matplotlib.pyplot as plt
+    from aux_gps import replace_time_series_with_its_group
     time_dim = list(set(da_ts.dims))[0]
     assert xr.infer_freq(da_ts[time_dim]) == 'D'
     if ax is None:
         fig, ax = plt.subplots()
-    da_ts.plot.line('k-', lw=2, ax=ax, zorder=20)
+    # also calc the monthly means:
+    if add_mm:
+        da_ts_mm = replace_time_series_with_its_group(da_ts, grp='month')
+        da_ts_mm.plot.line('k-.', ax=ax)
+    if isinstance(da_ts, xr.Dataset):
+        styles = ['r-', 'g-', 'b-']
+        lns = []
+        for i, st in enumerate(da_ts):
+            ln = da_ts[st].plot.line(styles[i], lw=2, ax=ax, zorder=20)
+            lns.append(ln)
+        da_ts = da_ts[st]
+    else:
+        # plot daily values:
+        da_ts.plot.line('k-', lw=2, ax=ax, zorder=20)
     if second_da_ts is not None:
         second_da_ts.plot.line('k--', lw=2, ax=ax, marker='o')
     # ymin, ymax = ax.get_ylim()
