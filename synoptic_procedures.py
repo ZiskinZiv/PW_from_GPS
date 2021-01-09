@@ -85,7 +85,8 @@ def choose_color_for_synoptic_classification():
 
 def visualize_synoptic_class_on_time_series(da_ts, path=climate_path,
                                             ax=None, leg_ncol=1, add_mm=False,
-                                            leg_loc=1, second_da_ts=None):
+                                            leg_loc=1, second_da_ts=None,
+                                            twin=None):
     import xarray as xr
     import matplotlib.pyplot as plt
     from aux_gps import replace_time_series_with_its_group
@@ -101,14 +102,27 @@ def visualize_synoptic_class_on_time_series(da_ts, path=climate_path,
         styles = ['r-', 'g-', 'b-']
         lns = []
         for i, st in enumerate(da_ts):
-            ln = da_ts[st].plot.line(styles[i], lw=2, ax=ax, zorder=20)
+            lbl = st.upper()
+            ln = da_ts[st].plot.line(styles[i], lw=2, ax=ax, zorder=20, label=lbl)
             lns.append(ln)
         da_ts = da_ts[st]
     else:
         # plot daily values:
         da_ts.plot.line('k-', lw=2, ax=ax, zorder=20)
     if second_da_ts is not None:
-        second_da_ts.plot.line('k--', lw=2, ax=ax, marker='o')
+        try:
+            if second_da_ts.attrs['units'] == da_ts.attrs['units']:
+                second_da_ts.plot.line('k--', lw=2, ax=ax, marker='o')
+            else:
+                twinx = ax.twinx()
+                second_da_ts.plot.line('k--', lw=2, ax=twinx, marker='o')
+                if twin is not None:
+                    twinx.set_ylim(*twin)
+        except KeyError:
+            twinx = ax.twinx()
+            second_da_ts.plot.line('k--', lw=2, ax=twinx, marker='o')
+            if twin is not None:
+                twinx.set_ylim(*twin)
     # ymin, ymax = ax.get_ylim()
     df = read_synoptic_classification(path, report=False)
     ind = da_ts.to_dataframe().index
