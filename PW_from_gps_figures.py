@@ -2158,6 +2158,46 @@ def plot_pwv_longterm_trend(path=work_yuval, model_name='LR', save=True,
     return ax
 
 
+def plot_trend_filled_pwv_and_era5_barh_plot(path=work_yuval):
+    import xarray as xr
+    from aux_gps import path_glob
+    from PW_stations import process_mkt_from_dataset
+    import pandas as pd
+    import seaborn as sns
+    file = sorted(
+        path_glob(path, 'GNSS_PW_monthly_homogenized_filled_*.nc'))[0]
+    gnss = xr.load_dataset(path / file)
+    era5 = xr.load_dataset(path / 'GNSS_era5_monthly_PW.nc')
+    era5 = era5.sel(time=slice(gnss.time.min(), gnss.time.max()))
+    era5 = era5[[x for x in era5 if x in gnss]]
+    df_gnss = process_mkt_from_dataset(
+        gnss,
+        alpha=0.95,
+        season_selection=None,
+        seasonal=False,
+        factor=120,
+        anomalize=True, CI=True)
+    df_gnss = add_location_to_GNSS_stations_dataframe(df_gnss)
+    df_gnss['sig'] = df_gnss['p'].astype(float) <= 0.05
+    df_era5 = process_mkt_from_dataset(
+        era5,
+        alpha=0.95,
+        season_selection=None,
+        seasonal=False,
+        factor=120,
+        anomalize=True, CI=True)
+    df_era5 = add_location_to_GNSS_stations_dataframe(df_era5)
+    df_era5['sig'] = df_era5['p'].astype(float) <= 0.05
+    df = pd.concat([df_gnss, df_era5], keys=['GNSS', 'ERA5'])
+    df1 = df.unstack(level=0)
+    df = df1.stack().reset_index()
+    df.columns = ['station', '', 'p', 'Tau', 'slope', 'intercept', 'CI_5_low',
+                  'CI_5_high', 'Location', 'sig']
+    sns.barplot(x="slope", y='station', hue='', data=df[df['sig']])
+    # df['slope'].unstack(level=0).plot(kind='barh', subplots=False, xerr=1)
+    return df
+
+
 def produce_filled_pwv_and_era5_mann_kendall_table(path=work_yuval):
     import xarray as xr
     from aux_gps import path_glob
@@ -2351,6 +2391,21 @@ def plot_pwv_statistic_vs_height(pwv_ds, stat='mean', x='alt', season=None,
         ax.set_title('{} season'.format(season))
     ax.grid()
     return ax
+
+
+def add_location_to_GNSS_stations_dataframe(df, scope='annual'):
+    import pandas as pd
+    # load location data:
+    gr = group_sites_to_xarray(scope=scope)
+    gr_df = gr.to_dataframe('sites')
+    new = gr.T.values.ravel()
+    # remove nans form mixed nans and str numpy:
+    new = new[~pd.isnull(new)]
+    geo = [gr_df[gr_df == x].dropna().index.values.item()[1] for x in new]
+    geo = [x.title() for x in geo]
+    df = df.reindex(new)
+    df['Location'] = geo
+    return df
 
 
 def plot_peak_amplitude_altitude_long_term_pwv(path=work_yuval, era5=False,
@@ -4614,10 +4669,11 @@ def box_lat_lon_polygon_as_gpd(lat_bounds=[29, 34], lon_bounds=[34, 36.5]):
 
 
 def plot_synoptic_daily_on_pwv_daily_with_colors(climate_path=climate_path,
-                                                 station='tela',
+                                                 station='tela',ims_path=ims_path,
                                                  times=['2013-09-15',
                                                         '2015-09-15'],
-                                                 days=47, add_era5=True):
+                                                 days=47, add_era5=True,
+                                                 add_dtr=True):
     from synoptic_procedures import visualize_synoptic_class_on_time_series
     import matplotlib.pyplot as plt
     import xarray as xr
@@ -4630,22 +4686,35 @@ def plot_synoptic_daily_on_pwv_daily_with_colors(climate_path=climate_path,
         pw_daily = [xr.open_dataset(
             work_yuval/'GNSS_PW_daily_thresh_50_homogenized.nc')[x].load() for x in station]
         pw_daily = xr.merge(pw_daily)
+        add_mm = False
+        label = ', '.join([x.upper() for x in station])
+        ncol = 6
     else:
         pw_daily = xr.open_dataset(
             work_yuval/'GNSS_PW_daily_thresh_50_homogenized.nc')[station].load()
+        add_mm = True
+        label = station.upper()
+        ncol = 4
     era5_hourly = xr.open_dataset(work_yuval/'GNSS_era5_hourly_PW.nc')[station]
     era5_daily = era5_hourly.resample(time='D').mean().load()
+    dtr_daily = xr.load_dataset(work_yuval/'GNSS_ERA5_DTR_daily_1996-2020.nc')[station]
+    dtr_daily = xr.load_dataset(ims_path /'GNSS_IMS_DTR_mm_israel_1996-2020.nc')[station]
     fig, axes = plt.subplots(len(times), 1, figsize=(20, 10))
     leg_locs = ['upper right', 'lower right']
     for i, ax in enumerate(axes.flat):
         if add_era5:
             second_da_ts = era5_daily.sel(time=times_dt[i])
+        elif add_dtr:
+            second_da_ts = dtr_daily.sel(time=times_dt[i])
         else:
             second_da_ts = None
         visualize_synoptic_class_on_time_series(pw_daily.sel(time=times_dt[i]),
                                                 path=climate_path, ax=ax,
                                                 second_da_ts=second_da_ts,
-                                                leg_ncol=4, leg_loc=leg_locs[i], add_mm=True)
+                                                leg_ncol=ncol,
+                                                leg_loc=leg_locs[i],
+                                                add_mm=add_mm,
+                                                twin=None)
         ax.set_ylabel('PWV [mm]')
         ax.xaxis.set_major_locator(mdates.DayLocator(interval=1))
         # set formatter
@@ -4656,13 +4725,26 @@ def plot_synoptic_daily_on_pwv_daily_with_colors(climate_path=climate_path,
         dt_str = ', '.join([month_abbr[x] for x in months]) + ' {}'.format(year)
         ax.set_title(dt_str, fontweight='bold', fontsize=14)
         ax.set_xlabel('')
+    # set ylims :
     ylims_low = [ax.get_ylim()[0] for ax in axes]
     ylims_high = [ax.get_ylim()[1] for ax in axes]
     [ax.set_ylim(min(ylims_low), max(ylims_high)) for ax in axes]
-    fig.suptitle(
-        'Daily PWV and synoptic class for {} station using GNSS(solid - monthly means in dot-dashed) and ERA5(dashed)'.format(station.upper()))
+    # set ylims in right_axes:
+    # ylims_low = [ax.right_ax.get_ylim()[0] for ax in axes]
+    # ylims_high = [ax.right_ax.get_ylim()[1] for ax in axes]
+    # [ax.right_ax.set_ylim(min(ylims_low), max(ylims_high)) for ax in axes]
+    # axes[0].right_ax.set_ylim(0,100)
+    if add_era5:
+        fig.suptitle(
+            'Daily PWV and synoptic class for {} station using GNSS(solid - monthly means in dot-dashed) and ERA5(dashed)'.format(label))
+    elif add_dtr:
+        fig.suptitle(
+            'Daily PWV and synoptic class for {} station using GNSS(solid - monthly means in dot-dashed) and DTR(dashed)'.format(label))
+    else:
+        fig.suptitle(
+            'Daily PWV and synoptic class for {} station using GNSS(solid)'.format(label))
     fig.tight_layout()
-    return
+    return axes
 
 
 def create_enhanced_qualitative_color_map(plot=True, alevels=[1, 0.75, 0.5, 0.25]):
