@@ -912,8 +912,8 @@ def groupby_half_hour_xr(da_ts, reduce='mean'):
     return ds
 
 
-def groupby_date_xr(da_ts):
-    df = da_ts.to_dataframe()
+def groupby_date_xr(da_ts, time_dim='time'):
+    df = da_ts[time_dim].to_dataframe()
     df['date'] = df.index.date
     date = df['date'].to_xarray()
     return date
