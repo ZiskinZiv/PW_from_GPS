@@ -9,6 +9,7 @@ from sklearn_xarray import RegressorWrapper
 from PW_paths import work_yuval
 climate_path = work_yuval / 'climate'
 era5_path = work_yuval / 'ERA5'
+ims_path = work_yuval / 'IMS_T'
 lat_box = [10, 50]
 lon_box = [10, 60]
 lat_box1 = [10, 60]
@@ -17,6 +18,59 @@ lat_hemi_box = [0, 80]
 lon_hemi_box = [-80, 80]
 
 # what worked: z500 is OK, compare to other large scale cirulations ?
+
+
+def prepare_diurnal_temperature_range(era5_path=era5_path, ims_path=ims_path):
+    import xarray as xr
+    from aux_gps import groupby_date_xr
+    from aux_gps import save_ncfile
+    import pandas as pd
+    t2 = xr.load_dataset(era5_path / 'ERA5_T2_hourly_israel_1996-2020.nc')
+    date = groupby_date_xr(t2)
+    t2_min = t2.groupby(date).min()
+    t2_max = t2.groupby(date).max()
+    dtr = t2_max['t2m'] - t2_min['t2m']
+    dtr = dtr.rename({'date': 'time'})
+    dtr['time'] = pd.to_datetime(dtr['time'].values)
+    ds = xr.Dataset()
+    ds['DTR_mm'] = dtr
+    ds['DTR_mm'].attrs['long_name'] = 'Diurnal Temperature Range'
+    ds['DTR_mm'].attrs['method'] = 'max-min'
+    ds['DTR_mm'].attrs['units'] = 'degC'
+    # maybe Local Time ?
+    t2_12 = t2.sel(time=t2['time.hour'] == 12).resample(time='1D').mean()
+    t2_00 = t2.sel(time=t2['time.hour'] == 00).resample(time='1D').mean()
+    dtr = t2_12['t2m'] - t2_00['t2m']
+    ds['DTR_1200'] = dtr
+    ds['DTR_1200'].attrs['long_name'] = 'Diurnal Temperature Range'
+    ds['DTR_1200'].attrs['method'] = '12UTC-00UTC'
+    ds['DTR_1200'].attrs['units'] = 'degC'
+    filename = 'ERA5_DTR_israel_1996-2020.nc'
+    save_ncfile(ds, era5_path, filename)
+    # do the same thing for IMS data (at gnss loc)
+    t = xr.load_dataset(ims_path / 'GNSS_5mins_TD_ALL_1996_2020.nc')
+    date = groupby_date_xr(t)
+    t2_min = t.groupby(date).min()
+    t2_max = t.groupby(date).max()
+    dtr = t2_max - t2_min
+    dtr = dtr.rename({'date': 'time'})
+    dtr['time'] = pd.to_datetime(dtr['time'].values)
+    # dtr.name = 'DTR_mm'
+    dtr.attrs['long_name'] = 'Diurnal Temperature Range'
+    dtr.attrs['method'] = 'max-min'
+    dtr.attrs['units'] = 'degC'
+    filename = 'GNSS_IMS_DTR_mm_israel_1996-2020.nc'
+    save_ncfile(dtr, ims_path, filename)
+    t2_12 = t.sel(time=t['time.hour'] == 12).resample(time='1D').mean()
+    t2_00 = t.sel(time=t['time.hour'] == 00).resample(time='1D').mean()
+    dtr = t2_12 - t2_00
+    # dtr.name = 'DTR_1200'
+    dtr.attrs['long_name'] = 'Diurnal Temperature Range'
+    dtr.attrs['method'] = '12UTC-00UTC'
+    dtr.attrs['units'] = 'degC'
+    filename = 'GNSS_IMS_DTR_1200_israel_1996-2020.nc'
+    save_ncfile(dtr, ims_path, filename)
+    return ds
 
 
 def prepare_ERA5_single_var_EM(era5_path=era5_path, var='tcwv'):
@@ -106,7 +160,7 @@ def prepare_ERA5_moisture_flux(era5_path=era5_path):
     mf['qf'] = np.sqrt(mf['qu']**2 + mf['qv']**2)
     mf['qf'].attrs['units'] = ds['v'].attrs['units']
     mf['qf'].attrs['long_name'] = 'moisture flux magnitude'
-    mf['qfdir'] = np.rad2deg(np.arctan2(mf['qv'], mf['qu']))
+    mf['qfdir'] = 270 - np.rad2deg(np.arctan2(mf['qv'], mf['qu']))
     mf['qfdir'].attrs['units'] = 'deg'
     mf['qfdir'].attrs['long_name'] = 'moisture flux direction'
     mf = mf.sortby('latitude')
