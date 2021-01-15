@@ -3413,15 +3413,20 @@ def produce_all_GNSS_PW_anomalies(load_path=work_yuval, thresh=50,
     return GNSS_pw_anom
 
 
-def perform_annual_harmonic_analysis_all_GNSS(path=work_yuval, era5=False, n=6):
+def perform_annual_harmonic_analysis_all_GNSS(path=work_yuval,
+                                              era5=False, n=6, keep_full_years=True):
     from aux_gps import harmonic_da_ts
     from aux_gps import save_ncfile
+    from aux_gps import keep_full_years_of_monthly_mean_data
     import xarray as xr
     from aux_gps import anomalize_xr
     if era5:
         pw = xr.load_dataset(path / 'GNSS_era5_monthly_PW.nc')
     else:
         pw = xr.load_dataset(path / 'GNSS_PW_monthly_thresh_50.nc')
+    if keep_full_years:
+        print('kept full years only')
+        pw = pw.map(keep_full_years_of_monthly_mean_data, verbose=False)
     pw = anomalize_xr(pw, freq='AS')
     dss_list = []
     for site in pw:
