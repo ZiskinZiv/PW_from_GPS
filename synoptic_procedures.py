@@ -110,6 +110,18 @@ def visualize_synoptic_class_on_time_series(da_ts, path=climate_path,
         # plot daily values:
         da_ts.plot.line('k-', lw=2, ax=ax, zorder=20)
     if second_da_ts is not None:
+        # record the corr between second_da_ts and da_ts:
+        corr_all = xr.corr(da_ts, second_da_ts).item()
+        corr_oct = xr.corr(da_ts.sel(time=da_ts['time.month'] == 10), second_da_ts.sel(
+            time=second_da_ts['time.month'] == 10)).item()
+        props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+        textstr = '\n'.join([
+            'r_all = {:.2f}'.format(corr_all),
+            'r_just_Oct = {:.2f}'.format(corr_oct)])
+        # textstr = 'r_all = {:.2f}'.format(corr)
+        # place a text box in upper left in axes coords
+        ax.text(0.05, 0.95, textstr, transform=ax.transAxes, fontsize=14,
+        verticalalignment='top', bbox=props)
         try:
             if second_da_ts.attrs['units'] == da_ts.attrs['units']:
                 second_da_ts.plot.line('k--', lw=2, ax=ax, marker='o')
