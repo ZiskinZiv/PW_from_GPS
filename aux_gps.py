@@ -570,7 +570,7 @@ def run_MLR_harmonics(harmonic_dss, season=None, n_max=4,
         if ax is None:
             fig, ax = plt.subplots(figsize=(8, 6))
         markers = ['s', 'x', '^', '>', '<', 'X']
-        colors = ['tab:blue', 'tab:red', 'tab:orange', 'tab:green',
+        colors = ['tab:blue', 'tab:red', 'tab:green', 'tab:orange',
                   'tab:purple', 'tab:yellow']
         styles = ['-', '--', '-.', ':', 'None', ' ']
         for i, cycle in enumerate(harmonic[cunits].values):
@@ -737,6 +737,24 @@ def harmonic_da_ts(da_ts, n=3, grp='month'):
     return ds
 
 
+def get_season_for_pandas_dtindex(df):
+    import pandas as pd
+    if not isinstance(df.index, pd.DatetimeIndex):
+        raise ValueError('index needs to be datetimeindex!')
+    season = []
+    months = [x.month for x in df.index]
+    for month in months:
+        if month <= 8 and month >=6:
+            season.append('JJA')
+        elif month <=5 and month >= 3:
+            season.append('MAM')
+        elif month >=9 and month<=11:
+            season.append('SON')
+        elif month == 12 or month == 1 or month ==2:
+            season.append('DJF')
+    return pd.Series(season, index=df.index)
+
+
 def anomalize_xr(da_ts, freq='D', time_dim=None, verbose=True):  # i.e., like deseason
     import xarray as xr
     if time_dim is None:
@@ -819,6 +837,38 @@ def grab_n_consecutive_epochs_from_ts(da_ts, sep='nan', n=10, time_dim=None,
         da_list.append(da)
     return da_list
 
+
+def keep_full_years_of_monthly_mean_data(da_ts, verbose=False):
+    name = da_ts.name
+    time_dim = list(set(da_ts.dims))[0]
+    df = da_ts.dropna(time_dim).to_dataframe()
+    # calculate yearly data to drop (if points less than threshold):
+    df['year'] = df.index.year
+    points_in_year = df.groupby(['year']).count()[name].to_frame()
+    # calculate total years with any data:
+    tot_years = points_in_year[points_in_year >0].dropna().count().values.item()
+    # calculate yealy data percentage (from maximum available):
+    points_in_year['percent'] = (points_in_year[name] / 12) * 100.0
+    # get the number of years to drop and the years themselves:
+    number_of_years_to_drop = points_in_year[name][points_in_year['percent'] <= 99].count()
+    percent_of_years_to_drop = 100.0 * \
+        number_of_years_to_drop / len(points_in_year)
+    years_to_drop = points_in_year.index[points_in_year['percent'] <= 99]
+    if verbose:
+        print('for {}: found {} ({:.2f} %) bad years with {:.0f} % drop thresh.'.format(
+                name, number_of_years_to_drop, percent_of_years_to_drop, 99))
+    # now drop the days:
+    for year_to_drop in years_to_drop:
+        df = df[df['year'] != year_to_drop]
+    if verbose:
+        print('for {}: kept {} years.'.format(name, df['year'].unique().size))
+    da = df[name].to_xarray()
+    # add some more metadata:
+    da.attrs['years_kept'] = sorted(df['year'].unique().tolist())
+    da.attrs['years_total'] = tot_years
+    da.attrs['years_dropped'] = number_of_years_to_drop
+    da.attrs['years_dropped_percent'] = '{:.1f}'.format(percent_of_years_to_drop)
+    return da
 
 #def assemble_semi_period(reduced_da_ts):
 #    import numpy as np
@@ -1215,7 +1265,7 @@ def get_all_possible_combinations_from_list(li, reduce_single_list=True):
 
 def gantt_chart(ds, fw='bold', ax=None, pe_dict=None, fontsize=14, linewidth=10,
                 title='RINEX files availability for the Israeli GNSS stations',
-                time_dim='time', antialiased=False):
+                time_dim='time', antialiased=False, colors=None):
     import pandas as pd
     import matplotlib.pyplot as plt
     import numpy as np
@@ -1224,14 +1274,16 @@ def gantt_chart(ds, fw='bold', ax=None, pe_dict=None, fontsize=14, linewidth=10,
     from matplotlib.ticker import AutoMinorLocator
     import matplotlib.patheffects as pe
     # TODO: fix the ticks/ticks labels
-    sns.set_palette(sns.color_palette("tab10", len(ds)))
+    # sns.set_palette(sns.color_palette("tab10", len(ds)))
+    sns.set_palette(sns.color_palette("Dark2", len(ds)))
     if ax is None:
         fig, ax = plt.subplots(figsize=(20, 6))
     names = [x for x in ds]
     vals = range(1, len(ds) + 1)
     xmin = pd.to_datetime(ds[time_dim].min().values) - pd.Timedelta(1, unit='W')
     xmax = pd.to_datetime(ds[time_dim].max().values) + pd.Timedelta(1, unit='W')
-    colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    if colors is None:
+        colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 #    dt_min_list = []
 #    dt_max_list = []
     for i, da in enumerate(ds):
