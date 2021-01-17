@@ -192,12 +192,15 @@ def adjust_lightness(color, amount=0.5):
     return colorsys.hls_to_rgb(c[0], max(0, min(1, amount * c[1])), c[2])
 
 
-def produce_colors_for_pwv_station(scope='annual', zebra=False, as_dict=False):
+def produce_colors_for_pwv_station(scope='annual', zebra=False,
+                                   as_dict=False, as_cat_dict=False):
     import pandas as pd
     stns = group_sites_to_xarray(scope=scope)
     cdict = {'coastal': 'tab:blue',
              'highland': 'tab:green',
              'eastern': 'tab:orange'}
+    if as_cat_dict:
+        return cdict
     # for grp, color in cdict.copy().items():
     #     cdict[grp] = to_rgba(get_named_colors_mapping()[
     #                         color], alpha=1)
@@ -530,10 +533,12 @@ def plot_MLR_GNSS_PW_harmonics_facetgrid(path=work_yuval, season='JJA',
                     leg_loc = None
                 if scope == 'annual':
                     leg_loc = 'upper left'
-                ax = run_MLR_harmonics(harm_site, season=season, cunits=cunits,
-                                       n_max=n_max, plot=True, ax=ax,
-                                       legend_loc=leg_loc, ncol=2,
-                                       legsize=leg_size, lw=2.5)
+                ax, handles, labels = run_MLR_harmonics(harm_site, season=season,
+                                                        cunits=cunits,
+                                                        n_max=n_max, plot=True, ax=ax,
+                                                        legend_loc=leg_loc, ncol=1,
+                                                        legsize=leg_size, lw=2.5,
+                                                        legend_S_only=True)
                 ax.set_xlabel(xlabel, fontsize=16)
                 if ylim is not None:
                     ax.set_ylim(*ylim)
@@ -548,6 +553,8 @@ def plot_MLR_GNSS_PW_harmonics_facetgrid(path=work_yuval, season='JJA',
                 ax.set_title('')
                 ax.set_ylabel('')
                 ax.grid(axis='y', which='minor', linestyle='--')
+                # get this for upper legend:
+                # handles, labels = ax.get_legend_handles_labels()
                 if scope == 'annual':
                     site_label = '{} ({:.0f})'.format(
                         site.upper(), geo.loc[site].alt)
@@ -594,8 +601,20 @@ def plot_MLR_GNSS_PW_harmonics_facetgrid(path=work_yuval, season='JJA',
 #        if i > (da.GNSS.telasize-1):
 #            ax.set_axis_off()
 #            pass
+    # add upper legend for all factes:
+    S_labels = labels[:-2]
+    S_labels = [x.split(' ')[0] for x in S_labels]
+    last_label = 'Mean PWV anomalies'
+    sum_label = labels[-2].split("'")[1]
+    S_labels.append(sum_label)
+    S_labels.append(last_label)
+    fg.fig.legend(handles=handles, labels=S_labels, prop={'size': 20}, edgecolor='k',
+                  framealpha=0.5, fancybox=True, facecolor='white',
+                  ncol=5, fontsize=20, loc='upper center', bbox_to_anchor=(0.5, 1.005),
+                  bbox_transform=plt.gcf().transFigure)
+
     fg.fig.subplots_adjust(
-        top=0.993,
+        top=0.973,
         bottom=0.032,
         left=0.054,
         right=0.995,
@@ -792,11 +811,11 @@ def plot_rinex_availability_with_map(path=work_yuval, gis_path=gis_path,
     if scope == 'diurnal':
         file = path_glob(path, 'GNSS_PW_thresh_50_for_diurnal_analysis.nc')[-1]
     elif scope == 'annual':
-        file = path_glob(path, 'GNSS_PW_thresh_50_homogenized.nc')[-1]
+        file = path / 'GNSS_PW_monthly_thresh_50.nc'
     ds = xr.open_dataset(file)
     just_pw = [x for x in ds if 'error' not in x]
     ds = ds[just_pw]
-    da = ds.to_array('station')
+    da = ds.to_array('station').sel(time=slice(None,'2019'))
     da['station'] = [x.upper() for x in da.station.values]
     ds = da.to_dataset('station')
     # reorder for annual, coastal, highland and eastern:
@@ -804,14 +823,22 @@ def plot_rinex_availability_with_map(path=work_yuval, gis_path=gis_path,
     stns = stns[~pd.isnull(stns)]
     ds = ds[stns]
     # colors:
-    colors = produce_colors_for_pwv_station(scope=scope, zebra=True)
+    colors = produce_colors_for_pwv_station(scope=scope, zebra=False)
     title = 'Daily RINEX files availability for the Israeli GNSS stations'
     ax_gantt = gantt_chart(
         ds,
         ax=ax_gantt,
-        fw='normal',
+        fw='bold',
         title='', colors=colors,
         pe_dict=None, fontsize=fontsize, linewidth=24, antialiased=False)
+
+    years_fmt = mdates.DateFormatter('%Y')
+    # ax_gantt.xaxis.set_major_locator(mdates.YearLocator())
+    ax_gantt.xaxis.set_major_locator(mdates.YearLocator(4))
+    ax_gantt.xaxis.set_minor_locator(mdates.YearLocator(1))
+    ax_gantt.xaxis.set_major_formatter(years_fmt)
+    # ax_gantt.xaxis.set_minor_formatter(years_fmt)
+    ax_gantt.tick_params(axis='x', labelrotation=0)
     # Israel gps ims map:
     ax_map = plot_israel_map(
         gis_path=gis_path, ax=ax_map, ticklabelsize=fontsize)
@@ -835,7 +862,7 @@ def plot_rinex_availability_with_map(path=work_yuval, gis_path=gis_path,
     if scope == 'diurnal':
         removed = ['hrmn', 'gilb', 'lhav']
     elif scope == 'annual':
-        removed = ['hrmn', 'gilb', 'lhav', 'nizn', 'spir']
+        removed = ['hrmn', 'gilb', 'lhav']
     print('removing {} stations from map.'.format(removed))
 #    merged = ['klhv', 'lhav', 'mrav', 'gilb']
     merged = []
@@ -1096,8 +1123,8 @@ def plot_annual_pw(path=work_yuval, fontsize=20, labelsize=18, compare='uerra',
         fg = plot_pw_geographical_segments(
             df_annual, scope='annual',
             kind='mean_month',
-            fg=None,
-            ylim=[10, 31],
+            fg=None, ticklabelcolor='tab:blue',
+            ylim=[10, 31], color='tab:blue',
             fontsize=fontsize,
             labelsize=labelsize, hue=None,
             save=False, bins=None)
@@ -1112,19 +1139,29 @@ def plot_annual_pw(path=work_yuval, fontsize=20, labelsize=18, compare='uerra',
             if pd.isnull(sites_flat[i]):
                 continue
             twinax = ax.twinx()
-            twinax.plot(dftm.index.values, dftm[sites_flat[i]].values, color='r',
-                        markersize=10, marker='s', lw=1, markerfacecolor="None")
+            twinax.plot(dftm.index.values, dftm[sites_flat[i]].values, color='tab:red',
+                        markersize=10, marker='s', lw=1, markerfacecolor="None",
+                        label='Temperature')
             # dftm[sites[i]].plot(ax=twinax, color='r', markersize=10,
             #                     marker='s', lw=1, markerfacecolor="None")
             twinax.set_ylim(7, 30)
-            twinax.tick_params(axis='y', which='major', labelsize=labelsize)
+            twinax.tick_params(axis='y', which='major', labelcolor='tab:red',
+                               labelsize=labelsize)
             if sites_flat[i] in sites.sel(group='eastern'):
-                twinax.set_ylabel(r'Temperature [$\degree$ C]', fontsize=labelsize)
+                twinax.set_ylabel(r'Temperature [$\degree$ C]',
+                                  fontsize=labelsize)
             # fg.fig.canvas.draw()
             # twinax.xaxis.set_ticks(np.arange(1, 13))
             # twinax.tick_params(axis='x', which='major', labelsize=labelsize-2)
+            lines, labels = ax.get_legend_handles_labels()
+            lines2, labels2 = twinax.get_legend_handles_labels()
+        labels = ['PWV', 'Surface Temperature']
+        fg.fig.legend(handles=lines+lines2, labels=labels, prop={'size': 20}, edgecolor='k',
+                      framealpha=0.5, fancybox=True, facecolor='white',
+                      ncol=5, fontsize=20, loc='upper center', bbox_to_anchor=(0.5, 1.005),
+                      bbox_transform=plt.gcf().transFigure)
         fg.fig.subplots_adjust(
-            top=0.973,
+            top=0.97,
             bottom=0.029,
             left=0.049,
             right=0.96,
@@ -2146,7 +2183,7 @@ def produce_table_stats(thresh=50, add_location=True, add_height=True):
     new = [x for x in new.astype(str) if x != 'nan']
     pw_mm = xr.load_dataset(
         work_yuval /
-        'GNSS_PW_monthly_thresh_{:.0f}_homogenized.nc'.format(thresh))
+        'GNSS_PW_monthly_thresh_{:.0f}.nc'.format(thresh))
 
     pw_mm = pw_mm[new]
     df = produce_pw_statistics(
@@ -2556,12 +2593,16 @@ def plot_peak_amplitude_altitude_long_term_pwv(path=work_yuval, era5=False,
     df['alt'] = df_geo['alt']
     df = df.set_index('alt')
     df = df.sort_index()
+    cdict = produce_colors_for_pwv_station(scope='annual', as_cat_dict=True)
+    cdict = dict(zip([x.capitalize() for x in cdict.keys()], cdict.values()))
     if add_a1a2:
         fig, axes=plt.subplots(2, 1, sharex=False, figsize=(8, 10))
         ax = axes[0]
     else:
         ax = None
-    ax = sns.scatterplot(data=df, y='A1', x='alt', hue='Location', ax=ax)
+    # colors=produce_colors_for_pwv_station(scope='annual')
+    ax = sns.scatterplot(data=df, y='A1', x='alt', hue='Location',
+                         palette=cdict, ax=ax, s=100, zorder=20)
     x_coords = []
     y_coords = []
     colors = []
@@ -2578,7 +2619,7 @@ def plot_peak_amplitude_altitude_long_term_pwv(path=work_yuval, era5=False,
     y = df['A1'].values
 
     p = fit_poly_model_xr(x, y, 1, plot=None, ax=None, return_just_p=True)
-    fit_label = 'Linear Fit: {:.2f} mm/km'.format(p[0] * -1000)
+    fit_label = r'Fitted line, slope: {:.2f} mm$\cdot$km$^{{-1}}$'.format(p[0] * -1000)
     fit_poly_model_xr(x,y,1,plot='manual', ax=ax, fit_label=fit_label)
     ax.set_ylabel('PWV annual amplitude [mm]')
     if add_a1a2:
@@ -2588,8 +2629,13 @@ def plot_peak_amplitude_altitude_long_term_pwv(path=work_yuval, era5=False,
     ax.grid()
     ax.legend()
     if add_a1a2:
+        # convert to percent:
+        df['A2A1'] = df['A2A1'].mul(100)
+        df['A2A1std'] = df['A2A1std'].mul(100)
         ax = sns.scatterplot(data=df, y='A2A1', x='alt',
-                             hue='Location', ax=axes[1], legend=True)
+                             hue='Location', ax=axes[1],
+                             legend=True, palette=cdict,
+                             s=100, zorder=20)
         x_coords = []
         y_coords = []
         colors = []
@@ -2601,13 +2647,37 @@ def plot_peak_amplitude_altitude_long_term_pwv(path=work_yuval, era5=False,
         ax.errorbar(x_coords, y_coords,
                     yerr=df['A2A1std'].values, ecolor=colors[0][:,0:-1],
                     ls='', capsize=None, fmt=" ")#, zorder=-1)
-        y = df['A2A1'].values
-        x = df.index.values
-        p = fit_poly_model_xr(x, y, 2, plot='manual', ax=ax,
-                              return_just_p=False,
-                              fit_label='Parabolic Fit')
-        ax.legend(loc='upper left')
-        ax.set_ylabel('PWV semi-annual to annual amplitude ratio')
+        df_upper = df.iloc[9:]
+        y = df_upper['A2A1'].values
+        x = df_upper.index.values
+        p = fit_poly_model_xr(x, y, 1, return_just_p=True)
+        fit_label = r'Fitted line, slope: {:.2f} %$\cdot$km$^{{-1}}$'.format(p[0] * 1000)
+        p = fit_poly_model_xr(x, y, 1, plot='manual', ax=ax,
+                              return_just_p=False, color='r',
+                              fit_label=fit_label)
+        df_lower = df.iloc[:11]
+        mean = df_lower['A2A1'].mean()
+        std = df_lower['A2A1'].std()
+        stderr = std / np.sqrt(len(df_lower))
+        ci = 1.96 * stderr
+        ax.hlines(xmin=df_lower.index.min(), xmax=df_lower.index.max(), y=mean,
+                  color='k', label='Mean ratio: {:.2f} %'.format(mean))
+        ax.fill_between(df_lower.index.values, mean + ci, mean - ci, color="#b9cfe7", edgecolor=None, alpha=0.6)
+        # y = df_lower['A2A1'].values
+        # x = df_lower.index.values
+        # p = fit_poly_model_xr(x, y, 1, return_just_p=True)
+        # fit_label = 'Linear Fit intercept: {:.2f} %'.format(p[1])
+        # p = fit_poly_model_xr(x, y, 1, plot='manual', ax=ax,
+        #                       return_just_p=False, color='k',
+        #                       fit_label=fit_label)
+        # arrange the legend a bit:
+        handles, labels = ax.get_legend_handles_labels()
+        h_stns = handles[1:4]
+        l_stns = labels[1:4]
+        h_fits = [handles[0] , handles[-1]]
+        l_fits = [labels[0], labels[-1]]
+        ax.legend(handles=h_fits+h_stns, labels=l_fits+l_stns, loc='upper left')
+        ax.set_ylabel('PWV semi-annual to annual amplitude ratio [%]')
         ax.set_xlabel('GNSS station height [m a.s.l]')
         ax.grid()
         fig.tight_layout()
@@ -2819,6 +2889,7 @@ def plot_monthly_means_anomalies_with_station_mean(load_path=work_yuval,
                                                    thresh=50, save=True,
                                                    anoms=None, agg='mean',
                                                    fontsize=16,
+                                                   remove_stations=['nizn', 'spir'],
                                                    sort_by=['groups_annual', 'lat']):
     import xarray as xr
     import seaborn as sns
@@ -2839,8 +2910,9 @@ def plot_monthly_means_anomalies_with_station_mean(load_path=work_yuval,
         anoms = xr.load_dataset(
             load_path /
             'GNSS_PW_monthly_anoms_thresh_{:.0f}.nc'.format(thresh))
-
-    df = anoms.to_dataframe()
+    if remove_stations is not None:
+        anoms = anoms[[x for x in anoms if x not in remove_stations]]
+    df = anoms.to_dataframe()[:'2019']
 #    sites = group_sites_to_xarray(upper=True, scope='annual').T
 #    sites_flat = [x.lower() for x in sites.values.flatten() if isinstance(x, str)]
 #    df = df[sites_flat]
@@ -2851,10 +2923,10 @@ def plot_monthly_means_anomalies_with_station_mean(load_path=work_yuval,
     fig = plt.figure(figsize=(20, 10))
     grid = plt.GridSpec(
         2, 1, height_ratios=[
-            2, 1], hspace=0)
+            2, 1], hspace=0.0225)
     ax_heat = fig.add_subplot(grid[0, 0])  # plt.subplot(221)
     ax_group = fig.add_subplot(grid[1, 0])  # plt.subplot(223)
-    cbar_ax = fig.add_axes([0.95, 0.37, 0.01, 0.62])  # [left, bottom, width,
+    cbar_ax = fig.add_axes([0.95, 0.43, 0.0125, 0.45])  # [left, bottom, width,
     # height]
     ax_heat = sns.heatmap(
         df.T,
@@ -2864,7 +2936,7 @@ def plot_monthly_means_anomalies_with_station_mean(load_path=work_yuval,
         ax=ax_heat,
         cbar_ax=cbar_ax,
         cbar_kws={'label': 'PWV anomalies [mm]'}, xticklabels=False)
-    cbar_ax.set_ylabel('PWV anomalies [mm]', fontsize=fontsize)
+    cbar_ax.set_ylabel('PWV anomalies [mm]', fontsize=fontsize-4)
     cbar_ax.tick_params(labelsize=fontsize)
     # activate top ticks and tickslabales:
     ax_heat.xaxis.set_tick_params(
@@ -2873,6 +2945,7 @@ def plot_monthly_means_anomalies_with_station_mean(load_path=work_yuval,
     ax_heat.yaxis.set_tick_params(left='on')
     ax_heat.set_yticklabels(ax_heat.get_ymajorticklabels(),
                             fontweight='bold', fontsize=fontsize)
+    ax_heat.set_xlabel('')
     if agg == 'mean':
         ts = df.T.mean().shift(periods=-1, freq='15D')
     elif agg == 'median':
@@ -2885,14 +2958,13 @@ def plot_monthly_means_anomalies_with_station_mean(load_path=work_yuval,
     # ts.index = dt_as_int
     ts.plot(ax=ax_group, color='k', fontsize=fontsize, lw=2)
     barax = ax_group.twinx()
-    barax.bar(ts.index, weights.values, width=35, color='k', alpha=0.3)
+    barax.bar(ts.index, weights.values, width=35, color='k', alpha=0.2)
     barax.yaxis.set_major_locator(ticker.MaxNLocator(6))
-    barax.set_ylabel('Stations [#]', fontsize=fontsize)
+    barax.set_ylabel('Stations [#]', fontsize=fontsize-4)
     barax.tick_params(labelsize=fontsize)
-    # group_limit = ax_heat.get_xlim()
     ax_group.set_xlim(ts.index.min(), ts.index.max() +
                       pd.Timedelta(15, unit='D'))
-    ax_group.set_ylabel('PWV {} anomalies [mm]'.format(agg), fontsize=fontsize)
+    ax_group.set_ylabel('PWV {} anomalies [mm]'.format(agg), fontsize=fontsize-4)
     # set ticks and align with heatmap axis (move by 0.5):
     # ax_group.set_xticks(dt_as_int)
     # offset = 1
@@ -2909,6 +2981,10 @@ def plot_monthly_means_anomalies_with_station_mean(load_path=work_yuval,
     ax_group.xaxis.set_major_locator(mdates.YearLocator())
     ax_group.xaxis.set_major_formatter(years_fmt)
     ax_group.xaxis.set_minor_locator(mdates.MonthLocator())
+    # ax_group.xaxis.tick_top()
+    # ax_group.xaxis.set_ticks_position('both')
+    # ax_group.tick_params(axis='x', labeltop='off', top='on',
+                         # bottom='on', labelbottom='on')
     ax_group.grid()
     # ax_group.axvline('2015-09-15')
     # ax_group.axhline(2.5)
@@ -2917,7 +2993,7 @@ def plot_monthly_means_anomalies_with_station_mean(load_path=work_yuval,
     fig.subplots_adjust(right=0.946)
     if save:
         filename = 'pw_monthly_means_anomaly_heatmap.png'
-        plt.savefig(savefig_path / filename, bbox_inches='tight')
+        plt.savefig(savefig_path / filename, bbox_inches='tight', pad_inches=0.1)
     return ts
 
 
@@ -3718,7 +3794,7 @@ def plot_climate_classification(path=climate_path, gis_path=gis_path,
             ax_map.annotate(label, xy=(x, y), xytext=(3, 3),
                             textcoords="offset points", color='k',
                             fontweight='bold', fontsize=fontsize - 2)
-    return fg
+    return
 
 
 def group_sites_to_xarray(upper=False, scope='diurnal'):
@@ -3729,9 +3805,9 @@ def group_sites_to_xarray(upper=False, scope='diurnal'):
         group2 = ['NZRT', 'MRAV', 'YOSH', 'JSLM', 'KLHV', 'YRCM', 'RAMO']
         group3 = ['ELRO', 'KATZ', 'DRAG', 'DSEA', 'SPIR', 'NRIF', 'ELAT']
     elif scope == 'annual':
-        group1 = ['KABR', 'BSHM', 'CSAR', 'TELA', 'ALON', 'SLOM']
+        group1 = ['KABR', 'BSHM', 'CSAR', 'TELA', 'ALON', 'SLOM', 'NIZN']
         group2 = ['NZRT', 'MRAV', 'YOSH', 'JSLM', 'KLHV', 'YRCM', 'RAMO']
-        group3 = ['ELRO', 'KATZ', 'DRAG', 'DSEA', 'NRIF', 'ELAT']
+        group3 = ['ELRO', 'KATZ', 'DRAG', 'DSEA', 'SPIR', 'NRIF', 'ELAT']
     if not upper:
         group1 = [x.lower() for x in group1]
         group2 = [x.lower() for x in group2]
@@ -3848,7 +3924,10 @@ def prepare_reanalysis_monthly_pwv_to_dataframe(path=work_yuval, re='era5',
 
 
 def plot_long_term_anomalies_with_trends(path=work_yuval, era5_path=era5_path,
-                             model_name=None, save=True):  # ,aero_path=aero_path):
+                                         model_name=None,
+                                         fontsize=16,
+                                         remove_stations=['nizn', 'spir'],
+                                         save=True):  # ,aero_path=aero_path):
     import xarray as xr
     from aux_gps import anomalize_xr
     from aux_gps import linear_fit_using_scipy_da_ts
@@ -3861,6 +3940,8 @@ def plot_long_term_anomalies_with_trends(path=work_yuval, era5_path=era5_path,
     # load GNSS Israel:
     pw = xr.load_dataset(
         path / 'GNSS_PW_monthly_thresh_50.nc').sel(time=slice('1998', None))
+    if remove_stations is not None:
+        pw = pw[[x for x in pw if x not in remove_stations]]
     pw_anoms = anomalize_xr(pw, 'MS', verbose=False)
     pw_mean = pw_anoms.to_array('station').mean('station')
     pw_mean = pw_mean.sel(time=slice('1998', '2019'))
@@ -3902,7 +3983,8 @@ def plot_long_term_anomalies_with_trends(path=work_yuval, era5_path=era5_path,
     #     era5corr), 'MERRA2, r={:.2f}'.format(merra2corr)]
     labels = ['GNSS', 'ERA5, r={:.2f}'.format(
         era5corr)]
-    ax[0].legend(handles=handles, labels=labels, loc='upper left')
+    ax[0].legend(handles=handles, labels=labels, loc='upper left',
+                 prop={'size': fontsize-2})
 #    if aero_path is not None:
 #        aeroln = aero.plot.line('b-.', ax=ax, alpha=0.8)
 #        aerocorr = df.corr().loc['GNSS', 'AERONET']
@@ -3977,11 +4059,14 @@ def plot_long_term_anomalies_with_trends(path=work_yuval, era5_path=era5_path,
         # ax.set_ylabel('PWV mean anomalies [mm]')
         # ax.legend(labels=[],handles=[trendln[0]])
         # fig.tight_layout()
-        ax[1].legend(handles=handles, labels=labels, loc='upper left')
+        ax[1].legend(handles=handles, labels=labels, loc='upper left',
+                     prop={'size': fontsize-2})
     # ylim = ax.get_ylim()
     # ax.set_ylim(ylim[0], 8.5)
-    ax[0].set_ylabel('PWV anomalies [mm]')
-    ax[1].set_ylabel('PWV anomalies [mm]')
+    ax[0].set_ylabel('PWV anomalies [mm]', fontsize=fontsize)
+    ax[1].set_ylabel('PWV anomalies [mm]', fontsize=fontsize)
+    ax[0].tick_params(labelsize=fontsize)
+    ax[1].tick_params(labelsize=fontsize)
     ax[1].set_xlabel('')
     ax[0].set_xlabel('')
     ax[1].grid()
@@ -3989,7 +4074,7 @@ def plot_long_term_anomalies_with_trends(path=work_yuval, era5_path=era5_path,
     ax[1] = fix_time_axis_ticks(ax[1], limits=['1998-01', '2020-01'])
     ax[0] = fix_time_axis_ticks(ax[0], limits=['1998-01', '2020-01'])
     fig.tight_layout()
-    # fig.subplots_adjust(right=0.946)
+    fig.subplots_adjust(left=0.072)
     if save:
         filename = 'pwv_long_term_anomalies_era5_comparison.png'
         plt.savefig(savefig_path / filename, orientation='portrait')
@@ -4100,6 +4185,7 @@ def plot_day_night_pwv_monthly_mean_std_heatmap(
 def plot_pw_geographical_segments(df, scope='diurnal', kind=None, fg=None,
                                   marker='o', color='b', ylim=[-2, 3],
                                   hue=None, fontsize=14, labelsize=10,
+                                  ticklabelcolor=None,
                                   zorder=0, label=None, save=False, bins=None):
     import xarray as xr
     import numpy as np
@@ -4241,6 +4327,8 @@ def plot_pw_geographical_segments(df, scope='diurnal', kind=None, fg=None,
                 ax.text(.17, .87, site_label, fontsize=fontsize,
                         horizontalalignment='center', fontweight='bold',
                         transform=ax.transAxes)
+                if ticklabelcolor is not None:
+                    ax.tick_params(axis='y', labelcolor=ticklabelcolor)
 #                ax.yaxis.grid(
 #                    True,
 #                    which='minor',
@@ -4393,12 +4481,16 @@ def prepare_harmonics_table(path=work_yuval, season='ALL',
     return df
 
 
-def plot_station_mean_violin_plot(path=work_yuval, fontsize=16, save=True):
+def plot_station_mean_violin_plot(path=work_yuval,
+                                  remove_stations=['nizn','spir'],
+                                  fontsize=16, save=True):
     import xarray as xr
     import seaborn as sns
     import matplotlib.pyplot as plt
     import matplotlib.patches as mpatches
     pw = xr.load_dataset(path / 'GNSS_PW_monthly_anoms_thresh_50.nc')
+    if remove_stations is not None:
+        pw = pw[[x for x in pw if x not in remove_stations]]
     pw_mean = pw.to_array('s').mean('s')
     df = pw_mean.to_dataframe(name='pwv')
     df['month'] = df.index.month
@@ -4411,9 +4503,10 @@ def plot_station_mean_violin_plot(path=work_yuval, fontsize=16, save=True):
     # df = pw_mean.groupby('time.month').std().to_dataframe(name='PWV-SD')
     # df.plot.bar(ax=axes[1], rot=0)
     # axes[1].set_ylabel('PWV anomalies SD [mm]')
-    sns.violinplot(ax=axes[0], data=df, x='month', y='pwv', color='tab:purple',
+    axes[0]= sns.violinplot(ax=axes[0], data=df, x='month', y='pwv', color='tab:purple',
                    fliersize=10, gridsize=250, inner=None, scale='width',
                    hue=None)
+    [x.set_alpha(0.8) for x in axes[0].collections]
     sns.swarmplot(ax=axes[0], x="month", y='pwv', data=df,
                   color="k", edgecolor="gray",
                   hue=None, dodge=False)
@@ -4426,6 +4519,7 @@ def plot_station_mean_violin_plot(path=work_yuval, fontsize=16, save=True):
     sns.swarmplot(ax=axes[1], x="month", y='pwv', data=df,
                   size=4.5, color='k', edgecolor="gray", palette=None,
                   hue='years', dodge=True)
+    [x.set_alpha(0.8) for x in axes[1].collections]
     # remove legend, reorder and re-plot:
     axes[1].get_legend().remove()
     handles, labels = axes[1].get_legend_handles_labels()
@@ -4433,7 +4527,7 @@ def plot_station_mean_violin_plot(path=work_yuval, fontsize=16, save=True):
                    loc='upper left', prop={'size': 16})
     # upper legend:
     color = axes[0].collections[0].get_facecolor()[0]
-    handle = (mpatches.Patch(facecolor=color, edgecolor='k'))
+    handle = (mpatches.Patch(facecolor=color, edgecolor='k', alpha=0.8))
     axes[0].legend(handles=[handle], labels=['1997-2019'],
                    loc='upper left', prop={'size': 16})
     axes[0].grid()
@@ -4507,10 +4601,11 @@ def plot_october_2015(path=work_yuval):
 
 def plot_correlation_pwv_mean_anoms_and_qflux_anoms(era5_path=era5_path,
                                                     work_path=work_yuval,
-                                                    anoms=True, pwv_mm=None,
+                                                    anoms=None, pwv_mm=None,
                                                     all_months=False, mf='qf',
                                                     add_hline=None, title=None,
-                                                    save=True):
+                                                    save=True,
+                                                    remove_stations=['nizn', 'spir']):
     import xarray as xr
     from aux_gps import anomalize_xr
     import matplotlib.pyplot as plt
@@ -4519,20 +4614,22 @@ def plot_correlation_pwv_mean_anoms_and_qflux_anoms(era5_path=era5_path,
     import seaborn as sns
     # first load pw and produce mean anomalies:
     pw = xr.load_dataset(work_path/'GNSS_PW_monthly_thresh_50.nc')
-    if anoms:
+    if remove_stations is not None:
+        pw = pw[[x for x in pw if x not in remove_stations]]
+    if anoms is None:
         pw_anoms = anomalize_xr(pw, 'MS')
         pw_anoms_mean = pw_anoms.to_array('s').mean('s')
     else:
-        pw_anoms_mean = pw['jslm']
+        pw_anoms_mean = pw[anoms]
     if pwv_mm is not None:
         pw_anoms_mean = pwv_mm
     # now load qflux and resmaple to mm:
-    if anoms:
+    if anoms is None:
         ds = xr.load_dataset(
                 era5_path/'ERA5_MF_anomalies_4xdaily_israel_mean_1996-2019.nc')
     else:
-        ds = xr.load_dataset(era5_path / 'ERA5_MF_mm_israel_1996-2019.nc')
-        ds = ds.sel(latitude=32, longitude=35).reset_coords(drop=True)
+        ds = xr.load_dataset(work_path / 'GNSS_ERA5_qf_1996-2019.nc')
+        mf = anoms
     qf_mm = ds[mf].resample(time='MS').mean()
     # add pressure integral:
     iqf = calculate_pressure_integral(qf_mm)/9.79
@@ -4563,12 +4660,12 @@ def plot_correlation_pwv_mean_anoms_and_qflux_anoms(era5_path=era5_path,
         # add line to separate integrated from level
         ax.hlines([37], *ax.get_xlim(), color='k')
         # add boxes around maximal values:
-        ax.hlines([26], [1], [5], color='k')
-        ax.hlines([27], [1], [5], color='k')
-        ax.vlines([1, 2, 3, 4], 26, 27, color='k')
-        ax.hlines([28], [0], [1], color='k')
-        ax.hlines([29], [0], [1], color='k')
-        ax.vlines([0, 1], 28, 29, color='k')
+        ax.hlines([26], [1], [5], color='w', lw=0.5)
+        ax.hlines([27], [1], [5], color='w', lw=0.5)
+        ax.vlines([1, 2, 3, 4], 26, 27, color='w', lw=0.5)
+        ax.hlines([28], [0], [1], color='w', lw=0.5)
+        ax.hlines([29], [0], [1], color='w', lw=0.5)
+        ax.vlines([0, 1], 28, 29, color='w', lw=0.5)
         fig.tight_layout()
         filename = 'pwv_qflux_levels_correlations_months.png'
     else:
