@@ -11,8 +11,8 @@ import scipy.stats as stats
 import matplotlib.pyplot as plt
 
 
-def fit_poly_model_xr(x, y, degree=1, plot='manual', ax=None,
-                      return_just_p=False, fit_label=None):
+def fit_poly_model_xr(x, y, degree=1, plot='manual', ax=None, color='k',
+                      return_just_p=False, logfit=False, fit_label=None):
     import numpy as np
     import matplotlib.pyplot as plt
     p, cov = np.polyfit(x, y, degree, cov=True)
@@ -40,8 +40,12 @@ def fit_poly_model_xr(x, y, degree=1, plot='manual', ax=None,
     if fit_label is None:
         fit_label = 'Fit: {:.2f}'.format(p[0])
         # fit_label = 'Fit: {:.2f} mm/km'.format(p[0] * -1000)
-    ax.plot(x, y_model, ls="-", color='k',
-            linewidth=1.5, alpha=0.8, label=fit_label)
+    if logfit:
+        ax.plot(x, np.exp(y_model), ls="-", color=color,
+                linewidth=1.5, alpha=0.8, label=fit_label)
+    else:
+        ax.plot(x, y_model, ls="-", color=color,
+                linewidth=1.5, alpha=0.8, label=fit_label)
 
     x2 = np.linspace(np.min(x), np.max(x), 100)
     y2 = np.polyval(p, x2)
@@ -49,7 +53,7 @@ def fit_poly_model_xr(x, y, degree=1, plot='manual', ax=None,
     # Confidence Interval (select one)
     if plot is not None:
         if plot == 'manual':
-            ax = plot_ci_manual(t, s_err, n, x, x2, y2, ax=ax)
+            ax = plot_ci_manual(t, s_err, n, x, x2, y2, ax=ax, logfit=logfit, color=color)
         elif plot == 'boot':
             ax = plot_ci_bootstrap(x, y, resid, ax=ax)
 
@@ -61,7 +65,7 @@ def fit_poly_model_xr(x, y, degree=1, plot='manual', ax=None,
     return p
 
 
-def plot_ci_manual(t, s_err, n, x, x2, y2, ax=None):
+def plot_ci_manual(t, s_err, n, x, x2, y2, logfit=False, ax=None, color='k'):
     """Return an axes of confidence bands using a simple approach.
 
     Notes
@@ -79,7 +83,10 @@ def plot_ci_manual(t, s_err, n, x, x2, y2, ax=None):
         ax = plt.gca()
 
     ci = t * s_err * np.sqrt(1/n + (x2 - np.mean(x)) **2 / np.sum((x - np.mean(x))**2))
-    ax.fill_between(x2, y2 + ci, y2 - ci, color="#b9cfe7", edgecolor=None, alpha=0.6)
+    if logfit:
+        ax.fill_between(x2, np.exp(y2 + ci), np.exp(y2 - ci), color="#b9cfe7", edgecolor=None, alpha=0.6)
+    else:
+        ax.fill_between(x2, y2 + ci, y2 - ci, color="#b9cfe7", edgecolor=None, alpha=0.6)
 
     return ax
 
@@ -113,9 +120,9 @@ def plot_ci_bootstrap(xs, ys, resid, nboot=500, ax=None):
     for _ in range(nboot):
         resamp_resid = resid[bootindex(0, len(resid) - 1, len(resid))]
         # Make coeffs of for polys
-        pc = sp.polyfit(xs, ys + resamp_resid, 1)
+        pc = np.polyfit(xs, ys + resamp_resid, 1)
         # Plot bootstrap cluster
-        ax.plot(xs, sp.polyval(pc, xs), "b-",
+        ax.plot(xs, np.polyval(pc, xs), "b-",
                 linewidth=2, alpha=3.0 / float(nboot))
 
     return ax
