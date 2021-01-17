@@ -245,6 +245,7 @@ def produce_PWV_flux_from_ERA5_UVQ(
 def produce_era5_field_at_gnss_coords(era5_da, savepath=None,
                                       pw_path=work_yuval):
     import xarray as xr
+    from aux_gps import save_ncfile
     print('reading ERA5 {} field.'.format(era5_da.name))
     gps = produce_geo_gnss_solved_stations(plot=False)
     era5_pw_list = []
@@ -258,6 +259,12 @@ def produce_era5_field_at_gnss_coords(era5_da, savepath=None,
         da = da.reset_coords(drop=True)
         era5_pw_list.append(da)
     ds = xr.merge(era5_pw_list)
+    if savepath is not None:
+        name = era5_da.name
+        yrmin = era5_da['time'].dt.year.min().item()
+        yrmax = era5_da['time'].dt.year.max().item()
+        filename = 'GNSS_ERA5_{}_{}-{}.nc'.format(name, yrmin, yrmax)
+        save_ncfile(ds, savepath, filename)
     return ds
 
 
@@ -1216,11 +1223,12 @@ def produce_geo_gnss_solved_stations(path=gis_path,
             'csar',
             'tela',
             'alon',
-            'slom']}
+            'slom',
+            'nizn']}
     highland_dict = {key: 1 for (key) in
                      ['nzrt', 'mrav', 'yosh', 'jslm', 'klhv', 'yrcm', 'ramo']}
     eastern_dict = {key: 2 for (key) in
-                    ['elro', 'katz', 'drag', 'dsea', 'nrif', 'elat']}
+                    ['elro', 'katz', 'drag', 'dsea', 'spir', 'nrif', 'elat']}
     groups_dict = {**coastal_dict, **highland_dict, **eastern_dict}
     stations['groups_annual'] = pd.Series(groups_dict)
     # define groups with climate code
@@ -1240,7 +1248,7 @@ def produce_geo_gnss_solved_stations(path=gis_path,
     gr2_dict = {key: 1 for (key) in
                 ['slom', 'klhv', 'yrcm', 'drag']}
     gr3_dict = {key: 2 for (key) in
-                ['ramo', 'dsea', 'nrif', 'elat']}
+                ['nizn', 'ramo', 'dsea', 'spir', 'nrif', 'elat']}
     groups_dict = {**gr1_dict, **gr2_dict, **gr3_dict}
     stations['groups_climate'] = pd.Series(groups_dict)
     if climate_path is not None:
