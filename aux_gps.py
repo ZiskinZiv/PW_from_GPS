@@ -524,7 +524,7 @@ def select_months(da_ts, months, remove=False, reindex=True):
 def run_MLR_harmonics(harmonic_dss, season=None, n_max=4,
                       plot=True, cunits='cpd',
                       ax=None, legend_loc=None, ncol=1,
-                      legsize=8, lw=1):
+                      legsize=8, lw=1, legend_S_only=False):
     """ change cunits to 'cpy' to process annual harmonics"""
     from sklearn.linear_model import LinearRegression
     from sklearn.metrics import explained_variance_score
@@ -570,22 +570,38 @@ def run_MLR_harmonics(harmonic_dss, season=None, n_max=4,
         if ax is None:
             fig, ax = plt.subplots(figsize=(8, 6))
         markers = ['s', 'x', '^', '>', '<', 'X']
-        colors = ['tab:blue', 'tab:red', 'tab:green', 'tab:orange',
+        colors = ['tab:cyan', 'tab:brown', 'tab:pink', 'tab:orange',
                   'tab:purple', 'tab:yellow']
-        styles = ['-', '--', '-.', ':', 'None', ' ']
-        for i, cycle in enumerate(harmonic[cunits].values):
-            harmonic[name + '_mean'].sel({cunits: cycle}).plot(ax=ax, linestyle=styles[i], color=colors[i], linewidth=lw) # marker=markers[i])
-        harmonic[name + '_mean'].sum(cunits).plot(ax=ax, marker=None, color='k', alpha=0.7, linewidth=lw)
-        harmonic[name].plot(ax=ax, marker='o', linewidth=0., color='k', alpha=0.7)
+        styles = ['--', '-.', ':', ' ', 'None', ' ']
         S = ['S{}'.format(x) for x in harmonic[cunits].values]
         S_total = ['+'.join(S)]
         S = ['S{} ({:.0f}%)'.format(x, exp_dict[int(x)]) for x in harmonic[cunits].values]
-        ax.legend(
-            S + S_total + [field],
-            prop={'size': legsize},
-            framealpha=0.5,
-            fancybox=True,
-            loc=legend_loc, ncol=ncol, columnspacing=0.75, handlelength=1.0)
+        for i, cycle in enumerate(harmonic[cunits].values):
+            harmonic[name + '_mean'].sel({cunits: cycle}).plot(ax=ax,
+                                                               linestyle=styles[i],
+                                                               color=colors[i],
+                                                               linewidth=lw,
+                                                               label=S[i]) # marker=markers[i])
+        harmonic[name + '_mean'].sum(cunits).plot(ax=ax, marker=None, color='k',
+                                                  alpha=0.7, linewidth=lw, label=S_total)
+        harmonic[name].plot(ax=ax, marker='o', linewidth=0., color='k', alpha=0.7, label=field)
+        handles, labels = ax.get_legend_handles_labels()
+        if legend_S_only:
+            handles1 = handles[:-2]
+            labels1 = labels[:-2]
+            ax.legend(
+                handles=handles1, labels=labels1,
+                prop={'size': legsize},
+                framealpha=0.5,
+                fancybox=True,
+                loc=legend_loc, ncol=ncol, columnspacing=0.75, handlelength=1.0)
+        else:
+            ax.legend(
+                S + S_total + [field],
+                prop={'size': legsize},
+                framealpha=0.5,
+                fancybox=True,
+                loc=legend_loc, ncol=ncol, columnspacing=0.75, handlelength=1.0)
 #        ax.grid()
         ax.set_xlabel('Time of day [UTC]')
         # ax.set_ylabel('{} anomalies [mm]'.format(field))
@@ -593,7 +609,10 @@ def run_MLR_harmonics(harmonic_dss, season=None, n_max=4,
             ax.set_title('Annual {} diurnal cycle for {} station'.format(field, name.upper()))
         else:
             ax.set_title('{} diurnal cycle for {} station in {}'.format(field, name.upper(), season))
-        return ax
+        if legend_S_only:
+            return ax, handles, labels
+        else:
+            return ax
     else:
         return exp_dict
 
