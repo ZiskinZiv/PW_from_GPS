@@ -144,8 +144,10 @@ def prepare_ERA5_moisture_flux(era5_path=era5_path):
     from aux_gps import save_ncfile
     from aux_gps import anomalize_xr
     import numpy as np
-    ds = xr.load_dataset(
-        era5_path / 'ERA5_UVQ_4xdaily_israel_1996-2019.nc')
+    from aux_gps import convert_wind_direction
+    from dask.diagnostics import ProgressBar
+    ds = xr.open_dataset(
+        era5_path / 'ERA5_UVQ_4xdaily_israel_1996-2019.nc', chunks={'level': 5})
     # ds = ds.resample(time='D', keep_attrs=True).mean(keep_attrs=True)
     # ds.attrs['action'] = 'resampled to 1D from 12:00UTC data points'
     mf = (ds['q'] * ds['u']).to_dataset(name='qu')
@@ -157,19 +159,32 @@ def prepare_ERA5_moisture_flux(era5_path=era5_path):
     mf['qv'].attrs['units'] = ds['v'].attrs['units']
     mf['qv'].attrs['long_name'] = 'V component moisture flux'
     mf['qv'].attrs['standard_name'] = 'northward moisture flux'
-    mf['qf'] = np.sqrt(mf['qu']**2 + mf['qv']**2)
+    mf['qf'], mf['qfdir'] = convert_wind_direction(u=mf['qu'], v=mf['qv'])
     mf['qf'].attrs['units'] = ds['v'].attrs['units']
     mf['qf'].attrs['long_name'] = 'moisture flux magnitude'
-    mf['qfdir'] = 270 - np.rad2deg(np.arctan2(mf['qv'], mf['qu']))
+    # mf['qfdir'] = 270 - np.rad2deg(np.arctan2(mf['qv'], mf['qu']))
     mf['qfdir'].attrs['units'] = 'deg'
-    mf['qfdir'].attrs['long_name'] = 'moisture flux direction'
+    mf['qfdir'].attrs['long_name'] = 'moisture flux direction (meteorological)'
     mf = mf.sortby('latitude')
     mf = mf.sortby('level', ascending=False)
-    save_ncfile(mf, era5_path, 'ERA5_MF_4xdaily_israel_1996-2019.nc')
+    comp = dict(zlib=True, complevel=9)
+    encoding_mf = {var: comp for var in mf}
+    mf_delayed = mf.to_netcdf(era5_path / 'ERA5_MF_4xdaily_israel_1996-2019.nc',
+                              'w', encoding=encoding_mf, compute=False)
     mf_anoms = anomalize_xr(mf, freq='MS', time_dim='time')
     mf_anoms_mean = mf_anoms.mean('latitude').mean('longitude')
-    save_ncfile(mf_anoms_mean, era5_path,
-                'ERA5_MF_anomalies_4xdaily_israel_mean_1996-2019.nc')
+    encoding_mf_anoms = {var: comp for var in mf_anoms}
+    mf_anoms_delayed = mf_anoms_mean.to_netcdf(era5_path / 'ERA5_MF_anomalies_4xdaily_israel_mean_1996-2019.nc',
+                                               'w', encoding=encoding_mf_anoms, compute=False)
+    with ProgressBar():
+        results = mf_delayed.compute()
+    with ProgressBar():
+        results1 = mf_anoms_delayed.compute()
+    # save_ncfile(mf, era5_path, 'ERA5_MF_4xdaily_israel_1996-2019.nc')
+    # mf_anoms = anomalize_xr(mf, freq='MS', time_dim='time')
+    # mf_anoms_mean = mf_anoms.mean('latitude').mean('longitude')
+    # save_ncfile(mf_anoms_mean, era5_path,
+    #             'ERA5_MF_anomalies_4xdaily_israel_mean_1996-2019.nc')
     return
 
 
