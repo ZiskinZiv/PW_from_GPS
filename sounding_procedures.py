@@ -299,7 +299,7 @@ def analyse_radiosonde_climatology(path=sound_path, data_type='phys',
     ax.set_xlabel('{} [{}]'.format(name, units))
     ax.set_ylim(100, 10000)
     ax.get_yaxis().set_major_formatter(ScalarFormatter())
-    locmaj = LogLocator(base=10,numticks=12) 
+    locmaj = LogLocator(base=10,numticks=12)
     ax.yaxis.set_major_locator(locmaj)
     locmin = LogLocator(base=10.0,subs=(0.2,0.4,0.6,0.8),numticks=12)
     ax.yaxis.set_minor_locator(locmin)
@@ -326,7 +326,7 @@ def process_new_field_from_radiosonde_data(phys_ds, dim='sound_time',
             long_name = 'Precipatiable water'
             Dewpt = phys_ds['Dewpt'].isel({dim: i})
             P = phys_ds['P'].isel({dim: i})
-            try: 
+            try:
                 field, unit = wrap_xr_metpy_pw(Dewpt, P, bottom=bottom, top=top)
             except ValueError:
                 field, unit = wrap_xr_metpy_pw(Dewpt, P, bottom=None, top=None)
@@ -513,14 +513,14 @@ def wrap_xr_metpy_pw(dewpt, pressure, bottom=None, top=None, verbose=False,
             if np.isnan(pre_val):
                 pw_list.append(np.nan)
                 continue
-            pw = precipitable_water(dew_values, pressure_values, bottom=None,
+            pw = precipitable_water(pressure_values, dew_values, bottom=None,
                                     top=pre_val)
             pw_units = pw.units.format_babel('~P')
             pw_list.append(pw.magnitude)
         pw = np.array(pw_list)
         return pw, pw_units
     else:
-        pw = precipitable_water(dew_values, pressure_values,
+        pw = precipitable_water(pressure_values, dew_values,
                                 bottom=bottom_with_units, top=top_with_units)
         pw_units = pw.units.format_babel('~P')
         return pw.magnitude, pw_units
@@ -1162,7 +1162,7 @@ def calculate_temperature_lapse_rate_from_2s_radiosonde(ds, radio_time=2,
         T1 = T.sel(time=radio_time, method='nearest')
         H1 = H.sel(time=radio_time, method='nearest')
         seconds_after = T['time'].sel(time=radio_time, method='nearest').dt.seconds.item()
-        if dsize == 1:         
+        if dsize == 1:
             height = H.sel(time=radio_time, method='nearest').item()
             dz = height - H0.item()
         elif dsize == 2:
@@ -1170,13 +1170,13 @@ def calculate_temperature_lapse_rate_from_2s_radiosonde(ds, radio_time=2,
             dz = (H1 - H0).mean().item()
         method = 'time'
     elif radio_time is None and Height is not None:
-        if dsize == 1:         
+        if dsize == 1:
             t1 = (np.abs(H-Height)).idxmin().item()
         elif dsize == 2:
             t1 = (np.abs(H-Height)).idxmin('time')
         H1 = H.sel(time=t1)
         T1 = T.sel(time=t1)
-        if dsize == 1:         
+        if dsize == 1:
             height = H1.item()
             seconds_after = T['time'].sel(time=t1).dt.seconds.item()
             dz = height - H0.item()
@@ -1352,7 +1352,7 @@ def calculate_richardson_from_2s_radiosonde(ds, g=9.79474, method='bulk'):
         V0 = V.isel(time=0)
         VPT_0 = VPT.isel(time=0)
         U0 = 0
-        V0 = 0 
+        V0 = 0
         U2 = (U - U0)**2.0
         V2 = (V - V0)**2.0
         Rib_values = g * (VPT - VPT_0) * (H - H0) / ((VPT_0) * (U2 + V2))
@@ -1462,7 +1462,7 @@ def find_MLH_from_2s_WW2014(ds, alt_cutoff=None, eps=50,
             found.append(row_sorted[1:4])
         elif diff_2_0 <= eps:
             found.append(row_sorted[0:3])
-            
+
 #        mlh_0 = vc_df.value_counts()[vc_df.value_counts() > 2]
 #        if mlh_0.empty:
 #            continue
@@ -1725,7 +1725,7 @@ def wrap_xr_metpy_brunt_vaisala_f2(Height, PT, axis=0, verbose=False):
     da.attrs['long_name'] = 'Brunt-Vaisala Frequency squared'
     return da
 
-    
+
 def wrap_xr_metpy_virtual_temperature(T, MR, verbose=False):
     from metpy.calc import virtual_temperature
     from metpy.units import units
@@ -1839,7 +1839,7 @@ def wrap_xr_metpy_vapor_pressure(P, MR, verbose=False):
     except KeyError:
         MR_unit = 'kg/kg'
         if verbose:
-            print('assuming mixing ratio units are kg/kg...')  
+            print('assuming mixing ratio units are kg/kg...')
     P_values = P.values * units(P_unit)
     MR_values = MR.values * units(MR_unit)
     VP = vapor_pressure(P_values, MR_values)
@@ -2993,7 +2993,7 @@ def combine_EDT_and_PTU_radiosonde(sound_path=sound_path, savepath=None,
     import pandas as pd
     import numpy as np
     import xarray as xr
-    
+
     def interpolate_one_da(da, dim_over, freq='2s'):
         ds_list = []
         for stime in dim_over:
@@ -3009,7 +3009,7 @@ def combine_EDT_and_PTU_radiosonde(sound_path=sound_path, savepath=None,
                 ds_list.append(interpolated)
         ds = xr.concat(ds_list, dim_over.name)
         return ds
-        
+
     ptu_file = path_glob(sound_path, 'bet_dagan_PTU_Wind_sounding_*.nc')[-1]
     edt_file = path_glob(sound_path, 'bet_dagan_edt_sounding*.nc')[-1]
     ptu = xr.load_dataset(ptu_file)
