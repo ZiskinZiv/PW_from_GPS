@@ -336,6 +336,35 @@ def linear_fit_using_scipy_da_ts(da_ts, model='TSEN', slope_factor=3650.25,
     return trend_ds, results_dict
 
 
+def scatter_plot_and_fit(df, x, y, color='b', ax=None):
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    if ax is None:
+        fig, ax = plt.subplots()
+    sns.scatterplot(x=x, y=y, data=df, ax=ax, color=color, s=10)
+
+
+def linear_regression_scikit_learn(da1, da2, same_dim='time'):
+    from sklearn.metrics import mean_squared_error
+    from sklearn.linear_model import LinearRegression
+    import numpy as np
+    from aux_gps import dim_intersection
+    shared = dim_intersection([da1, da2])
+    da1 = da1.sel({same_dim: shared})
+    da2 = da2.sel({same_dim: shared})
+    X = da1.dropna(same_dim).values.reshape(-1, 1)
+    y = da2.dropna(same_dim).values
+    lr = LinearRegression()
+    lr.fit(X, y)
+    slope = lr.coef_[0]
+    inter = lr.intercept_
+    pred = lr.predict(X)
+    rmse = mean_squared_error(y, pred, squared=False)
+    resid = pred - y
+    mean = np.sum(resid)
+    return slope, inter, mean, rmse
+
+
 def split_equal_da_ts_around_datetime(da_ts, dt='2014-05-01'):
     time_dim = list(set(da_ts.dims))[0]
     x1 = da_ts.dropna(time_dim).sel({time_dim: slice(None, dt)})
@@ -774,7 +803,7 @@ def get_season_for_pandas_dtindex(df):
     return pd.Series(season, index=df.index)
 
 
-def anomalize_xr(da_ts, freq='D', time_dim=None, verbose=True):  # i.e., like deseason
+def anomalize_xr(da_ts, freq='D', time_dim=None, units=None, verbose=True):  # i.e., like deseason
     import xarray as xr
     if time_dim is None:
         time_dim = list(set(da_ts.dims))[0]
@@ -792,25 +821,32 @@ def anomalize_xr(da_ts, freq='D', time_dim=None, verbose=True):  # i.e., like de
             print('removing daily means from {}'.format(name))
         frq = 'daily'
         date = groupby_date_xr(da_ts)
-        da_anoms = da_ts.groupby(date) - da_ts.groupby(date).mean()
+        grp = date
     elif freq == 'H':
         if verbose:
             print('removing hourly means from {}'.format(name))
         frq = 'hourly'
-        da_anoms = da_ts.groupby('{}.hour'.format(
-            time_dim)) - da_ts.groupby('{}.hour'.format(time_dim)).mean()
+        grp = '{}.hour'.format(time_dim)
     elif freq == 'MS':
         if verbose:
             print('removing monthly means from {}'.format(name))
         frq = 'monthly'
-        da_anoms = da_ts.groupby('{}.month'.format(
-            time_dim)) - da_ts.groupby('{}.month'.format(time_dim)).mean()
+        grp = '{}.month'.format(time_dim)
     elif freq == 'AS':
         if verbose:
             print('removing yearly means from {}'.format(name))
         frq = 'yearly'
-        da_anoms = da_ts.groupby('{}.year'.format(
-            time_dim)) - da_ts.groupby('{}.year'.format(time_dim)).mean()
+        grp = '{}.year'.format(time_dim)
+    # calculate climatology:
+    climatology = da_ts.groupby(grp).mean()
+    da_anoms = da_ts.groupby(grp) - climatology
+    if units == '%':
+        da_anoms = 100.0 * (da_anoms.groupby(grp) / climatology)
+        # da_anoms = 100.0 * (da_anoms / da_ts.mean())
+        # da_anoms = 100.0 * (da_ts.groupby(grp)/climatology - 1)
+        # da_anoms = 100.0 * (da_ts.groupby(grp)-climatology) / da_ts
+        if verbose:
+            print('Using % as units.')
     da_anoms = da_anoms.reset_coords(drop=True)
     da_anoms.attrs.update(attrs)
     da_anoms.attrs.update(action='removed {} means'.format(frq))
@@ -819,6 +855,8 @@ def anomalize_xr(da_ts, freq='D', time_dim=None, verbose=True):  # i.e., like de
         for x in da_ts:
             da_anoms[x].attrs.update(da_attrs.get(x))
             da_anoms[x].attrs.update(action='removed {} means'.format(frq))
+            if units == '%':
+                da_anoms[x].attrs.update(units='%')
     return da_anoms
 
 
@@ -1284,7 +1322,7 @@ def get_all_possible_combinations_from_list(li, reduce_single_list=True):
 
 def gantt_chart(ds, fw='bold', ax=None, pe_dict=None, fontsize=14, linewidth=10,
                 title='RINEX files availability for the Israeli GNSS stations',
-                time_dim='time', antialiased=False, colors=None):
+                time_dim='time', antialiased=False, colors=None, grid=False):
     import pandas as pd
     import matplotlib.pyplot as plt
     import numpy as np
@@ -1329,6 +1367,8 @@ def gantt_chart(ds, fw='bold', ax=None, pe_dict=None, fontsize=14, linewidth=10,
         #plt.show()
         # ds[da][~ds[da].isnull()] = i + 1
         # ds[da] = ds[da].fillna(0)
+    if grid:
+        ax.grid(True, axis='x')
     # yticks and their labels:
     ax.set_yticks(vals)
     ax.set_yticklabels(names[::-1], fontweight=fw, fontsize=fontsize)
@@ -1541,6 +1581,50 @@ def piecewise_linear_fit(da, k=1, plot=True):
         for piece in time_pieces:
             da_final.sel({time_dim: piece}).plot(color='r', ax=ax)
     return da_final
+
+
+def convert_wind_direction(u=None, v=None, ws=None, wd=None, verbose=False):
+    """
+
+
+    Parameters
+    ----------
+    u : TYPE, optional
+        zonal direction. The default is None.
+    v : TYPE, optional
+        meridional direction. The default is None.
+    ws : TYPE, optional
+        magnitude. The default is None.
+    wd : TYPE, optional
+        meteorological direction. The default is None.
+    verbose : TYPE, optional
+        DESCRIPTION. The default is False.
+
+    Raises
+    ------
+    ValueError
+        DESCRIPTION.
+
+    Returns
+    -------
+    None.
+
+    """
+    import numpy as np
+    if (u is None and v is None) and (ws is not None and wd is not None):
+        if verbose:
+            print('converting from WS, WD to U, V')
+        u = -ws*np.sin(np.deg2rad(wd))
+        v = -ws*np.cos(np.deg2rad(wd))
+        return u, v
+    elif (u is not None and v is not None) and (ws is None and wd is None):
+        if verbose:
+            print('converting from U, V to WS, WD')
+        wd = 180 + np.rad2deg(np.arctan2(u, v))
+        ws = np.sqrt(u**2+v**2)
+        return ws, wd
+    else:
+        raise ValueError('choose either ws and wd or u and v!')
 
 
 def lmfit_params(model_name, k=None):
