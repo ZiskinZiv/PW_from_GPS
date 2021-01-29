@@ -11,6 +11,13 @@ from PW_paths import work_yuval
 # TODO: check if lmfit accepts- datetimeindex, xarrays and NaNs.
 # TODO: if not, build func to replace datetimeindex to numbers and vise versa
 
+# def high_sample_and_smooth_dataframe_time_series(df):
+#     import pandas as pd
+#     dfs = df.copy()
+#     dfs.index = pd.to_timedelta(dfs.index, unit='d')
+#     dfs = dfs.resample('15S').interpolate(method='cubic').T.mean().resample('5T').mean()
+#     better = better.reset_index(drop=True)
+#     better.index = np.arange(-days_prior, days_after, 1/pts_per_day)
 
 def replace_xarray_time_series_with_its_group(da, grp='month', time_dim='time'):
     """run the same func on each dim in da"""
@@ -2193,10 +2200,10 @@ def choose_time_groupby_arg(da_ts, time_dim='time', grp='hour'):
 
 
 def time_series_stack(time_da, time_dim='time', grp1='hour', grp2='month',
-                      plot=True):
+                      return_just_stacked_da=False):
     """Takes a time-series xr.DataArray objects and reshapes it using
     grp1 and grp2. output is a xr.Dataset that includes the reshaped DataArray
-    , its datetime-series and the grps. plots the mean also"""
+    , its datetime-series and the grps."""
     import xarray as xr
     import pandas as pd
     # try to infer the freq and put it into attrs for later reconstruction:
@@ -2251,7 +2258,10 @@ def time_series_stack(time_da, time_dim='time', grp1='hour', grp2='month',
         mindex = pd.MultiIndex.from_product([grps1], names=[grp1])
         stacked_ds.coords['all'] = mindex
     # unstack:
+    # ds = stacked_ds.unstack('all')[time_da.name]
     ds = stacked_ds.unstack('all')
+    if return_just_stacked_da:
+        ds = ds[time_da.name]
     ds.attrs = attrs
 #    if plot:
 #        plot_stacked_time_series(ds[name].mean('rest', keep_attrs=True))
