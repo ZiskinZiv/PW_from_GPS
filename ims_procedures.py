@@ -61,11 +61,12 @@ def save_daily_IMS_params_at_GNSS_loc(ims_path=ims_path,
 
 
 def produce_bet_dagan_long_term_pressure(path=ims_path, rate='1H',
-                                         savepath=None):
+                                         savepath=None, fill_from_jerusalem=True):
     import xarray as xr
     from aux_gps import xr_reindex_with_date_range
     from aux_gps import get_unique_index
     from aux_gps import save_ncfile
+    from aux_gps import anomalize_xr
     # load manual old measurements and new 3 hr ones:
     bd_man = xr.open_dataset(
         path / 'IMS_hourly_03hr.nc')['BET-DAGAN-MAN_2520_ps']
@@ -88,8 +89,32 @@ def produce_bet_dagan_long_term_pressure(path=ims_path, rate='1H',
     bd_inter = bd_inter.sortby('time')
     bd_inter.name = 'bet-dagan'
     bd_inter.attrs['action'] = 'interpolated from 3H'
+    if fill_from_jerusalem:
+        print('filling missing gaps from 2018 with jerusalem')
+        jr_10 = xr.load_dataset(
+            path / 'IMS_BP_israeli_hourly.nc')['JERUSALEM-CENTRE']
+        jr_10_anoms = anomalize_xr(jr_10, 'MS')
+        bd_anoms = anomalize_xr(bd_inter, 'MS')
+        bd_anoms = xr.concat(
+            [bd_anoms.dropna('time'), jr_10_anoms.dropna('time')], 'time', join='inner')
+        bd_anoms = get_unique_index(bd_anoms)
+        bd_anoms = bd_anoms.sortby('time')
+        bd_anoms = xr_reindex_with_date_range(bd_anoms, freq='5T')
+        bd_anoms = bd_anoms.interpolate_na('time', method='cubic', max_gap='2H')
+        bd_anoms.name = 'bet-dagan'
+        bd_anoms.attrs['action'] = 'interpolated from 3H'
+        bd_anoms.attrs['filled'] = 'using Jerusalem-centre'
+        bd_anoms.attrs['long_name'] = 'Pressure Anomalies'
+        bd_anoms.attrs['units'] = 'hPa'
+        if savepath is not None:
+            yr_min = bd_anoms.time.min().dt.year.item()
+            yr_max = bd_anoms.time.max().dt.year.item()
+            filename = 'IMS_BD_anoms_5min_ps_{}-{}.nc'.format(
+                yr_min, yr_max)
+            save_ncfile(bd_anoms, savepath, filename)
+        return bd_anoms
     if savepath is not None:
-        filename = 'IMS_BD_hourly_ps.nc'
+        # filename = 'IMS_BD_hourly_ps.nc'
         yr_min = bd_inter.time.min().dt.year.item()
         yr_max = bd_inter.time.max().dt.year.item()
         filename = 'IMS_BD_hourly_ps_{}-{}.nc'.format(yr_min, yr_max)
