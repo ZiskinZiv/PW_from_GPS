@@ -713,17 +713,18 @@ def mean_ZWD_over_sound_time_and_fit_tstm(path=work_yuval,
     from aux_gps import multi_time_coord_slice
     from aux_gps import path_glob
     from aux_gps import xr_reindex_with_date_range
+    from sounding_procedures import load_field_from_radiosonde
     from sounding_procedures import get_field_from_radiosonde
     """mean the WetZ over the gps station soundings datetimes to get a more
         accurate realistic measurement comparison to soundings"""
-    tpw = get_field_from_radiosonde(path=sound_path, field='PW', data_type=data_type,
-                                    reduce='max',dim='Height', plot=False, times=times)
+    # tpw = load_field_from_radiosonde(path=sound_path, field='PW', data_type=data_type,
+    #                                 reduce='max',dim='Height', plot=False)
     min_time = get_field_from_radiosonde(path=sound_path, field='min_time', data_type='phys',
-                                         reduce=None, plot=False, times=times)
+                                         reduce=None, plot=False)
     max_time = get_field_from_radiosonde(path=sound_path, field='max_time', data_type='phys',
-                                         reduce=None, plot=False, times=times)
+                                         reduce=None, plot=False)
     sound_time = get_field_from_radiosonde(path=sound_path, field='sound_time', data_type='phys',
-                                           reduce=None, plot=False, times=times)
+                                           reduce=None, plot=False)
     min_time = min_time.dropna('sound_time').values
     max_time = max_time.dropna('sound_time').values
     # load the zenith wet daley for GPS (e.g.,TELA) station:
@@ -748,7 +749,7 @@ def mean_ZWD_over_sound_time_and_fit_tstm(path=work_yuval,
     ds['{}_error'.format(gps_station)] = zwd_error.groupby(
         zwd[da_group.name]).mean('time')
     ds['sound_time'] = sound_time.dropna('sound_time')
-    ds['tpw_bet_dagan'] = tpw
+    # ds['tpw_bet_dagan'] = tpw
     wetz = ds['{}'.format(gps_station)]
     wetz_error = ds['{}_error'.format(gps_station)]
     # do the same for surface temperature:
@@ -766,7 +767,7 @@ def mean_ZWD_over_sound_time_and_fit_tstm(path=work_yuval,
     ts_sound = ts_sound.rename({'sound_time': 'time'})
     # prepare ts-tm data:
     tm = get_field_from_radiosonde(path=sound_path, field='Tm', data_type=data_type,
-                                   reduce='min', dim='Height', plot=False)
+                                   reduce=None, dim='Height', plot=False)
     ts = get_field_from_radiosonde(path=sound_path, field='Ts', data_type=data_type,
                                    reduce=None, dim='Height', plot=False)
     tstm = xr.Dataset()
@@ -784,7 +785,7 @@ def mean_ZWD_over_sound_time_and_fit_tstm(path=work_yuval,
         wetz_error**2.0 + dk**2.0)
     # divide by kappa calculated from bet_dagan ts to get bet_dagan zwd:
     k = kappa(tm, Tm_input=True)
-    ds['zwd_bet_dagan'] = ds['tpw_bet_dagan'] / k
+    # ds['zwd_bet_dagan'] = ds['tpw_bet_dagan'] / k
     return ds, mda
 
 
@@ -1477,6 +1478,49 @@ def produce_geo_df(gis_path=gis_path, plot=True):
 #                        textcoords="offset points")
         plt.tight_layout()
     return ims, gps
+
+
+def save_GNSS_PWV_hydro_stations(path=work_yuval, stacked=False):
+    import xarray as xr
+    from aux_gps import save_ncfile
+    from aux_gps import time_series_stack
+    if not stacked:
+        file = path / 'ZWD_thresh_0_for_hydro_analysis.nc'
+        zwd = xr.load_dataset(file)
+        ds, mda = mean_ZWD_over_sound_time_and_fit_tstm()
+        ds = save_GNSS_PW_israeli_stations(model_name='TSEN',
+                                           thresh=0,mda=mda,
+                                           extra_name='for_hydro_analysis')
+    else:
+        if stacked == 'stack':
+            file = path / 'GNSS_PW_thresh_0_for_hydro_analysis.nc'
+            pwv = xr.open_dataset(file)
+            pwv = pwv[[x for x in pwv if '_error' not in x]]
+            pwv.load()
+            pwv_stacked = pwv.map(time_series_stack, grp2='dayofyear', return_just_stacked_da=True)
+            filename = 'GNSS_PW_thresh_0_hour_dayofyear_rest.nc'
+            save_ncfile(pwv_stacked, path, filename)
+        elif stacked == 'unstack':
+            file = path / 'GNSS_PW_thresh_0_for_hydro_analysis.nc'
+            pwv = xr.open_dataset(file)
+            pwv = pwv[[x for x in pwv if '_error' not in x]]
+            pwv.load()
+            pwv = pwv.map(produce_PWV_anomalies_from_stacked_groups,
+                          grp1='hour', grp2='dayofyear', plot=False)
+            filename = 'GNSS_PW_thresh_0_hour_dayofyear_anoms.nc'
+            save_ncfile(pwv, path, filename)
+    return
+
+
+def save_GNSS_ZWD_hydro_stations(path=work_yuval):
+    import xarray as xr
+    from aux_gps import save_ncfile
+    file = path / 'ZWD_unselected_israel_1996-2020.nc'
+    zwd = xr.load_dataset(file)
+    # zwd = zwd[[x for x in zwd.data_vars if '_error' not in x]]
+    filename = 'ZWD_thresh_0_for_hydro_analysis.nc'
+    save_ncfile(zwd, path, filename)
+    return
 
 
 def save_GNSS_PW_israeli_stations(path=work_yuval, ims_path=ims_path,
@@ -3454,7 +3498,28 @@ def perform_annual_harmonic_analysis_all_GNSS(path=work_yuval,
     return dss_all
 
 
-def produce_PW_anomalies(pw_da, grp1='hour', grp2='dayofyear', plot=True):
+def produce_PWV_anomalies_from_stacked_groups(pw_da, grp1='hour', grp2='dayofyear', plot=True):
+    """
+    use time_series_stack (return the whole ds including the time data)
+    to produce the anomalies per station
+
+    Parameters
+    ----------
+    pw_da : TYPE
+        DESCRIPTION.
+    grp1 : TYPE, optional
+        DESCRIPTION. The default is 'hour'.
+    grp2 : TYPE, optional
+        DESCRIPTION. The default is 'dayofyear'.
+    plot : TYPE, optional
+        DESCRIPTION. The default is True.
+
+    Returns
+    -------
+    pw_anom : TYPE
+        DESCRIPTION.
+
+    """
     from aux_gps import time_series_stack
     import xarray as xr
     from aux_gps import get_unique_index
@@ -3465,7 +3530,7 @@ def produce_PW_anomalies(pw_da, grp1='hour', grp2='dayofyear', plot=True):
     fname = pw_da.name
     print('computing anomalies for {}'.format(fname))
     stacked_pw = time_series_stack(pw_da, time_dim=time_dim, grp1=grp1,
-                                   grp2=grp2, plot=False)
+                                   grp2=grp2, return_just_stacked_da=False)
     pw_anom = stacked_pw.copy(deep=True)
     attrs = pw_anom.attrs
     rest_dim = [x for x in stacked_pw.dims if x != grp1 and x != grp2][0]
