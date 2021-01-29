@@ -5754,3 +5754,511 @@ def plot_ERA5_wind_speed_direction_profiles_at_bet_dagan(ear5_path=era5_path,
         filename = 'ERA5_wind_speed_dir_bet-dagan_profiles.png'
         plt.savefig(savefig_path / filename, orientation='potrait')
     return fig
+
+
+def plot_PWV_anomalies_groups_maps(work_path=work_yuval,
+                                   fontsize=16, save=True):
+    import xarray as xr
+    import seaborn as sns
+    import numpy as np
+    import matplotlib.pyplot as plt
+    sns.set_style('whitegrid')
+    sns.set_style('ticks')
+    cmap = sns.color_palette('terrain', as_cmap=True)
+    file = work_path/'GNSS_PW_thresh_0_hour_dayofyear_rest.nc'
+    pw = xr.open_dataset(file)
+    drag = pw['drag'].mean('rest')
+    elat = pw['elat'].mean('rest')
+    dsea = pw['dsea'].mean('rest')
+    da = xr.concat([drag, dsea, elat], 'station')
+    da['station'] = ['DRAG', 'DSEA', 'ELAT']
+    fg = da.plot.contourf(levels=41, row='station', add_colorbar=False,
+                          figsize=(6.5, 13), cmap=cmap)
+    for ax in fg.fig.axes:
+        ax.set_xticks(np.arange(50, 400, 50))
+        ax.tick_params(labelsize=fontsize)
+        ax.set_ylabel('Hour of day [UTC]', fontsize=fontsize)
+        title = ax.get_title()
+        ax.set_title(title, fontsize=fontsize)
+    fg.fig.axes[-1].set_xlabel('Day of Year', fontsize=fontsize)
+    cbar_ax = fg.fig.add_axes([0.87, 0.05, 0.025, 0.917])
+    fg.add_colorbar(cax=cbar_ax)
+    cb = fg.cbar
+    cb.ax.tick_params(labelsize=fontsize-2)
+    cb.set_label('PWV [mm]', size=fontsize-2)
+    fg.fig.subplots_adjust(top=0.967,
+                           bottom=0.05,
+                           left=0.125,
+                           right=0.85,
+                           hspace=0.105,
+                           wspace=0.2)
+    if save:
+        filename = 'PWV_climatology_drag_dsea_elat_stacked_groups.png'
+        plt.savefig(savefig_path / filename, orientation='potrait')
+    return fg
+
+
+def plot_hydro_pwv_before_event_motivation(work_path=work_yuval,
+                                           hydro_path=hydro_path,
+                                           days_prior=3, fontsize=16,
+                                           save=True, smoothed=False):
+    import xarray as xr
+    from hydro_procedures import hydro_pw_dict
+    from hydro_procedures import produce_pwv_days_before_tide_events
+    from hydro_procedures import read_station_from_tide_database
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+    import pandas as pd
+
+    def smooth_df(df):
+        import numpy as np
+        dfs = df.copy()
+        dfs.index = pd.to_timedelta(dfs.index, unit='d')
+        dfs = dfs.resample('15S').interpolate(method='cubic')
+        dfs = dfs.resample('5T').mean()
+        dfs = dfs.reset_index(drop=True)
+        dfs.index = np.linspace(df.index[0], df.index[-1], dfs.index.size)
+        return dfs
+    sns.set_style('whitegrid')
+    sns.set_style('ticks')
+    pw = xr.open_dataset(work_path / 'GNSS_PW_thresh_0_hour_dayofyear_anoms.nc')
+    pws = [pw[x].load() for x in hydro_pw_dict.keys()]
+    dfs = [read_station_from_tide_database(hydro_pw_dict.get(x), hydro_path=hydro_path) for x in hydro_pw_dict.keys()]
+    df_list = []
+    for pw_da, df_da in zip(pws, dfs):
+        df, _, _ = produce_pwv_days_before_tide_events(pw_da, df_da,
+                                                       plot=False,
+                                                       days_prior=days_prior,
+                                                       drop_thresh=0.5,
+                                                       max_gap='12H')
+        df_list.append(df)
+    n_events = [len(x.columns) for x in df_list]
+    if smoothed:
+        df_list = [smooth_df(x) for x in df_list]
+    df_mean = pd.concat([x.T.mean().to_frame(x.columns[0].split('_')[0]) for x in df_list], axis=1)
+    fig, ax = plt.subplots(figsize=(8, 10))
+    labels = ['{}: mean from {} events'.format(x.upper(), y) for x,y in zip(df_mean.columns, n_events)]
+    for i, station in enumerate(df_mean.columns):
+        sns.lineplot(data=df_mean, y=station, x=df.index, ax=ax, label=labels[i], lw=4)
+    ax.grid(True)
+    ax.axvline(0, color='k', linestyle='--')
+    ax.set_xlabel('Days before/after tide event', fontsize=fontsize)
+    ax.set_ylabel('PWV anomalies [mm]', fontsize=fontsize)
+    ax.tick_params(labelsize=fontsize)
+    ax.legend(prop={'size': fontsize-2})
+    fig.tight_layout()
+    if save:
+        filename = 'PWV_anoms_dsea_drag_elat_{}_prior_tides.png'.format(days_prior)
+        plt.savefig(savefig_path / filename, orientation='potrait')
+    return fig
+
+
+def plot_typical_tide_event_with_PWV(work_path=work_yuval,
+                                     hydro_path=hydro_path,
+                                     station='drag',
+                                     days_prior=1, days_after=1, fontsize=16,
+                                     date='2014-03-09T16:50',
+                                     save=True, smoothed=True):
+    # possible dates: 2014-11-16T13:50, 2018-04-26T18:55
+    import xarray as xr
+    import pandas as pd
+    from hydro_procedures import hydro_pw_dict
+
+    def smooth_df(df):
+        dfs = df.copy()
+        # dfs.index = pd.to_timedelta(dfs.index, unit='d')
+        dfs = dfs.resample('15S').interpolate(method='cubic')
+        dfs = dfs.resample('5T').mean()
+        # dfs = dfs.reset_index(drop=True)
+        # dfs.index = np.linspace(df.index[0], df.index[-1], dfs.index.size)
+        return dfs
+    colors = sns.color_palette('tab10',n_colors=2)
+    sns.set_style('whitegrid')
+    sns.set_style('ticks')
+    # load hydro graphs:
+    hgs = xr.open_dataset(hydro_path/'hydro_graphs.nc')
+    # select times:
+    dt_start = pd.to_datetime(date) - pd.Timedelta(days_prior, unit='d')
+    dt_end = pd.to_datetime(date) + pd.Timedelta(days_after, unit='d')
+    hs_id = hydro_pw_dict.get(station)
+    hg_da = hgs['HS_{}_flow'.format(hs_id)].sel(time=slice(dt_start, dt_end)).dropna('time')
+    hg_da = hg_da.resample(time='15T').mean().interpolate_na('time', method='spline', max_gap='12H')
+    # load pwv:
+    pw = xr.open_dataset(work_path / 'GNSS_PW_thresh_0_for_hydro_analysis.nc')[station]
+    pw = pw.sel(time=slice(dt_start, dt_end))
+    df = pw.to_dataframe(name='pwv')
+    df['flow'] = hg_da.to_dataframe()
+    if smoothed:
+        df = smooth_df(df)
+    fig, ax = plt.subplots(figsize=(6, 8))
+    flow_label = r'Flow [m$^3\cdot$ sec$^{-1}$]'
+    # df['time'] = df.index
+    # sns.lineplot(data=df, y='flow', x=df.index, ax=ax, label=48125, lw=2, color=colors[0])
+    # twin = ax.twinx()
+    # sns.lineplot(data=df, y='pwv', x=df.index, ax=twin, label='DRAG', lw=2, color=colors[1])
+    df.index.name=''
+    ax = df['flow'].plot(color=colors[0], ax=ax, lw=2)
+    twin = df['pwv'].plot(secondary_y=True,
+                          color=colors[1], ax=ax, lw=2)
+    ax.set_ylim(0, 20)
+    ax.set_ylabel(flow_label, fontsize=fontsize)
+    twin.set_ylabel('PWV [mm]', fontsize=fontsize)
+    ax.tick_params(axis='y', labelsize=fontsize, labelcolor=colors[0])
+    twin.tick_params(axis='y',labelsize=fontsize, labelcolor=colors[1])
+    # align_yaxis_np(ax, twin)
+    # alignYaxes([ax, twin], [0, 10])
+    l = ax.get_ylim()
+    l2 = twin.get_ylim()
+    f = lambda x : l2[0]+(x-l[0])/(l[1]-l[0])*(l2[1]-l2[0])
+    ticks = f(ax.get_yticks())
+    twin.yaxis.set_major_locator(ticker.FixedLocator(ticks))
+    ax.grid(True, axis='y',color='k', ls='--')
+    # twin.grid(True, axis='y',color=colors[1], ls=':')
+    # ax.set_ylim(0, 20)
+    fig.tight_layout()
+    if save:
+        filename = 'typical_tide_event_with_pwv'
+        plt.savefig(savefig_path / filename, orientation='potrait')
+    return df
+
+
+def plot_hydro_pwv_anomalies_with_station_mean(work_path=work_yuval,
+                                               hydro_path=hydro_path,
+                                               days_prior=3, fontsize=14,
+                                               save=True, smoothed=False):
+    import xarray as xr
+    from hydro_procedures import hydro_pw_dict
+    from hydro_procedures import produce_pwv_days_before_tide_events
+    from hydro_procedures import read_station_from_tide_database
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+    import pandas as pd
+    import numpy as np
+
+    def smooth_df(df):
+        import numpy as np
+        dfs = df.copy()
+        dfs.index = pd.to_timedelta(dfs.index, unit='d')
+        dfs = dfs.resample('15S').interpolate(method='cubic')
+        dfs = dfs.resample('5T').mean()
+        dfs = dfs.reset_index(drop=True)
+        dfs.index = np.linspace(df.index[0], df.index[-1], dfs.index.size)
+        return dfs
+    sns.set_style('whitegrid')
+    sns.set_style('ticks')
+    pw = xr.open_dataset(work_path / 'GNSS_PW_thresh_0_hour_dayofyear_anoms.nc')
+    pws = [pw[x].load() for x in hydro_pw_dict.keys()]
+    dfs = [read_station_from_tide_database(hydro_pw_dict.get(x), hydro_path=hydro_path) for x in hydro_pw_dict.keys()]
+    df_list = []
+    for pw_da, df_da in zip(pws, dfs):
+        df, _, _ = produce_pwv_days_before_tide_events(pw_da, df_da,
+                                                       plot=False,
+                                                       days_prior=days_prior,
+                                                       drop_thresh=0.75,
+                                                       max_gap='6H')
+        df_list.append(df)
+    n_events = [len(x.columns) for x in df_list]
+    if smoothed:
+        df_list = [smooth_df(x) for x in df_list]
+    df_mean = pd.concat([x.T.mean().to_frame(x.columns[0].split('_')[0]) for x in df_list], axis=1)
+
+    df_mean.columns = [x.upper() for x in df_mean.columns]
+    df_mean.index = pd.to_timedelta(df_mean.index, unit='D')
+    df_mean = df_mean.resample('30T').mean()
+    df_mean.index = np.linspace(-3, 1, len(df_mean.index))
+    # weights = df.count(axis=1).shift(periods=-1, freq='15D').astype(int)
+    fig = plt.figure(figsize=(5, 8))
+    grid = plt.GridSpec(
+        2, 1, height_ratios=[
+            1, 1], hspace=0.0225)
+    ax_heat = fig.add_subplot(grid[0, 0])  # plt.subplot(221)
+    ax_group = fig.add_subplot(grid[1, 0])  # plt.subplot(223)
+    cbar_ax = fig.add_axes([0.95, 0.50, 0.02, 0.38])  # [left, bottom, width,
+    # height]
+    ax_heat = sns.heatmap(
+        df_mean.T,
+        cmap='gist_earth_r',
+        yticklabels=True,
+        ax=ax_heat,
+        cbar_ax=cbar_ax,
+        cbar_kws={'label': 'PWV anomalies [mm]'}, xticklabels=False)
+    cbar_ax.set_ylabel('PWV anomalies [mm]', fontsize=fontsize-2)
+    cbar_ax.tick_params(labelsize=fontsize)
+    # activate top ticks and tickslabales:
+    ax_heat.xaxis.set_tick_params(
+        bottom='off', labelbottom='off', labelsize=fontsize)
+    # emphasize the yticklabels (stations):
+    ax_heat.yaxis.set_tick_params(left='on')
+    labels = ['{} ({})'.format(x.get_text(), y) for x, y in zip(ax_heat.get_ymajorticklabels(), n_events)]
+    ax_heat.set_yticklabels(labels,
+                            fontweight='bold', fontsize=fontsize,
+                            rotation='horizontal')
+    ax_heat.set_xlabel('')
+    ts = df_mean.T.mean() #.shift(periods=-1, freq='15D')
+    ts_std = df_mean.T.std()
+    # ts.index= pd.to_timedelta(ts.index, unit='D')
+    ts.index.name = ''
+    ts.plot(ax=ax_group, color='k', fontsize=fontsize, lw=2)
+    ax_group.fill_between(x=ts.index, y1=ts-ts_std, y2=ts+ts_std, color='k', alpha=0.4)
+    # barax = ax_group.twinx()
+    # barax.bar(ts.index, weights.values, width=35, color='k', alpha=0.2)
+    # barax.yaxis.set_major_locator(ticker.MaxNLocator(6))
+    # barax.set_ylabel('Stations [#]', fontsize=fontsize-4)
+    # barax.tick_params(labelsize=fontsize)
+    ax_group.set_xlim(ts.index.min(), ts.index.max())  #+
+                      # pd.Timedelta(15, unit='D'))
+    ax_group.set_ylabel('PWV mean anomalies [mm]', fontsize=fontsize-2)
+    ax_group.set_xlabel('Days before/after a tide event', fontsize=fontsize-2)
+    # set ticks and align with heatmap axis (move by 0.5):
+    # ax_group.xaxis.set_major_locator(ticker.MultipleLocator(0.25))
+    # ax_group.set_xticks(np.arange(-3, 1, 0.25))
+    # offset = 1
+    # ax_group.xaxis.set(ticks=np.arange(offset / 2.,
+    #                                   max(ts.index) + 1 - min(ts.index),
+    #                                   offset),
+    #                   ticklabels=ts.index)
+    # # move the lines also by 0.5 to align with heatmap:
+    # lines = ax_group.lines  # get the lines
+    # [x.set_xdata(x.get_xdata() - min(ts.index) + 0.5) for x in lines]
+    # ax_group.xaxis.set(ticks=xticks, ticklabels=xticks_labels)
+    # ax_group.xaxis.set(ticks=xticks)
+    # mytime = mdates.DateFormatter('%D-%H')
+    # ax_group.xaxis.set_major_formatter(mytime)
+    # ax_group.xaxis.set_major_locator(mdates.DayLocator(interval=0.5))
+    # xticks = pd.timedelta_range(pd.Timedelta(-3, unit='D'), pd.Timedelta(1, unit='D'), freq='3H')
+    # ax_group.set_xticks(xticks)
+    ax_group.axvline(0, color='r', ls='--')
+    # ax_heat.axvline(0, color='r', ls='--')
+    ax_group.grid(True)
+    fig.tight_layout()
+    fig.subplots_adjust(right=0.946)
+    if save:
+        filename = 'PWV_anoms_{}_prior_tides.png'.format(days_prior)
+        plt.savefig(savefig_path / filename, bbox_inches='tight', pad_inches=0.1)
+    return ax_group
+
+
+def produce_hydro_and_GNSS_stations_table(work_path=work_yuval,
+                                          hydro_path=hydro_path, gis_path=gis_path):
+    from PW_stations import produce_geo_gnss_solved_stations
+    from hydro_procedures import hydro_pw_dict, hydro_st_name_dict
+    from hydro_procedures import read_hydro_metadata
+    from hydro_procedures import get_hydro_near_GNSS
+    import xarray as xr
+    import pandas as pd
+    stns = [x for x in hydro_pw_dict.keys()]
+    df_gnss = produce_geo_gnss_solved_stations(plot=False,
+                                               add_distance_to_coast=False)
+    df_gnss = df_gnss.loc[stns]
+    df_gnss['ID'] = df_gnss.index.str.upper()
+    pd.options.display.float_format = '{:.2f}'.format
+    df = df_gnss[['name', 'ID', 'lat', 'lon', 'alt']]
+    df['alt'] = df['alt'].map('{:,.0f}'.format)
+    cols = ['GNSS Station name', 'Station ID', 'Latitude [N]',
+            'Longitude [E]', 'Altitude [m a.s.l]']
+    df.columns = cols
+    # df.loc['spir', 'GNSS station name'] = 'Sapir'
+    hydro_meta = read_hydro_metadata(hydro_path, gis_path, plot=False)
+    hdf = hydro_meta.loc[:, ['id', 'alt', 'lat', 'lon']]
+    hdf = hdf.set_index('id')
+    hdf = hdf.loc[[x for x in hydro_pw_dict.values()], :]
+    hdf['station_name'] = [x for x in hydro_st_name_dict.values()]
+    hdf['nearest_gnss'] = [x.upper() for x in hydro_pw_dict.keys()]
+    hdf1 = get_hydro_near_GNSS(radius=15, plot=False)
+    li = []
+    for st, hs_id in hydro_pw_dict.items():
+        dis = hdf1[hdf1['id'] == hs_id].loc[:, st]
+        li.append(dis.values[0])
+    hdf['distance_to_gnss'] = [x/1000.0 for x in li]
+    hdf['alt'] = hdf['alt'].map('{:,.0f}'.format)
+    hdf['station_number'] = [int(x) for x in hydro_pw_dict.values()]
+    hdf['distance_to_gnss'] = hdf['distance_to_gnss'].map('{:,.0f}'.format)
+    # add tide events per station:
+    file = hydro_path / 'hydro_tides_hourly_features_with_positives.nc'
+    tides = xr.load_dataset(file)['Tides']
+    tide_count = tides.to_dataset('GNSS').to_dataframe().count()
+    hdf['tides'] = [x for x in tide_count]
+    hdf = hdf[['station_name', 'station_number', 'lat', 'lon', 'alt', 'nearest_gnss', 'distance_to_gnss', 'tides']]
+    hdf.columns = ['Hydro station name', 'Station ID', 'Latitude [N]',
+            'Longitude [E]', 'Altitude [m a.s.l]', 'Nearest GNSS station', 'Distance to GNSS station [km]', 'Flood events near GNSS station']
+    return df, hdf
+
+
+def plot_hydro_events_climatology(hydro_path=hydro_path, fontsize=16, save=True):
+    import xarray as xr
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    sns.set_style('whitegrid')
+    sns.set_style('ticks')
+    file = hydro_path / 'hydro_tides_hourly_features_with_positives.nc'
+    X = xr.load_dataset(file)['X']
+    df = X['sample'].groupby('sample.month').count().to_dataframe()
+    fig, ax = plt.subplots(figsize=(8, 6))
+    df.plot(kind='bar', ax=ax, rot=0, legend=False)
+    ax.grid(True)
+    ax.set_ylabel('Number of flood events [#]', fontsize=fontsize)
+    ax.set_xlabel('month', fontsize=fontsize)
+    ax.tick_params(labelsize=fontsize)
+    fig.tight_layout()
+    if save:
+        filename = 'tides_count_climatology.png'
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
+    return fig
+
+
+def plot_hydro_GNSS_periods_and_map(path=work_yuval, gis_path=gis_path,
+                                    ims=False, dem_path=dem_path,
+                                    hydro_path=hydro_path,
+                                    fontsize=18, save=True):
+
+    from aux_gps import gantt_chart
+    import xarray as xr
+    import pandas as pd
+    import geopandas as gpd
+    from PW_stations import produce_geo_gnss_solved_stations
+    from aux_gps import geo_annotate
+    from ims_procedures import produce_geo_ims
+    from hydro_procedures import hydro_pw_dict
+    import cartopy.crs as ccrs
+    from hydro_procedures import read_hydro_metadata
+    sns.set_style('whitegrid')
+    sns.set_style('ticks')
+    fig = plt.figure(figsize=(20, 15))
+    grid = plt.GridSpec(1, 2, width_ratios=[
+        5, 5], wspace=0.125)
+    ax_gantt = fig.add_subplot(grid[0, 0])  # plt.subplot(221)
+    ax_map = fig.add_subplot(grid[0, 1], projection=ccrs.PlateCarree())  # plt.subplot(122)
+    extent = [34, 36.3, 29.2, 32.5]
+    ax_map.set_extent(extent)
+#    fig, ax = plt.subplots(1, 2, sharex=False, sharey=False, figsize=(20, 6))
+    # RINEX gantt chart:
+    file = hydro_path /  'hydro_tides_hourly_features.nc'
+    ds = xr.open_dataset(file)
+    just_pw = [x for x in hydro_pw_dict.keys()]
+    ds = ds[just_pw]
+    da = ds.to_array('station')
+    da['station'] = [x.upper() for x in da.station.values]
+    ds = da.to_dataset('station')
+    # colors:
+    # title = 'Daily RINEX files availability for the Israeli GNSS stations'
+    ax_gantt = gantt_chart(
+        ds,
+        ax=ax_gantt,
+        fw='bold', grid=True,
+        title='', colors=None,
+        pe_dict=None, fontsize=fontsize, linewidth=24, antialiased=False)
+    years_fmt = mdates.DateFormatter('%Y')
+    # ax_gantt.xaxis.set_major_locator(mdates.YearLocator())
+    ax_gantt.xaxis.set_major_locator(mdates.YearLocator(4))
+    ax_gantt.xaxis.set_minor_locator(mdates.YearLocator(1))
+    ax_gantt.xaxis.set_major_formatter(years_fmt)
+    # ax_gantt.xaxis.set_minor_formatter(years_fmt)
+    ax_gantt.tick_params(axis='x', labelrotation=0)
+    # Israel gps ims map:
+    ax_map = plot_israel_map(
+        gis_path=gis_path, ax=ax_map, ticklabelsize=fontsize)
+    # overlay with dem data:
+    cmap = plt.get_cmap('terrain', 41)
+    dem = xr.open_dataarray(dem_path / 'israel_dem_250_500.nc')
+    # dem = xr.open_dataarray(dem_path / 'israel_dem_500_1000.nc')
+    dem = dem.sel(lat=slice(29.2, 32.5), lon=slice(34, 36.3))
+    fg = dem.plot.imshow(ax=ax_map, alpha=0.5, cmap=cmap,
+                         vmin=dem.min(), vmax=dem.max(), add_colorbar=False)
+#    scale_bar(ax_map, 50)
+    cbar_kwargs = {'fraction': 0.1, 'aspect': 50, 'pad': 0.03}
+    cb = plt.colorbar(fg, **cbar_kwargs)
+    cb.set_label(label='meters above sea level',
+                 size=fontsize, weight='normal')
+    cb.ax.tick_params(labelsize=fontsize)
+    ax_map.set_xlabel('')
+    ax_map.set_ylabel('')
+    # ax_map.xaxis.set_major_locator(ticker.MaxNLocator(2))
+    # ax_map.yaxis.set_major_locator(ticker.MaxNLocator(5))
+    # ax_map.yaxis.set_major_formatter(lat_formatter)
+    # ax_map.xaxis.set_major_formatter(lon_formatter)
+    # ax_map.gridlines(draw_labels=True, dms=False, x_inline=False,
+    #                  y_inline=False, xformatter=lon_formatter, yformatter=lat_formatter,
+    #                  xlocs=ticker.MaxNLocator(2), ylocs=ticker.MaxNLocator(5))
+    # fig.canvas.draw()
+    ax_map.set_xticks([34, 35, 36])
+    ax_map.set_yticks([29.5, 30, 30.5, 31, 31.5, 32, 32.5])
+    ax_map.tick_params(top=True, bottom=True, left=True, right=True,
+                       direction='out', labelsize=fontsize)
+    gps = produce_geo_gnss_solved_stations(path=gis_path, plot=False)
+    gps = gps.loc[just_pw, :]
+    # gps_list = [x for x in gps.index if x not in merged and x not in removed]
+    gps.plot(ax=ax_map, edgecolor='black', marker='s',
+             alpha=1.0, markersize=55, facecolor="None", linewidth=2, zorder=3)
+    to_plot_offset = ['nizn', 'ramo', 'nrif']
+
+    for x, y, label in zip(gps.lon, gps.lat, gps.index.str.upper()):
+        if label.lower() in to_plot_offset:
+            ax_map.annotate(label, xy=(x, y), xytext=(4, -12),
+                            textcoords="offset points", color='k',
+                            fontweight='bold', fontsize=fontsize - 2)
+        else:
+            ax_map.annotate(label, xy=(x, y), xytext=(3, 3),
+                            textcoords="offset points", color='k',
+                            fontweight='bold', fontsize=fontsize - 2)
+#    geo_annotate(ax_map, gps_normal_anno.lon, gps_normal_anno.lat,
+#                 gps_normal_anno.index.str.upper(), xytext=(3, 3), fmt=None,
+#                 c='k', fw='normal', fs=10, colorupdown=False)
+#    geo_annotate(ax_map, gps_offset_anno.lon, gps_offset_anno.lat,
+#                 gps_offset_anno.index.str.upper(), xytext=(4, -6), fmt=None,
+#                 c='k', fw='normal', fs=10, colorupdown=False)
+    # plot bet-dagan:
+    df = pd.Series([32.00, 34.81]).to_frame().T
+    df.index = ['Bet-Dagan']
+    df.columns = ['lat', 'lon']
+    bet_dagan = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.lon,
+                                                                 df.lat),
+                                 crs=gps.crs)
+    bet_dagan.plot(ax=ax_map, color='black', edgecolor='black',
+                   marker='x', linewidth=2, zorder=2)
+    geo_annotate(ax_map, bet_dagan.lon, bet_dagan.lat,
+                 bet_dagan.index, xytext=(4, -6), fmt=None,
+                 c='k', fw='bold', fs=fontsize - 2, colorupdown=False)
+    # now add hydro stations:
+    hydro_meta = read_hydro_metadata(hydro_path, gis_path, plot=False)
+    hm = hydro_meta.loc[:, ['id', 'name', 'alt', 'lat', 'lon']]
+    hm = hm.set_index('id')
+    hm = hm.loc[[x for x in hydro_pw_dict.values()], :]
+    hmgdf = gpd.GeoDataFrame(hm, geometry=gpd.points_from_xy(hm.lon, hm.lat), crs=gps.crs)
+    hmgdf.plot(ax=ax_map, edgecolor='black', marker='o',
+               alpha=1.0, markersize=55, facecolor='tab:pink', zorder=4)
+#    plt.legend(['GNSS \nreceiver sites',
+#                'removed \nGNSS sites',
+#                'merged \nGNSS sites',
+#                'radiosonde\nstation'],
+#               loc='upper left', framealpha=0.7, fancybox=True,
+#               handletextpad=0.2, handlelength=1.5)
+    if ims:
+        print('getting IMS temperature stations metadata...')
+        ims = produce_geo_ims(path=gis_path, freq='10mins', plot=False)
+        ims.plot(ax=ax_map, marker='o', edgecolor='tab:orange', alpha=1.0,
+                 markersize=35, facecolor="tab:orange", zorder=1)
+    # ims, gps = produce_geo_df(gis_path=gis_path, plot=False)
+        print('getting solved GNSS israeli stations metadata...')
+        plt.legend(['GNSS \nstations',
+                    'radiosonde\nstation', 'IMS stations'],
+                   loc='upper left', framealpha=0.7, fancybox=True,
+                   handletextpad=0.2, handlelength=1.5, fontsize=fontsize - 2)
+    else:
+        plt.legend(['GNSS \nstations',
+                    'radiosonde\nstation',
+                    'hydro tide\nstations'],
+                   loc='upper left', framealpha=0.7, fancybox=True,
+                   handletextpad=0.2, handlelength=1.5, fontsize=fontsize - 2)
+    fig.subplots_adjust(top=0.95,
+                        bottom=0.11,
+                        left=0.05,
+                        right=0.95,
+                        hspace=0.2,
+                        wspace=0.2)
+    # plt.legend(['IMS stations', 'GNSS stations'], loc='upper left')
+
+    filename = 'hydro_israeli_gnss_map.png'
+#    caption('Daily RINEX files availability for the Israeli GNSS station network at the SOPAC/GARNER website')
+    if save:
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
+    return fig
