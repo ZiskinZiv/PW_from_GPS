@@ -12,11 +12,182 @@ gis_path = work_yuval / 'gis'
 ims_path = work_yuval / 'IMS_T'
 hydro_ml_path = hydro_path / 'hydro_ML'
 from PW_paths import savefig_path
+# 'tela': 17135
+hydro_pw_dict = {'nizn': 25191, 'klhv': 21105, 'yrcm': 55165,
+                 'ramo': 56140, 'drag': 48125, 'dsea': 48192,
+                 'spir': 56150, 'nrif': 60105, 'elat': 60190
+                 }
 
-hydro_pw_dict = {'drag': 48125, 'dsea': 48199,
-                 'elat': 60170, 'tela': 17135}
+hydro_st_name_dict = {25191: 'Lavan - new nizana road',
+                      21105: 'Shikma - Tel milcha',
+                      55165: 'Mamasheet',
+                      56140: 'Ramon',
+                      48125: 'Draga',
+                      48192: 'Chiemar - down the cliff',
+                      46150: 'Nekrot - Top',
+                      60105: 'Yaelon - Kibutz Yahel',
+                      60190: 'Solomon - Eilat'}
+    # TODO: treat all pwv from events as follows:
+#    For each station:
+#    0) rolling mean to all pwv 1 hour
+#    1) take 288 points before events, if < 144 gone then drop
+#    2) interpolate them 12H using spline/other
+#    3) then, check if dts coinside 1 day before, if not concat all dts+pwv for each station
+#    4) prepare features, such as pressure, doy, try to get pressure near the stations and remove the longterm hour dayofyear
+#   pressure in BD anoms is highly correlated with SEDOM (0.9) and ELAT (0.88) so no need for local pressure features
+# fixed filling with jerusalem centre since 2 drag events dropped due to lack of data 2018-11 2019-02 in pressure
+#   5) feature addition: should be like pwv steps 1-3,
+#   6) negative events should be sampled separtely, for
+# 7) now prepare pwv and pressure to single ds with 1 hourly sample rate
+# 8) produce positives and save them to file!
+# 9) produce a way to get negatives considering the positives
 
-# TODO: scan for seasons in the tide events and remove summer
+
+def produce_negatives_events_from_feature_file(hydro_path=hydro_path, seed=42,
+                                               neg_batch=1):
+    import xarray as xr
+    import numpy as np
+    import pandas as pd
+    feats = xr.load_dataset(hydro_path / 'hydro_tides_hourly_features.nc')
+    tides = xr.open_dataset(hydro_path / 'hydro_tides_hourly_features_with_positives.nc')['Tides']
+    df = tides.to_dataset('GNSS').to_dataframe()
+    stns = [x for x in hydro_pw_dict.keys()]
+    # main stns df features (pwv)
+    pwv_df = feats[stns].to_dataframe()
+    # loop over all stns and produce negative events:
+    np.random.seed(seed)
+    batches = []
+    for i in np.arange(1, neg_batch + 1):
+        print('preparing batch {}:'.format(i))
+        neg_stns = []
+        for stn in stns:
+            dts_df = df[stn].dropna()
+            pwv = pwv_df[stn].dropna()
+            # loop over all events in on stn:
+            negatives = []
+            neg_samples = []
+            for dt in dts_df:
+                print('finding negatives for station {}, dt={}'.format(stn, dt.strftime('%Y-%m-%d %H:%M')))
+                no_choice_dt_range = pd.date_range(start=dt, periods=48, freq='H')
+                cnt = 0
+                while cnt < 1:
+                    # get random number from each stn pwv:
+                    r = np.random.randint(low=0, high=len(pwv.index))
+                    random_dt = pwv.index[r]
+                    negative_dt_range = pd.date_range(start=random_dt, periods=24, freq='H')
+                    if not (no_choice_dt_range.intersection(negative_dt_range)).empty:
+                        # print('#')
+                        continue
+                    negative = pwv.loc[pwv.index.intersection(negative_dt_range)]
+                    # negative = pwv.loc[negative_dt_range].dropna().values
+                    if len(negative) != (24):
+                        # print('!')
+                        continue
+                    cnt = 1
+                neg_da = xr.DataArray(negative, dims='feature')
+                neg_da['feature'] = ['{}_{}'.format('pwv', x) for x in np.arange(1, 25)]
+                neg_samples.append(negative_dt_range[0])
+                negatives.append(neg_da)
+            da = xr.concat(negatives, 'sample')
+            da['sample'] = neg_samples
+            da = da.sortby('sample')
+            neg_stns.append(da)
+        da_stns = xr.concat(neg_stns, 'sample')
+        da_stns = da_stns.sortby('sample')
+        batches.append(da_stns)
+    neg_batch_da = xr.concat(batches, 'batch')
+    neg_batch_da['batch'] = np.arange(1, neg_batch + 1)
+    return neg_batch_da
+
+
+def produce_positives_from_feature_file(hydro_path=hydro_path):
+    import xarray as xr
+    import pandas as pd
+    import numpy as np
+    from aux_gps import save_ncfile
+    # load features:
+    file = hydro_path / 'hydro_tides_hourly_features.nc'
+    feats = xr.load_dataset(file)
+    # load positive event for each station:
+    dfs = [read_station_from_tide_database(hydro_pw_dict.get(x)) for x in hydro_pw_dict.keys()]
+    da_list = []
+    positives_per_station = []
+    for i, feat in enumerate(feats):
+        try:
+            _, _, pr = produce_pwv_days_before_tide_events(feats[feat], dfs[i],
+                                                           plot=False,
+                                                           days_prior=1,
+                                                           drop_thresh=0.75,
+                                                           max_gap='6H',
+                                                           verbose=0)
+            print('getting positives from station {}'.format(feat))
+
+            positives = [pd.to_datetime((x[-1].time + pd.Timedelta(1, unit='D')).item()) for x in pr]
+            da = xr.DataArray(pr, dims=['sample', 'feature'])
+            da['sample'] = positives
+            positives_per_station.append(positives)
+            da['feature'] = ['pwv_{}'.format(x) for x in np.arange(1, 25)]
+            da_list.append(da)
+        except IndexError:
+            continue
+    da_pwv = xr.concat(da_list, 'sample')
+    da_pwv = da_pwv.sortby('sample')
+    # now add more features:
+    da_list = []
+    for feat in ['bet-dagan', 'doy', 'doy_sin', 'doy_cos']:
+        print('getting positives from feature {}'.format(feat))
+        positives = []
+        for dt_end in da_pwv.sample:
+            dt_st = pd.to_datetime(dt_end.item()) - pd.Timedelta(24, unit='H')
+            dt_end_end = pd.to_datetime(
+                dt_end.item()) - pd.Timedelta(1, unit='H')
+            positive = feats[feat].sel(time=slice(dt_st, dt_end_end))
+            positives.append(positive)
+        da = xr.DataArray(positives, dims=['sample', 'feature'])
+        da['sample'] = da_pwv.sample
+        da['feature'] = ['{}_{}'.format(feat, x) for x in np.arange(1, 25)]
+        da_list.append(da)
+    da_f = xr.concat(da_list, 'feature')
+    da = xr.concat([da_pwv, da_f], 'feature')
+    filename =  'hydro_tides_hourly_features_with_positives.nc'
+    feats['X'] = da
+    # now add positives per stations:
+    pdf = pd.DataFrame(positives_per_station).T
+    pdf.index.name = 'tide_event'
+    pos_da = pdf.to_xarray().to_array('GNSS')
+    pos_da['GNSS'] = [x for x in hydro_pw_dict.keys()]
+    pos_da.attrs['info'] = 'contains the datetimes of the tide events per GNSS station.'
+    feats['Tides'] = pos_da
+    save_ncfile(feats, hydro_path, filename)
+    return feats
+
+
+def prepare_features_and_save_hourly(work_path=work_yuval, ims_path=ims_path,
+                                     savepath=hydro_path):
+    import xarray as xr
+    from aux_gps import save_ncfile
+    import numpy as np
+    pwv = xr.load_dataset(work_path / 'GNSS_PW_thresh_0_hour_dayofyear_anoms.nc')
+    pwv_stations = [x for x in hydro_pw_dict.keys()]
+    pwv = pwv[pwv_stations]
+    # pwv = pwv.rolling(time=12, keep_attrs=True).mean(keep_attrs=True)
+    pwv = pwv.resample(time='1H', keep_attrs=True).mean(keep_attrs=True)
+    bd = xr.load_dataset(ims_path / 'IMS_BD_anoms_5min_ps_1964-2020.nc')
+    # min_time = pwv.dropna('time')['time'].min()
+    bd = bd.sel(time=slice('1996', None)).resample(time='1H').mean()
+    pressure = bd['bet-dagan']
+    doy = pwv['time'].copy(data=pwv['time'].dt.dayofyear)
+    doy.name = 'doy'
+    doy_sin = np.sin(doy * np.pi / 183)
+    doy_sin.name = 'doy_sin'
+    doy_cos = np.cos(doy * np.pi / 183)
+    doy_cos.name = 'doy_cos'
+    ds = xr.merge([pwv, pressure, doy, doy_sin, doy_cos])
+    filename = 'hydro_tides_hourly_features.nc'
+    save_ncfile(ds, savepath, filename)
+    return ds
+
+
 def plot_all_decompositions(X, y, n=2):
     import xarray as xr
     models = [
@@ -1688,9 +1859,12 @@ def add_features_and_produce_X_y(hdf, fdf, window_size=25, seed=42,
         slice_range = int(window_size * window_factor)
         sliced = df.iloc[r - slice_range:r + slice_range]
         # if tides inside this date range, continue:
-        if y_pos.loc[good_dts].index in sliced.index:
+        # try:
+        if not (y_pos.loc[good_dts].index.intersection(sliced.index)).empty:
             # print('#')
             continue
+        # except TypeError:
+        #     return y_pos, good_dts, sliced
         # now if no 24 items exist, also continue:
         negative = df.iloc[r - window_size:r - 1][feature].dropna().values
         if len(negative) != (window_size - 1):
@@ -1932,6 +2106,144 @@ def aggregate_get_ndays_pw_hydro(pw_da, hs_ids, max_flow_thresh=None,
                 'Mean PW for tide stations (above {} m^3/sec) near {} station'.format(
                     max_flow_thresh, pw_da.name))
     return dass
+
+
+def produce_pwv_days_before_tide_events(pw_da, hs_df, days_prior=1, drop_thresh=0.5,
+                                        days_after=1, plot=False, verbose=0,
+                                        max_gap='12H', rolling=12):
+    """
+    takes pwv and hydro tide dates from one station and
+    rounds the hydro tides dates to 5 min
+    selects the tides dates that are at least the first date of pwv available
+    then if no pwv data prior to 1 day of tides date - drops
+    if more than half day missing - drops
+    then interpolates the missing pwv data points using spline
+    returns the dataframes contains pwv 1 day before and after tides
+    and pwv's 1 day prior to event and 1 day after.
+
+    Parameters
+    ----------
+    pw_da : TYPE
+        pwv of station.
+    hs_df : TYPE
+        hydro tide dataframe for one station.
+    days_prior : TYPE, optional
+        DESCRIPTION. The default is 1.
+    drop_thresh : TYPE, optional
+        DESCRIPTION. The default is 0.5.
+    days_after : TYPE, optional
+        DESCRIPTION. The default is 1.
+    plot : TYPE, optional
+        DESCRIPTION. The default is False.
+    verbose : TYPE, optional
+        DESCRIPTION. The default is 0.
+    max_gap : TYPE, optional
+        DESCRIPTION. The default is '12H'.
+    rolling : TYPE, optional
+        DESCRIPTION. The default is 12.
+
+    Returns
+    -------
+    df : TYPE
+        DESCRIPTION.
+    pwv_after_list : TYPE
+        DESCRIPTION.
+    pwv_prior_list : TYPE
+        DESCRIPTION.
+
+    """
+    import pandas as pd
+    import xarray as xr
+    import numpy as np
+    import matplotlib.pyplot as plt
+    if rolling is not None:
+        pw_da = pw_da.rolling(time=rolling, center=True, keep_attrs=True).mean(keep_attrs=True)
+    if drop_thresh is None:
+        drop_thresh=0
+    # first infer time freq of pw_da:
+    freq = xr.infer_freq(pw_da['time'])
+    if freq == '5T':
+        pts_per_day = 288
+    if freq == '1H' or freq == 'H':
+        pts_per_day = 24
+    # get the minimum dt of the pwv station:
+    min_dt = pw_da.dropna('time').time.min().values
+    # round the hs_df to 5 mins, and find the closest min_dt:
+    hs_df.index = hs_df.index.round(freq)
+    hs_df = hs_df[~hs_df.index.duplicated(keep='first')]
+    hs_df = hs_df.sort_index()
+    min_ind = hs_df.index.get_loc(min_dt, method='nearest')
+    # slice the tides data accordinaly:
+    hs_df = hs_df.iloc[min_ind:].dropna()
+    # loop over each tide start and grab the datetimes
+    pwv_prior_list = []
+    pwv_after_list = []
+    # se_list = []
+    tot_events = hs_df.index.size
+    event_cnt = 0
+    dropped_thresh = 0
+    dropped_no_data = 0
+    for ts in hs_df.index:
+        dt_prior = ts - pd.Timedelta(days_prior, unit='d')
+        dt_after = ts + pd.Timedelta(days_after, unit='d')
+        after_da = pw_da.sel(time=slice(ts, dt_after))
+        prior_da = pw_da.sel(time=slice(dt_prior, ts - pd.Timedelta(5, unit='min')))
+        if prior_da.dropna('time').size == 0:
+            if verbose == 1:
+                print('{} found no prior data for PWV {} days prior'.format(ts.strftime('%Y-%m-%d %H:%M'), days_prior))
+            dropped_no_data += 1
+            continue
+        elif prior_da.dropna('time').size < pts_per_day*drop_thresh:
+            if verbose == 1:
+                print('{} found less than {} a day prior data for PWV {} days prior'.format(ts.strftime('%Y-%m-%d %H:%M'), drop_thresh, days_prior))
+            dropped_thresh += 1
+            continue
+        if max_gap is not None:
+            prior_da = prior_da.interpolate_na('time', method='spline', max_gap=max_gap, keep_attrs=True)
+        event_cnt += 1
+        # if rolling is not None:
+        #     after_da = after_da.rolling(time=rolling, center=True, keep_attrs=True).mean(keep_attrs=True)
+        #     prior_da = prior_da.rolling(time=rolling, center=True, keep_attrs=True).mean(keep_attrs=True)
+        # after_da.name = pw_da.name + '_{}'.format(i)
+        pwv_after_list.append(after_da)
+        pwv_prior_list.append(prior_da)
+        # se = da.reset_index('time', drop=True).to_dataframe()[da.name]
+        # se_list.append(se)
+    se_list = []
+    for i, (prior, after) in enumerate(zip(pwv_prior_list, pwv_after_list)):
+        # return prior, after
+        # df_p = prior.to_dataframe()
+        # df_a = after.to_dataframe()
+        # return df_p, df_a
+        da = xr.concat([prior, after], 'time')
+        # print(da)
+        se = da.reset_index('time', drop=True).to_dataframe()
+        se.columns = [da.name + '_{}'.format(i)]
+        # print(se)
+        # [da.name + '_{}'.format(i)]
+        se_list.append(se)
+    df = pd.concat(se_list, axis=1)
+    df = df.iloc[:-1]
+    df.index = np.arange(-days_prior, days_after, 1/pts_per_day)
+    if verbose >= 0:
+        print('total events with pwv:{} , dropped due to no data: {}, dropped due to thresh:{}, left events: {}'.format(tot_events, dropped_no_data, dropped_thresh, event_cnt))
+    if plot:
+        ax = df.T.mean().plot()
+        ax.grid()
+        ax.axvline(color='k', linestyle='--')
+        ax.set_xlabel('Days before tide event')
+        ax.set_ylabel('PWV anomalies [mm]')
+        ax.set_title('GNSS station: {} with {} events'.format(pw_da.name.upper(), event_cnt))
+        better = df.copy()
+        better.index = pd.to_timedelta(better.index, unit='d')
+        better = better.resample('15S').interpolate(method='cubic').T.mean().resample('5T').mean()
+        better = better.reset_index(drop=True)
+        better.index = np.linspace(-days_prior, days_after, better.index.size)
+        better.plot(ax=ax)
+        # fig, ax = plt.subplots(figsize=(20, 7))
+    #     [pwv.plot.line(ax=ax) for pwv in pwv_list]
+    return df, pwv_after_list, pwv_prior_list
+
 
 
 def get_n_days_pw_hydro_all(pw_da, hs_id, max_flow_thresh=None,
@@ -2396,6 +2708,37 @@ def read_hydrographs(path=hydro_path):
     ds.to_netcdf(path / filename, 'w', encoding=encoding)
     print('Done!')
     return ds
+
+
+def read_station_from_tide_database(hs_id=48125, hydro_path=hydro_path):
+    import xarray as xr
+    all_tides = xr.open_dataset(hydro_path / 'hydro_tides.nc')
+    # get all tides for specific station without nans:
+    sta_slice = [x for x in all_tides.data_vars if str(hs_id) in x]
+    if not sta_slice:
+        raise KeyError('hydro station {} not found in database'.format(hs_id))
+    # tides = all_tides[sta_slice].dropna('tide_start')
+    df = all_tides[sta_slice].to_dataframe()
+    df.columns = ['max_height', 'max_flow', 'tide_vol', 'tide_end', 'tide_max']
+    df = df[df['max_flow'] != 0]
+    df['hydro_station_id'] = hs_id
+    return df
+    # tide_starts = tides['tide_start'].where(
+    #     ~tides.isnull()).dropna('tide_start')['tide_start']
+
+
+def check_if_tide_events_from_stations_are_within_time_window(df_list, days=1):
+    import pandas as pd
+    dfs = []
+    for i, df in enumerate(df_list):
+        df.dropna(inplace=True)
+        dfs.append(df['hydro_station_id'])
+    df = pd.concat(dfs, axis=0).to_frame()
+    df['time'] = df.index
+    dif = df['time'].diff()
+    dupes = dif[abs(dif) < pd.Timedelta(days, unit='D')].index
+    print(df.loc[dupes, 'hydro_station_id'])
+    return
 
 
 class ML_Classifier_Switcher(object):
