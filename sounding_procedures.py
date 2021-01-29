@@ -51,30 +51,59 @@ def load_field_from_radiosonde(
     return da
 
 
-#def get_field_from_radiosonde(path=sound_path, field='Tm', data_type='phys',
-#                              reduce='min', dim='time',
-#                              times=['2007', '2019'], plot=True):
-#    import xarray as xr
-#    from aux_gps import get_unique_index
-#    from aux_gps import keep_iqr
-#    from aux_gps import plot_tmseries_xarray
-#    from aux_gps import path_glob
-#    file = path_glob(path, 'bet_dagan_{}_sounding_*.nc'.format(data_type))[0]
-#    ds = xr.open_dataset(file)
-#    if field is not None:
-#        da = ds[field]
-#        if reduce is not None:
-#            if reduce == 'min':
-#                da = da.min(dim)
-#            elif reduce == 'max':
-#                da = da.max(dim)
-#            da = da.reset_coords(drop=True)
-#        da = get_unique_index(da, dim='sound_time')
-#        da = keep_iqr(da, k=2.0, dim='sound_time', drop_with_freq='12H')
-#    da = da.sel(sound_time=slice(*times))
-#    if plot:
-#        plot_tmseries_xarray(da)
-#    return da
+def get_field_from_radiosonde(path=sound_path, field='Tm', data_type='phys',
+                              reduce='min', dim='time',
+                              times=['2007', '2019'], plot=True):
+    """
+    old version, to be replaced with load_field_from_radiosonde,
+    but still useful for ZWD
+
+    Parameters
+    ----------
+    path : TYPE, optional
+        DESCRIPTION. The default is sound_path.
+    field : TYPE, optional
+        DESCRIPTION. The default is 'Tm'.
+    data_type : TYPE, optional
+        DESCRIPTION. The default is 'phys'.
+    reduce : TYPE, optional
+        DESCRIPTION. The default is 'min'.
+    dim : TYPE, optional
+        DESCRIPTION. The default is 'time'.
+    times : TYPE, optional
+        DESCRIPTION. The default is ['2007', '2019'].
+    plot : TYPE, optional
+        DESCRIPTION. The default is True.
+
+    Returns
+    -------
+    da : TYPE
+        DESCRIPTION.
+
+    """
+
+    import xarray as xr
+    from aux_gps import get_unique_index
+    from aux_gps import keep_iqr
+    from aux_gps import plot_tmseries_xarray
+    from aux_gps import path_glob
+    file = path_glob(path, 'bet_dagan_{}_sounding_*.nc'.format(data_type))[0]
+    file = path / 'bet_dagan_phys_PW_Tm_Ts_2007-2019.nc'
+    ds = xr.open_dataset(file)
+    if field is not None:
+        da = ds[field]
+        if reduce is not None:
+            if reduce == 'min':
+                da = da.min(dim)
+            elif reduce == 'max':
+                da = da.max(dim)
+            da = da.reset_coords(drop=True)
+        da = get_unique_index(da, dim='sound_time')
+        da = keep_iqr(da, k=2.0, dim='sound_time', drop_with_freq='12H')
+    da = da.sel(sound_time=slice(*times))
+    if plot:
+        plot_tmseries_xarray(da)
+    return da
 
 
 def calculate_edt_north_east_distance(lat_da, lon_da, method='fast'):
