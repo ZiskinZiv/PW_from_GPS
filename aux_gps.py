@@ -1339,7 +1339,8 @@ def get_all_possible_combinations_from_list(li, reduce_single_list=True):
 
 def gantt_chart(ds, fw='bold', ax=None, pe_dict=None, fontsize=14, linewidth=10,
                 title='RINEX files availability for the Israeli GNSS stations',
-                time_dim='time', antialiased=False, colors=None, grid=False):
+                time_dim='time', antialiased=False, colors=None, grid=False,
+                marker='x', marker_suffix='_tide'):
     import pandas as pd
     import matplotlib.pyplot as plt
     import numpy as np
@@ -1352,7 +1353,13 @@ def gantt_chart(ds, fw='bold', ax=None, pe_dict=None, fontsize=14, linewidth=10,
     sns.set_palette(sns.color_palette("Dark2", len(ds)))
     if ax is None:
         fig, ax = plt.subplots(figsize=(20, 6))
-    names = [x for x in ds]
+    names = []
+    for x in ds:
+        if marker_suffix in x:
+            names.append('')
+        else:
+            names.append(x)
+    # names = [x for x in ds]
     vals = range(1, len(ds) + 1)
     xmin = pd.to_datetime(ds[time_dim].min().values) - pd.Timedelta(1, unit='W')
     xmax = pd.to_datetime(ds[time_dim].max().values) + pd.Timedelta(1, unit='W')
@@ -1369,18 +1376,25 @@ def gantt_chart(ds, fw='bold', ax=None, pe_dict=None, fontsize=14, linewidth=10,
             dt_max = df.iloc[A['{}_True_end'.format(da)]].index
         except IndexError:
             dt_max = df.iloc[A['{}_True_end'.format(da)][:-1]]
-            end = pd.DataFrame(index=[df.index[-1]], data=[False],columns=[da])
+            end = pd.DataFrame(index=[df.index[-1]], data=[False], columns=[da])
             dt_max = dt_max.append(end)
             dt_max = dt_max.index
         y = len(ds) + 1 - np.ones(dt_min.shape) * (i + 1)
+        y1 = len(ds) + 1 - np.ones(dt_min.shape) * (i + 0.5)
 #        y_list.append(y)
 #        dt_min_list.append(dt_min)
 #        dt_max_list.append(dt_max)
         # v = int(calc(i, max = len(ds)))
-        if pe_dict is not None:
-            ax.hlines(y, dt_min, dt_max, linewidth=linewidth, color=colors[i], path_effects=[pe.Stroke(linewidth=15, foreground='k'), pe.Normal()])
+        if marker_suffix in da:
+            x = pd.to_datetime(ds[da].dropna('time')['time'].values)
+            # print(x)
+            ax.scatter(x, y1, color=colors[i], marker=marker, s=150)
+            # ax.vlines(y, dt_min, dt_max, linewidth=1000, color=colors[i])
         else:
-            ax.hlines(y, dt_min, dt_max, linewidth=linewidth, color=colors[i], antialiased=antialiased)
+            if pe_dict is not None:
+                ax.hlines(y, dt_min, dt_max, linewidth=linewidth, color=colors[i], path_effects=[pe.Stroke(linewidth=15, foreground='k'), pe.Normal()])
+            else:
+                ax.hlines(y, dt_min, dt_max, linewidth=linewidth, color=colors[i], antialiased=antialiased)
         #plt.show()
         # ds[da][~ds[da].isnull()] = i + 1
         # ds[da] = ds[da].fillna(0)
