@@ -76,7 +76,13 @@ def produce_bet_dagan_long_term_pressure(path=ims_path, rate='1H',
     bd = get_unique_index(bd)
     bd = bd.sortby('time')
     bd = xr_reindex_with_date_range(bd, freq='1H')
-    bd_inter = bd.interpolate_na('time', max_gap='3H', method='cubic')
+    # remove dayofyear mean, interpolate and reconstruct signal to fill it with climatology:
+    climatology = bd.groupby('time.dayofyear').mean(keep_attrs=True)
+    bd_anoms = anomalize_xr(bd, freq='DOY')
+    bd_inter = bd_anoms.interpolate_na('time', method='cubic', max_gap='24H', keep_attrs=True)
+    # bd_inter = bd.interpolate_na('time', max_gap='3H', method='cubic')
+    bd_inter = bd_inter.groupby('time.dayofyear') + climatology
+    bd_inter = bd_inter.reset_coords(drop=True)
     # load 10-mins new measurements:
     bd_10 = xr.open_dataset(path / 'IMS_BP_israeli_hourly.nc')['BET-DAGAN']
     bd_10 = bd_10.dropna('time').sel(
