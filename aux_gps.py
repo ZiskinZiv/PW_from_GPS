@@ -844,6 +844,16 @@ def anomalize_xr(da_ts, freq='D', time_dim=None, units=None, verbose=True):  # i
             print('removing yearly means from {}'.format(name))
         frq = 'yearly'
         grp = '{}.year'.format(time_dim)
+    elif freq == 'DOY':
+        if verbose:
+            print('removing day of year means from {}'.format(name))
+        frq = 'dayofyear'
+        grp = '{}.dayofyear'.format(time_dim)
+    elif freq == 'WOY':
+        if verbose:
+            print('removing week of year means from {}'.format(name))
+        frq = 'weekofyear'
+        grp = '{}.weekofyear'.format(time_dim)
     # calculate climatology:
     climatology = da_ts.groupby(grp).mean()
     da_anoms = da_ts.groupby(grp) - climatology
