@@ -6088,15 +6088,21 @@ def plot_hydro_events_climatology(hydro_path=hydro_path, fontsize=16, save=True)
     import xarray as xr
     import matplotlib.pyplot as plt
     import seaborn as sns
+    import pandas as pd
     sns.set_style('whitegrid')
     sns.set_style('ticks')
     file = hydro_path / 'hydro_tides_hourly_features_with_positives.nc'
     X = xr.load_dataset(file)['X']
     df = X['sample'].groupby('sample.month').count().to_dataframe()
+    # add July and August:
+    add = pd.DataFrame([0, 0], index=[7, 8])
+    add.index.name = 'month'
+    add.columns = ['sample']
+    df = df.append(add).sort_index()
     fig, ax = plt.subplots(figsize=(8, 6))
     df.plot(kind='bar', ax=ax, rot=0, legend=False)
     ax.grid(True)
-    ax.set_ylabel('Number of flood events [#]', fontsize=fontsize)
+    ax.set_ylabel('Number of unique flood events [#]', fontsize=fontsize)
     ax.set_xlabel('month', fontsize=fontsize)
     ax.tick_params(labelsize=fontsize)
     fig.tight_layout()
