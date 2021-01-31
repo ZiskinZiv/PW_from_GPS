@@ -92,10 +92,10 @@ def main_hydro_ML(args):
     scorers = ['roc_auc', 'f1', 'recall']
 #    splits = [2, 3, 4]
     model_name = args.model
-    if model_name == 'SVC' or model_name == 'RF':
-        f = ['pwv', 'pressure']
-    else:
-        f = ['pwv', 'pressure', 'doy']
+    # if model_name == 'SVC' or model_name == 'RF':
+    #     f = ['pwv', 'pressure']
+    # else:
+    f = ['pwv', 'pressure', 'doy']
     features = get_all_possible_combinations_from_list(
         f, reduce_single_list=True)
     if args.inner_splits is not None:
@@ -117,38 +117,38 @@ def main_hydro_ML(args):
 #    if args.model is not None:
 
     for scorer in scorers:
-        # if model_name != 'RF':
-        for feature in features:
+        if model_name != 'RF':
+            for feature in features:
+                logger.info(
+                    'Running {} model with {} test scorer and {},{} (inner, outer) nsplits, features={}'.format(
+                        model_name, scorer, inner_splits, outer_splits, feature))
+                model = nested_cross_validation_procedure(
+                    X,
+                    y,
+                    model_name=model_name,
+                    features=feature,
+                    inner_splits=inner_splits,
+                    outer_splits=outer_splits,
+                    refit_scorer=scorer,
+                    verbose=verbose,
+                    diagnostic=False,
+                    savepath=savepath, n_jobs=n_jobs)
+        else:
             logger.info(
-                'Running {} model with {} test scorer and {},{} (inner, outer) nsplits, features={}'.format(
-                    model_name, scorer, inner_splits, outer_splits, feature))
+                    'Running {} model with {} test scorer and {},{} (inner, outer) nsplits, features={}'.format(
+                        model_name, scorer, inner_splits, outer_splits, f))
             model = nested_cross_validation_procedure(
                 X,
                 y,
                 model_name=model_name,
-                features=feature,
+                features=f,
                 inner_splits=inner_splits,
                 outer_splits=outer_splits,
                 refit_scorer=scorer,
                 verbose=verbose,
                 diagnostic=False,
                 savepath=savepath, n_jobs=n_jobs)
-        # else:
-        #     logger.info(
-        #             'Running {} model with {} test scorer and {},{} (inner, outer) nsplits, features={}'.format(
-        #                 model_name, scorer, inner_splits, outer_splits, f))
-        #     model = nested_cross_validation_procedure(
-        #         X,
-        #         y,
-        #         model_name=model_name,
-        #         features=f,
-        #         inner_splits=inner_splits,
-        #         outer_splits=outer_splits,
-        #         refit_scorer=scorer,
-        #         verbose=verbose,
-        #         diagnostic=False,
-        #         savepath=savepath, n_jobs=n_jobs)
-#    else:
+    # else:
 #        logger.info('Running with all three models:')
 #        models = ['SVC', 'RF', 'MLP']
 #        for model_name in models:
