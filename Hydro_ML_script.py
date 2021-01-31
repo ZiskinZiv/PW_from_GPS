@@ -8,6 +8,9 @@ Created on Wed Oct  7 08:31:03 2020
 import os
 import sys
 import warnings
+from PW_paths import work_yuval
+hydro_path = work_yuval / 'hydro'
+
 if not sys.warnoptions:
     warnings.simplefilter("ignore")
     os.environ["PYTHONWARNINGS"] = (
@@ -49,8 +52,10 @@ def check_path(path):
 
 
 def main_hydro_ML(args):
-    from hydro_procedures import produce_X_y
-    from hydro_procedures import produce_X_y_from_list
+    # from hydro_procedures import produce_X_y
+    # from hydro_procedures import produce_X_y_from_list
+    from hydro_procedures import combine_pos_neg_from_nc_file
+    # from hydro_procedures import select_features_from_X
     from hydro_procedures import nested_cross_validation_procedure
     from aux_gps import get_all_possible_combinations_from_list
     if args.verbose is None:
@@ -61,31 +66,36 @@ def main_hydro_ML(args):
         n_jobs = -1
     else:
         n_jobs = args.n_jobs
-    if args.max_flow is None:
-        max_flow = 0
-    else:
-        max_flow = args.max_flow
-    if args.neg_pos_ratio is not None:
-        neg_pos_ratio = args.neg_pos_ratio
-    else:
-        neg_pos_ratio = 1
-    logger.info('max flow {} threshold m^3/sec selected.'.format(max_flow))
-    logger.info('negative to positive ratio {} selected.'.format(neg_pos_ratio))
-    if len(args.pw_station) > 1:
-        X, y = produce_X_y_from_list(pw_stations=args.pw_station,
-                                     hs_ids=args.hydro_id,
-                                     pressure_station='bet-dagan', window=25,
-                                     max_flow=max_flow,
-                                     neg_pos_ratio=neg_pos_ratio,
-                                     concat_Xy=True)
-    else:
-        X, y = produce_X_y(pw_station=args.pw_station[0], hs_id=args.hydro_id[0],
-                           pressure_station='bet-dagan', window=25,
-                           max_flow=max_flow,
-                           neg_pos_ratio=neg_pos_ratio)
-    scorers = ['roc_auc', 'f1', 'accuracy']
+    # if args.max_flow is None:
+    #     max_flow = 0
+    # else:
+    #     max_flow = args.max_flow
+    # if args.neg_pos_ratio is not None:
+    #     neg_pos_ratio = args.neg_pos_ratio
+    # else:
+    #     neg_pos_ratio = 1
+    # logger.info('max flow {} threshold m^3/sec selected.'.format(max_flow))
+    # logger.info('negative to positive ratio {} selected.'.format(neg_pos_ratio))
+    # if len(args.pw_station) > 1:
+    #     X, y = produce_X_y_from_list(pw_stations=args.pw_station,
+    #                                  hs_ids=args.hydro_id,
+    #                                  pressure_station='bet-dagan', window=25,
+    #                                  max_flow=max_flow,
+    #                                  neg_pos_ratio=neg_pos_ratio,
+    #                                  concat_Xy=True)
+    # else:
+    # X, y = produce_X_y(pw_station=args.pw_station[0], hs_id=args.hydro_id[0],
+    #                    pressure_station='bet-dagan', window=25,
+    #                    max_flow=max_flow,
+    #                    neg_pos_ratio=neg_pos_ratio)
+    X, y = combine_pos_neg_from_nc_file(hydro_path)
+    scorers = ['roc_auc', 'f1', 'recall']
 #    splits = [2, 3, 4]
-    f = ['pwv', 'pressure', 'doy']
+    model_name = args.model
+    if model_name == 'SVC' or model_name == 'RF':
+        f = ['pwv', 'pressure']
+    else:
+        f = ['pwv', 'pressure', 'doy']
     features = get_all_possible_combinations_from_list(
         f, reduce_single_list=True)
     if args.inner_splits is not None:
@@ -105,39 +115,39 @@ def main_hydro_ML(args):
     else:
         savepath = hydro_path
 #    if args.model is not None:
-    model_name = args.model
+
     for scorer in scorers:
-        if model_name != 'RF':
-            for feature in features:
-                logger.info(
-                    'Running {} model with {} test scorer and {},{} (inner, outer) nsplits, features={}'.format(
-                        model_name, scorer, inner_splits, outer_splits, feature))
-                model = nested_cross_validation_procedure(
-                    X,
-                    y,
-                    model_name=model_name,
-                    features=feature,
-                    inner_splits=inner_splits,
-                    outer_splits=outer_splits,
-                    refit_scorer=scorer,
-                    verbose=verbose,
-                    diagnostic=False,
-                    savepath=savepath, n_jobs=n_jobs)
-        else:
+        # if model_name != 'RF':
+        for feature in features:
             logger.info(
-                    'Running {} model with {} test scorer and {},{} (inner, outer) nsplits, features={}'.format(
-                        model_name, scorer, inner_splits, outer_splits, f))
+                'Running {} model with {} test scorer and {},{} (inner, outer) nsplits, features={}'.format(
+                    model_name, scorer, inner_splits, outer_splits, feature))
             model = nested_cross_validation_procedure(
                 X,
                 y,
                 model_name=model_name,
-                features=f,
+                features=feature,
                 inner_splits=inner_splits,
                 outer_splits=outer_splits,
                 refit_scorer=scorer,
                 verbose=verbose,
                 diagnostic=False,
                 savepath=savepath, n_jobs=n_jobs)
+        # else:
+        #     logger.info(
+        #             'Running {} model with {} test scorer and {},{} (inner, outer) nsplits, features={}'.format(
+        #                 model_name, scorer, inner_splits, outer_splits, f))
+        #     model = nested_cross_validation_procedure(
+        #         X,
+        #         y,
+        #         model_name=model_name,
+        #         features=f,
+        #         inner_splits=inner_splits,
+        #         outer_splits=outer_splits,
+        #         refit_scorer=scorer,
+        #         verbose=verbose,
+        #         diagnostic=False,
+        #         savepath=savepath, n_jobs=n_jobs)
 #    else:
 #        logger.info('Running with all three models:')
 #        models = ['SVC', 'RF', 'MLP']
@@ -174,17 +184,17 @@ if __name__ == '__main__':
     optional = parser._action_groups.pop()
     required = parser.add_argument_group('required arguments')
     # remove this line: optional = parser...
-    required.add_argument(
-        '--pw_station',
-        help="GNSS 4 letter station", nargs='+',
-        type=check_station_name)
-    required.add_argument(
-        '--hydro_id',
-        help="5 integer hydro station", nargs='+',
-        type=int)  # check_hydro_id)
+    # required.add_argument(
+    #     '--pw_station',
+    #     help="GNSS 4 letter station", nargs='+',
+    #     type=check_station_name)
+    # required.add_argument(
+    #     '--hydro_id',
+    #     help="5 integer hydro station", nargs='+',
+    #     type=int)  # check_hydro_id)
 #    optional.add_argument('--loop_over', help='select which params to loop over',
 #                          type=check_loopover, nargs='+')
-    optional.add_argument(
+    required.add_argument(
         '--savepath',
         help="a full path to download the files, e.g., /home/ziskin/Work_Files/PW_yuval/IMS_T/10mins",
         type=check_path)
@@ -196,14 +206,14 @@ if __name__ == '__main__':
         '--inner_splits',
         help='how many splits for the inner nested loop',
         type=int)
-    optional.add_argument(
-        '--max_flow',
-        help='slice the hydro events for minimum max flow',
-        type=float)
-    optional.add_argument(
-        '--neg_pos_ratio',
-        help='negative to positive events ratio',
-        type=int)
+    # optional.add_argument(
+    #     '--max_flow',
+    #     help='slice the hydro events for minimum max flow',
+    #     type=float)
+    # optional.add_argument(
+    #     '--neg_pos_ratio',
+    #     help='negative to positive events ratio',
+    #     type=int)
     optional.add_argument(
         '--n_jobs',
         help='number of CPU threads to do gridsearch and cross-validate',
@@ -225,14 +235,18 @@ if __name__ == '__main__':
     args = parser.parse_args()
     # print(parser.format_help())
 #    # print(vars(args))
-    if args.pw_station is None:
-        print('pw_station is a required argument, run with -h...')
+    # if args.pw_station is None:
+    #     print('pw_station is a required argument, run with -h...')
+    #     sys.exit()
+
+    if args.savepath is None:
+        print('savepath is a required argument, run with -h...')
         sys.exit()
-    if args.hydro_id is None:
-        print('hydro_id is a required argument, run with -h...')
-        sys.exit()
+    # if args.hydro_id is None:
+    #     print('hydro_id is a required argument, run with -h...')
+    #     sys.exit()
     if args.model is None:
         print('model is a required argument, run with -h...')
         sys.exit()
-    logger.info('Running pwv station {} with hydro station {}.'.format(args.pw_station, args.hydro_id))
+    logger.info('Running nested ML with {} model'.format(args.model))
     main_hydro_ML(args)
