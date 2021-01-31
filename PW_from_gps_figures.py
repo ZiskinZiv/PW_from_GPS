@@ -43,6 +43,26 @@ seasonal_colors = {'DJF': 'tab:blue',
                    'MAM': 'tab:orange',
                    'Annual': 'tab:purple'}
 
+
+def sci_notation(num, decimal_digits=1, precision=None, exponent=None):
+    """
+    Returns a string representation of the scientific
+    notation of the given number formatted for use with
+    LaTeX or Mathtext, with specified number of significant
+    decimal digits and precision (number of decimal digits
+    to show). The exponent to be used can also be specified
+    explicitly.
+    """
+    from math import floor, log10
+    if exponent is None:
+        exponent = int(floor(log10(abs(num))))
+    coeff = round(num / float(10**exponent), decimal_digits)
+    if precision is None:
+        precision = decimal_digits
+
+    return r"${0:.{2}f}\cdot10^{{{1:d}}}$".format(coeff, exponent, precision)
+
+
 def utm_from_lon(lon):
     """
     utm_from_lon - UTM zone for a longitude
@@ -5756,24 +5776,36 @@ def plot_ERA5_wind_speed_direction_profiles_at_bet_dagan(ear5_path=era5_path,
     return fig
 
 
-def plot_PWV_anomalies_groups_maps(work_path=work_yuval,
+def plot_PWV_anomalies_groups_maps(work_path=work_yuval, station='drag',
                                    fontsize=16, save=True):
     import xarray as xr
     import seaborn as sns
     import numpy as np
     import matplotlib.pyplot as plt
+    from scipy.ndimage.filters import gaussian_filter
     sns.set_style('whitegrid')
     sns.set_style('ticks')
     cmap = sns.color_palette('terrain', as_cmap=True)
     file = work_path/'GNSS_PW_thresh_0_hour_dayofyear_rest.nc'
     pw = xr.open_dataset(file)
-    drag = pw['drag'].mean('rest')
-    elat = pw['elat'].mean('rest')
-    dsea = pw['dsea'].mean('rest')
-    da = xr.concat([drag, dsea, elat], 'station')
-    da['station'] = ['DRAG', 'DSEA', 'ELAT']
-    fg = da.plot.contourf(levels=41, row='station', add_colorbar=False,
-                          figsize=(6.5, 13), cmap=cmap)
+    if isinstance(station, str):
+        st_mean = pw[station].mean('rest').expand_dims('station')
+        st_mean['station'] = [station.upper()]
+        data = gaussian_filter(st_mean, 5)
+        st_mean = st_mean.copy(data=data)
+    elif isinstance(station, list):
+        pws = [pw[x].mean('rest') for x in pw if x in station]
+        pws = [x.copy(data=gaussian_filter(x, 5)) for x in pws]
+        st_mean = xr.merge(pws).to_array('station')
+        st_mean['station'] = [x.upper() for x in station]
+    # drag = pw['drag'].mean('rest')
+    # elat = pw['elat'].mean('rest')
+    # dsea = pw['dsea'].mean('rest')
+    # da = xr.concat([drag, dsea, elat], 'station')
+    # da['station'] = ['DRAG', 'DSEA', 'ELAT']
+    n = st_mean['station'].size
+    fg = st_mean.plot.contourf(levels=41, row='station', add_colorbar=False,
+                               figsize=(6.5, 13), cmap=cmap)
     for ax in fg.fig.axes:
         ax.set_xticks(np.arange(50, 400, 50))
         ax.tick_params(labelsize=fontsize)
@@ -5922,6 +5954,47 @@ def plot_typical_tide_event_with_PWV(work_path=work_yuval,
     return df
 
 
+def plot_hydro_pressure_anomalies(hydro_path=hydro_path,
+                                  fontsize=16, save=True):
+    import xarray as xr
+    import pandas as pd
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    sns.set_style('whitegrid')
+    sns.set_style('ticks')
+    feats = xr.load_dataset(hydro_path/'hydro_tides_hourly_features_with_positives.nc')
+    dts = pd.DatetimeIndex(feats['X_pos']['positive_sample'].values)
+    bd = feats['bet-dagan']
+    dts_ranges = []
+    for dt in dts:
+        prior = dt - pd.Timedelta(3, unit='D')
+        after = dt + pd.Timedelta(1, unit='D')
+        dt_range = pd.date_range(start=prior, end=after, freq='H')
+        bd_range = bd.sel(time=dt_range)
+        dts_ranges.append(bd_range.values)
+    df = pd.DataFrame(dts_ranges).T
+    df.index = np.linspace(-3, 1, len(df))
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ts = df.T.mean() #.shift(periods=-1, freq='15D')
+    ts_std = df.T.std()
+    ts.index.name = ''
+    ts.plot(ax=ax, color='k', fontsize=fontsize, lw=2)
+    ax.fill_between(x=ts.index, y1=ts-ts_std, y2=ts+ts_std, color='k', alpha=0.4)
+    ax.set_xlim(ts.index.min(), ts.index.max())  #+
+                      # pd.Timedelta(15, unit='D'))
+    ax.set_ylabel('Pressure mean anomalies [hPa]', fontsize=fontsize-2)
+    ax.set_xlabel('Days before/after a tide event', fontsize=fontsize-2)
+    ax.axvline(0, color='r', ls='--')
+    ax.grid(True)
+    fig.tight_layout()
+    fig.subplots_adjust(right=0.946)
+    if save:
+        filename = 'Pressure_anoms_3_prior_tides.png'
+        plt.savefig(savefig_path / filename, bbox_inches='tight', pad_inches=0.1)
+    return df
+
+
 def plot_hydro_pwv_anomalies_with_station_mean(work_path=work_yuval,
                                                hydro_path=hydro_path,
                                                days_prior=3, fontsize=14,
@@ -5946,6 +6019,7 @@ def plot_hydro_pwv_anomalies_with_station_mean(work_path=work_yuval,
         return dfs
     sns.set_style('whitegrid')
     sns.set_style('ticks')
+    cmap = sns.color_palette('mako', as_cmap=True)
     pw = xr.open_dataset(work_path / 'GNSS_PW_thresh_0_hour_dayofyear_anoms.nc')
     pws = [pw[x].load() for x in hydro_pw_dict.keys()]
     dfs = [read_station_from_tide_database(hydro_pw_dict.get(x), hydro_path=hydro_path) for x in hydro_pw_dict.keys()]
@@ -5977,7 +6051,7 @@ def plot_hydro_pwv_anomalies_with_station_mean(work_path=work_yuval,
     # height]
     ax_heat = sns.heatmap(
         df_mean.T,
-        cmap='gist_earth_r',
+        cmap=cmap,
         yticklabels=True,
         ax=ax_heat,
         cbar_ax=cbar_ax,
@@ -5989,10 +6063,10 @@ def plot_hydro_pwv_anomalies_with_station_mean(work_path=work_yuval,
         bottom='off', labelbottom='off', labelsize=fontsize)
     # emphasize the yticklabels (stations):
     ax_heat.yaxis.set_tick_params(left='on')
-    labels = ['{} ({})'.format(x.get_text(), y) for x, y in zip(ax_heat.get_ymajorticklabels(), n_events)]
-    ax_heat.set_yticklabels(labels,
-                            fontweight='bold', fontsize=fontsize,
-                            rotation='horizontal')
+    # labels = ['{} ({})'.format(x.get_text(), y) for x, y in zip(ax_heat.get_ymajorticklabels(), n_events)]
+    # ax_heat.set_yticklabels(labels,
+    #                         fontweight='bold', fontsize=fontsize,
+    #                         rotation='horizontal')
     ax_heat.set_xlabel('')
     ts = df_mean.T.mean() #.shift(periods=-1, freq='15D')
     ts_std = df_mean.T.std()
@@ -6127,6 +6201,7 @@ def plot_hydro_GNSS_periods_and_map(path=work_yuval, gis_path=gis_path,
     from hydro_procedures import hydro_pw_dict
     import cartopy.crs as ccrs
     from hydro_procedures import read_hydro_metadata
+    from hydro_procedures import prepare_tide_events_GNSS_dataset
     sns.set_style('whitegrid')
     sns.set_style('ticks')
     fig = plt.figure(figsize=(20, 15))
@@ -6145,13 +6220,29 @@ def plot_hydro_GNSS_periods_and_map(path=work_yuval, gis_path=gis_path,
     da = ds.to_array('station')
     da['station'] = [x.upper() for x in da.station.values]
     ds = da.to_dataset('station')
+    # add tide events
+    ds_events = prepare_tide_events_GNSS_dataset(hydro_path)
+    # merge in couples for keeping the original order:
+    li = []
+    for pwv, tide in zip(ds, ds_events):
+        first = ds[pwv]
+        second = ds_events[tide]
+        second.name = first.name + '*'
+        li.append(first)
+        li.append(second)
+    ds = xr.merge(li)
     # colors:
     # title = 'Daily RINEX files availability for the Israeli GNSS stations'
+    c = sns.color_palette('Dark2', n_colors=int(len(ds) / 2))
+    colors = []
+    for color in c:
+        colors.append(color)
+        colors.append(color)
     ax_gantt = gantt_chart(
         ds,
         ax=ax_gantt,
-        fw='bold', grid=True,
-        title='', colors=None,
+        fw='bold', grid=True,marker='x', marker_suffix='*',
+        title='', colors=colors,
         pe_dict=None, fontsize=fontsize, linewidth=24, antialiased=False)
     years_fmt = mdates.DateFormatter('%Y')
     # ax_gantt.xaxis.set_major_locator(mdates.YearLocator())
@@ -6268,3 +6359,44 @@ def plot_hydro_GNSS_periods_and_map(path=work_yuval, gis_path=gis_path,
     if save:
         plt.savefig(savefig_path / filename, bbox_inches='tight')
     return fig
+
+
+def produce_all_param_grid_tables():
+    import pandas as pd
+    mlp = produce_single_param_grid_table('MLP')
+    rf = produce_single_param_grid_table('RF')
+    svc = produce_single_param_grid_table('SVC')
+    df = pd.concat([svc, rf, mlp], axis=1)
+    df = df.fillna(' ')
+    return df
+
+
+def produce_single_param_grid_table(model='MLP'):
+    import pandas as pd
+    from hydro_procedures import ML_Classifier_Switcher
+    numeric = ['C', 'alpha', 'gamma', 'max_depth', 'n_estimators']
+    numeric_type = ['log', 'log', 'log', 'int', 'int']
+    numeric_dict = dict(zip(numeric, numeric_type))
+    ml = ML_Classifier_Switcher()
+    ml.pick_model(model)
+    params = ml.param_grid
+    num_params = [x for x in params.keys() if x in numeric]
+    num_dict = dict((k, params[k]) for k in num_params)
+    other_params = [x for x in params.keys() if x not in numeric]
+    other_dict = dict((k, params[k]) for k in other_params)
+    di = {}
+    for key, val in other_dict.items():
+        val = [str(x) for x in val]
+        di[key] = ', '.join(val)
+    for key, val in num_dict.items():
+        if numeric_dict[key] != 'log':
+            val = '{} to {}'.format(val[0], val[-1])
+        else:
+            val = r'{} to {}'.format(sci_notation(val[0]), sci_notation(val[-1]))
+
+        di[key] = val
+    df = pd.Series(di).to_frame('Options')
+    df['Parameters'] = df.index.str.replace('_', ' ')
+    df = df[['Parameters', 'Options']]
+    df = df.reset_index(drop=True)
+    return df
