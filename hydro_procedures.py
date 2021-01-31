@@ -46,6 +46,28 @@ hydro_st_name_dict = {25191: 'Lavan - new nizana road',
 # maybe implement permutaion importance to pwv ? see what is more important to
 # the model in 24 hours ? only on SVC and MLP ?
 
+
+def prepare_tide_events_GNSS_dataset(hydro_path=hydro_path):
+    import xarray as xr
+    import pandas as pd
+    import numpy as np
+    from aux_gps import xr_reindex_with_date_range
+    feats = xr.load_dataset(
+        hydro_path/'hydro_tides_hourly_features_with_positives.nc')
+    ds = feats['Tides'].to_dataset('GNSS').rename({'tide_event': 'time'})
+    da_list = []
+    for da in ds:
+        time = ds[da].dropna('time')
+        daa = time.copy(data=np.ones(time.shape))
+        daa['time'] = pd.to_datetime(time.values)
+        daa.name = time.name + '_tide'
+        da_list.append(daa)
+    ds = xr.merge(da_list)
+    li = [xr_reindex_with_date_range(ds[x], freq='H') for x in ds]
+    ds = xr.merge(li)
+    return ds
+
+
 def select_features_from_X(X, features='pwv'):
     if isinstance(features, str):
         f = [x for x in X.feature.values if features in x]
@@ -207,21 +229,20 @@ def produce_negatives_events_from_feature_file(hydro_path=hydro_path, seed=42,
         # now loop over the remaining features (which are stns agnostic)
         # and add them with the same negative datetimes of the pwv already aquired:
         dts = [pd.date_range(x.item(), periods=24, freq='H')
-               for x in da_stns['sample']]
+                for x in da_stns['sample']]
         dts_samples = [x[0] for x in dts]
         other_feat_list = []
         for feat in feats[other_feats]:
-            other_feat_sample_list = []
-            for dt in dts:
-                da_other = xr.DataArray(feats[feat].sel(
-                    time=dt).values, dims=['feature'])
-                da_other['feature'] = ['{}_{}'.format(
-                    feat, x) for x in np.arange(1, 25)]
-                other_feat_sample_list.append(da_other)
-            other_feat_da = xr.concat(other_feat_sample_list, 'sample')
-            other_feat_da['sample'] = dts_samples
-            other_feat_list.append(other_feat_da)
+            # other_feat_sample_list = []
+            da_other = xr.DataArray(feats[feat].sel(time=dts_samples).values, dims=['sample'])
+            # for dt in dts_samples:
+            #     da_other = xr.DataArray(feats[feat].sel(
+            #         time=dt).values, dims=['feature'])
+            da_other['sample'] = dts_samples
+            other_feat_list.append(da_other)
+            # other_feat_da = xr.concat(other_feat_sample_list, 'feature')
         da_other_feats = xr.concat(other_feat_list, 'feature')
+        da_other_feats['feature'] = other_feats
         da_stns = xr.concat([da_stns, da_other_feats], 'feature')
         neg_batches.append(da_stns)
     neg_batch_da = xr.concat(neg_batches, 'sample')
@@ -277,7 +298,7 @@ def produce_positives_from_feature_file(hydro_path=hydro_path):
     da_pwv = da_pwv.sortby('sample')
     # now add more features:
     da_list = []
-    for feat in ['bet-dagan', 'DOY', 'doy_sin', 'doy_cos']:
+    for feat in ['bet-dagan']:
         print('getting positives from feature {}'.format(feat))
         positives = []
         for dt_end in da_pwv.sample:
@@ -296,7 +317,20 @@ def produce_positives_from_feature_file(hydro_path=hydro_path):
                          for x in np.arange(1, 25)]
         da_list.append(da)
     da_f = xr.concat(da_list, 'feature')
-    da = xr.concat([da_pwv, da_f], 'feature')
+    da_list = []
+    for feat in ['DOY', 'doy_sin', 'doy_cos']:
+        print('getting positives from feature {}'.format(feat))
+        positives = []
+        for dt in da_pwv.sample:
+            positive = feats[feat].sel(time=dt)
+            positives.append(positive)
+        da = xr.DataArray(positives, dims=['sample'])
+        da['sample'] = da_pwv.sample
+        # da['feature'] = feat
+        da_list.append(da)
+    da_ff = xr.concat(da_list, 'feature')
+    da_ff['feature'] = ['DOY', 'doy_sin', 'doy_cos']
+    da = xr.concat([da_pwv, da_f, da_ff], 'feature')
     filename = 'hydro_tides_hourly_features_with_positives.nc'
     feats['X_pos'] = da
     # now add positives per stations:
