@@ -6,12 +6,12 @@ Created on Thu Nov 21 14:08:43 2019
 @author: ziskin
 """
 
+from PW_paths import savefig_path
 from PW_paths import work_yuval
 hydro_path = work_yuval / 'hydro'
 gis_path = work_yuval / 'gis'
 ims_path = work_yuval / 'IMS_T'
 hydro_ml_path = hydro_path / 'hydro_ML'
-from PW_paths import savefig_path
 # 'tela': 17135
 hydro_pw_dict = {'nizn': 25191, 'klhv': 21105, 'yrcm': 55165,
                  'ramo': 56140, 'drag': 48125, 'dsea': 48192,
@@ -27,7 +27,7 @@ hydro_st_name_dict = {25191: 'Lavan - new nizana road',
                       46150: 'Nekrot - Top',
                       60105: 'Yaelon - Kibutz Yahel',
                       60190: 'Solomon - Eilat'}
-    # TODO: treat all pwv from events as follows:
+# TODO: treat all pwv from events as follows:
 #    For each station:
 #    0) rolling mean to all pwv 1 hour
 #    1) take 288 points before events, if < 144 gone then drop
@@ -43,6 +43,47 @@ hydro_st_name_dict = {25191: 'Lavan - new nizana road',
 # 9) produce a way to get negatives considering the positives
 
 
+# maybe implement permutaion importance to pwv ? see what is more important to
+# the model in 24 hours ? only on SVC and MLP ?
+
+def select_features_from_X(X, features='pwv'):
+    if isinstance(features, str):
+        f = [x for x in X.feature.values if features in x]
+        X = X.sel(feature=f)
+    elif isinstance(features, list):
+        fs = []
+        for f in features:
+            fs += [x for x in X.feature.values if f in x]
+        X = X.sel(feature=fs)
+    return X
+
+
+def combine_pos_neg_from_nc_file(hydro_path=hydro_path, seed=1):
+    from aux_gps import path_glob
+    import xarray as xr
+    import numpy as np
+    # import pandas as pd
+    np.random.seed(seed)
+    file = path_glob(
+        hydro_path, 'hydro_tides_hourly_features_with_positives_negatives_*.nc')[-1]
+    ds = xr.open_dataset(file)
+    # get the positive features and produce target:
+    X_pos = ds['X_pos'].rename({'positive_sample': 'sample'})
+    y_pos = xr.DataArray(np.ones(X_pos['sample'].shape), dims=['sample'])
+    y_pos['sample'] = X_pos['sample']
+    # choose at random y_pos size of negative class:
+    X_neg = ds['X_neg'].rename({'negative_sample': 'sample'})
+    dts = np.random.choice(
+        X_neg['sample'], y_pos['sample'].size, replace=False)
+    X_neg = X_neg.sel(sample=dts)
+    y_neg = xr.DataArray(np.zeros(X_neg['sample'].shape), dims=['sample'])
+    y_neg['sample'] = X_neg['sample']
+    # now concat all X's and y's:
+    X = xr.concat([X_pos, X_neg], 'sample')
+    y = xr.concat([y_pos, y_neg], 'sample')
+    return X, y
+
+
 def check_if_negatives_are_within_positives(neg_da, hydro_path=hydro_path):
     import xarray as xr
     import pandas as pd
@@ -52,76 +93,148 @@ def check_if_negatives_are_within_positives(neg_da, hydro_path=hydro_path):
     dt_neg = neg_da.sample.to_dataframe()
     dt_all = dt_pos.index.union(dt_neg.index)
     dff = pd.DataFrame(dt_all, index=dt_all)
-    print(dff[(dff.diff()['sample'] < pd.Timedelta(1, unit='D'))].size)
+    dff = dff.sort_index()
+    samples_within = dff[(dff.diff()['sample'] <= pd.Timedelta(1, unit='D'))]
+    num = samples_within.size
+    print('samples that are within a day of each other: {}'.format(num))
+    print('samples are: {}'.format(samples_within))
     return dff
 
 
 def produce_negatives_events_from_feature_file(hydro_path=hydro_path, seed=42,
-                                               neg_batch=1):
+                                               batches=1, verbose=1):
+    # do the same thing for pressure (as for pwv), but not for
     import xarray as xr
     import numpy as np
     import pandas as pd
+    from aux_gps import save_ncfile
     feats = xr.load_dataset(hydro_path / 'hydro_tides_hourly_features.nc')
-    all_tides = xr.open_dataset(hydro_path / 'hydro_tides_hourly_features_with_positives.nc')['X']
-    tides = xr.open_dataset(hydro_path / 'hydro_tides_hourly_features_with_positives.nc')['Tides']
+    feats = feats.rename({'doy': 'DOY'})
+    all_tides = xr.open_dataset(
+        hydro_path / 'hydro_tides_hourly_features_with_positives.nc')['X_pos']
+    # pos_tides = xr.open_dataset(hydro_path / 'hydro_tides_hourly_features_with_positives.nc')['tide_datetimes']
+    tides = xr.open_dataset(
+        hydro_path / 'hydro_tides_hourly_features_with_positives.nc')['Tides']
     # get the positives (tide events) for each station:
     df_stns = tides.to_dataset('GNSS').to_dataframe()
     # get all positives (tide events) for all stations:
-    df = all_tides.sample.to_dataframe()['sample']
+    df = all_tides.positive_sample.to_dataframe()['positive_sample']
+    df.columns = ['sample']
     stns = [x for x in hydro_pw_dict.keys()]
+    other_feats = ['DOY', 'doy_sin', 'doy_cos']
     # main stns df features (pwv)
     pwv_df = feats[stns].to_dataframe()
+    pressure = feats['bet-dagan'].to_dataframe()['bet-dagan']
+    # define the initial no_choice_dt_range from the positive dt_range:
+    no_choice_dt_range = [pd.date_range(
+        start=dt, periods=48, freq='H') for dt in df]
+    no_choice_dt_range = pd.DatetimeIndex(
+        np.unique(np.hstack(no_choice_dt_range)))
+    dts_to_choose_from = pwv_df.index.difference(no_choice_dt_range)
+    # dts_to_choose_from_pressure = pwv_df.index.difference(no_choice_dt_range)
     # loop over all stns and produce negative events:
     np.random.seed(seed)
-    batches = []
-    for i in np.arange(1, neg_batch + 1):
-        print('preparing batch {}:'.format(i))
+    neg_batches = []
+    for i in np.arange(1, batches + 1):
+        if verbose >= 0:
+            print('preparing batch {}:'.format(i))
         neg_stns = []
         for stn in stns:
             dts_df = df_stns[stn].dropna()
             pwv = pwv_df[stn].dropna()
             # loop over all events in on stn:
             negatives = []
+            negatives_pressure = []
             # neg_samples = []
-            print('finding negatives for station {}, events={}'.format(stn, len(dts_df)))
-            no_choice_dt_range = [pd.date_range(start=dt, periods=48, freq='H') for dt in df]
-            no_choice_dt_range = pd.DatetimeIndex(np.unique(np.hstack(no_choice_dt_range)))
+            if verbose >= 1:
+                print('finding negatives for station {}, events={}'.format(
+                    stn, len(dts_df)))
             # print('finding negatives for station {}, dt={}'.format(stn, dt.strftime('%Y-%m-%d %H:%M')))
             cnt = 0
             while cnt < len(dts_df):
                 # get random number from each stn pwv:
-                r = np.random.randint(low=0, high=len(pwv.index))
-                random_dt = pwv.index[r]
-                negative_dt_range = pd.date_range(start=random_dt, periods=24, freq='H')
+                # r = np.random.randint(low=0, high=len(pwv.index))
+                # random_dt = pwv.index[r]
+                random_dt = np.random.choice(dts_to_choose_from)
+                negative_dt_range = pd.date_range(
+                    start=random_dt, periods=24, freq='H')
                 if not (no_choice_dt_range.intersection(negative_dt_range)).empty:
                     # print('#')
-                    print('Overlap!')
+                    if verbose >= 2:
+                        print('Overlap!')
                     continue
                 # get the actual pwv and check it is full (24hours):
                 negative = pwv.loc[pwv.index.intersection(negative_dt_range)]
-                if len(negative) != (24):
+                neg_pressure = pressure.loc[pwv.index.intersection(
+                    negative_dt_range)]
+                if len(negative.dropna()) != 24 or len(neg_pressure.dropna()) != 24:
                     # print('!')
-                    print('NaNs!')
+                    if verbose >= 2:
+                        print('NaNs!')
                     continue
+                if verbose >= 2:
+                    print('number of dts that are already chosen: {}'.format(
+                        len(no_choice_dt_range)))
                 negatives.append(negative)
+                negatives_pressure.append(neg_pressure)
+                # now add to the no_choice_dt_range the negative dt_range we just aquired:
+                negative_dt_range_with_padding = pd.date_range(
+                    start=random_dt-pd.Timedelta(24, unit='H'), end=random_dt+pd.Timedelta(23, unit='H'), freq='H')
+                no_choice_dt_range = pd.DatetimeIndex(
+                    np.unique(np.hstack([no_choice_dt_range, negative_dt_range_with_padding])))
+                dts_to_choose_from = dts_to_choose_from.difference(
+                    no_choice_dt_range)
+                if verbose >= 2:
+                    print('number of dts to choose from: {}'.format(
+                        len(dts_to_choose_from)))
                 cnt += 1
             neg_da = xr.DataArray(negatives, dims=['sample', 'feature'])
-            neg_da['feature'] = ['{}_{}'.format('pwv', x) for x in np.arange(1, 25)]
+            neg_da['feature'] = ['{}_{}'.format(
+                'pwv', x) for x in np.arange(1, 25)]
             neg_samples = [x.index[0] for x in negatives]
             neg_da['sample'] = neg_samples
+            neg_pre_da = xr.DataArray(
+                negatives_pressure, dims=['sample', 'feature'])
+            neg_pre_da['feature'] = ['{}_{}'.format(
+                'pressure', x) for x in np.arange(1, 25)]
+            neg_pre_samples = [x.index[0] for x in negatives_pressure]
+            neg_pre_da['sample'] = neg_pre_samples
+            neg_da = xr.concat([neg_da, neg_pre_da], 'feature')
             neg_da = neg_da.sortby('sample')
-            # return neg_da
-            # neg_samples.append(negative_dt_range[0])
-            # negatives.append(neg_da)
-            # da = xr.concat(negatives, 'sample')
-            # da['sample'] = neg_samples
-            # da = da.sortby('sample')
             neg_stns.append(neg_da)
         da_stns = xr.concat(neg_stns, 'sample')
         da_stns = da_stns.sortby('sample')
-        batches.append(da_stns)
-    neg_batch_da = xr.concat(batches, 'batch')
-    neg_batch_da['batch'] = np.arange(1, neg_batch + 1)
+        # now loop over the remaining features (which are stns agnostic)
+        # and add them with the same negative datetimes of the pwv already aquired:
+        dts = [pd.date_range(x.item(), periods=24, freq='H')
+               for x in da_stns['sample']]
+        dts_samples = [x[0] for x in dts]
+        other_feat_list = []
+        for feat in feats[other_feats]:
+            other_feat_sample_list = []
+            for dt in dts:
+                da_other = xr.DataArray(feats[feat].sel(
+                    time=dt).values, dims=['feature'])
+                da_other['feature'] = ['{}_{}'.format(
+                    feat, x) for x in np.arange(1, 25)]
+                other_feat_sample_list.append(da_other)
+            other_feat_da = xr.concat(other_feat_sample_list, 'sample')
+            other_feat_da['sample'] = dts_samples
+            other_feat_list.append(other_feat_da)
+        da_other_feats = xr.concat(other_feat_list, 'feature')
+        da_stns = xr.concat([da_stns, da_other_feats], 'feature')
+        neg_batches.append(da_stns)
+    neg_batch_da = xr.concat(neg_batches, 'sample')
+    # neg_batch_da['batch'] = np.arange(1, batches + 1)
+    neg_batch_da.name = 'X_neg'
+    feats['X_neg'] = neg_batch_da
+    feats['X_pos'] = all_tides
+    feats['X_pwv_stns'] = tides
+    # feats['tide_datetimes'] = pos_tides
+    feats = feats.rename({'sample': 'negative_sample'})
+    filename = 'hydro_tides_hourly_features_with_positives_negatives_{}.nc'.format(
+        batches)
+    save_ncfile(feats, hydro_path, filename)
     return neg_batch_da
 
 
@@ -133,9 +246,12 @@ def produce_positives_from_feature_file(hydro_path=hydro_path):
     # load features:
     file = hydro_path / 'hydro_tides_hourly_features.nc'
     feats = xr.load_dataset(file)
+    feats = feats.rename({'doy': 'DOY'})
     # load positive event for each station:
-    dfs = [read_station_from_tide_database(hydro_pw_dict.get(x), rounding='1H') for x in hydro_pw_dict.keys()]
-    dfs = check_if_tide_events_from_stations_are_within_time_window(dfs, days=1, rounding=None, return_hs_list=True)
+    dfs = [read_station_from_tide_database(hydro_pw_dict.get(
+        x), rounding='1H') for x in hydro_pw_dict.keys()]
+    dfs = check_if_tide_events_from_stations_are_within_time_window(
+        dfs, days=1, rounding=None, return_hs_list=True)
     da_list = []
     positives_per_station = []
     for i, feat in enumerate(feats):
@@ -148,7 +264,8 @@ def produce_positives_from_feature_file(hydro_path=hydro_path):
                                                            verbose=0)
             print('getting positives from station {}'.format(feat))
 
-            positives = [pd.to_datetime((x[-1].time + pd.Timedelta(1, unit='H')).item()) for x in pr]
+            positives = [pd.to_datetime(
+                (x[-1].time + pd.Timedelta(1, unit='H')).item()) for x in pr]
             da = xr.DataArray(pr, dims=['sample', 'feature'])
             da['sample'] = positives
             positives_per_station.append(positives)
@@ -160,7 +277,7 @@ def produce_positives_from_feature_file(hydro_path=hydro_path):
     da_pwv = da_pwv.sortby('sample')
     # now add more features:
     da_list = []
-    for feat in ['bet-dagan', 'doy', 'doy_sin', 'doy_cos']:
+    for feat in ['bet-dagan', 'DOY', 'doy_sin', 'doy_cos']:
         print('getting positives from feature {}'.format(feat))
         positives = []
         for dt_end in da_pwv.sample:
@@ -171,12 +288,17 @@ def produce_positives_from_feature_file(hydro_path=hydro_path):
             positives.append(positive)
         da = xr.DataArray(positives, dims=['sample', 'feature'])
         da['sample'] = da_pwv.sample
-        da['feature'] = ['{}_{}'.format(feat, x) for x in np.arange(1, 25)]
+        if feat == 'bet-dagan':
+            feat_name = 'pressure'
+        else:
+            feat_name = feat
+        da['feature'] = ['{}_{}'.format(feat_name, x)
+                         for x in np.arange(1, 25)]
         da_list.append(da)
     da_f = xr.concat(da_list, 'feature')
     da = xr.concat([da_pwv, da_f], 'feature')
-    filename =  'hydro_tides_hourly_features_with_positives.nc'
-    feats['X'] = da
+    filename = 'hydro_tides_hourly_features_with_positives.nc'
+    feats['X_pos'] = da
     # now add positives per stations:
     pdf = pd.DataFrame(positives_per_station).T
     pdf.index.name = 'tide_event'
@@ -184,6 +306,8 @@ def produce_positives_from_feature_file(hydro_path=hydro_path):
     pos_da['GNSS'] = [x for x in hydro_pw_dict.keys()]
     pos_da.attrs['info'] = 'contains the datetimes of the tide events per GNSS station.'
     feats['Tides'] = pos_da
+    # rename sample to positive sample:
+    feats = feats.rename({'sample': 'positive_sample'})
     save_ncfile(feats, hydro_path, filename)
     return feats
 
@@ -193,7 +317,8 @@ def prepare_features_and_save_hourly(work_path=work_yuval, ims_path=ims_path,
     import xarray as xr
     from aux_gps import save_ncfile
     import numpy as np
-    pwv = xr.load_dataset(work_path / 'GNSS_PW_thresh_0_hour_dayofyear_anoms.nc')
+    pwv = xr.load_dataset(
+        work_path / 'GNSS_PW_thresh_0_hour_dayofyear_anoms.nc')
     pwv_stations = [x for x in hydro_pw_dict.keys()]
     pwv = pwv[pwv_stations]
     # pwv = pwv.rolling(time=12, keep_attrs=True).mean(keep_attrs=True)
@@ -245,7 +370,8 @@ def plot_all_decompositions(X, y, n=2):
     name_dict = dict(zip(models, names))
     da = xr.DataArray(models, dims=['model'])
     da['model'] = models
-    fg = xr.plot.FacetGrid(da, col='model', col_wrap=4, sharex=False, sharey=False)
+    fg = xr.plot.FacetGrid(da, col='model', col_wrap=4,
+                           sharex=False, sharey=False)
     for model_str, ax in zip(da['model'].values, fg.axes.flatten()):
         model = model_str.split('-')[0]
         method = model_str.split('-')[-1]
@@ -323,7 +449,7 @@ def scikit_decompose(X, y, model='PCA', n=2, method=None, ax=None):
             df_1.plot.scatter(ax=ax,
                               x='{}_1'.format(model),
                               y='{}_1'.format(model),
-                              color='b',marker='s', alpha=0.3,
+                              color='b', marker='s', alpha=0.3,
                               label='1',
                               s=50)
         else:
@@ -337,7 +463,7 @@ def scikit_decompose(X, y, model='PCA', n=2, method=None, ax=None):
             ax=ax,
             x='{}_1'.format(model),
             y='{}_1'.format(model),
-            color='r',marker='x',
+            color='r', marker='x',
             label='0',
             s=50)
     elif X_decomp.shape[1] == 2:
@@ -345,7 +471,7 @@ def scikit_decompose(X, y, model='PCA', n=2, method=None, ax=None):
             df_1.plot.scatter(ax=ax,
                               x='{}_1'.format(model),
                               y='{}_2'.format(model),
-                              color='b',marker='s', alpha=0.3,
+                              color='b', marker='s', alpha=0.3,
                               label='1',
                               s=50)
         else:
@@ -396,9 +522,9 @@ def permutation_scikit(X, y, cv=False, plot=True):
     import numpy as np
     if not cv:
         clf = SVC(C=0.01, break_ties=False, cache_size=200, class_weight=None, coef0=0.0,
-    decision_function_shape='ovr', degree=3, gamma=0.032374575428176434,
-    kernel='poly', max_iter=-1, probability=False, random_state=None,
-    shrinking=True, tol=0.001, verbose=False)
+                  decision_function_shape='ovr', degree=3, gamma=0.032374575428176434,
+                  kernel='poly', max_iter=-1, probability=False, random_state=None,
+                  shrinking=True, tol=0.001, verbose=False)
 #        clf = LinearDiscriminantAnalysis()
         # cv = StratifiedKFold(2, shuffle=True)
         cv = KFold(4, shuffle=True)
@@ -424,7 +550,7 @@ def permutation_scikit(X, y, cv=False, plot=True):
             X, y, test_size=0.2, shuffle=True, random_state=42)
         param_grid = {
             'C': np.logspace(-2, 3, 50), 'gamma': np.logspace(-2, 3, 50),
-                  'kernel': ['rbf', 'poly', 'sigmoid']}
+            'kernel': ['rbf', 'poly', 'sigmoid']}
         grid = GridSearchCV(SVC(), param_grid, refit=True, verbose=2)
         grid.fit(X_train, y_train)
         print(grid.best_estimator_)
@@ -532,26 +658,41 @@ def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
     all_scorings = ['f1', 'recall', 'roc_auc']
     # first if RF chosen, replace the cyclic coords of DOY (sin and cos) with
     # the DOY itself.
-    if model_name == 'RF':
-        doy = X['sample'].dt.dayofyear
-        sel_doy = [x for x in X.feature.values if 'doy_sin' in x]
-        doy_X = doy.broadcast_like(X.sel(feature=sel_doy))
-        doy_X['feature'] = [
-            'doy_{}'.format(x) for x in range(
-                doy_X.feature.size)]
-        no_doy = [x for x in X.feature.values if 'doy' not in x]
-        X = X.sel(feature=no_doy)
-        X = xr.concat([X, doy_X], 'feature')
-    else:
-        # first slice X for features:
-        if isinstance(features, str):
-            f = [x for x in X.feature.values if features in x]
-            X = X.sel(feature=f)
-        elif isinstance(features, list):
-            fs = []
-            for f in features:
-                fs += [x for x in X.feature.values if f in x]
-            X = X.sel(feature=fs)
+    if model_name == 'RF' and 'doy' in features:
+        if isinstance(features, list):
+            features.remove('doy')
+            features.append('DOY')
+        elif isinstance(features, str):
+            features = 'DOY'
+    elif model_name != 'RF' and 'doy' in features:
+        if isinstance(features, list):
+            features.remove('doy')
+            features.append('doy_sin')
+            features.append('doy_cos')
+        elif isinstance(features, str):
+            features = ['doy_sin']
+            features.append('doy_cos')
+    X = select_features_from_X(X, features)
+    # if model_name == 'RF':
+    #     doy = X['sample'].dt.dayofyear
+    #     sel_doy = [x for x in X.feature.values if 'doy_sin' in x]
+    #     doy_X = doy.broadcast_like(X.sel(feature=sel_doy))
+    #     doy_X['feature'] = [
+    #         'doy_{}'.format(x) for x in range(
+    #             doy_X.feature.size)]
+    #     no_doy = [x for x in X.feature.values if 'doy' not in x]
+    #     X = X.sel(feature=no_doy)
+    #     X = xr.concat([X, doy_X], 'feature')
+    # else:
+    #     # first slice X for features:
+    #     if isinstance(features, str):
+    #         f = [x for x in X.feature.values if features in x]
+    #         X = X.sel(feature=f)
+    #     elif isinstance(features, list):
+    #         fs = []
+    #         for f in features:
+    #             fs += [x for x in X.feature.values if f in x]
+    #         X = X.sel(feature=fs)
     if diagnostic:
         print(np.unique(X.feature.values))
     # configure the cross-validation procedure
@@ -574,7 +715,8 @@ def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
                              refit=refit_scorer, return_train_score=True)
 #    gr.fit(X, y)
     # configure the cross-validation procedure
-    cv_outer = StratifiedKFold(n_splits=outer_splits, shuffle=True, random_state=seed)
+    cv_outer = StratifiedKFold(
+        n_splits=outer_splits, shuffle=True, random_state=seed)
     # execute the nested cross-validation
     scores_est_dict = cross_validate(gr_search, X, y,
                                      scoring=all_scorings,
@@ -596,10 +738,12 @@ def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
     preds_ds = []
     gr_ds = []
     for est in scores_est_dict['estimator']:
-        gr, _ = process_gridsearch_results(est, model_name, split_dim='inner_kfold', features=X.feature.values)
+        gr, _ = process_gridsearch_results(
+            est, model_name, split_dim='inner_kfold', features=X.feature.values)
         # somehow save gr:
         gr_ds.append(gr)
-        preds_ds.append(grab_y_true_and_predict_from_sklearn_model(est, X, y, cv_inner))
+        preds_ds.append(
+            grab_y_true_and_predict_from_sklearn_model(est, X, y, cv_inner))
 #        tpr_ds.append(produce_ROC_curves_from_model(est, X, y, cv_inner))
     dss = xr.concat(preds_ds, 'outer_kfold')
     gr_dss = xr.concat(gr_ds, 'outer_kfold')
@@ -611,64 +755,64 @@ def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
     dss.attrs = gr_dss.attrs
     dss.attrs['outer_kfold_splits'] = outer_splits
     remove_digits = str.maketrans('', '', digits)
-    features = list(set([x.translate(remove_digits).split('_')[0] for x in X.feature.values]))
+    features = list(set([x.translate(remove_digits).split('_')[0]
+                         for x in X.feature.values]))
     # add more attrs, features etc:
     dss.attrs['features'] = features
-    if isinstance(X.attrs['pwv_id'], list):
-        dss.attrs['pwv_id'] = '-'.join(X.attrs['pwv_id'])
-    else:
-        dss.attrs['pwv_id'] = X.attrs['pwv_id']
-    if isinstance(y.attrs['hydro_station_id'], list):
-        dss.attrs['hs_id'] = '-'.join([str(x) for x in y.attrs['hydro_station_id']])
-    else:
-        dss.attrs['hs_id'] = y.attrs['hydro_station_id']
-    dss.attrs['hydro_max_flow'] = y.attrs['max_flow']
-    dss.attrs['neg_pos_ratio'] = y.attrs['neg_pos_ratio']
+
+    # rename major data_vars with model name:
+    # ys = [x for x in dss.data_vars if 'y_' in x]
+    # new_ys = [y + '_{}'.format(model_name) for y in ys]
+    # dss = dss.rename(dict(zip(ys, new_ys)))
+    # new_test_keys = [y + '_{}'.format(model_name) for y in test_keys]
+    # dss = dss.rename(dict(zip(test_keys, new_test_keys)))
+
+    # if isinstance(X.attrs['pwv_id'], list):
+    #     dss.attrs['pwv_id'] = '-'.join(X.attrs['pwv_id'])
+    # else:
+    #     dss.attrs['pwv_id'] = X.attrs['pwv_id']
+    # if isinstance(y.attrs['hydro_station_id'], list):
+    #     dss.attrs['hs_id'] = '-'.join([str(x) for x in y.attrs['hydro_station_id']])
+    # else:
+    #     dss.attrs['hs_id'] = y.attrs['hydro_station_id']
+    # dss.attrs['hydro_max_flow'] = y.attrs['max_flow']
+    # dss.attrs['neg_pos_ratio'] = y.attrs['neg_pos_ratio']
     # save results to file:
     if savepath is not None:
         save_cv_results(dss, savepath=savepath)
     return dss
 
 
-def ML_main_procedure(X, y, estimator=None, model_name='SVC', features='pwv',
-                      val_size=0.18, n_splits=None, test_size=0.2, seed=42, best_score='f1',
-                      savepath=None, plot=True):
-    """split the X,y for train and test, either do HP tuning using HP_tuning
-    with val_size or use already tuned (or not) estimator.
-    models to play with = MLP, RF and SVC.
-    n_splits = 2, 3, 4.
-    features = pwv, pressure.
-    best_score = f1, roc_auc, accuracy.
-    can do loop on them. RF takes the most time to tune."""
-    from sklearn.model_selection import train_test_split
-    # first slice X for features:
-    if isinstance(features, str):
-        f = [x for x in X.feature.values if features in x]
-        X = X.sel(feature=f)
-    elif isinstance(features, list):
-        fs = []
-        for f in features:
-            fs += [x for x in X.feature.values if f in x]
-        X = X.sel(feature=fs)
-    X_train, X_test, y_train, y_test = train_test_split(X, y,
-                                                        test_size=test_size,
-                                                        shuffle=True,
-                                                        random_state=seed)
-    # do HP_tuning:
-    if estimator is None:
-        cvr, model = HP_tuning(X_train, y_train, model_name=model_name, val_size=val_size, test_size=test_size,
-                        best_score=best_score, seed=seed, savepath=savepath, n_splits=n_splits)
-    else:
-        model = estimator
-    if plot:
-        ax = plot_many_ROC_curves(model, X_test, y_test, name=model_name,
-                                  ax=None)
-        return ax
-    else:
-        return model
+# def ML_main_procedure(X, y, estimator=None, model_name='SVC', features='pwv',
+#                       val_size=0.18, n_splits=None, test_size=0.2, seed=42, best_score='f1',
+#                       savepath=None, plot=True):
+#     """split the X,y for train and test, either do HP tuning using HP_tuning
+#     with val_size or use already tuned (or not) estimator.
+#     models to play with = MLP, RF and SVC.
+#     n_splits = 2, 3, 4.
+#     features = pwv, pressure.
+#     best_score = f1, roc_auc, accuracy.
+#     can do loop on them. RF takes the most time to tune."""
+#     X = select_features_from_X(X, features)
+#     X_train, X_test, y_train, y_test = train_test_split(X, y,
+#                                                         test_size=test_size,
+#                                                         shuffle=True,
+#                                                         random_state=seed)
+#     # do HP_tuning:
+#     if estimator is None:
+#         cvr, model = HP_tuning(X_train, y_train, model_name=model_name, val_size=val_size, test_size=test_size,
+#                         best_score=best_score, seed=seed, savepath=savepath, n_splits=n_splits)
+#     else:
+#         model = estimator
+#     if plot:
+#         ax = plot_many_ROC_curves(model, X_test, y_test, name=model_name,
+#                                   ax=None)
+#         return ax
+#     else:
+#         return model
 
 
-def plot_hydro_ML_models_results_from_dss(dss, station='drag', std_on='outer',
+def plot_hydro_ML_models_results_from_dss(dss, std_on='outer',
                                           save=False, fontsize=16,
                                           plot_type='ROC', neg=1,
                                           feat=['doy+pressure+pwv', 'pwv']):
@@ -677,7 +821,7 @@ def plot_hydro_ML_models_results_from_dss(dss, station='drag', std_on='outer',
     import matplotlib.pyplot as plt
     import pandas as pd
     cmap = sns.color_palette("colorblind", len(feat))
-    dss = dss.sel(neg_pos_ratio=neg)
+    # dss = dss.sel(neg_pos_ratio=neg)
     # if len(station) > 4:
     #     max_flow = 0
     #     sts = [x for x in station.split('-')]
@@ -689,7 +833,7 @@ def plot_hydro_ML_models_results_from_dss(dss, station='drag', std_on='outer',
     #     X, y = produce_X_y(station, hydro_pw_dict[station], neg_pos_ratio=1,
     #                        max_flow=max_flow)
     # events = int(y[y == 1].sum().item())
-    assert station == dss.attrs['pwv_id']
+    # assert station == dss.attrs['pwv_id']
     fg = xr.plot.FacetGrid(
         dss,
         col='model',
@@ -704,11 +848,13 @@ def plot_hydro_ML_models_results_from_dss(dss, station='drag', std_on='outer',
             chance_plot = [False for x in feat]
             chance_plot[-1] = True
             for k, f in enumerate(feat):
-            #     name = '{}-{}-{}'.format(modelname, scoring, feat)
-            # model = dss.isel({'model': j, 'scoring': i}).sel(
-            #     {'features': feat})
-                model = dss.isel({'model': j, 'scoring': i}).sel({'features': f})
-                title = '{} of {} model ({})'.format(plot_type, modelname, scoring)
+                #     name = '{}-{}-{}'.format(modelname, scoring, feat)
+                # model = dss.isel({'model': j, 'scoring': i}).sel(
+                #     {'features': feat})
+                model = dss.isel({'model': j, 'scoring': i}
+                                 ).sel({'features': f})
+                title = '{} of {} model ({})'.format(
+                    plot_type, modelname, scoring)
                 try:
                     plot_ROC_PR_curve_from_dss(model, outer_dim='outer_kfold',
                                                inner_dim='inner_kfold',
@@ -721,7 +867,8 @@ def plot_hydro_ML_models_results_from_dss(dss, station='drag', std_on='outer',
                     ax.grid('on')
                     continue
             handles, labels = ax.get_legend_handles_labels()
-            hand = pd.Series(labels, index=handles).drop_duplicates().index.values
+            hand = pd.Series(
+                labels, index=handles).drop_duplicates().index.values
             labe = pd.Series(labels, index=handles).drop_duplicates().values
             ax.legend(handles=hand.tolist(), labels=labe.tolist(), loc="lower right",
                       fontsize=14)
@@ -740,14 +887,14 @@ def plot_hydro_ML_models_results_from_dss(dss, station='drag', std_on='outer',
                            hspace=0.173,
                            wspace=0.051)
     if save:
-        filename = 'hydro_models_on_{}_{}_{}_std_on_{}_{}_neg{}.png'.format(
-            station, dss['inner_kfold'].size, dss['outer_kfold'].size,
+        filename = 'hydro_models_on_{}_{}_std_on_{}_{}_neg{}.png'.format(
+            dss['inner_kfold'].size, dss['outer_kfold'].size,
             std_on, plot_type, neg)
         plt.savefig(savefig_path / filename, bbox_inches='tight')
     return fg
 
 
-#def plot_hydro_ML_models_result(model_da, nsplits=2, station='drag',
+# def plot_hydro_ML_models_result(model_da, nsplits=2, station='drag',
 #                                test_size=20, n_splits_plot=None, save=False):
 #    import xarray as xr
 #    import seaborn as sns
@@ -785,8 +932,8 @@ def plot_hydro_ML_models_results_from_dss(dss, station='drag', std_on='outer',
 #                    X_f = X.sel(feature=f)
 #                else:
 #                    X_f = X
-##                X_train, X_test, y_train, y_test = train_test_split(
-##                        X_f, y, test_size=test_size/100, shuffle=True, random_state=42)
+# X_train, X_test, y_train, y_test = train_test_split(
+# X_f, y, test_size=test_size/100, shuffle=True, random_state=42)
 #
 #                plot_many_ROC_curves(model, X_f, y, name=name,
 #                                     color=cmap[k], ax=ax,
@@ -841,6 +988,7 @@ def load_ML_run_results(path=hydro_ml_path, prefix='CVR', pw_station='drag'):
     def smart_add_dataarray_to_ds_list(dsl, da_name='feature_importances'):
         """add data array to ds_list even if it does not exist, use shape of
         data array that exists in other part of ds list"""
+        # print(da_name)
         fi = [x for x in dsl if da_name in x][0]
         print(da_name, fi[da_name].shape)
         fi = fi[da_name].copy(data=np.zeros(shape=fi[da_name].shape))
@@ -851,59 +999,60 @@ def load_ML_run_results(path=hydro_ml_path, prefix='CVR', pw_station='drag'):
             new_dsl.append(ds)
         return new_dsl
 
-    print('loading hydro ML results for station {}'.format(pw_station))
+    print('loading hydro ML results for all models and features')
+    # print('loading hydro ML results for station {}'.format(pw_station))
     model_files = path_glob(path, '{}_*.nc'.format(prefix))
     model_files = sorted(model_files)
-    model_files = [x for x in model_files if pw_station in x.as_posix()]
+    # model_files = [x for x in model_files if pw_station in x.as_posix()]
     ds_list = [xr.load_dataset(x) for x in model_files]
     model_as_str = [x.as_posix().split('/')[-1].split('.')[0]
                     for x in model_files]
-    model_names = [x.split('_')[3] for x in model_as_str]
-    model_scores = [x.split('_')[5] for x in model_as_str]
-    model_features = [x.split('_')[4] for x in model_as_str]
+    model_names = [x.split('_')[1] for x in model_as_str]
+    model_scores = [x.split('_')[3] for x in model_as_str]
+    model_features = [x.split('_')[2] for x in model_as_str]
     new_model_features = order_features_list(model_features)
-    model_hs_id = [x.split('_')[2] for x in model_as_str]
-    model_ratio = [int(x.split('_')[-1]) for x in model_as_str]
-    assert len(set(model_hs_id)) == 1
+    # model_hs_id = [x.split('_')[2] for x in model_as_str]
+    # model_ratio = [int(x.split('_')[-1]) for x in model_as_str]
+    # assert len(set(model_hs_id)) == 1
 #    hs_id = list(set(model_hs_id))[0]
-    tups = [
-        tuple(x) for x in zip(
-            model_names,
-            new_model_features,
-            model_scores,
-            model_ratio)]
+    # tups = [
+    #     tuple(x) for x in zip(
+    #         model_names,
+    #         new_model_features,
+    #         model_scores)]
     ind = pd.MultiIndex.from_arrays(
         [model_names,
             new_model_features,
-            model_scores,
-            model_ratio],
+            model_scores],
         names=(
             'model',
             'features',
-            'scoring',
-            'neg_pos_ratio'))
-#    ind1 = pd.MultiIndex.from_product([model_names, model_scores, model_features], names=[
-#                                     'model', 'scoring', 'feature'])
-#    ds_list = [x[data_vars] for x in ds_list]
+            'scoring'))
+    #    ind1 = pd.MultiIndex.from_product([model_names, model_scores, model_features], names=[
+    #                                     'model', 'scoring', 'feature'])
+    #    ds_list = [x[data_vars] for x in ds_list]
     # complete non-existant fields like best and fi for all ds:
     data_vars = [x for x in ds_list[0] if x.startswith('test')]
-#    data_vars += ['AUC', 'TPR']
-    data_vars += ['y_true', 'y_pred', 'y_prob']
+    #    data_vars += ['AUC', 'TPR']
+    data_vars += [x for x in ds_list[0] if x.startswith('y_')]
     bests = [[x for x in y if x.startswith('best')] for y in ds_list]
     data_vars += list(set([y for x in bests for y in x]))
-    data_vars += ['feature_importances']
+    if 'RF' in data_vars:
+        data_vars += ['feature_importances']
     new_ds_list = []
     for dvar in data_vars:
         ds_list = smart_add_dataarray_to_ds_list(ds_list, dvar)
-#    # check if all data vars are in each ds and merge them:
-    new_ds_list = [xr.merge([y[x] for x in data_vars if x in y], combine_attrs='no_conflicts') for y in ds_list]
+    #    # check if all data vars are in each ds and merge them:
+    new_ds_list = [xr.merge([y[x] for x in data_vars if x in y],
+                            combine_attrs='no_conflicts') for y in ds_list]
     # concat all
     dss = xr.concat(new_ds_list, dim='dim_0')
     dss['dim_0'] = ind
     dss = dss.unstack('dim_0')
-    dss.attrs['pwv_id'] = pw_station
+    # dss.attrs['pwv_id'] = pw_station
     # fix roc_auc to roc-auc in dss datavars
-    dss = dss.rename({'test_roc_auc': 'test_roc-auc'})
+    dss = dss.rename_vars({'test_roc_auc': 'test_roc-auc'})
+    # dss['test_roc_auc'].name = 'test_roc-auc'
     print('calculating ROC, PR metrics.')
     dss = calculate_metrics_from_ML_dss(dss)
     print('Done!')
@@ -928,87 +1077,102 @@ def calculate_metrics_from_ML_dss(dss):
     m = [x for x in dss['model'].values]
     sc = [x for x in dss['scoring'].values]
     f = [x for x in dss['features'].values]
-    r = [x for x in dss['neg_pos_ratio'].values]
+    # r = [x for x in dss['neg_pos_ratio'].values]
     ind = pd.MultiIndex.from_product(
-        [ok, ik, m, sc, f, r],
+        [ok, ik, m, sc, f],
         names=[
             'outer_kfold',
             'inner_kfold',
             'model',
             'scoring',
-            'features',
-            'neg_pos_ratio'])  # , 'station'])
+            'features'])  # , 'station'])
 
     okn = [x for x in range(dss['outer_kfold'].size)]
     ikn = [x for x in range(dss['inner_kfold'].size)]
     mn = [x for x in range(dss['model'].size)]
     scn = [x for x in range(dss['scoring'].size)]
     fn = [x for x in range(dss['features'].size)]
-    ra = [x for x in range(dss['neg_pos_ratio'].size)]
     ds_list = []
     for i in okn:
         for j in ikn:
             for k in mn:
                 for n in scn:
                     for m in fn:
-                        for r in ra:
-                            ds = xr.Dataset()
-                            y_true = dss['y_true'].isel(outer_kfold=i, inner_kfold=j, model=k, scoring=n, features=m, neg_pos_ratio=r).reset_coords(drop=True).squeeze()
-                            y_prob = dss['y_prob'].isel(outer_kfold=i, inner_kfold=j, model=k, scoring=n, features=m, neg_pos_ratio=r).reset_coords(drop=True).squeeze()
-                            y_true = y_true.dropna('sample')
-                            y_prob = y_prob.dropna('sample')
-                            if y_prob.size == 0:
-                                # in case of NaNs in the results:
-                                fpr_da = xr.DataArray(np.nan*np.ones((1)), dims=['sample'])
-                                fpr_da['sample'] = [x for x in range(fpr_da.size)]
-                                tpr_da = xr.DataArray(np.nan*np.ones((1)), dims=['sample'])
-                                tpr_da['sample'] = [x for x in range(tpr_da.size)]
-                                prn_da = xr.DataArray(np.nan*np.ones((1)), dims=['sample'])
-                                prn_da['sample'] = [x for x in range(prn_da.size)]
-                                rcll_da = xr.DataArray(np.nan*np.ones((1)), dims=['sample'])
-                                rcll_da['sample'] = [x for x in range(rcll_da.size)]
-                                tpr_fpr = xr.DataArray(np.nan*np.ones((100)), dims=['FPR'])
-                                tpr_fpr['FPR'] = mean_fpr
-                                prn_rcll = xr.DataArray(np.nan*np.ones((100)), dims=['RCLL'])
-                                prn_rcll['RCLL'] = mean_fpr
-                                pr_auc_da = xr.DataArray(np.nan)
-                                roc_auc_da = xr.DataArray(np.nan)
-                                no_skill_da = xr.DataArray(np.nan)
-                            else:
-                                no_skill = len(y_true[y_true==1]) / len(y_true)
-                                no_skill_da = xr.DataArray(no_skill)
-                                fpr, tpr, _ = roc_curve(y_true, y_prob)
-                                interp_tpr = np.interp(mean_fpr, fpr, tpr)
-                                interp_tpr[0] = 0.0
-                                roc_auc = roc_auc_score(y_true, y_prob)
-                                prn, rcll, _ = precision_recall_curve(y_true, y_prob)
-                                interp_prn = np.interp(mean_fpr, rcll[::-1], prn[::-1])
-                                interp_prn[0] = 1.0
-                                pr_auc_score = auc(rcll, prn)
-                                roc_auc_da = xr.DataArray(roc_auc)
-                                pr_auc_da = xr.DataArray(pr_auc_score)
-                                prn_da = xr.DataArray(prn, dims=['sample'])
-                                prn_da['sample'] = [x for x in range(len(prn))]
-                                rcll_da = xr.DataArray(rcll, dims=['sample'])
-                                rcll_da['sample'] = [x for x in range(len(rcll))]
-                                fpr_da = xr.DataArray(fpr, dims=['sample'])
-                                fpr_da['sample'] = [x for x in range(len(fpr))]
-                                tpr_da = xr.DataArray(tpr, dims=['sample'])
-                                tpr_da['sample'] = [x for x in range(len(tpr))]
-                                tpr_fpr = xr.DataArray(interp_tpr, dims=['FPR'])
-                                tpr_fpr['FPR'] = mean_fpr
-                                prn_rcll = xr.DataArray(interp_prn, dims=['RCLL'])
-                                prn_rcll['RCLL'] = mean_fpr
-                            ds['fpr'] = fpr_da
-                            ds['tpr'] = tpr_da
-                            ds['roc-auc'] = roc_auc_da
-                            ds['pr-auc'] = pr_auc_da
-                            ds['prn'] = prn_da
-                            ds['rcll'] = rcll_da
-                            ds['TPR'] = tpr_fpr
-                            ds['PRN'] = prn_rcll
-                            ds['no_skill'] = no_skill_da
-                            ds_list.append(ds)
+                        ds = xr.Dataset()
+                        y_true = dss['y_true'].isel(
+                            outer_kfold=i, inner_kfold=j, model=k, scoring=n, features=m).reset_coords(drop=True).squeeze()
+                        y_prob = dss['y_prob'].isel(
+                            outer_kfold=i, inner_kfold=j, model=k, scoring=n, features=m).reset_coords(drop=True).squeeze()
+                        y_true = y_true.dropna('sample')
+                        y_prob = y_prob.dropna('sample')
+                        if y_prob.size == 0:
+                            # in case of NaNs in the results:
+                            fpr_da = xr.DataArray(
+                                np.nan*np.ones((1)), dims=['sample'])
+                            fpr_da['sample'] = [
+                                x for x in range(fpr_da.size)]
+                            tpr_da = xr.DataArray(
+                                np.nan*np.ones((1)), dims=['sample'])
+                            tpr_da['sample'] = [
+                                x for x in range(tpr_da.size)]
+                            prn_da = xr.DataArray(
+                                np.nan*np.ones((1)), dims=['sample'])
+                            prn_da['sample'] = [
+                                x for x in range(prn_da.size)]
+                            rcll_da = xr.DataArray(
+                                np.nan*np.ones((1)), dims=['sample'])
+                            rcll_da['sample'] = [
+                                x for x in range(rcll_da.size)]
+                            tpr_fpr = xr.DataArray(
+                                np.nan*np.ones((100)), dims=['FPR'])
+                            tpr_fpr['FPR'] = mean_fpr
+                            prn_rcll = xr.DataArray(
+                                np.nan*np.ones((100)), dims=['RCLL'])
+                            prn_rcll['RCLL'] = mean_fpr
+                            pr_auc_da = xr.DataArray(np.nan)
+                            roc_auc_da = xr.DataArray(np.nan)
+                            no_skill_da = xr.DataArray(np.nan)
+                        else:
+                            no_skill = len(
+                                y_true[y_true == 1]) / len(y_true)
+                            no_skill_da = xr.DataArray(no_skill)
+                            fpr, tpr, _ = roc_curve(y_true, y_prob)
+                            interp_tpr = np.interp(mean_fpr, fpr, tpr)
+                            interp_tpr[0] = 0.0
+                            roc_auc = roc_auc_score(y_true, y_prob)
+                            prn, rcll, _ = precision_recall_curve(
+                                y_true, y_prob)
+                            interp_prn = np.interp(
+                                mean_fpr, rcll[::-1], prn[::-1])
+                            interp_prn[0] = 1.0
+                            pr_auc_score = auc(rcll, prn)
+                            roc_auc_da = xr.DataArray(roc_auc)
+                            pr_auc_da = xr.DataArray(pr_auc_score)
+                            prn_da = xr.DataArray(prn, dims=['sample'])
+                            prn_da['sample'] = [x for x in range(len(prn))]
+                            rcll_da = xr.DataArray(rcll, dims=['sample'])
+                            rcll_da['sample'] = [
+                                x for x in range(len(rcll))]
+                            fpr_da = xr.DataArray(fpr, dims=['sample'])
+                            fpr_da['sample'] = [x for x in range(len(fpr))]
+                            tpr_da = xr.DataArray(tpr, dims=['sample'])
+                            tpr_da['sample'] = [x for x in range(len(tpr))]
+                            tpr_fpr = xr.DataArray(
+                                interp_tpr, dims=['FPR'])
+                            tpr_fpr['FPR'] = mean_fpr
+                            prn_rcll = xr.DataArray(
+                                interp_prn, dims=['RCLL'])
+                            prn_rcll['RCLL'] = mean_fpr
+                        ds['fpr'] = fpr_da
+                        ds['tpr'] = tpr_da
+                        ds['roc-auc'] = roc_auc_da
+                        ds['pr-auc'] = pr_auc_da
+                        ds['prn'] = prn_da
+                        ds['rcll'] = rcll_da
+                        ds['TPR'] = tpr_fpr
+                        ds['PRN'] = prn_rcll
+                        ds['no_skill'] = no_skill_da
+                        ds_list.append(ds)
     ds = xr.concat(ds_list, 'dim_0')
     ds['dim_0'] = ind
     ds = ds.unstack()
@@ -1025,7 +1189,7 @@ def calculate_metrics_from_ML_dss(dss):
     return dss
 
 #
-#def load_ML_models(path=hydro_ml_path, station='drag', prefix='CVM', suffix='.pkl'):
+# def load_ML_models(path=hydro_ml_path, station='drag', prefix='CVM', suffix='.pkl'):
 #    from aux_gps import path_glob
 #    import joblib
 #    import matplotlib.pyplot as plt
@@ -1066,7 +1230,7 @@ def calculate_metrics_from_ML_dss(dss):
 
 
 def plot_heatmaps_for_all_models_and_scorings(dss, station='drag',
-                                              var='roc-auc'): # , save=True):
+                                              var='roc-auc'):  # , save=True):
     import xarray as xr
     import seaborn as sns
     import matplotlib.pyplot as plt
@@ -1074,11 +1238,11 @@ def plot_heatmaps_for_all_models_and_scorings(dss, station='drag',
     cmaps = {'roc-auc': sns.color_palette("Blues", as_cmap=True),
              'pr-auc': sns.color_palette("Greens", as_cmap=True)}
     fg = xr.plot.FacetGrid(
-            dss,
-            col='model',
-            row='scoring',
-            sharex=True,
-            sharey=True, figsize=(10, 20))
+        dss,
+        col='model',
+        row='scoring',
+        sharex=True,
+        sharey=True, figsize=(10, 20))
     dss = dss.mean('inner_kfold', keep_attrs=True)
     vmin, vmax = dss[var].min(), 1
     norm = plt.Normalize(vmin=vmin, vmax=vmax)
@@ -1087,7 +1251,8 @@ def plot_heatmaps_for_all_models_and_scorings(dss, station='drag',
             ax = fg.axes[i, j]
             modelname = dss['model'].isel(model=j).item()
             scoring = dss['scoring'].isel(scoring=i).item()
-            model = dss[var].isel({'model': j, 'scoring': i}).reset_coords(drop=True)
+            model = dss[var].isel(
+                {'model': j, 'scoring': i}).reset_coords(drop=True)
             df = model.to_dataframe()
             title = '{} model ({})'.format(modelname, scoring)
             df = df.unstack()
@@ -1104,7 +1269,8 @@ def plot_heatmaps_for_all_models_and_scorings(dss, station='drag',
                 ax.set_xlabel('')
     cax = fg.fig.add_axes([0.1, 0.025, .8, .015])
     fg.fig.colorbar(ax.get_children()[0], cax=cax, orientation="horizontal")
-    fg.fig.suptitle('{}: {}'.format(dss.attrs['pwv_id'].upper(), var.upper()), fontweight='bold')
+    fg.fig.suptitle('{}: {}'.format(
+        dss.attrs['pwv_id'].upper(), var.upper()), fontweight='bold')
     fg.fig.tight_layout()
     fg.fig.subplots_adjust(top=0.937,
                            bottom=0.099,
@@ -1122,7 +1288,7 @@ def plot_heatmaps_for_all_models_and_scorings(dss, station='drag',
 def plot_feature_importances(
         dss,
         feat_dim='features',
-        features = 'doy+pressure+pwv',
+        features='doy+pressure+pwv',
         scoring='f1',
         axes=None):
     import matplotlib.pyplot as plt
@@ -1167,8 +1333,10 @@ def plot_feature_importances_for_all_scorings(dss,
     scores = dss['scoring'].values
     fig, axes = plt.subplots(len(scores), fns, sharey=True, figsize=(15, 20))
     for i, score in enumerate(scores):
-        plot_feature_importances(dss, features=features, scoring=score, axes=axes[i, :])
-    fig.suptitle('feature importances of {} model on {} station'.format(model, station))
+        plot_feature_importances(
+            dss, features=features, scoring=score, axes=axes[i, :])
+    fig.suptitle(
+        'feature importances of {} model on {} station'.format(model, station))
     fig.tight_layout()
     fig.subplots_adjust(top=0.935,
                         bottom=0.034,
@@ -1222,7 +1390,8 @@ def plot_ROC_PR_curve_from_dss(
         ylabel = 'Precision'
     # plot mean ROC:
     if main_label is None:
-        main_label = r'Mean {} (AUC={:.2f}$\pm${:.2f})'.format(plot_type, mean_auc, std_auc)
+        main_label = r'Mean {} (AUC={:.2f}$\pm${:.2f})'.format(
+            plot_type, mean_auc, std_auc)
     else:
         textstr = '\n'.join(['Mean ROC {}'.format(
             main_label), r'(AUC={:.2f}$\pm${:.2f})'.format(mean_auc, std_auc)])
@@ -1319,7 +1488,8 @@ def plot_many_ROC_curves(model, X, y, name='', color='b', ax=None,
         mean_auc = auc(mean_fpr, mean_tpr)
         std_auc = np.std(aucs)
         ax.plot(mean_fpr, mean_tpr, color=color,
-                label=r'Mean ROC (AUC = %0.2f $\pm$ %0.2f)' % (mean_auc, std_auc),
+                label=r'Mean ROC (AUC = %0.2f $\pm$ %0.2f)' % (
+                    mean_auc, std_auc),
                 lw=2, alpha=.8)
 
         std_tpr = np.std(tprs, axis=0)
@@ -1363,7 +1533,8 @@ def HP_tuning(X, y, model_name='SVC', val_size=0.18, n_splits=None,
         ds, best_model = process_gridsearch_results(gr, model_name,
                                                     features=features, pwv_id=X.attrs['pwv_id'], hs_id=y.attrs['hydro_station_id'], test_size=test_size)
     else:
-        ds = process_gridsearch_results(gr, model_name, features=features, pwv_id=X.attrs['pwv_id'], hs_id=y.attrs['hydro_station_id'], test_size=test_size)
+        ds = process_gridsearch_results(gr, model_name, features=features,
+                                        pwv_id=X.attrs['pwv_id'], hs_id=y.attrs['hydro_station_id'], test_size=test_size)
         best_model = None
     if savepath is not None:
         save_cv_results(ds, best_model=best_model, savepath=savepath)
@@ -1443,7 +1614,8 @@ def process_gridsearch_results(GridSearchCV, model_name,
         ds.attrs['refitted_scorer'] = GridSearchCV.refit
         for name in names:
             if isinstance(GridSearchCV.best_params_[name], tuple):
-                GridSearchCV.best_params_[name] = ','.join(map(str, GridSearchCV.best_params_[name]))
+                GridSearchCV.best_params_[name] = ','.join(
+                    map(str, GridSearchCV.best_params_[name]))
             ds['best_{}'.format(name)] = GridSearchCV.best_params_[name]
         return ds, GridSearchCV.best_estimator_
     else:
@@ -1453,16 +1625,17 @@ def process_gridsearch_results(GridSearchCV, model_name,
 def save_cv_results(cvr, savepath=hydro_path):
     from aux_gps import save_ncfile
     features = '+'.join(cvr.attrs['features'])
-    pwv_id = cvr.attrs['pwv_id']
-    hs_id = cvr.attrs['hs_id']
-    neg_pos_ratio = cvr.attrs['neg_pos_ratio']
+    # pwv_id = cvr.attrs['pwv_id']
+    # hs_id = cvr.attrs['hs_id']
+    # neg_pos_ratio = cvr.attrs['neg_pos_ratio']
     ikfolds = cvr.attrs['inner_kfold_splits']
     okfolds = cvr.attrs['outer_kfold_splits']
     name = cvr.attrs['model_name']
     refitted_scorer = cvr.attrs['refitted_scorer'].replace('_', '-')
-    filename = 'CVR_{}_{}_{}_{}_{}_{}_{}_{}.nc'.format(pwv_id, hs_id,
-                                                       name, features, refitted_scorer, ikfolds, okfolds, neg_pos_ratio)
-
+    # filename = 'CVR_{}_{}_{}_{}_{}_{}_{}_{}.nc'.format(pwv_id, hs_id,
+    #                                                    name, features, refitted_scorer, ikfolds, okfolds, neg_pos_ratio)
+    filename = 'CVR_{}_{}_{}_{}_{}.nc'.format(
+        name, features, refitted_scorer, ikfolds, okfolds)
     save_ncfile(cvr, savepath, filename)
     return
 
@@ -1505,10 +1678,10 @@ def scikit_fit_predict(X, y, seed=42, with_pressure=True, n_splits=7,
     aucs = []
     mean_fpr = np.linspace(0, 1, 100)
     for i, (train, val) in enumerate(cv.split(X_tt, y_tt)):
-#    for i in range(100):
-#        X_train, X_val, y_train, y_val = train_test_split(
-#            X_tt, y_tt, shuffle=True, test_size=0.5, random_state=i)
-#        clf.fit(X_train, y_train)
+        #    for i in range(100):
+        #        X_train, X_val, y_train, y_val = train_test_split(
+        #            X_tt, y_tt, shuffle=True, test_size=0.5, random_state=i)
+        #        clf.fit(X_train, y_train)
         classifier.fit(X_tt[train], y_tt[train])
 #        viz = plot_roc_curve(clf, X_val, y_val,
 #                             name='ROC run {}'.format(i),
@@ -1545,9 +1718,11 @@ def scikit_fit_predict(X, y, seed=42, with_pressure=True, n_splits=7,
     ax.set(xlim=[-0.05, 1.05], ylim=[-0.05, 1.05],
            title="Receiver operating characteristic example")
     ax.legend(loc="lower right")
-    ax.set_title ('ROC curve for KFold={}, with pressure anomalies.'.format(n_splits))
+    ax.set_title(
+        'ROC curve for KFold={}, with pressure anomalies.'.format(n_splits))
     if not with_pressure:
-        ax.set_title ('ROC curve for KFold={}, without pressure anomalies.'.format(n_splits))
+        ax.set_title(
+            'ROC curve for KFold={}, without pressure anomalies.'.format(n_splits))
     y_test_predict = classifier.predict(X_test)
     print('final test predict score:')
     print(f1_score(y_test, y_test_predict))
@@ -1575,7 +1750,8 @@ def produce_X_y_from_list(pw_stations=['drag', 'dsea', 'elat'],
         Xs.append(X)
         ys.append(y)
     if concat_Xy:
-        print('concatenating pwv stations {}, with hydro_ids {}.'.format(pw_stations, hs_ids))
+        print('concatenating pwv stations {}, with hydro_ids {}.'.format(
+            pw_stations, hs_ids))
         X, y = concat_X_y(Xs, ys)
         return X, y
     else:
@@ -1611,7 +1787,8 @@ def produce_X_y(pw_station='drag', hs_id=48125, pressure_station='bet-dagan',
     from PW_stations import produce_geo_gnss_solved_stations
     import numpy as np
     # call preprocess_hydro_station
-    hdf, y_meta = preprocess_hydro_station(hs_id, hydro_path, max_flow=max_flow)
+    hdf, y_meta = preprocess_hydro_station(
+        hs_id, hydro_path, max_flow=max_flow)
     # load PWV and other features and combine them to fdf:
     pw = xr.open_dataset(path / 'GNSS_PW_anom_hourly_50_hour_dayofyear.nc')
     fdf = pw[pw_station].to_dataframe(name='pwv_{}'.format(pw_station))
@@ -1625,7 +1802,8 @@ def produce_X_y(pw_station='drag', hs_id=48125, pressure_station='bet-dagan',
             ims_path /
             'IMS_BD_hourly_ps_1964-2020.nc')[pressure_station]
         p_attrs = p.attrs
-        p_attrs = {'pressure_{}'.format(key): val for key, val in p_attrs.items()}
+        p_attrs = {'pressure_{}'.format(
+            key): val for key, val in p_attrs.items()}
         p = p.sel(time=slice('1996', None))
         p = anomalize_xr(p, freq='MS')
         fdf['pressure_{}'.format(pressure_station)] = p.to_dataframe()
@@ -1654,13 +1832,14 @@ def produce_X_y(pw_station='drag', hs_id=48125, pressure_station='bet-dagan',
     lat2 = y.attrs['lat']
     lon2 = y.attrs['lon']
     y.attrs['max_flow'] = max_flow
-    distance = calculate_distance_between_two_latlons_israel(lat1, lon1, lat2, lon2)
+    distance = calculate_distance_between_two_latlons_israel(
+        lat1, lon1, lat2, lon2)
     X.attrs['distance_to_hydro_station_in_km'] = distance / 1000.0
     y.attrs['distance_to_pwv_station_in_km'] = distance / 1000.0
     X.attrs['pwv_id'] = pw_station
     return X, y
 
-#def produce_X_y(station='drag', hs_id=48125, lag=25, anoms=True,
+# def produce_X_y(station='drag', hs_id=48125, lag=25, anoms=True,
 #                neg_pos_ratio=2, add_pressure=False,
 #                path=work_yuval, hydro_path=hydro_path, with_ends=False,
 #                seed=42,
@@ -1792,7 +1971,8 @@ def preprocess_hydro_station(hs_id=48125, hydro_path=hydro_path, max_flow=0,
     all_tides = xr.open_dataset(hydro_path / 'hydro_tides.nc')
     # get all tides for specific station without nans:
     sta_slice = [x for x in all_tides.data_vars if str(hs_id) in x]
-    sta_slice = [x for x in sta_slice if 'max_flow' in x or 'tide_end' in x or 'tide_max' in x]
+    sta_slice = [
+        x for x in sta_slice if 'max_flow' in x or 'tide_end' in x or 'tide_max' in x]
     if not sta_slice:
         raise KeyError('hydro station {} not found in database'.format(hs_id))
     tides = all_tides[sta_slice].dropna('tide_start')
@@ -1802,7 +1982,8 @@ def preprocess_hydro_station(hs_id=48125, hydro_path=hydro_path, max_flow=0,
         ~tides.isnull()).where(max_flow_tide > max_flow).dropna('tide_start')['tide_start']
     tide_ends = tides['TS_{}_tide_end'.format(hs_id)].where(
         ~tides.isnull()).where(max_flow_tide > max_flow).dropna('tide_start')['TS_{}_tide_end'.format(hs_id)]
-    max_flows = max_flow_tide.where(max_flow_tide > max_flow).dropna('tide_start')
+    max_flows = max_flow_tide.where(
+        max_flow_tide > max_flow).dropna('tide_start')
     # round all tide_starts to hourly:
     ts = tide_starts.dt.round('1H')
     max_flows = max_flows.sel(tide_start=ts, method='nearest')
@@ -1867,7 +2048,8 @@ def add_features_and_produce_X_y(hdf, fdf, window_size=25, seed=42,
     good_inds_for_masks = [adf.index.get_loc(x) for x in good_dts]
     good_masks = [masks[x] for x in good_inds_for_masks]
     feature_pos_list = [df[feature][x].values for x in good_masks]
-    dts_pos_list = [df[feature][x].index[-1] + pd.Timedelta(1, unit='H') for x in good_masks]
+    dts_pos_list = [df[feature][x].index[-1] +
+                    pd.Timedelta(1, unit='H') for x in good_masks]
     # TODO: add diagnostic mode for how and where are missing features
     # now get the negative y's with neg_pos_ratio
     # (set to 1 if the same pos=neg):
@@ -1897,7 +2079,8 @@ def add_features_and_produce_X_y(hdf, fdf, window_size=25, seed=42,
             # print('!')
             continue
         # get the negative datetimes (last record)
-        neg_dts = df.iloc[r - window_size:r - 1][feature].dropna().index[-1] + pd.Timedelta(1, unit='H')
+        neg_dts = df.iloc[r - window_size:r -
+                          1][feature].dropna().index[-1] + pd.Timedelta(1, unit='H')
         # else, append to pw_neg_list and increase cnt
         feature_neg_list.append(negative)
         dts_neg_list.append(neg_dts)
@@ -1936,7 +2119,7 @@ def add_features_and_produce_X_y(hdf, fdf, window_size=25, seed=42,
     return X_da, y_da
 
 
-#def preprocess_hydro_pw(pw_station='drag', hs_id=48125, path=work_yuval,
+# def preprocess_hydro_pw(pw_station='drag', hs_id=48125, path=work_yuval,
 #                        ims_path=ims_path,
 #                        anoms=True, hydro_path=hydro_path, max_flow=0,
 #                        with_tide_ends=False, pressure_anoms=None,
@@ -1988,7 +2171,8 @@ def loop_over_gnss_hydro_and_aggregate(sel_hydro, pw_anom=False,
             file = path_glob(work_yuval, 'GNSS_PW_anom_*.nc')[-1]
             gnss_pw = xr.open_dataset(file)
         else:
-            gnss_pw = xr.open_dataset(work_yuval / 'GNSS_PW_thresh_50_homogenized.nc')
+            gnss_pw = xr.open_dataset(
+                work_yuval / 'GNSS_PW_thresh_50_homogenized.nc')
         just_pw = [x for x in gnss_pw.data_vars if '_error' not in x]
         gnss_pw = gnss_pw[just_pw]
         da_list = []
@@ -2033,7 +2217,8 @@ def loop_over_gnss_hydro_and_aggregate(sel_hydro, pw_anom=False,
                 marker='.', linewidth=0., ax=ax)
         if pressure_anoms is not None:
             names = [x.split('_')[0] for x in ds.data_vars]
-            names = [x + ' ({})'.format(y) for x, y in zip(names, gnss_stations)]
+            names = [x + ' ({})'.format(y)
+                     for x, y in zip(names, gnss_stations)]
         ax.set_xlabel('Days before tide event')
         ax.grid()
 
@@ -2052,7 +2237,8 @@ def loop_over_gnss_hydro_and_aggregate(sel_hydro, pw_anom=False,
             title += ' (max_flow > {} m^3/sec)'.format(max_flow_thresh)
         if pressure_anoms is not None:
             ylabel = 'Surface pressure anomalies [hPa]'
-            title = 'Mean surface pressure anomaly in {} for all tide stations near GNSS stations'.format(pname)
+            title = 'Mean surface pressure anomaly in {} for all tide stations near GNSS stations'.format(
+                pname)
         ax.set_title(title)
         ax.set_ylabel(ylabel)
     return ds
@@ -2185,7 +2371,7 @@ def produce_pwv_days_before_tide_events(pw_da, hs_df, days_prior=1, drop_thresh=
     if rolling is not None:
         pw_da = pw_da.rolling(time=rolling, center=True).mean(keep_attrs=True)
     if drop_thresh is None:
-        drop_thresh=0
+        drop_thresh = 0
     # first infer time freq of pw_da:
     freq = xr.infer_freq(pw_da['time'])
     if freq == '5T':
@@ -2218,16 +2404,19 @@ def produce_pwv_days_before_tide_events(pw_da, hs_df, days_prior=1, drop_thresh=
         prior_da = pw_da.sel(time=slice(dt_prior, ts - timedelta))
         if prior_da.dropna('time').size == 0:
             if verbose == 1:
-                print('{} found no prior data for PWV {} days prior'.format(ts.strftime('%Y-%m-%d %H:%M'), days_prior))
+                print('{} found no prior data for PWV {} days prior'.format(
+                    ts.strftime('%Y-%m-%d %H:%M'), days_prior))
             dropped_no_data += 1
             continue
         elif prior_da.dropna('time').size < pts_per_day*drop_thresh:
             if verbose == 1:
-                print('{} found less than {} a day prior data for PWV {} days prior'.format(ts.strftime('%Y-%m-%d %H:%M'), drop_thresh, days_prior))
+                print('{} found less than {} a day prior data for PWV {} days prior'.format(
+                    ts.strftime('%Y-%m-%d %H:%M'), drop_thresh, days_prior))
             dropped_thresh += 1
             continue
         if max_gap is not None:
-            prior_da = prior_da.interpolate_na('time', method='spline', max_gap=max_gap, keep_attrs=True)
+            prior_da = prior_da.interpolate_na(
+                'time', method='spline', max_gap=max_gap, keep_attrs=True)
         event_cnt += 1
         # if rolling is not None:
         #     after_da = after_da.rolling(time=rolling, center=True, keep_attrs=True).mean(keep_attrs=True)
@@ -2254,24 +2443,26 @@ def produce_pwv_days_before_tide_events(pw_da, hs_df, days_prior=1, drop_thresh=
     df = df.iloc[:-1]
     df.index = np.arange(-days_prior, days_after, 1/pts_per_day)
     if verbose >= 0:
-        print('total events with pwv:{} , dropped due to no data: {}, dropped due to thresh:{}, left events: {}'.format(tot_events, dropped_no_data, dropped_thresh, event_cnt))
+        print('total events with pwv:{} , dropped due to no data: {}, dropped due to thresh:{}, left events: {}'.format(
+            tot_events, dropped_no_data, dropped_thresh, event_cnt))
     if plot:
         ax = df.T.mean().plot()
         ax.grid()
         ax.axvline(color='k', linestyle='--')
         ax.set_xlabel('Days before tide event')
         ax.set_ylabel('PWV anomalies [mm]')
-        ax.set_title('GNSS station: {} with {} events'.format(pw_da.name.upper(), event_cnt))
+        ax.set_title('GNSS station: {} with {} events'.format(
+            pw_da.name.upper(), event_cnt))
         better = df.copy()
         better.index = pd.to_timedelta(better.index, unit='d')
-        better = better.resample('15S').interpolate(method='cubic').T.mean().resample('5T').mean()
+        better = better.resample('15S').interpolate(
+            method='cubic').T.mean().resample('5T').mean()
         better = better.reset_index(drop=True)
         better.index = np.linspace(-days_prior, days_after, better.index.size)
         better.plot(ax=ax)
         # fig, ax = plt.subplots(figsize=(20, 7))
     #     [pwv.plot.line(ax=ax) for pwv in pwv_list]
     return df, pwv_after_list, pwv_prior_list
-
 
 
 def get_n_days_pw_hydro_all(pw_da, hs_id, max_flow_thresh=None,
@@ -2298,7 +2489,8 @@ def get_n_days_pw_hydro_all(pw_da, hs_id, max_flow_thresh=None,
             points = int(ndays) * 24
             points_forward = int(ndays_forward) * 24
         lag = pd.timedelta_range(end=0, periods=points, freq=freq)
-        forward_lag = pd.timedelta_range(start=0, periods=points_forward, freq=freq)
+        forward_lag = pd.timedelta_range(
+            start=0, periods=points_forward, freq=freq)
         lag = lag.union(forward_lag)
         time_arr = pd.to_datetime(pw_da.time.values)
         tide_start = pd.to_datetime(tide_start).round(freq)
@@ -2306,7 +2498,8 @@ def get_n_days_pw_hydro_all(pw_da, hs_id, max_flow_thresh=None,
         # days = pd.Timedelta(ndays, unit='D')
         # time_slice = [tide_start - days, tide_start]
         # pw = pw_da.sel(time=slice(*time_slice))
-        pw = pw_da.isel(time=slice(ts_loc - points, ts_loc + points_forward -1))
+        pw = pw_da.isel(time=slice(ts_loc - points,
+                                   ts_loc + points_forward - 1))
         return pw, lag
 
     # first load tides data:
@@ -2341,9 +2534,10 @@ def get_n_days_pw_hydro_all(pw_da, hs_id, max_flow_thresh=None,
             max_flows > max_flow_thresh).dropna('tide_start')
     pw_list = []
     for ts in tide_starts.values:
-#        te = tide_ends.sel(tide_start=ts).values
-#        tm = tide_maxs.sel(tide_start=ts).values
-        pw, lag = get_n_days_pw_hydro_one_event(pw_da, ts, ndays=ndays, ndays_forward=ndays_forward)
+        #        te = tide_ends.sel(tide_start=ts).values
+        #        tm = tide_maxs.sel(tide_start=ts).values
+        pw, lag = get_n_days_pw_hydro_one_event(
+            pw_da, ts, ndays=ndays, ndays_forward=ndays_forward)
         pw.attrs['ts'] = ts
         pw_list.append(pw)
     # filter events that no PW exists:
@@ -2451,7 +2645,8 @@ def get_hydro_near_GNSS(radius=5, n=5, hydro_path=hydro_path,
             ax.annotate(label, xy=(x, y), xytext=(3, 3),
                         textcoords="offset points")
         plt.legend(['hydro-tide stations', 'GNSS stations'], loc='upper left')
-        plt.suptitle('hydro-tide stations within {} km of a GNSS station'.format(radius), fontsize=14)
+        plt.suptitle(
+            'hydro-tide stations within {} km of a GNSS station'.format(radius), fontsize=14)
         plt.tight_layout()
         plt.subplots_adjust(top=0.95)
 #        for x, y, label in zip(sel_hydro.lon, sel_hydro.lat,
@@ -2631,8 +2826,10 @@ def plot_hydro_events(hs_id, path=hydro_path, field='max_flow', min_flow=10):
     fig, ax = plt.subplots()
     tide.plot.line(linewidth=0., marker='x', color='r', ax=ax)
     if min_flow is not None:
-        tide[tide>min_flow].plot.line(linewidth=0., marker='x', color='b',ax=ax)
-        print('min flow of {} m^3/sec: {}'.format(min_flow, tide[tide>min_flow].dropna('tide_start').size))
+        tide[tide > min_flow].plot.line(
+            linewidth=0., marker='x', color='b', ax=ax)
+        print('min flow of {} m^3/sec: {}'.format(min_flow,
+                                                  tide[tide > min_flow].dropna('tide_start').size))
     return tide
 
 
@@ -2759,14 +2956,14 @@ def read_station_from_tide_database(hs_id=48125, rounding='1H',
     #     ~tides.isnull()).dropna('tide_start')['tide_start']
 
 
-def check_if_tide_events_from_stations_are_within_time_window(df_list,rounding='H',
+def check_if_tide_events_from_stations_are_within_time_window(df_list, rounding='H',
                                                               days=1, return_hs_list=False):
     import pandas as pd
     dfs = []
     for i, df in enumerate(df_list):
         df.dropna(inplace=True)
         if rounding is not None:
-            df.index=df.index.round(rounding)
+            df.index = df.index.round(rounding)
         dfs.append(df['hydro_station_id'])
     df = pd.concat(dfs, axis=0).to_frame()
     df['time'] = df.index
@@ -2778,12 +2975,13 @@ def check_if_tide_events_from_stations_are_within_time_window(df_list,rounding='
     dif = df['time'].diff()
     mask = abs(dif) <= pd.Timedelta(days, unit='D')
     dupes = dif[mask].index
-    print('found {} tide events that are within {} of each other.'.format(dupes.size, days))
+    print('found {} tide events that are within {} of each other.'.format(
+        dupes.size, days))
     print(df.loc[dupes, 'hydro_station_id'])
     df = df.loc[~mask]
     if return_hs_list:
         hs_ids = [x['hydro_station_id'].iloc[0] for x in df_list]
-        df_list = [df[df['hydro_station_id']==x] for x in hs_ids]
+        df_list = [df[df['hydro_station_id'] == x] for x in hs_ids]
         return df_list
     else:
         return df
