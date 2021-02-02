@@ -47,6 +47,8 @@ hydro_st_name_dict = {25191: 'Lavan - new nizana road',
 # the model in 24 hours ? only on SVC and MLP ?
 # implemetn TSS and HSS scores and test them (make_scorer from confusion matrix)
 
+
+
 def prepare_tide_events_GNSS_dataset(hydro_path=hydro_path):
     import xarray as xr
     import pandas as pd
@@ -3021,6 +3023,38 @@ def check_if_tide_events_from_stations_are_within_time_window(df_list, rounding=
         return df
 
 
+def tss_score(y_true, y_pred):
+    from sklearn.metrics import confusion_matrix
+    if y_true == y_pred:
+        raise ValueError('y_true == y_pred either 0 or 1')
+    else:
+        tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+    print('TN: {}'.format(tn))
+    print('FP: {}'.format(fp))
+    print('FN: {}'.format(fn))
+    print('TP: {}'.format(tp))
+    tss = tp / (tp + fn) - fp / (fp + tn)
+    print('TSS: {}'.format(tss))
+    return tss
+
+
+def hss_score(y_true, y_pred):
+    from sklearn.metrics import confusion_matrix
+    if y_true == y_pred:
+        raise ValueError('y_true == y_pred either 0 or 1')
+    else:
+        tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+    print('TN: {}'.format(tn))
+    print('FP: {}'.format(fp))
+    print('FN: {}'.format(fn))
+    print('TP: {}'.format(tp))
+    # if (tp+fn) == 0 or (fn+tn) == 0 :
+    #     raise ValueError('TSS undefined, denom is 0!')
+    hss = 2 * (tp*tn - fn*fp)/((tp+fn)*(fn+tn)+(tp+fn)*(fp+tn))
+    print('HSS: {}'.format(hss))
+    return hss
+
+
 class ML_Classifier_Switcher(object):
     def pick_model(self, model_name, light=False):
         """Dispatch method"""
@@ -3042,9 +3076,11 @@ class ML_Classifier_Switcher(object):
         from sklearn.svm import SVC
         import numpy as np
         if self.light:
-            self.param_grid = {'kernel': ['rbf', 'linear'],
-                               'C': [0.001, 0.01, 0.1, 1, 10],
-                               'gamma': [0.001, 0.01, 0.1]}
+            self.param_grid = {'kernel': ['rbf', 'sigmoid', 'linear', 'poly'],
+                               'C': [0.1, 100],
+                               'gamma': [0.0001,1],
+                               'degree': [1, 2, 5],
+                               'coef0': [0, 1, 4]}
         else:
             self.param_grid = {'kernel': ['rbf', 'sigmoid', 'linear', 'poly'],
                                'C': np.logspace(-5, 2, 25),
