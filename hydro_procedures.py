@@ -45,7 +45,7 @@ hydro_st_name_dict = {25191: 'Lavan - new nizana road',
 
 # maybe implement permutaion importance to pwv ? see what is more important to
 # the model in 24 hours ? only on SVC and MLP ?
-
+# implemetn TSS and HSS scores and test them (make_scorer from confusion matrix)
 
 def prepare_tide_events_GNSS_dataset(hydro_path=hydro_path):
     import xarray as xr
@@ -689,7 +689,7 @@ def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
     from string import digits
     import numpy as np
     import xarray as xr
-    all_scorings = ['f1', 'recall', 'roc_auc']
+    all_scorings = ['f1', 'recall', 'roc_auc', 'precision']
     # first if RF chosen, replace the cyclic coords of DOY (sin and cos) with
     # the DOY itself.
     if model_name == 'RF' and 'doy' in features:
