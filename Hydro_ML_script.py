@@ -89,13 +89,17 @@ def main_hydro_ML(args):
     #                    max_flow=max_flow,
     #                    neg_pos_ratio=neg_pos_ratio)
     X, y = combine_pos_neg_from_nc_file(hydro_path)
-    scorers = ['roc_auc', 'f1', 'recall']
+    scorers = ['roc_auc', 'f1', 'recall', 'precision']
 #    splits = [2, 3, 4]
     model_name = args.model
     # if model_name == 'SVC' or model_name == 'RF':
     #     f = ['pwv', 'pressure']
     # else:
     f = ['pwv', 'pressure', 'doy']
+    if model_name == 'SVC':
+        f = ['pwv', 'pressure']
+    if model_name != 'SVC':
+        scorers = ['precision']
     features = get_all_possible_combinations_from_list(
         f, reduce_single_list=True)
     if args.inner_splits is not None:
