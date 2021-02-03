@@ -99,8 +99,9 @@ def produce_bet_dagan_long_term_pressure(path=ims_path, rate='1H',
         print('filling missing gaps from 2018 with jerusalem')
         jr_10 = xr.load_dataset(
             path / 'IMS_BP_israeli_hourly.nc')['JERUSALEM-CENTRE']
-        jr_10_anoms = anomalize_xr(jr_10, 'MS')
-        bd_anoms = anomalize_xr(bd_inter, 'MS')
+        climatology = bd_inter.groupby('time.dayofyear').mean(keep_attrs=True)
+        jr_10_anoms = anomalize_xr(jr_10, 'DOY')
+        bd_anoms = anomalize_xr(bd_inter, 'DOY')
         bd_anoms = xr.concat(
             [bd_anoms.dropna('time'), jr_10_anoms.dropna('time')], 'time', join='inner')
         bd_anoms = get_unique_index(bd_anoms)
@@ -112,19 +113,27 @@ def produce_bet_dagan_long_term_pressure(path=ims_path, rate='1H',
         bd_anoms.attrs['filled'] = 'using Jerusalem-centre'
         bd_anoms.attrs['long_name'] = 'Pressure Anomalies'
         bd_anoms.attrs['units'] = 'hPa'
-        if savepath is not None:
-            yr_min = bd_anoms.time.min().dt.year.item()
-            yr_max = bd_anoms.time.max().dt.year.item()
-            filename = 'IMS_BD_anoms_5min_ps_{}-{}.nc'.format(
-                yr_min, yr_max)
-            save_ncfile(bd_anoms, savepath, filename)
-        return bd_anoms
+        bd_inter = bd_anoms.groupby('time.dayofyear') + climatology
+        bd_inter = bd_inter.resample(time='1H', keep_attrs=True).mean(keep_attrs=True)
+        # if savepath is not None:
+        #     yr_min = bd_anoms.time.min().dt.year.item()
+        #     yr_max = bd_anoms.time.max().dt.year.item()
+        #     filename = 'IMS_BD_anoms_5min_ps_{}-{}.nc'.format(
+        #         yr_min, yr_max)
+        #     save_ncfile(bd_anoms, savepath, filename)
+        # return bd_anoms
     if savepath is not None:
         # filename = 'IMS_BD_hourly_ps.nc'
         yr_min = bd_inter.time.min().dt.year.item()
         yr_max = bd_inter.time.max().dt.year.item()
         filename = 'IMS_BD_hourly_ps_{}-{}.nc'.format(yr_min, yr_max)
         save_ncfile(bd_inter, savepath, filename)
+        bd_anoms = anomalize_xr(bd_inter, 'DOY', units='std')
+        filename = 'IMS_BD_hourly_anoms_std_ps_{}-{}.nc'.format(yr_min, yr_max)
+        save_ncfile(bd_anoms, savepath, filename)
+        bd_anoms = anomalize_xr(bd_inter, 'DOY')
+        filename = 'IMS_BD_hourly_anoms_ps_{}-{}.nc'.format(yr_min, yr_max)
+        save_ncfile(bd_anoms, savepath, filename)
     return bd_inter
 
 
