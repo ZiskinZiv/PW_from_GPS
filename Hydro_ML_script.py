@@ -89,17 +89,22 @@ def main_hydro_ML(args):
     #                    max_flow=max_flow,
     #                    neg_pos_ratio=neg_pos_ratio)
     X, y = combine_pos_neg_from_nc_file(hydro_path)
-    scorers = ['roc_auc', 'f1', 'recall', 'precision']
+    # scorers = ['roc_auc', 'f1', 'recall', 'precision']
+    if args.scorers is None:
+        scorers = ['f1', 'recall', 'tss', 'hss',
+                   'roc_auc', 'precision', 'accuracy']
+    else:
+        scorers = [x for x in args.scorers]
 #    splits = [2, 3, 4]
     model_name = args.model
     # if model_name == 'SVC' or model_name == 'RF':
     #     f = ['pwv', 'pressure']
     # else:
     f = ['pwv', 'pressure', 'doy']
-    if model_name == 'SVC':
-        f = ['pwv', 'pressure']
-    if model_name != 'SVC':
-        scorers = ['precision']
+    # if model_name == 'SVC':
+    #     f = ['doy', 'pressure']
+    # if model_name != 'SVC':
+    #     scorers = ['precision']
     features = get_all_possible_combinations_from_list(
         f, reduce_single_list=True)
     if args.inner_splits is not None:
@@ -119,16 +124,19 @@ def main_hydro_ML(args):
     else:
         savepath = hydro_path
 #    if args.model is not None:
-
+    total_cnt = len(scorers) * len(features)
+    cnt = 0
     for scorer in scorers:
         if model_name != 'RF':
             for feature in features:
+                cnt += 1
+                logger.info('Running nested CV # {} out of {}'.format(cnt, total_cnt))
                 logger.info(
                     'Running {} model with {} test scorer and {},{} (inner, outer) nsplits, features={}'.format(
                         model_name, scorer, inner_splits, outer_splits, feature))
                 model = nested_cross_validation_procedure(
                     X,
-                    y,
+                    y, scorers=scorers,
                     model_name=model_name,
                     features=feature,
                     inner_splits=inner_splits,
@@ -138,12 +146,14 @@ def main_hydro_ML(args):
                     diagnostic=False,
                     savepath=savepath, n_jobs=n_jobs)
         else:
+            cnt += 1
+            logger.info('Running nested CV # {} out of {}'.format(cnt, int(total_cnt/len(features))))
             logger.info(
                     'Running {} model with {} test scorer and {},{} (inner, outer) nsplits, features={}'.format(
                         model_name, scorer, inner_splits, outer_splits, f))
             model = nested_cross_validation_procedure(
                 X,
-                y,
+                y, scorers=scorers,
                 model_name=model_name,
                 features=f,
                 inner_splits=inner_splits,
@@ -226,6 +236,11 @@ if __name__ == '__main__':
         '--verbose',
         help='verbosity 0, 1, 2',
         type=int)
+    optional.add_argument(
+        '--scorers',
+        nargs ='+',
+        help='scorers, e.g., f1, accuracy, recall, etc',
+        type=str)
 #    optional.add_argument('--nsplits', help='select number of splits for HP tuning.', type=int)
     required.add_argument(
         '--model',
