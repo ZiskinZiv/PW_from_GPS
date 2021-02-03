@@ -856,6 +856,7 @@ def anomalize_xr(da_ts, freq='D', time_dim=None, units=None, verbose=True):  # i
         grp = '{}.weekofyear'.format(time_dim)
     # calculate climatology:
     climatology = da_ts.groupby(grp).mean()
+    climatology_std = da_ts.groupby(grp).std()
     da_anoms = da_ts.groupby(grp) - climatology
     if units == '%':
         da_anoms = 100.0 * (da_anoms.groupby(grp) / climatology)
@@ -864,6 +865,10 @@ def anomalize_xr(da_ts, freq='D', time_dim=None, units=None, verbose=True):  # i
         # da_anoms = 100.0 * (da_ts.groupby(grp)-climatology) / da_ts
         if verbose:
             print('Using % as units.')
+    elif units == 'std':
+        da_anoms = (da_anoms.groupby(grp) / climatology_std)
+        if verbose:
+            print('Using std as units.')
     da_anoms = da_anoms.reset_coords(drop=True)
     da_anoms.attrs.update(attrs)
     da_anoms.attrs.update(action='removed {} means'.format(frq))
