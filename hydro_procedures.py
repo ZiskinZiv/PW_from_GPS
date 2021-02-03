@@ -46,7 +46,7 @@ hydro_st_name_dict = {25191: 'Lavan - new nizana road',
 # maybe implement permutaion importance to pwv ? see what is more important to
 # the model in 24 hours ? only on SVC and MLP ?
 # implemetn TSS and HSS scores and test them (make_scorer from confusion matrix)
-
+# redo results but with inner and outer splits of 4, 4
 
 
 def prepare_tide_events_GNSS_dataset(hydro_path=hydro_path):
@@ -353,15 +353,18 @@ def prepare_features_and_save_hourly(work_path=work_yuval, ims_path=ims_path,
     import xarray as xr
     from aux_gps import save_ncfile
     import numpy as np
-    pwv = xr.load_dataset(
-        work_path / 'GNSS_PW_thresh_0_hour_dayofyear_anoms.nc')
+    # pwv = xr.load_dataset(
+    #     work_path / 'GNSS_PW_thresh_0_hour_dayofyear_anoms.nc')
+    pwv = xr.load_dataset(work_path /'GNSS_PW_thresh_0_hour_dayofyear_anoms_sd.nc')
     pwv_stations = [x for x in hydro_pw_dict.keys()]
     pwv = pwv[pwv_stations]
     # pwv = pwv.rolling(time=12, keep_attrs=True).mean(keep_attrs=True)
     pwv = pwv.resample(time='1H', keep_attrs=True).mean(keep_attrs=True)
-    bd = xr.load_dataset(ims_path / 'IMS_BD_anoms_5min_ps_1964-2020.nc')
+    # bd = xr.load_dataset(ims_path / 'IMS_BD_anoms_5min_ps_1964-2020.nc')
+    bd = xr.load_dataset(ims_path / 'IMS_BD_hourly_anoms_std_ps_1964-2020.nc')
     # min_time = pwv.dropna('time')['time'].min()
-    bd = bd.sel(time=slice('1996', None)).resample(time='1H').mean()
+    # bd = bd.sel(time=slice('1996', None)).resample(time='1H').mean()
+    bd = bd.sel(time=slice('1996', None))
     pressure = bd['bet-dagan']
     doy = pwv['time'].copy(data=pwv['time'].dt.dayofyear)
     doy.name = 'doy'
@@ -682,16 +685,27 @@ def produce_ROC_curves_from_model(model, X, y, cv, kfold_name='inner_kfold'):
 def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
                                       outer_splits=4, inner_splits=2,
                                       refit_scorer='roc_auc',
+                                      scorers=['f1', 'recall', 'tss', 'hss',
+                                               'roc_auc', 'precision',
+                                               'accuracy'],
                                       seed=42, savepath=None, verbose=0,
                                       diagnostic=False, n_jobs=-1):
     from sklearn.model_selection import cross_validate
     from sklearn.model_selection import StratifiedKFold
     from sklearn.model_selection import GridSearchCV
+    from sklearn.metrics import make_scorer
     from sklearn.inspection import permutation_importance
     from string import digits
     import numpy as np
     import xarray as xr
-    all_scorings = ['f1', 'recall', 'roc_auc', 'precision']
+
+    assert refit_scorer in scorers
+    scores_dict = {s: s for s in scorers}
+    if 'tss' in scorers:
+        scores_dict['tss'] = make_scorer(tss_score)
+    if 'hss' in scorers:
+        scores_dict['hss'] = make_scorer(hss_score)
+
     # first if RF chosen, replace the cyclic coords of DOY (sin and cos) with
     # the DOY itself.
     if model_name == 'RF' and 'doy' in features:
@@ -746,7 +760,7 @@ def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
     # define search
     gr_search = GridSearchCV(estimator=sk_model, param_grid=search_space,
                              cv=cv_inner, n_jobs=n_jobs,
-                             scoring=all_scorings,
+                             scoring=scores_dict,
                              verbose=verbose,
                              refit=refit_scorer, return_train_score=True)
 #    gr.fit(X, y)
@@ -755,7 +769,7 @@ def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
         n_splits=outer_splits, shuffle=True, random_state=seed)
     # execute the nested cross-validation
     scores_est_dict = cross_validate(gr_search, X, y,
-                                     scoring=all_scorings,
+                                     scoring=scores_dict,
                                      cv=cv_outer, n_jobs=n_jobs,
                                      return_estimator=True, verbose=verbose)
 #    perm = []
@@ -1073,7 +1087,7 @@ def load_ML_run_results(path=hydro_ml_path, prefix='CVR', pw_station='drag'):
     data_vars += [x for x in ds_list[0] if x.startswith('y_')]
     bests = [[x for x in y if x.startswith('best')] for y in ds_list]
     data_vars += list(set([y for x in bests for y in x]))
-    if 'RF' in data_vars:
+    if 'RF' in model_names:
         data_vars += ['feature_importances']
     new_ds_list = []
     for dvar in data_vars:
@@ -1327,6 +1341,7 @@ def plot_feature_importances(
         features='doy+pressure+pwv',
         scoring='f1',
         axes=None):
+    # use dss.sel(model='RF') first as input
     import matplotlib.pyplot as plt
     dss = dss.sel({feat_dim: features})
     tests_ds = dss[[x for x in dss if 'test' in x]]
@@ -1363,7 +1378,7 @@ def plot_feature_importances_for_all_scorings(dss,
                                               features='doy+pressure+pwv',
                                               model='RF'):
     import matplotlib.pyplot as plt
-    station = dss.attrs['pwv_id'].upper()
+    # station = dss.attrs['pwv_id'].upper()
     dss = dss.sel(model=model).reset_coords(drop=True)
     fns = len(features.split('+'))
     scores = dss['scoring'].values
@@ -1372,7 +1387,7 @@ def plot_feature_importances_for_all_scorings(dss,
         plot_feature_importances(
             dss, features=features, scoring=score, axes=axes[i, :])
     fig.suptitle(
-        'feature importances of {} model on {} station'.format(model, station))
+        'feature importances of {} model'.format(model))
     fig.tight_layout()
     fig.subplots_adjust(top=0.935,
                         bottom=0.034,
@@ -1633,7 +1648,10 @@ def process_gridsearch_results(GridSearchCV, model_name,
     ds['split_train_score'] = train_splits
     ds['split_test_score'] = test_splits
     ds[split_dim] = splits_scorer
-    ds['scoring'] = scoring
+    if isinstance(scoring, list):
+        ds['scoring'] = scoring
+    elif isinstance(scoring, dict):
+        ds['scoring'] = [x for x in scoring.keys()]
     ds.attrs['name'] = 'CV_results'
     ds.attrs['param_names'] = names
     ds.attrs['model_name'] = model_name
@@ -3022,40 +3040,45 @@ def check_if_tide_events_from_stations_are_within_time_window(df_list, rounding=
     else:
         return df
 
+def acc_score(y_true, y_pred):
+    from sklearn.metrics import accuracy_score
+    return accuracy_score(y_true, y_pred)
 
-def tss_score(y_true, y_pred):
+
+def tss_score(y, y_pred, **kwargs):
     from sklearn.metrics import confusion_matrix
-    if y_true == y_pred:
-        raise ValueError('y_true == y_pred either 0 or 1')
-    else:
-        tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
-    print('TN: {}'.format(tn))
-    print('FP: {}'.format(fp))
-    print('FN: {}'.format(fn))
-    print('TP: {}'.format(tp))
+    # if y == y_pred:
+    #     raise ValueError('y_true == y_pred either 0 or 1')
+    # else:
+    tn, fp, fn, tp = confusion_matrix(y, y_pred).ravel()
+    # print('TN: {}'.format(tn))
+    # print('FP: {}'.format(fp))
+    # print('FN: {}'.format(fn))
+    # print('TP: {}'.format(tp))
     tss = tp / (tp + fn) - fp / (fp + tn)
-    print('TSS: {}'.format(tss))
+    # print('TSS: {}'.format(tss))
     return tss
 
 
-def hss_score(y_true, y_pred):
+def hss_score(y, y_pred, **kwargs):
     from sklearn.metrics import confusion_matrix
-    if y_true == y_pred:
-        raise ValueError('y_true == y_pred either 0 or 1')
-    else:
-        tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
-    print('TN: {}'.format(tn))
-    print('FP: {}'.format(fp))
-    print('FN: {}'.format(fn))
-    print('TP: {}'.format(tp))
+    # if y == y_pred:
+    #     raise ValueError('y_true == y_pred either 0 or 1')
+    # else:
+    tn, fp, fn, tp = confusion_matrix(y, y_pred).ravel()
+    # print('TN: {}'.format(tn))
+    # print('FP: {}'.format(fp))
+    # print('FN: {}'.format(fn))
+    # print('TP: {}'.format(tp))
     # if (tp+fn) == 0 or (fn+tn) == 0 :
     #     raise ValueError('TSS undefined, denom is 0!')
     hss = 2 * (tp*tn - fn*fp)/((tp+fn)*(fn+tn)+(tp+fn)*(fp+tn))
-    print('HSS: {}'.format(hss))
+    # print('HSS: {}'.format(hss))
     return hss
 
 
 class ML_Classifier_Switcher(object):
+
     def pick_model(self, model_name, light=False):
         """Dispatch method"""
         # from sklearn.model_selection import GridSearchCV
@@ -3078,13 +3101,13 @@ class ML_Classifier_Switcher(object):
         if self.light:
             self.param_grid = {'kernel': ['rbf', 'sigmoid', 'linear', 'poly'],
                                'C': [0.1, 100],
-                               'gamma': [0.0001,1],
+                               'gamma': [0.0001, 1],
                                'degree': [1, 2, 5],
                                'coef0': [0, 1, 4]}
         else:
             self.param_grid = {'kernel': ['rbf', 'sigmoid', 'linear', 'poly'],
-                               'C': np.logspace(-5, 2, 25),
-                               'gamma': np.logspace(-5, 2, 25),
+                               'C': np.logspace(-1, 2, 10),
+                               'gamma': np.logspace(-5, 0, 15),
                                'degree': [1, 2, 3, 4, 5],
                                'coef0': [0, 1, 2, 3, 4]}
         return SVC(random_state=42, class_weight='balanced')
@@ -3099,26 +3122,24 @@ class ML_Classifier_Switcher(object):
                     'relu'],
                 'hidden_layer_sizes': [(50, 50, 50), (50, 100, 50)]}
         else:
-            self.param_grid = {'alpha': np.logspace(-5, 3, 25),
+            self.param_grid = {'alpha': np.logspace(-5, 1, 15),
                                'activation': ['identity', 'logistic', 'tanh', 'relu'],
                                'hidden_layer_sizes': [(50, 50, 50), (50, 100, 50), (100,)],
                                'learning_rate': ['constant', 'adaptive'],
-                               'solver': ['adam', 'lbfgs']}
+                               'solver': ['adam', 'lbfgs', 'sgd']}
         return MLPClassifier(random_state=42, max_iter=500)
 
     def RF(self):
         from sklearn.ensemble import RandomForestClassifier
         import numpy as np
         if self.light:
-            self.param_grid = {'bootstrap': [True, False],
-                               'max_features': ['auto', 'sqrt']}
+            self.param_grid = {'max_features': ['auto', 'sqrt']}
         else:
-            self.param_grid = {'max_depth': np.arange(10, 110, 10),
-                               'bootstrap': [True, False],
+            self.param_grid = {'max_depth': [5, 10, 25, 50, 100],
                                'max_features': ['auto', 'sqrt'],
-                               'min_samples_leaf': [1, 2, 4],
-                               'min_samples_split': [2, 5, 10],
-                               'n_estimators': np.arange(200, 2200, 200)
+                               'min_samples_leaf': [1, 2, 5, 10],
+                               'min_samples_split': [2, 5, 15, 50],
+                               'n_estimators': [100, 300, 700, 1200]
                                }
         return RandomForestClassifier(random_state=42, n_jobs=-1,
                                       class_weight='balanced')
