@@ -5887,14 +5887,17 @@ def plot_hydro_pwv_before_event_motivation(work_path=work_yuval,
 
 def plot_typical_tide_event_with_PWV(work_path=work_yuval,
                                      hydro_path=hydro_path,
-                                     station='drag',
-                                     days_prior=1, days_after=1, fontsize=16,
-                                     date='2014-03-09T16:50',
+                                     station='yrcm',
+                                     days_prior=3, days_after=1, fontsize=16,
+                                     date='2018-04-27',
                                      save=True, smoothed=True):
     # possible dates: 2014-11-16T13:50, 2018-04-26T18:55
+    # best to show 2018-04-24-27,
+    # TODO: x-axis time hours, ylabels in color
     import xarray as xr
     import pandas as pd
     from hydro_procedures import hydro_pw_dict
+    from matplotlib.ticker import FormatStrFormatter
 
     def smooth_df(df):
         dfs = df.copy()
@@ -5922,7 +5925,7 @@ def plot_typical_tide_event_with_PWV(work_path=work_yuval,
     df['flow'] = hg_da.to_dataframe()
     if smoothed:
         df = smooth_df(df)
-    fig, ax = plt.subplots(figsize=(6, 8))
+    fig, ax = plt.subplots(figsize=(15, 4))
     flow_label = r'Flow [m$^3\cdot$ sec$^{-1}$]'
     # df['time'] = df.index
     # sns.lineplot(data=df, y='flow', x=df.index, ax=ax, label=48125, lw=2, color=colors[0])
@@ -5932,11 +5935,12 @@ def plot_typical_tide_event_with_PWV(work_path=work_yuval,
     ax = df['flow'].plot(color=colors[0], ax=ax, lw=2)
     twin = df['pwv'].plot(secondary_y=True,
                           color=colors[1], ax=ax, lw=2)
-    ax.set_ylim(0, 20)
+    ax.set_ylim(0, 100)
     ax.set_ylabel(flow_label, fontsize=fontsize)
     twin.set_ylabel('PWV [mm]', fontsize=fontsize)
     ax.tick_params(axis='y', labelsize=fontsize, labelcolor=colors[0])
     twin.tick_params(axis='y',labelsize=fontsize, labelcolor=colors[1])
+    twin.yaxis.set_major_formatter(FormatStrFormatter('%.1f'))
     # align_yaxis_np(ax, twin)
     # alignYaxes([ax, twin], [0, 10])
     l = ax.get_ylim()
