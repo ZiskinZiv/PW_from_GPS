@@ -1480,7 +1480,7 @@ def produce_geo_df(gis_path=gis_path, plot=True):
     return ims, gps
 
 
-def save_GNSS_PWV_hydro_stations(path=work_yuval, stacked=False):
+def save_GNSS_PWV_hydro_stations(path=work_yuval, stacked=False, sd=False):
     import xarray as xr
     from aux_gps import save_ncfile
     from aux_gps import time_series_stack
@@ -1506,8 +1506,11 @@ def save_GNSS_PWV_hydro_stations(path=work_yuval, stacked=False):
             pwv = pwv[[x for x in pwv if '_error' not in x]]
             pwv.load()
             pwv = pwv.map(produce_PWV_anomalies_from_stacked_groups,
-                          grp1='hour', grp2='dayofyear', plot=False)
-            filename = 'GNSS_PW_thresh_0_hour_dayofyear_anoms.nc'
+                          grp1='hour', grp2='dayofyear', plot=False, standartize=sd)
+            if sd:
+                filename = 'GNSS_PW_thresh_0_hour_dayofyear_anoms_sd.nc'
+            else:
+                filename = 'GNSS_PW_thresh_0_hour_dayofyear_anoms.nc'
             save_ncfile(pwv, path, filename)
     return
 
@@ -3498,10 +3501,12 @@ def perform_annual_harmonic_analysis_all_GNSS(path=work_yuval,
     return dss_all
 
 
-def produce_PWV_anomalies_from_stacked_groups(pw_da, grp1='hour', grp2='dayofyear', plot=True):
+def produce_PWV_anomalies_from_stacked_groups(pw_da, grp1='hour', grp2='dayofyear',
+                                              standartize=False, plot=True):
     """
     use time_series_stack (return the whole ds including the time data)
-    to produce the anomalies per station
+    to produce the anomalies per station. use standertize=True to divide the
+    anoms with std
 
     Parameters
     ----------
@@ -3536,8 +3541,11 @@ def produce_PWV_anomalies_from_stacked_groups(pw_da, grp1='hour', grp2='dayofyea
     rest_dim = [x for x in stacked_pw.dims if x != grp1 and x != grp2][0]
     # compute mean on rest dim and remove it from stacked_da:
     rest_mean = stacked_pw[fname].mean(rest_dim)
+    rest_std = stacked_pw[fname].std(rest_dim)
     for rest in stacked_pw[rest_dim].values:
         pw_anom[fname].loc[{rest_dim: rest}] -= rest_mean
+        if standartize:
+            pw_anom[fname].loc[{rest_dim: rest}] /= rest_std
     # now, flatten anomalies to restore the time-series structure:
     vals = pw_anom[fname].values.ravel()
     times = pw_anom[time_dim].values.ravel()
@@ -3549,6 +3557,8 @@ def produce_PWV_anomalies_from_stacked_groups(pw_da, grp1='hour', grp2='dayofyea
     pw_anom = xr_reindex_with_date_range(pw_anom, freq=pw_anom.attrs['freq'])
     pw_anom.name = fname
     pw_anom.attrs['description'] = 'anomalies are computed from {} and {} groupings'.format(grp1, grp2)
+    if standartize:
+        pw_anom.attrs['action'] = 'data was also standartized'
     if plot:
         fig, (ax1, ax2) = plt.subplots(1, 2, gridspec_kw={'width_ratios': [4, 1]})
         pw = pw_anom.dropna(time_dim).values
