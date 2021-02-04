@@ -127,41 +127,41 @@ def main_hydro_ML(args):
     total_cnt = len(scorers) * len(features)
     cnt = 0
     for scorer in scorers:
-        if model_name != 'RF':
-            for feature in features:
-                cnt += 1
-                logger.info('Running nested CV # {} out of {}'.format(cnt, total_cnt))
-                logger.info(
-                    'Running {} model with {} test scorer and {},{} (inner, outer) nsplits, features={}'.format(
-                        model_name, scorer, inner_splits, outer_splits, feature))
-                model = nested_cross_validation_procedure(
-                    X,
-                    y, scorers=scorers,
-                    model_name=model_name,
-                    features=feature,
-                    inner_splits=inner_splits,
-                    outer_splits=outer_splits,
-                    refit_scorer=scorer,
-                    verbose=verbose,
-                    diagnostic=False,
-                    savepath=savepath, n_jobs=n_jobs)
-        else:
+        # if model_name != 'RF':
+        for feature in features:
             cnt += 1
-            logger.info('Running nested CV # {} out of {}'.format(cnt, int(total_cnt/len(features))))
+            logger.info('Running nested CV # {} out of {}'.format(cnt, total_cnt))
             logger.info(
-                    'Running {} model with {} test scorer and {},{} (inner, outer) nsplits, features={}'.format(
-                        model_name, scorer, inner_splits, outer_splits, f))
+                'Running {} model with {} test scorer and {},{} (inner, outer) nsplits, features={}'.format(
+                    model_name, scorer, inner_splits, outer_splits, feature))
             model = nested_cross_validation_procedure(
                 X,
                 y, scorers=scorers,
                 model_name=model_name,
-                features=f,
+                features=feature,
                 inner_splits=inner_splits,
                 outer_splits=outer_splits,
                 refit_scorer=scorer,
                 verbose=verbose,
                 diagnostic=False,
                 savepath=savepath, n_jobs=n_jobs)
+        # else:
+        #     cnt += 1
+        #     logger.info('Running nested CV # {} out of {}'.format(cnt, int(total_cnt/len(features))))
+        #     logger.info(
+        #             'Running {} model with {} test scorer and {},{} (inner, outer) nsplits, features={}'.format(
+        #                 model_name, scorer, inner_splits, outer_splits, f))
+        #     model = nested_cross_validation_procedure(
+        #         X,
+        #         y, scorers=scorers,
+        #         model_name=model_name,
+        #         features=f,
+        #         inner_splits=inner_splits,
+        #         outer_splits=outer_splits,
+        #         refit_scorer=scorer,
+        #         verbose=verbose,
+        #         diagnostic=False,
+        #         savepath=savepath, n_jobs=n_jobs)
     # else:
 #        logger.info('Running with all three models:')
 #        models = ['SVC', 'RF', 'MLP']
