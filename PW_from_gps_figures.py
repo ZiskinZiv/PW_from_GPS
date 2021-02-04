@@ -5898,6 +5898,7 @@ def plot_typical_tide_event_with_PWV(work_path=work_yuval,
     import pandas as pd
     from hydro_procedures import hydro_pw_dict
     from matplotlib.ticker import FormatStrFormatter
+    import numpy as np
 
     def smooth_df(df):
         dfs = df.copy()
@@ -5907,8 +5908,11 @@ def plot_typical_tide_event_with_PWV(work_path=work_yuval,
         # dfs = dfs.reset_index(drop=True)
         # dfs.index = np.linspace(df.index[0], df.index[-1], dfs.index.size)
         return dfs
-    colors = sns.color_palette('tab10',n_colors=2)
-    sns.set_style('whitegrid')
+
+    from pandas.plotting import register_matplotlib_converters
+    register_matplotlib_converters()
+    colors = sns.color_palette('tab10', n_colors=2)
+    # sns.set_style('whitegrid')
     sns.set_style('ticks')
     # load hydro graphs:
     hgs = xr.open_dataset(hydro_path/'hydro_graphs.nc')
@@ -5926,31 +5930,66 @@ def plot_typical_tide_event_with_PWV(work_path=work_yuval,
     if smoothed:
         df = smooth_df(df)
     fig, ax = plt.subplots(figsize=(15, 4))
-    flow_label = r'Flow [m$^3\cdot$ sec$^{-1}$]'
+    flow_label = r'Flow [m$^3\cdot$sec$^{-1}$]'
     # df['time'] = df.index
     # sns.lineplot(data=df, y='flow', x=df.index, ax=ax, label=48125, lw=2, color=colors[0])
     # twin = ax.twinx()
     # sns.lineplot(data=df, y='pwv', x=df.index, ax=twin, label='DRAG', lw=2, color=colors[1])
     df.index.name=''
     ax = df['flow'].plot(color=colors[0], ax=ax, lw=2)
-    twin = df['pwv'].plot(secondary_y=True,
-                          color=colors[1], ax=ax, lw=2)
+    twin = ax.twinx()
+    df['pwv'].plot(color=colors[1], ax=twin, lw=2)
     ax.set_ylim(0, 100)
-    ax.set_ylabel(flow_label, fontsize=fontsize)
-    twin.set_ylabel('PWV [mm]', fontsize=fontsize)
+    ax.set_ylabel(flow_label, fontsize=fontsize, color=colors[0])
+    twin.set_ylabel('PWV [mm]', fontsize=fontsize, color=colors[1])
     ax.tick_params(axis='y', labelsize=fontsize, labelcolor=colors[0])
-    twin.tick_params(axis='y',labelsize=fontsize, labelcolor=colors[1])
-    twin.yaxis.set_major_formatter(FormatStrFormatter('%.1f'))
+    # ax.tick_params(axis='x', labelsize=fontsize, bottom=True, which='both')
+    twin.tick_params(axis='y', labelsize=fontsize, labelcolor=colors[1])
+    twin.yaxis.set_ticks(np.arange(10, 35, 5))
+    # twin.yaxis.set_major_locator(ticker.FixedLocator(locs=np.arange(0,35,5)))
+    twin.yaxis.set_major_formatter(FormatStrFormatter('%.0f'))
     # align_yaxis_np(ax, twin)
     # alignYaxes([ax, twin], [0, 10])
-    l = ax.get_ylim()
-    l2 = twin.get_ylim()
-    f = lambda x : l2[0]+(x-l[0])/(l[1]-l[0])*(l2[1]-l2[0])
-    ticks = f(ax.get_yticks())
-    twin.yaxis.set_major_locator(ticker.FixedLocator(ticks))
-    ax.grid(True, axis='y',color='k', ls='--')
-    # twin.grid(True, axis='y',color=colors[1], ls=':')
+    # lim = ax.get_ylim()
+    # l2 = twin.get_ylim()
+    # fun = lambda x: l2[0]+(x-lim[0])/(lim[1]-lim[0])*(l2[1]-l2[0])
+    # ticks = fun(ax.get_yticks())
+    sns.set(rc={"xtick.bottom" : True, "ytick.left" : True})
+    xticks=df.resample('12H').mean().index
+    ax.xaxis.set_ticks(xticks)
+    strDates = [x.strftime('%d-%H') for x in xticks]
+    ax.set_xticklabels(strDates)
+    xticks=df.resample('4H').mean().index
+    ax.xaxis.set_ticks(xticks, minor=True)
+
+    # locator = mdates.AutoDateLocator(minticks = 15,
+    #                                  maxticks = 20)
+    # # formatter = mdates.ConciseDateFormatter(locator)
+
+    # ax.xaxis.set_major_locator(locator)
+    # ax.xaxis.set_major_formatter(formatter)
+    # loc = mdates.AutoDateLocator()
+    # ax.xaxis.set_major_locator(loc)
+    # ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(loc))
+    # ax.xaxis.set_minor_locator(mdates.HourLocator(interval=3))
+    # ax.xaxis.set_major_locator(mdates.DayLocator())
+    # minorLocator = ticker.AutoMinorLocator()
+    # ax.xaxis.set_major_formatter(mdates.DateFormatter('%d-%H'))
+    # ax.xaxis.set_major_locator(mdates.DayLocator())
+    # ax.xaxis.set_minor_locator(minorLocator)
+    # ax.xaxis.set_minor_locator(mdates.HourLocator(interval=3))
+    ax.grid(True, which='major', axis='y',color='k', ls='--')
+    # ax.set_xticklabels([x.strftime("%d-%H") for x in df.index], rotation=45)
+    ax.grid(True, which='minor', axis='x')
+
+    # twin.yaxis.set_major_locator(ticker.FixedLocator(ticks))
+    # twin.grid(True, axis='y',color='k', ls='--')
+    # twin.xaxis.set_major_locator(mdates.DayLocator())
+    # twin.xaxis.set_minor_locator(mdates.HourLocator())
+    # Fmt = mdates.AutoDateFormatter(mdates.DayLocator())
+    # twin.xaxis.set_major_formatter(Fmt)
     # ax.set_ylim(0, 20)
+    fig.autofmt_xdate()
     fig.tight_layout()
     if save:
         filename = 'typical_tide_event_with_pwv'
