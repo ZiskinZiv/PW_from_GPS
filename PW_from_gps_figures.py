@@ -5783,9 +5783,11 @@ def plot_PWV_anomalies_groups_maps(work_path=work_yuval, station='drag',
     import numpy as np
     import matplotlib.pyplot as plt
     from scipy.ndimage.filters import gaussian_filter
+    from PW_stations import produce_geo_gnss_solved_stations
     sns.set_style('whitegrid')
     sns.set_style('ticks')
     cmap = sns.color_palette('terrain', as_cmap=True)
+    df = produce_geo_gnss_solved_stations(plot=False)
     file = work_path/'GNSS_PW_thresh_0_hour_dayofyear_rest.nc'
     pw = xr.open_dataset(file)
     if isinstance(station, str):
@@ -5796,8 +5798,10 @@ def plot_PWV_anomalies_groups_maps(work_path=work_yuval, station='drag',
     elif isinstance(station, list):
         pws = [pw[x].mean('rest') for x in pw if x in station]
         pws = [x.copy(data=gaussian_filter(x, 5)) for x in pws]
-        st_mean = xr.merge(pws).to_array('station')
-        st_mean['station'] = [x.upper() for x in station]
+        st_mean = xr.merge(pws)
+        st_mean = st_mean[station].to_array('station')
+        st_mean['station'] = [x.upper() for x in st_mean['station'].values]
+        alts = df.loc[station,'alt'].values
     # drag = pw['drag'].mean('rest')
     # elat = pw['elat'].mean('rest')
     # dsea = pw['dsea'].mean('rest')
@@ -5806,11 +5810,12 @@ def plot_PWV_anomalies_groups_maps(work_path=work_yuval, station='drag',
     n = st_mean['station'].size
     fg = st_mean.plot.contourf(levels=41, row='station', add_colorbar=False,
                                figsize=(6.5, 13), cmap=cmap)
-    for ax in fg.fig.axes:
+    for i, ax in enumerate(fg.fig.axes):
         ax.set_xticks(np.arange(50, 400, 50))
         ax.tick_params(labelsize=fontsize)
         ax.set_ylabel('Hour of day [UTC]', fontsize=fontsize)
         title = ax.get_title()
+        title = title + ' ({:.0f} m a.s.l)'.format(alts[i])
         ax.set_title(title, fontsize=fontsize)
     fg.fig.axes[-1].set_xlabel('Day of Year', fontsize=fontsize)
     cbar_ax = fg.fig.add_axes([0.87, 0.05, 0.025, 0.917])
@@ -5825,7 +5830,7 @@ def plot_PWV_anomalies_groups_maps(work_path=work_yuval, station='drag',
                            hspace=0.105,
                            wspace=0.2)
     if save:
-        filename = 'PWV_climatology_drag_dsea_elat_stacked_groups.png'
+        filename = 'PWV_climatology_{}_stacked_groups.png'.format('_'.join(station))
         plt.savefig(savefig_path / filename, orientation='potrait')
     return fg
 
