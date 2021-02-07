@@ -47,7 +47,8 @@ hydro_st_name_dict = {25191: 'Lavan - new nizana road',
 # the model in 24 hours ? only on SVC and MLP ?
 # implemetn TSS and HSS scores and test them (make_scorer from confusion matrix)
 # redo results but with inner and outer splits of 4, 4
-
+# plot and see best_score per refit-scorrer - this is the best score of GridSearchCV on the entire
+# train/validation subset per each outerfold - basically see if the test_metric increased after the gridsearchcv as it should
 
 def prepare_tide_events_GNSS_dataset(hydro_path=hydro_path):
     import xarray as xr
@@ -864,26 +865,17 @@ def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
 
 def plot_hydro_ML_models_results_from_dss(dss, std_on='outer',
                                           save=False, fontsize=16,
-                                          plot_type='ROC', neg=1,
-                                          feat=['doy+pressure+pwv', 'pwv']):
+                                          plot_type='ROC',split=1,
+                                          feat=['pwv', 'pressure+pwv', 'doy+pressure+pwv']):
     import xarray as xr
     import seaborn as sns
     import matplotlib.pyplot as plt
     import pandas as pd
     cmap = sns.color_palette("colorblind", len(feat))
-    # dss = dss.sel(neg_pos_ratio=neg)
-    # if len(station) > 4:
-    #     max_flow = 0
-    #     sts = [x for x in station.split('-')]
-    #     hs_ids = [int(x) for x in dss.attrs['hs_id'].split('-')]
-    #     X, y = produce_X_y_from_list(
-    #         sts, hs_ids, neg_pos_ratio=1, concat_Xy=True)
-    # else:
-    #     max_flow = dss.attrs['max_flow']
-    #     X, y = produce_X_y(station, hydro_pw_dict[station], neg_pos_ratio=1,
-    #                        max_flow=max_flow)
-    # events = int(y[y == 1].sum().item())
-    # assert station == dss.attrs['pwv_id']
+    if split == 1:
+        dss = dss.sel(scoring=['f1', 'precision', 'recall'])
+    elif split == 2:
+        dss = dss.sel(scoring=['tss', 'hss', 'roc-auc', 'accuracy'])
     fg = xr.plot.FacetGrid(
         dss,
         col='model',
@@ -937,9 +929,9 @@ def plot_hydro_ML_models_results_from_dss(dss, std_on='outer',
                            hspace=0.173,
                            wspace=0.051)
     if save:
-        filename = 'hydro_models_on_{}_{}_std_on_{}_{}_neg{}.png'.format(
+        filename = 'hydro_models_on_{}_{}_std_on_{}_{}.png'.format(
             dss['inner_kfold'].size, dss['outer_kfold'].size,
-            std_on, plot_type, neg)
+            std_on, plot_type)
         plt.savefig(savefig_path / filename, bbox_inches='tight')
     return fg
 
@@ -1028,7 +1020,8 @@ def order_features_list(flist):
     return new_flist
 
 
-def load_ML_run_results(path=hydro_ml_path, prefix='CVR', pw_station='drag'):
+def load_ML_run_results(path=hydro_ml_path, prefix='CVR',
+                        change_DOY_to_doy=True):
     from aux_gps import path_glob
     import xarray as xr
 #    from aux_gps import save_ncfile
@@ -1055,21 +1048,20 @@ def load_ML_run_results(path=hydro_ml_path, prefix='CVR', pw_station='drag'):
     model_files = sorted(model_files)
     # model_files = [x for x in model_files if pw_station in x.as_posix()]
     ds_list = [xr.load_dataset(x) for x in model_files]
+    if change_DOY_to_doy:
+        for ds in ds_list:
+            if 'DOY' in ds.features:
+                new_feats = [x.replace('DOY', 'doy') for x in ds['feature'].values]
+                ds['feature'] = new_feats
+                ds.attrs['features'] = [x.replace('DOY', 'doy') for x in ds.attrs['features']]
     model_as_str = [x.as_posix().split('/')[-1].split('.')[0]
                     for x in model_files]
     model_names = [x.split('_')[1] for x in model_as_str]
     model_scores = [x.split('_')[3] for x in model_as_str]
     model_features = [x.split('_')[2] for x in model_as_str]
+    if change_DOY_to_doy:
+        model_features = [x.replace('DOY', 'doy') for x in model_features]
     new_model_features = order_features_list(model_features)
-    # model_hs_id = [x.split('_')[2] for x in model_as_str]
-    # model_ratio = [int(x.split('_')[-1]) for x in model_as_str]
-    # assert len(set(model_hs_id)) == 1
-#    hs_id = list(set(model_hs_id))[0]
-    # tups = [
-    #     tuple(x) for x in zip(
-    #         model_names,
-    #         new_model_features,
-    #         model_scores)]
     ind = pd.MultiIndex.from_arrays(
         [model_names,
             new_model_features,
@@ -1107,6 +1099,66 @@ def load_ML_run_results(path=hydro_ml_path, prefix='CVR', pw_station='drag'):
     dss = calculate_metrics_from_ML_dss(dss)
     print('Done!')
     return dss
+
+
+def prepare_test_df_to_barplot_from_dss(dss, feats='doy+pwv+pressure',
+                                        plot=True, splitfigs=True):
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+    dvars = [x for x in dss if 'test_' in x]
+    scores = [x.split('_')[-1] for x in dvars]
+    dst = dss[dvars]
+    # dst['scoring'] = [x+'_inner' for x in dst['scoring'].values]
+    # for i, ds in enumerate(dst):
+    #     dst[ds] = dst[ds].sel(scoring=scores[i]).reset_coords(drop=True)
+    if feats is None:
+        feats = ['pwv', 'pressure+pwv', 'doy+pressure+pwv']
+    dst = dst.sel(features=feats)  # .reset_coords(drop=True)
+    dst = dst.rename_vars(dict(zip(dvars, scores)))
+    # dst = dst.drop('scoring')
+    df = dst.to_dataframe()
+    # dfu = df
+    df['inner score'] = df.index.droplevel(2).droplevel(1).droplevel(0)
+    df['features'] = df.index.droplevel(2).droplevel(2).droplevel(1)
+    df['model'] = df.index.droplevel(2).droplevel(0).droplevel(1)
+    df = df.melt(value_vars=scores, id_vars=[
+        'features', 'model', 'inner score'], var_name='outer score')
+    # return dfu
+    # dfu.columns = dfu.columns.droplevel(1)
+    # dfu = dfu.T
+    # dfu['score'] = dfu.index
+    # dfu = dfu.reset_index()
+    # df = dfu.melt(value_vars=['MLP', 'RF', 'SVC'], id_vars=['score'])
+    df1 = df[(df['inner score']=='f1') | (df['inner score']=='precision') | (df['inner score']=='recall')]
+    df2 = df[(df['inner score']=='hss') | (df['inner score']=='tss') | (df['inner score']=='roc-auc') | (df['inner score']=='accuracy')]
+    if plot:
+        sns.set(font_scale = 1.5)
+        sns.set_style('whitegrid')
+        sns.set_style('ticks')
+        if splitfigs:
+            g = sns.catplot(x="outer score", y="value", hue='features',
+                            col="inner score", ci='sd',row='model',
+                            data=df1, kind="bar", capsize=0.15,
+                            height=4, aspect=1.5,errwidth=0.8)
+            g.set_xticklabels(rotation=45)
+            filename = 'ML_scores_models_{}_1.png'.format('_'.join(feats))
+            plt.savefig(savefig_path / filename, bbox_inches='tight')
+            g = sns.catplot(x="outer score", y="value", hue='features',
+                            col="inner score", ci='sd',row='model',
+                            data=df2, kind="bar", capsize=0.15,
+                            height=4, aspect=1.5,errwidth=0.8)
+            g.set_xticklabels(rotation=45)
+            filename = 'ML_scores_models_{}_2.png'.format('_'.join(feats))
+            plt.savefig(savefig_path / filename, bbox_inches='tight')
+        else:
+            g = sns.catplot(x="outer score", y="value", hue='features',
+                            col="inner score", ci='sd',row='model',
+                            data=df, kind="bar", capsize=0.15,
+                            height=4, aspect=1.5,errwidth=0.8)
+            g.set_xticklabels(rotation=45)
+            filename = 'ML_scores_models_{}.png'.format('_'.join(feats))
+            plt.savefig(savefig_path / filename, bbox_inches='tight')
+    return df
 
 
 def calculate_metrics_from_ML_dss(dss):
@@ -1279,12 +1331,11 @@ def calculate_metrics_from_ML_dss(dss):
 #    return da
 
 
-def plot_heatmaps_for_all_models_and_scorings(dss, station='drag',
-                                              var='roc-auc'):  # , save=True):
+def plot_heatmaps_for_all_models_and_scorings(dss, var='roc-auc'):  # , save=True):
     import xarray as xr
     import seaborn as sns
     import matplotlib.pyplot as plt
-    assert station == dss.attrs['pwv_id']
+    # assert station == dss.attrs['pwv_id']
     cmaps = {'roc-auc': sns.color_palette("Blues", as_cmap=True),
              'pr-auc': sns.color_palette("Greens", as_cmap=True)}
     fg = xr.plot.FacetGrid(
@@ -1319,8 +1370,8 @@ def plot_heatmaps_for_all_models_and_scorings(dss, station='drag',
                 ax.set_xlabel('')
     cax = fg.fig.add_axes([0.1, 0.025, .8, .015])
     fg.fig.colorbar(ax.get_children()[0], cax=cax, orientation="horizontal")
-    fg.fig.suptitle('{}: {}'.format(
-        dss.attrs['pwv_id'].upper(), var.upper()), fontweight='bold')
+    fg.fig.suptitle('{}'.format(
+        dss.attrs[var].upper()), fontweight='bold')
     fg.fig.tight_layout()
     fg.fig.subplots_adjust(top=0.937,
                            bottom=0.099,
@@ -1338,11 +1389,12 @@ def plot_heatmaps_for_all_models_and_scorings(dss, station='drag',
 def plot_feature_importances(
         dss,
         feat_dim='features',
-        features='doy+pressure+pwv',
-        scoring='f1',
-        axes=None):
+        features='doy+pwv+pressure',
+        scoring='f1', fix_xticklabels=True,
+        axes=None, save=True):
     # use dss.sel(model='RF') first as input
     import matplotlib.pyplot as plt
+    import numpy as np
     dss = dss.sel({feat_dim: features})
     tests_ds = dss[[x for x in dss if 'test' in x]]
     tests_ds = tests_ds.sel(scoring=scoring)
@@ -1351,7 +1403,11 @@ def plot_feature_importances(
     feats = features.split('+')
     fn = len(feats)
     if axes is None:
-        fig, axes = plt.subplots(1, fn, sharey=True, figsize=(15, 20))
+        fig, axes = plt.subplots(1, fn, sharey=True, figsize=(17, 5), gridspec_kw={'width_ratios': [1, 4, 4]})
+        try:
+            axes.flatten()
+        except AttributeError:
+            axes = [axes]
     for i, f in enumerate(feats):
         fe = [x for x in dss['feature'].values if f in x]
         dsf = dss['feature_importances'].sel(
@@ -1361,40 +1417,88 @@ def plot_feature_importances(
         dsf = dsf.to_dataset('scoring').to_dataframe(
         ).reset_index(drop=True) * 100
         title = '{} ({})'.format(f.upper(), scoring)
-        dsf.plot.bar(ax=axes[i], title=title, rot=0, legend=False, zorder=20)
+        dsf.plot.bar(ax=axes[i], title=title, rot=0, legend=False, zorder=20,
+                     width=.8)
         dsf_sum = dsf.sum().tolist()
         handles, labels = axes[i].get_legend_handles_labels()
         labels = [
             '{} ({:.1f} %)'.format(
                 x, y) for x, y in zip(
                 labels, dsf_sum)]
-        axes[i].legend(handles=handles, labels=labels)
+        axes[i].legend(handles=handles, labels=labels, prop={'size': 8})
         axes[i].set_ylabel('Feature importance [%]')
         axes[i].grid(axis='y', zorder=1)
+    if fix_xticklabels:
+        axes[0].xaxis.set_ticklabels('')
+        hrs = np.arange(-24,0)
+        axes[1].set_xticklabels(hrs, rotation = 30, ha="center", fontsize=12)
+        axes[2].set_xticklabels(hrs, rotation = 30, ha="center", fontsize=12)
+        axes[1].set_xlabel('Hours prior to flood')
+        axes[2].set_xlabel('Hours prior to flood')
+    if save:
+        fig.tight_layout()
+        filename = 'RF_feature_importances_{}.png'.format(scoring)
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
     return
 
 
 def plot_feature_importances_for_all_scorings(dss,
-                                              features='doy+pressure+pwv',
-                                              model='RF'):
+                                              features='doy+pwv+pressure',
+                                              model='RF', splitfigs=True):
     import matplotlib.pyplot as plt
     # station = dss.attrs['pwv_id'].upper()
     dss = dss.sel(model=model).reset_coords(drop=True)
     fns = len(features.split('+'))
     scores = dss['scoring'].values
-    fig, axes = plt.subplots(len(scores), fns, sharey=True, figsize=(15, 20))
-    for i, score in enumerate(scores):
-        plot_feature_importances(
-            dss, features=features, scoring=score, axes=axes[i, :])
-    fig.suptitle(
-        'feature importances of {} model'.format(model))
-    fig.tight_layout()
-    fig.subplots_adjust(top=0.935,
-                        bottom=0.034,
-                        left=0.039,
-                        right=0.989,
-                        hspace=0.19,
-                        wspace=0.027)
+    scores1 = ['f1', 'precision', 'recall']
+    scores2 = ['hss', 'tss', 'accuracy', 'roc-auc']
+    if splitfigs:
+        fig, axes = plt.subplots(len(scores1), fns, sharey=True, figsize=(15, 20))
+        for i, score in enumerate(scores1):
+            plot_feature_importances(
+                dss, features=features, scoring=score, axes=axes[i, :])
+        fig.suptitle(
+            'feature importances of {} model'.format(model))
+        fig.tight_layout()
+        fig.subplots_adjust(top=0.935,
+                            bottom=0.034,
+                            left=0.039,
+                            right=0.989,
+                            hspace=0.19,
+                            wspace=0.027)
+        filename = 'RF_feature_importances_1.png'
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
+        fig, axes = plt.subplots(len(scores2), fns, sharey=True, figsize=(15, 20))
+        for i, score in enumerate(scores2):
+            plot_feature_importances(
+                dss, features=features, scoring=score, axes=axes[i, :])
+        fig.suptitle(
+            'feature importances of {} model'.format(model))
+        fig.tight_layout()
+        fig.subplots_adjust(top=0.935,
+                            bottom=0.034,
+                            left=0.039,
+                            right=0.989,
+                            hspace=0.19,
+                            wspace=0.027)
+        filename = 'RF_feature_importances_2.png'
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
+    else:
+        fig, axes = plt.subplots(len(scores), fns, sharey=True, figsize=(15, 20))
+        for i, score in enumerate(scores):
+            plot_feature_importances(
+                dss, features=features, scoring=score, axes=axes[i, :])
+        fig.suptitle(
+            'feature importances of {} model'.format(model))
+        fig.tight_layout()
+        fig.subplots_adjust(top=0.935,
+                            bottom=0.034,
+                            left=0.039,
+                            right=0.989,
+                            hspace=0.19,
+                            wspace=0.027)
+        filename = 'RF_feature_importances.png'
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
     return dss
 
 
