@@ -3338,3 +3338,30 @@ def pick_lmfit_model(name='sine'):
             return lmfit.models.update_param_vals(params, self.prefix, **kwargs)
     name_dict = {'sine': MySineModel()}
     return name_dict.get(name)
+
+
+def move_or_copy_files_from_doy_dir_structure_to_single_path(yearly_path=work_yuval/'SST',
+                                                             movepath=work_yuval/'SST',
+                                                             filetype='*.nc',
+                                                             opr='copy'):
+    """move files from year-doy directory structure to another path."""
+    from aux_gps import path_glob
+    import shutil
+    year_dirs = sorted([x for x in path_glob(yearly_path, '*/') if x.is_dir()])
+    years = []
+    for year_dir in year_dirs:
+        print('year {} is being processed.'.format(year_dir))
+        years.append(year_dir.as_posix().split('/')[-1])
+        doy_dirs = sorted([x for x in path_glob(year_dir, '*/') if x.is_dir()])
+        for doy_dir in doy_dirs:
+            file = path_glob(doy_dir, filetype)[0]
+            same_file = file.as_posix().split('/')[-1]
+            orig = file
+            dest = movepath / same_file
+            if opr == 'copy':
+                shutil.copy(orig.resolve(), dest.resolve())
+            elif opr == 'move':
+                shutil.move(orig.resolve(), dest.resolve())
+            print('{} has been {}ed {}'.format(same_file, opr, movepath))
+    return years
+
