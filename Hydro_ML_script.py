@@ -57,7 +57,12 @@ def main_hydro_ML(args):
     from hydro_procedures import combine_pos_neg_from_nc_file
     # from hydro_procedures import select_features_from_X
     from hydro_procedures import nested_cross_validation_procedure
+    from hydro_procedures import cross_validation_with_holdout
     from aux_gps import get_all_possible_combinations_from_list
+    if args.param_grid is None:
+        param_grid = 'normal'
+    else:
+        param_grid = args.param_grid
     if args.verbose is None:
         verbose=0
     else:
@@ -92,7 +97,7 @@ def main_hydro_ML(args):
     # scorers = ['roc_auc', 'f1', 'recall', 'precision']
     if args.scorers is None:
         scorers = ['f1', 'recall', 'tss', 'hss',
-                   'roc_auc', 'precision', 'accuracy']
+                   'precision', 'accuracy']
     else:
         scorers = [x for x in args.scorers]
 #    splits = [2, 3, 4]
@@ -110,7 +115,7 @@ def main_hydro_ML(args):
     if args.inner_splits is not None:
         inner_splits = args.inner_splits
     else:
-        inner_splits = 2
+        inner_splits = 3
     if args.outer_splits is not None:
         outer_splits = args.outer_splits
     else:
@@ -124,27 +129,51 @@ def main_hydro_ML(args):
     else:
         savepath = hydro_path
 #    if args.model is not None:
-    total_cnt = len(scorers) * len(features)
     cnt = 0
-    for scorer in scorers:
-        # if model_name != 'RF':
+    if args.cv_type == 'nested':
+        total_cnt = len(scorers) * len(features)
+        for scorer in scorers:
+            # if model_name != 'RF':
+            for feature in features:
+                cnt += 1
+                logger.info('Running nested CV # {} out of {}'.format(cnt, total_cnt))
+                logger.info(
+                    'Running {} model with {} test scorer and {},{} (inner, outer) nsplits, features={}'.format(
+                        model_name, scorer, inner_splits, outer_splits, feature))
+                model = nested_cross_validation_procedure(
+                    X,
+                    y, scorers=scorers,
+                    model_name=model_name,
+                    features=feature,
+                    inner_splits=inner_splits,
+                    outer_splits=outer_splits,
+                    refit_scorer=scorer,
+                    verbose=verbose,
+                    param_grid=param_grid,
+                    savepath=savepath, n_jobs=n_jobs)
+    elif args.cv_type == 'holdout':
+        if args.test_ratio is None:
+            test_ratio = 0.25
+        else:
+            test_ratio = args.test_ratio
+        total_cnt = len(features)
         for feature in features:
             cnt += 1
-            logger.info('Running nested CV # {} out of {}'.format(cnt, total_cnt))
+            logger.info('Running holdout CV # {} out of {}'.format(cnt, total_cnt))
             logger.info(
-                'Running {} model with {} test scorer and {},{} (inner, outer) nsplits, features={}'.format(
-                    model_name, scorer, inner_splits, outer_splits, feature))
-            model = nested_cross_validation_procedure(
+                'Running {} model with {} nsplits and {} holdout ratio, features={}'.format(
+                    model_name, inner_splits, test_ratio, feature))
+            model = cross_validation_with_holdout(
                 X,
                 y, scorers=scorers,
                 model_name=model_name,
                 features=feature,
-                inner_splits=inner_splits,
-                outer_splits=outer_splits,
-                refit_scorer=scorer,
+                n_splits=inner_splits,
                 verbose=verbose,
-                diagnostic=False,
+                param_grid=param_grid,
+                test_ratio=test_ratio,
                 savepath=savepath, n_jobs=n_jobs)
+
         # else:
         #     cnt += 1
         #     logger.info('Running nested CV # {} out of {}'.format(cnt, int(total_cnt/len(features))))
@@ -218,8 +247,16 @@ if __name__ == '__main__':
         type=int)
     optional.add_argument(
         '--inner_splits',
-        help='how many splits for the inner nested loop',
+        help='how many splits for the inner nested loop, in case of cv_type=holdout, inner_splits is the n_splits for hp tuning',
         type=int)
+    optional.add_argument(
+        '--test_ratio',
+        help='how much test data for holdout CV (0 to 1)',
+        type=float)
+    optional.add_argument(
+        '--param_grid',
+        help='param grids for gridsearchcv object',
+        type=str, choices=['light', 'normal', 'dense'])
     # optional.add_argument(
     #     '--max_flow',
     #     help='slice the hydro events for minimum max flow',
@@ -238,7 +275,7 @@ if __name__ == '__main__':
         type=int)
     optional.add_argument(
         '--scorers',
-        nargs ='+',
+        nargs='+',
         help='scorers, e.g., f1, accuracy, recall, etc',
         type=str)
 #    optional.add_argument('--nsplits', help='select number of splits for HP tuning.', type=int)
@@ -249,6 +286,7 @@ if __name__ == '__main__':
             'SVC',
             'MLP',
             'RF'])
+    required.add_argument('--cv_type', help='select CV type', choices=['nested', 'holdout'])
 #    optional.add_argument('--feature', help='select features for ML', type=check_features, nargs='+')
     parser._action_groups.append(optional)  # added this line
     args = parser.parse_args()
@@ -261,11 +299,14 @@ if __name__ == '__main__':
     if args.savepath is None:
         print('savepath is a required argument, run with -h...')
         sys.exit()
+    if args.cv_type is None:
+        print('cv_type is a required argument, run with -h...')
+        sys.exit()
     # if args.hydro_id is None:
     #     print('hydro_id is a required argument, run with -h...')
     #     sys.exit()
     if args.model is None:
         print('model is a required argument, run with -h...')
         sys.exit()
-    logger.info('Running nested ML with {} model'.format(args.model))
+    logger.info('Running ML, {} CV with {} model'.format(args.cv_type, args.model))
     main_hydro_ML(args)
