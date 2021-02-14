@@ -5786,7 +5786,7 @@ def plot_PWV_anomalies_groups_maps(work_path=work_yuval, station='drag',
     from PW_stations import produce_geo_gnss_solved_stations
     sns.set_style('whitegrid')
     sns.set_style('ticks')
-    cmap = sns.color_palette('terrain', as_cmap=True)
+    cmap = 'jet' # sns.color_palette('terrain', as_cmap=True)
     df = produce_geo_gnss_solved_stations(plot=False)
     file = work_path/'GNSS_PW_thresh_0_hour_dayofyear_rest.nc'
     pw = xr.open_dataset(file)
@@ -6067,7 +6067,7 @@ def plot_hydro_pwv_anomalies_with_station_mean(work_path=work_yuval,
         return dfs
     sns.set_style('whitegrid')
     sns.set_style('ticks')
-    cmap = sns.color_palette('mako', as_cmap=True)
+    cmap = 'jet' #sns.color_palette('gist_rainbow_r', as_cmap=True)
     pw = xr.open_dataset(work_path / 'GNSS_PW_thresh_0_hour_dayofyear_anoms.nc')
     pws = [pw[x].load() for x in hydro_pw_dict.keys()]
     dfs = [read_station_from_tide_database(hydro_pw_dict.get(x), hydro_path=hydro_path) for x in hydro_pw_dict.keys()]
@@ -6106,6 +6106,9 @@ def plot_hydro_pwv_anomalies_with_station_mean(work_path=work_yuval,
         cbar_kws={'label': 'PWV anomalies [mm]'}, xticklabels=False)
     cbar_ax.set_ylabel('PWV anomalies [mm]', fontsize=fontsize-2)
     cbar_ax.tick_params(labelsize=fontsize)
+    zero_in_heat = df_mean.index.get_loc(0, method='nearest') + 1
+    ax_heat.vlines([zero_in_heat], *ax_heat.get_ylim(), color='k',
+                   linestyle='--', linewidth=1.5, zorder=20)
     # activate top ticks and tickslabales:
     ax_heat.xaxis.set_tick_params(
         bottom='off', labelbottom='off', labelsize=fontsize)
@@ -6149,7 +6152,7 @@ def plot_hydro_pwv_anomalies_with_station_mean(work_path=work_yuval,
     # ax_group.xaxis.set_major_locator(mdates.DayLocator(interval=0.5))
     # xticks = pd.timedelta_range(pd.Timedelta(-3, unit='D'), pd.Timedelta(1, unit='D'), freq='3H')
     # ax_group.set_xticks(xticks)
-    ax_group.axvline(0, color='r', ls='--')
+    ax_group.axvline(0, color='k', ls='--', lw=1.5)
     # ax_heat.axvline(0, color='r', ls='--')
     ax_group.grid(True)
     fig.tight_layout()
@@ -6237,7 +6240,7 @@ def plot_hydro_events_climatology(hydro_path=hydro_path, fontsize=16, save=True)
 def plot_hydro_GNSS_periods_and_map(path=work_yuval, gis_path=gis_path,
                                     ims=False, dem_path=dem_path,
                                     hydro_path=hydro_path,
-                                    fontsize=18, save=True):
+                                    fontsize=22, save=True):
 
     from aux_gps import gantt_chart
     import xarray as xr
@@ -6257,7 +6260,7 @@ def plot_hydro_GNSS_periods_and_map(path=work_yuval, gis_path=gis_path,
         5, 5], wspace=0.125)
     ax_gantt = fig.add_subplot(grid[0, 0])  # plt.subplot(221)
     ax_map = fig.add_subplot(grid[0, 1], projection=ccrs.PlateCarree())  # plt.subplot(122)
-    extent = [34, 36.3, 29.2, 32.5]
+    extent = [34, 36.0, 29.2, 32.5]
     ax_map.set_extent(extent)
 #    fig, ax = plt.subplots(1, 2, sharex=False, sharey=False, figsize=(20, 6))
     # RINEX gantt chart:
@@ -6333,12 +6336,12 @@ def plot_hydro_GNSS_periods_and_map(path=work_yuval, gis_path=gis_path,
     gps = gps.loc[just_pw, :]
     # gps_list = [x for x in gps.index if x not in merged and x not in removed]
     gps.plot(ax=ax_map, edgecolor='black', marker='s',
-             alpha=1.0, markersize=55, facecolor="None", linewidth=2, zorder=3)
+             alpha=1.0, markersize=100, facecolor="None", linewidth=2, zorder=3)
     to_plot_offset = ['nizn', 'ramo', 'nrif']
 
     for x, y, label in zip(gps.lon, gps.lat, gps.index.str.upper()):
         if label.lower() in to_plot_offset:
-            ax_map.annotate(label, xy=(x, y), xytext=(4, -12),
+            ax_map.annotate(label, xy=(x, y), xytext=(4, -15),
                             textcoords="offset points", color='k',
                             fontweight='bold', fontsize=fontsize - 2)
         else:
@@ -6359,7 +6362,7 @@ def plot_hydro_GNSS_periods_and_map(path=work_yuval, gis_path=gis_path,
                                                                  df.lat),
                                  crs=gps.crs)
     bet_dagan.plot(ax=ax_map, color='black', edgecolor='black',
-                   marker='x', linewidth=2, zorder=2)
+                   marker='x', linewidth=2, zorder=2, markersize=100)
     geo_annotate(ax_map, bet_dagan.lon, bet_dagan.lat,
                  bet_dagan.index, xytext=(4, -6), fmt=None,
                  c='k', fw='bold', fs=fontsize - 2, colorupdown=False)
@@ -6370,7 +6373,7 @@ def plot_hydro_GNSS_periods_and_map(path=work_yuval, gis_path=gis_path,
     hm = hm.loc[[x for x in hydro_pw_dict.values()], :]
     hmgdf = gpd.GeoDataFrame(hm, geometry=gpd.points_from_xy(hm.lon, hm.lat), crs=gps.crs)
     hmgdf.plot(ax=ax_map, edgecolor='black', marker='o',
-               alpha=1.0, markersize=55, facecolor='tab:pink', zorder=4)
+               alpha=1.0, markersize=100, facecolor='tab:pink', zorder=4)
 #    plt.legend(['GNSS \nreceiver sites',
 #                'removed \nGNSS sites',
 #                'merged \nGNSS sites',
@@ -6391,7 +6394,7 @@ def plot_hydro_GNSS_periods_and_map(path=work_yuval, gis_path=gis_path,
     else:
         plt.legend(['GNSS \nstations',
                     'radiosonde\nstation',
-                    'hydro tide\nstations'],
+                    'hydrometric\nstations'],
                    loc='upper left', framealpha=0.7, fancybox=True,
                    handletextpad=0.2, handlelength=1.5, fontsize=fontsize - 2)
     fig.subplots_adjust(top=0.95,
