@@ -565,12 +565,13 @@ def permutation_scikit(X, y, cv=False, plot=True):
                   decision_function_shape='ovr', degree=3, gamma=0.032374575428176434,
                   kernel='poly', max_iter=-1, probability=False, random_state=None,
                   shrinking=True, tol=0.001, verbose=False)
+        clf = SVC(kernel='linear')
 #        clf = LinearDiscriminantAnalysis()
-        # cv = StratifiedKFold(2, shuffle=True)
-        cv = KFold(4, shuffle=True)
+        cv = StratifiedKFold(4, shuffle=True)
+        # cv = KFold(4, shuffle=True)
         n_classes = 2
         score, permutation_scores, pvalue = permutation_test_score(
-            clf, X, y, scoring="f1", cv=cv, n_permutations=1000, n_jobs=1)
+            clf, X, y, scoring="f1", cv=cv, n_permutations=1000, n_jobs=-1, verbose=2)
 
         print("Classification score %s (pvalue : %s)" % (score, pvalue))
         plt.hist(permutation_scores, 20, label='Permutation scores',
@@ -683,6 +684,82 @@ def produce_ROC_curves_from_model(model, X, y, cv, kfold_name='inner_kfold'):
     return ds
 
 
+def cross_validation_with_holdout(X, y, model_name='SVC', features='pwv',
+                                  n_splits=3, test_ratio=0.25,
+                                  scorers=['f1', 'recall', 'tss', 'hss',
+                                           'precision', 'accuracy'],
+                                  seed=42, savepath=None, verbose=0,
+                                  param_grid='normal', n_jobs=-1):
+    # from sklearn.model_selection import cross_validate
+    from sklearn.model_selection import StratifiedKFold
+    from sklearn.model_selection import GridSearchCV
+    from sklearn.model_selection import train_test_split
+    from sklearn.metrics import make_scorer
+    # from string import digits
+    import numpy as np
+    # import xarray as xr
+    scores_dict = {s: s for s in scorers}
+    if 'tss' in scorers:
+        scores_dict['tss'] = make_scorer(tss_score)
+    if 'hss' in scorers:
+        scores_dict['hss'] = make_scorer(hss_score)
+
+    # first if RF chosen, replace the cyclic coords of DOY (sin and cos) with
+    # the DOY itself.
+    feats = features
+    if model_name == 'RF' and 'doy' in features:
+        if isinstance(features, list):
+            feats.remove('doy')
+            feats.append('DOY')
+        elif isinstance(features, str):
+            feats = 'DOY'
+    elif model_name != 'RF' and 'doy' in features:
+        if isinstance(features, list):
+            feats.remove('doy')
+            feats.append('doy_sin')
+            feats.append('doy_cos')
+        elif isinstance(features, str):
+            feats = ['doy_sin']
+            feats.append('doy_cos')
+    X = select_features_from_X(X, feats)
+    if param_grid == 'light':
+        print(np.unique(X.feature.values))
+    # first take out the hold-out set:
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_ratio,
+                                                        random_state=seed,
+                                                        stratify=y)
+    # configure the cross-validation procedure
+    cv = StratifiedKFold(n_splits=n_splits, shuffle=True,
+                         random_state=seed)
+    print('CV StratifiedKfolds of {}.'.format(n_splits))
+    # define the model and search space:
+    ml = ML_Classifier_Switcher()
+    print('param grid group is set to {}.'.format(param_grid))
+    sk_model = ml.pick_model(model_name, pgrid=param_grid)
+    search_space = ml.param_grid
+    # define search
+    gr_search = GridSearchCV(estimator=sk_model, param_grid=search_space,
+                             cv=cv, n_jobs=n_jobs,
+                             scoring=scores_dict,
+                             verbose=verbose,
+                             refit=False, return_train_score=True)
+
+    gr_search.fit(X, y)
+    if savepath is not None:
+        filename = 'GRSRCHCV_holdout_{}_{}_{}_{}_{}_{}.pkl'.format(
+            model_name, '+'.join(features), '+'.join(scorers), n_splits, int(test_ratio*100), param_grid)
+        save_gridsearchcv_object(gr_search, savepath, filename)
+    # gr, _ = process_gridsearch_results(
+    #         gr_search, model_name, split_dim='kfold', features=X.feature.values)
+    # remove_digits = str.maketrans('', '', digits)
+    # features = list(set([x.translate(remove_digits).split('_')[0]
+    #                      for x in X.feature.values]))
+    # # add more attrs, features etc:
+    # gr.attrs['features'] = features
+
+    return gr_search
+
+
 def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
                                       outer_splits=4, inner_splits=2,
                                       refit_scorer='roc_auc',
@@ -690,7 +767,7 @@ def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
                                                'roc_auc', 'precision',
                                                'accuracy'],
                                       seed=42, savepath=None, verbose=0,
-                                      diagnostic=False, n_jobs=-1):
+                                      param_grid='normal', n_jobs=-1):
     from sklearn.model_selection import cross_validate
     from sklearn.model_selection import StratifiedKFold
     from sklearn.model_selection import GridSearchCV
@@ -744,7 +821,7 @@ def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
     #         for f in features:
     #             fs += [x for x in X.feature.values if f in x]
     #         X = X.sel(feature=fs)
-    if diagnostic:
+    if param_grid == 'light':
         print(np.unique(X.feature.values))
     # configure the cross-validation procedure
     cv_inner = StratifiedKFold(n_splits=inner_splits, shuffle=True,
@@ -752,11 +829,9 @@ def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
     print('Inner CV StratifiedKfolds of {}.'.format(inner_splits))
     # define the model and search space:
     ml = ML_Classifier_Switcher()
-    light = False
-    if diagnostic:
-        print('disgnostic mode.')
-        light = True
-    sk_model = ml.pick_model(model_name, light=light)
+    if param_grid == 'light':
+        print('disgnostic mode light.')
+    sk_model = ml.pick_model(model_name, pgrid=param_grid)
     search_space = ml.param_grid
     # define search
     gr_search = GridSearchCV(estimator=sk_model, param_grid=search_space,
@@ -1319,7 +1394,9 @@ def calculate_metrics_from_ML_dss(dss):
 #        except IndexError:
 #            model_test_sizes.append(20)
 ##    model_pwv_hs_id = list(zip(model_pw_stations, model_hydro_stations))
-##    model_pwv_hs_id = ['_'.join(x) for x in model_pwv_hs_id]
+##    model_pwv_hs_id = ['_'.join(x) for     filename = 'CVR_{}_{}_{}_{}_{}.nc'.format(
+#         name, features, refitted_scorer, ikfolds, okfolds)
+# x in model_pwv_hs_id]
 #    # transform model_dict to dataarray:
 #    tups = [tuple(x) for x in zip(model_names, model_scores, model_nsplits, model_features, model_test_sizes)] #, model_pwv_hs_id)]
 #    ind = pd.MultiIndex.from_tuples((tups), names=['model', 'scoring', 'splits', 'feature', 'test_size']) #, 'station'])
@@ -1451,7 +1528,7 @@ def plot_feature_importances_for_all_scorings(dss,
     fns = len(features.split('+'))
     scores = dss['scoring'].values
     scores1 = ['f1', 'precision', 'recall']
-    scores2 = ['hss', 'tss', 'accuracy', 'roc-auc']
+    scores2 = ['hss', 'tss', 'accuracy','roc-auc']
     if splitfigs:
         fig, axes = plt.subplots(len(scores1), fns, sharey=True, figsize=(15, 20))
         for i, score in enumerate(scores1):
@@ -1696,15 +1773,51 @@ def HP_tuning(X, y, model_name='SVC', val_size=0.18, n_splits=None,
     return ds, best_model
 
 
+def save_gridsearchcv_object(GridSearchCV, savepath, filename):
+    import joblib
+    print('{} was saved to {}'.format(filename, savepath))
+    joblib.dump(GridSearchCV, savepath / filename)
+    return
+
+
+def read_one_gridsearchcv_object(gr):
+    import pandas as pd
+    # param grid dict:
+    params = gr.param_grid
+    # scorer names:
+    scoring = [x for x in gr.scoring.keys()]
+    # df:
+    df = pd.DataFrame().from_dict(gr.cv_results_)
+    # produce multiindex from param_grid dict:
+    param_names = [x for x in params.keys()]
+    # unpack param_grid vals to list of lists:
+    pro = [[y for y in x] for x in params.values()]
+    ind = pd.MultiIndex.from_product((pro), names=param_names)
+    df.index = ind
+    best_params = []
+    for scorer in scoring:
+        best_params.append(df[df['rank_test_{}'.format(scorer)]==1]['mean_test_{}'.format(scorer)].index[0])
+    best_df = pd.DataFrame(best_params, index=scoring, columns=param_names)
+    return best_df
+
+
 def process_gridsearch_results(GridSearchCV, model_name,
                                split_dim='inner_kfold', features=None,
                                pwv_id=None, hs_id=None, test_size=None):
     import xarray as xr
     import pandas as pd
     import numpy as np
+    # finish getting best results from all scorers togather
     """takes GridSreachCV object with cv_results and xarray it into dataarray"""
     params = GridSearchCV.param_grid
     scoring = GridSearchCV.scoring
+    results = GridSearchCV.cv_results_
+    for scorer in scoring:
+        for sample in ['train', 'test']:
+            sample_score_mean = results['mean_{}_{}'.format(sample, scorer)]
+            sample_score_std = results['std_{}_{}'.format(sample, scorer)]
+        best_index = np.nonzero(results['rank_test_{}'.format(scorer)] == 1)[0][0]
+        best_score = results['mean_test_{}'.format(scorer)][best_index]
     names = [x for x in params.keys()]
 
     # unpack param_grid vals to list of lists:
@@ -1714,10 +1827,10 @@ def process_gridsearch_results(GridSearchCV, model_name,
 #                        not in x and 'time' not in x and 'param' not in x and
 #                        'rank' not in x]
     result_names = [
-        x for x in GridSearchCV.cv_results_.keys() if 'param' not in x]
+        x for x in results.keys() if 'param' not in x]
     ds = xr.Dataset()
     for da_name in result_names:
-        da = xr.DataArray(GridSearchCV.cv_results_[da_name])
+        da = xr.DataArray(results[da_name])
         ds[da_name] = da
     ds = ds.assign(dim_0=ind).unstack('dim_0')
     for dim in ds.dims:
@@ -1777,7 +1890,7 @@ def process_gridsearch_results(GridSearchCV, model_name,
             ds['best_{}'.format(name)] = GridSearchCV.best_params_[name]
         return ds, GridSearchCV.best_estimator_
     else:
-        return ds
+        return ds, None
 
 
 def save_cv_results(cvr, savepath=hydro_path):
@@ -2891,16 +3004,26 @@ def read_tides(path=hydro_path):
         df['tide_start'] = pd.to_datetime(
             df['tide_start_date'], dayfirst=True) + pd.to_timedelta(
             df['tide_start_hour'].add(':00'), unit='m', errors='coerce')
+        # tides are in local Israeli winter clock (no DST):
+        # dst = np.zeros(df['tide_start'].shape)
+        # df['tide_start'] = df['tide_start'].dt.tz_localize('Asia/Jerusalem', ambiguous=dst).dt.tz_convert('UTC')
+        df['tide_start'] = df['tide_start'] - pd.Timedelta(2, unit='H')
         df['tide_end'] = pd.to_datetime(
             df['tide_end_date'], dayfirst=True) + pd.to_timedelta(
             df['tide_end_hour'].add(':00'),
             unit='m',
             errors='coerce')
+        # also to tide ends:
+        df['tide_end'] = df['tide_end'] - pd.Timedelta(2, unit='H')
+        # df['tide_end'] = df['tide_end'].dt.tz_localize('Asia/Jerusalem', ambiguous=dst).dt.tz_convert('UTC')
         df['tide_max'] = pd.to_datetime(
             df['tide_max_date'], dayfirst=True) + pd.to_timedelta(
             df['tide_max_hour'].add(':00'),
             unit='m',
             errors='coerce')
+        # also to tide max:
+        # df['tide_max'] = df['tide_max'].dt.tz_localize('Asia/Jerusalem', ambiguous=dst).dt.tz_convert('UTC')
+        df['tide_max'] = df['tide_max'] - pd.Timedelta(2, unit='H')
         df['tide_duration'] = pd.to_timedelta(
             df['tide_duration'] + ':00', unit='m', errors='coerce')
         df.loc[:,
@@ -2965,6 +3088,7 @@ def read_tides(path=hydro_path):
     dsu = [get_unique_index(x, dim='tide_start') for x in ds_list]
     print('merging...')
     ds = xr.merge(dsu)
+    ds.attrs['time'] = 'UTC'
     filename = 'hydro_tides.nc'
     print('saving {} to {}'.format(filename, path))
     comp = dict(zlib=True, complevel=9)  # best compression
@@ -3031,7 +3155,8 @@ def read_hydrographs(path=hydro_path):
             'flow_type',
             'record_type',
             'record_code']
-        df['time'] = pd.to_datetime(df['time'], dayfirst=True)
+        # make sure the time is in UTC since database is in ISR winter clock (no DST)
+        df['time'] = pd.to_datetime(df['time'], dayfirst=True) - pd.Timedelta(2, unit='H')
         df['tide_height[m]'] = df['tide_height[m]'].astype(float)
         df['flow[m^3/sec]'] = df['flow[m^3/sec]'].astype(float)
         df.loc[:, 'data_type'][df['data_type'].str.contains(
@@ -3084,6 +3209,7 @@ def read_hydrographs(path=hydro_path):
     dsu = [get_unique_index(x) for x in ds_list]
     print('merging...')
     ds = xr.merge(dsu)
+    ds.attrs['time'] = 'UTC'
     filename = 'hydro_graphs.nc'
     print('saving {} to {}'.format(filename, path))
     comp = dict(zlib=True, complevel=9)  # best compression
@@ -3183,7 +3309,7 @@ def hss_score(y, y_pred, **kwargs):
 
 class ML_Classifier_Switcher(object):
 
-    def pick_model(self, model_name, light=False):
+    def pick_model(self, model_name, pgrid='normal'):
         """Dispatch method"""
         # from sklearn.model_selection import GridSearchCV
         self.param_grid = None
@@ -3196,22 +3322,28 @@ class ML_Classifier_Switcher(object):
 #        else:
         # Call the method as we return it
         # whether to select lighter param grid, e.g., for testing purposes.
-        self.light = light
+        self.pgrid = pgrid
         return method()
 
     def SVC(self):
         from sklearn.svm import SVC
         import numpy as np
-        if self.light:
+        if self.pgrid == 'light':
             self.param_grid = {'kernel': ['rbf', 'sigmoid', 'linear', 'poly'],
                                'C': [0.1, 100],
                                'gamma': [0.0001, 1],
                                'degree': [1, 2, 5],
                                'coef0': [0, 1, 4]}
-        else:
+        elif self.pgrid == 'normal':
             self.param_grid = {'kernel': ['rbf', 'sigmoid', 'linear', 'poly'],
                                'C': np.logspace(-1, 2, 10),
                                'gamma': np.logspace(-5, 0, 15),
+                               'degree': [1, 2, 3, 4, 5],
+                               'coef0': [0, 1, 2, 3, 4]}
+        elif self.pgrid == 'dense':
+            self.param_grid = {'kernel': ['rbf', 'sigmoid', 'linear', 'poly'],
+                               'C': np.logspace(-2, 2, 25),
+                               'gamma': np.logspace(-5, 0, 25),
                                'degree': [1, 2, 3, 4, 5],
                                'coef0': [0, 1, 2, 3, 4]}
         return SVC(random_state=42, class_weight='balanced')
@@ -3219,14 +3351,20 @@ class ML_Classifier_Switcher(object):
     def MLP(self):
         import numpy as np
         from sklearn.neural_network import MLPClassifier
-        if self.light:
+        if self.pgrid == 'light':
             self.param_grid = {
                 'activation': [
                     'identity',
                     'relu'],
                 'hidden_layer_sizes': [(50, 50, 50), (50, 100, 50)]}
-        else:
+        elif self.pgrid == 'normal':
             self.param_grid = {'alpha': np.logspace(-5, 1, 15),
+                               'activation': ['identity', 'logistic', 'tanh', 'relu'],
+                               'hidden_layer_sizes': [(50, 50, 50), (50, 100, 50), (100,)],
+                               'learning_rate': ['constant', 'adaptive'],
+                               'solver': ['adam', 'lbfgs', 'sgd']}
+        elif self.pgrid == 'dense':
+            self.param_grid = {'alpha': np.logspace(-5, 1, 25),
                                'activation': ['identity', 'logistic', 'tanh', 'relu'],
                                'hidden_layer_sizes': [(50, 50, 50), (50, 100, 50), (100,)],
                                'learning_rate': ['constant', 'adaptive'],
@@ -3236,14 +3374,21 @@ class ML_Classifier_Switcher(object):
     def RF(self):
         from sklearn.ensemble import RandomForestClassifier
         import numpy as np
-        if self.light:
+        if self.pgrid == 'light':
             self.param_grid = {'max_features': ['auto', 'sqrt']}
-        else:
+        elif self.pgrid == 'normal':
             self.param_grid = {'max_depth': [5, 10, 25, 50, 100],
                                'max_features': ['auto', 'sqrt'],
                                'min_samples_leaf': [1, 2, 5, 10],
                                'min_samples_split': [2, 5, 15, 50],
                                'n_estimators': [100, 300, 700, 1200]
+                               }
+        elif self.pgrid == 'dense':
+            self.param_grid = {'max_depth': [5, 10, 25, 50, 100, 150, 250],
+                               'max_features': ['auto', 'sqrt'],
+                               'min_samples_leaf': [1, 2, 5, 10, 15, 25],
+                               'min_samples_split': [2, 5, 15, 30, 50, 70, 100],
+                               'n_estimators': [100, 200, 300, 500, 700, 1000, 1300, 1500]
                                }
         return RandomForestClassifier(random_state=42, n_jobs=-1,
                                       class_weight='balanced')
