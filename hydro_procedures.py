@@ -49,6 +49,9 @@ hydro_st_name_dict = {25191: 'Lavan - new nizana road',
 # redo results but with inner and outer splits of 4, 4
 # plot and see best_score per refit-scorrer - this is the best score of GridSearchCV on the entire
 # train/validation subset per each outerfold - basically see if the test_metric increased after the gridsearchcv as it should
+# use holdout set
+# implement repeatedstratifiedkfold and run it...
+# check for stability of the gridsearch CV...also run with 4-folds ?
 
 def prepare_tide_events_GNSS_dataset(hydro_path=hydro_path):
     import xarray as xr
@@ -706,7 +709,10 @@ def cross_validation_with_holdout(X, y, model_name='SVC', features='pwv',
 
     # first if RF chosen, replace the cyclic coords of DOY (sin and cos) with
     # the DOY itself.
-    feats = features
+    if isinstance(features, list):
+        feats = features.copy()
+    else:
+        feats = features
     if model_name == 'RF' and 'doy' in features:
         if isinstance(features, list):
             feats.remove('doy')
@@ -745,9 +751,12 @@ def cross_validation_with_holdout(X, y, model_name='SVC', features='pwv',
                              refit=False, return_train_score=True)
 
     gr_search.fit(X, y)
+    if isinstance(features, str):
+        features = [features]
     if savepath is not None:
-        filename = 'GRSRCHCV_holdout_{}_{}_{}_{}_{}_{}.pkl'.format(
-            model_name, '+'.join(features), '+'.join(scorers), n_splits, int(test_ratio*100), param_grid)
+        filename = 'GRSRCHCV_holdout_{}_{}_{}_{}_{}_{}_{}.pkl'.format(
+            model_name, '+'.join(features), '+'.join(scorers), n_splits,
+            int(test_ratio*100), param_grid, seed)
         save_gridsearchcv_object(gr_search, savepath, filename)
     # gr, _ = process_gridsearch_results(
     #         gr_search, model_name, split_dim='kfold', features=X.feature.values)
@@ -1176,6 +1185,33 @@ def load_ML_run_results(path=hydro_ml_path, prefix='CVR',
     return dss
 
 
+def plot_holdout_test_scores(dss, feats='pwv+pressure+doy'):
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+    if feats is None:
+        feats = ['pwv', 'pwv+pressure', 'pwv+pressure+doy']
+    dst = dss.sel(features=feats)  # .reset_coords(drop=True)
+    df = dst.to_dataframe()
+    df['scorers'] = df.index.droplevel(1).droplevel(0)
+    df['features'] = df.index.droplevel(2).droplevel(1)
+    df['model'] = df.index.droplevel(2).droplevel(0)
+    df['model'] = df['model'].str.replace('SVC', 'SVM')
+    df = df.melt(value_vars='holdout_test_scores', id_vars=[
+        'features', 'model', 'scorers'], var_name='test_score')
+    sns.set(font_scale = 1.5)
+    sns.set_style('whitegrid')
+    sns.set_style('ticks')
+    g = sns.catplot(x="scorers", y="value", hue='features',
+                    col=None, ci='sd',row='model',
+                    data=df, kind="bar", capsize=0.15,
+                    height=4, aspect=1.5,errwidth=0.8)
+    g.set_xticklabels(rotation=45)
+    [x.grid(True) for x in g.axes.flatten()]
+    filename = 'ML_scores_models_holdout_{}.png'.format('_'.join(feats))
+    plt.savefig(savefig_path / filename, bbox_inches='tight')
+    return df
+
+
 def prepare_test_df_to_barplot_from_dss(dss, feats='doy+pwv+pressure',
                                         plot=True, splitfigs=True):
     import seaborn as sns
@@ -1466,7 +1502,7 @@ def plot_heatmaps_for_all_models_and_scorings(dss, var='roc-auc'):  # , save=Tru
 def plot_feature_importances(
         dss,
         feat_dim='features',
-        features='doy+pwv+pressure',
+        features='pwv+pressure+doy',
         scoring='f1', fix_xticklabels=True,
         axes=None, save=True):
     # use dss.sel(model='RF') first as input
@@ -1780,7 +1816,161 @@ def save_gridsearchcv_object(GridSearchCV, savepath, filename):
     return
 
 
+def run_RF_feature_importance_on_all_features(path=hydro_path, gr_path=hydro_ml_path/'holdout'):
+    import xarray as xr
+    from aux_gps import get_all_possible_combinations_from_list
+    feats = get_all_possible_combinations_from_list(
+        ['pwv', 'pressure', 'doy'], reduce_single_list=True, combine_by_sep='+')
+    feat_list = []
+    for feat in feats:
+        da = holdout_test(model_name='RF', return_RF_FI=True, features=feat)
+        feat_list.append(da)
+    daa = xr.concat(feat_list, 'features')
+    daa['features'] = feats
+    return daa
+
+
+def run_holdout_test_on_all_models_and_features(path=hydro_path, gr_path=hydro_ml_path/'holdout'):
+    import xarray as xr
+    from aux_gps import get_all_possible_combinations_from_list
+    feats = get_all_possible_combinations_from_list(
+        ['pwv', 'pressure', 'doy'], reduce_single_list=True, combine_by_sep='+')
+    models = ['MLP', 'SVC', 'RF']
+    model_list = []
+    for model in models:
+        feat_list = []
+        for feat in feats:
+            best = holdout_test(path=path, gr_path=gr_path,
+                                model_name=model, features=feat)
+            best.index.name = 'scorer'
+            ds = best[['mean_score', 'std_score', 'holdout_test_scores']].to_xarray()
+            feat_list.append(ds)
+        dsf = xr.concat(feat_list, 'features')
+        dsf['features'] = feats
+        model_list.append(dsf)
+    dss = xr.concat(model_list, 'model')
+    dss['model'] = models
+    return dss
+
+
+def prepare_X_y_for_holdout_test(features='pwv+doy', model_name='SVC', path=hydro_path):
+    # combine X,y and split them according to test ratio and seed:
+    X, y = combine_pos_neg_from_nc_file(path)
+    # re arange X features according to model:
+    feats = features.split('+')
+    if model_name == 'RF' and 'doy' in feats:
+        if isinstance(feats, list):
+            feats.remove('doy')
+            feats.append('DOY')
+        elif isinstance(feats, str):
+            feats = 'DOY'
+    elif model_name != 'RF' and 'doy' in feats:
+        if isinstance(feats, list):
+            feats.remove('doy')
+            feats.append('doy_sin')
+            feats.append('doy_cos')
+        elif isinstance(feats, str):
+            feats = ['doy_sin']
+            feats.append('doy_cos')
+    X = select_features_from_X(X, feats)
+    return X, y
+
+
+def holdout_test(path=hydro_path, gr_path=hydro_ml_path/'holdout',
+                 model_name='SVC', features='pwv', return_RF_FI=False):
+    """do a holdout test with best model from gridsearchcv
+    with all scorers"""
+    from sklearn.model_selection import train_test_split
+    import xarray as xr
+    # process gridsearchcv results:
+    best_df, test_ratio, seed = load_one_gridsearchcv_object(path=gr_path,
+                                                             cv_type='holdout',
+                                                             features=features,
+                                                             model_name=model_name,
+                                                             verbose=False)
+    print('Using random seed of {} and {}% test ratio'.format(seed, test_ratio))
+    ts = int(test_ratio) / 100
+    X, y = prepare_X_y_for_holdout_test(features, model_name, path)
+    # split using test_size and seed:
+    X_train, X_test, y_train, y_test = train_test_split(X, y,
+                                                        test_size=ts,
+                                                        random_state=int(seed),
+                                                        stratify=y)
+    # pick model and set the params to best from gridsearchcv:
+    ml = ML_Classifier_Switcher()
+    print('Picking {} model with best params'.format(model_name))
+    print('Features are: {}'.format(features))
+    test_scores = []
+    fi_list = []
+    for scorer in best_df.index:
+        sk_model = ml.pick_model(model_name)
+        # get best params (drop two last cols since they are not params):
+        params = best_df.T[scorer][:-2].to_dict()
+        sk_model.set_params(**params)
+        sk_model.fit(X_train, y_train)
+        if hasattr(sk_model, 'feature_importances_'):
+            FI = xr.DataArray(sk_model.feature_importances_, dims=['feature'])
+            FI['feature'] = X_train['feature']
+            fi_list.append(FI)
+        y_pred = sk_model.predict(X_test)
+        score = scorer_function(scorer, y_test, y_pred)
+        test_scores.append(score)
+    best_df['holdout_test_scores'] = test_scores
+    if fi_list and return_RF_FI:
+        da = xr.concat(fi_list, 'scorer')
+        da['scorer'] = best_df.index.values
+        da.name = 'RF_feature_importances'
+        return da
+    return best_df
+
+
+def load_one_gridsearchcv_object(path=hydro_ml_path, cv_type='holdout', features='pwv',
+                                 model_name='SVC', verbose=True):
+    """load one gridsearchcv obj with model_name and features and run read_one_gridsearchcv_object"""
+    from aux_gps import path_glob
+    import joblib
+    # first filter for model name:
+    if verbose:
+        print('loading GridsearchCVs results for {} model with {} cv type'.format(model_name, cv_type))
+    model_files = path_glob(path, 'GRSRCHCV_{}_*.pkl'.format(cv_type))
+    model_files = [x for x in model_files if model_name in x.as_posix()]
+    # now select features:
+    if verbose:
+        print('loading GridsearchCVs results with {} features'.format(features))
+    model_features = [x.as_posix().split('/')[-1].split('_')[3] for x in model_files]
+    feat_ind, feats = get_feature_set_from_list(model_features, features)
+    # also get the test ratio and seed number:
+    file = model_files[feat_ind]
+    seed = file.as_posix().split('/')[-1].split('.')[0].split('_')[-1]
+    test_ratio = file.as_posix().split('/')[-1].split('.')[0].split('_')[-3]
+    # load and produce best_df:
+    gr = joblib.load(file)
+    best_df = read_one_gridsearchcv_object(gr)
+    return best_df, test_ratio, seed
+
+
+def get_feature_set_from_list(model_features_list, features, sep='+'):
+    """select features from model_features_list,
+    return the index in the model_features_list and the entry itself"""
+    # first find if features is a single or multiple features:
+    if isinstance(features, str) and sep not in features:
+        try:
+            ind = model_features_list.index(features)
+        except ValueError:
+            raise ValueError('{} is not in {}'.format(features, ', '.join(model_features_list)))
+    elif isinstance(features, str) and sep in features:
+        features_split = features.split(sep)
+        mf = [x.split(sep) for x in model_features_list]
+        bool_list = [set(features_split) == (set(x)) for x in mf]
+        ind = [i for i, x in enumerate(bool_list) if x][0]
+        feat = model_features_list[ind]
+    feat = model_features_list[ind]
+    return ind, feat
+
+
 def read_one_gridsearchcv_object(gr):
+    """read one gridsearchcv multimetric object and
+    get the best params, best mean/std scores"""
     import pandas as pd
     # param grid dict:
     params = gr.param_grid
@@ -1795,9 +1985,15 @@ def read_one_gridsearchcv_object(gr):
     ind = pd.MultiIndex.from_product((pro), names=param_names)
     df.index = ind
     best_params = []
+    best_mean_scores = []
+    best_std_scores = []
     for scorer in scoring:
         best_params.append(df[df['rank_test_{}'.format(scorer)]==1]['mean_test_{}'.format(scorer)].index[0])
+        best_mean_scores.append(df[df['rank_test_{}'.format(scorer)]==1]['mean_test_{}'.format(scorer)].iloc[0])
+        best_std_scores.append(df[df['rank_test_{}'.format(scorer)]==1]['std_test_{}'.format(scorer)].iloc[0])
     best_df = pd.DataFrame(best_params, index=scoring, columns=param_names)
+    best_df['mean_score'] = best_mean_scores
+    best_df['std_score'] = best_std_scores
     return best_df
 
 
@@ -1812,12 +2008,12 @@ def process_gridsearch_results(GridSearchCV, model_name,
     params = GridSearchCV.param_grid
     scoring = GridSearchCV.scoring
     results = GridSearchCV.cv_results_
-    for scorer in scoring:
-        for sample in ['train', 'test']:
-            sample_score_mean = results['mean_{}_{}'.format(sample, scorer)]
-            sample_score_std = results['std_{}_{}'.format(sample, scorer)]
-        best_index = np.nonzero(results['rank_test_{}'.format(scorer)] == 1)[0][0]
-        best_score = results['mean_test_{}'.format(scorer)][best_index]
+    # for scorer in scoring:
+    #     for sample in ['train', 'test']:
+    #         sample_score_mean = results['mean_{}_{}'.format(sample, scorer)]
+    #         sample_score_std = results['std_{}_{}'.format(sample, scorer)]
+    #     best_index = np.nonzero(results['rank_test_{}'.format(scorer)] == 1)[0][0]
+    #     best_score = results['mean_test_{}'.format(scorer)][best_index]
     names = [x for x in params.keys()]
 
     # unpack param_grid vals to list of lists:
@@ -3270,6 +3466,25 @@ def check_if_tide_events_from_stations_are_within_time_window(df_list, rounding=
     else:
         return df
 
+
+def scorer_function(scorer_label, y_true, y_pred):
+    import sklearn.metrics as sm
+    if scorer_label == 'precision':
+        return sm.precision_score(y_true, y_pred)
+    elif scorer_label == 'recall':
+        return sm.recall_score(y_true, y_pred)
+    elif scorer_label == 'f1':
+        return sm.f1_score(y_true, y_pred)
+    elif scorer_label == 'accuracy':
+        return sm.accuracy_score(y_true, y_pred)
+    elif scorer_label == 'tss':
+        return tss_score(y_true, y_pred)
+    elif scorer_label == 'hss':
+        return hss_score(y_true, y_pred)
+    else:
+        raise('{} is not implemented yet'.format(scorer_label))
+
+
 def acc_score(y_true, y_pred):
     from sklearn.metrics import accuracy_score
     return accuracy_score(y_true, y_pred)
@@ -3369,7 +3584,7 @@ class ML_Classifier_Switcher(object):
                                'hidden_layer_sizes': [(50, 50, 50), (50, 100, 50), (100,)],
                                'learning_rate': ['constant', 'adaptive'],
                                'solver': ['adam', 'lbfgs', 'sgd']}
-        return MLPClassifier(random_state=42, max_iter=500)
+        return MLPClassifier(random_state=42, max_iter=2000)
 
     def RF(self):
         from sklearn.ensemble import RandomForestClassifier
