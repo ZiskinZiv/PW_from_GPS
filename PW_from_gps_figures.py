@@ -6217,15 +6217,15 @@ def plot_hydro_events_climatology(hydro_path=hydro_path, fontsize=16, save=True)
     sns.set_style('whitegrid')
     sns.set_style('ticks')
     file = hydro_path / 'hydro_tides_hourly_features_with_positives.nc'
-    X = xr.load_dataset(file)['X']
-    df = X['sample'].groupby('sample.month').count().to_dataframe()
+    X = xr.load_dataset(file)['X_pos']
+    df = X['positive_sample'].groupby('positive_sample.month').count().to_dataframe()
     # add July and August:
     add = pd.DataFrame([0, 0], index=[7, 8])
     add.index.name = 'month'
-    add.columns = ['sample']
+    add.columns = ['positive_sample']
     df = df.append(add).sort_index()
     fig, ax = plt.subplots(figsize=(8, 6))
-    df.plot(kind='bar', ax=ax, rot=0, legend=False)
+    sns.barplot(data=df, x=df.index, y='positive_sample', ax=ax, color='tab:blue')
     ax.grid(True)
     ax.set_ylabel('Number of unique flood events [#]', fontsize=fontsize)
     ax.set_xlabel('month', fontsize=fontsize)
