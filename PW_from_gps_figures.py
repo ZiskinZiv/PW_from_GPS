@@ -3353,6 +3353,139 @@ def plot_vertical_climatology_months(path=sound_path, field='Rho_wv',
     return day, night
 
 
+def plot_global_warming_with_pwv_annual(climate_path=climate_path, work_path=work_yuval):
+    import pandas as pd
+    import xarray as xr
+    df= pd.read_csv(climate_path/'GLB.Ts+dSST.csv', header=1, na_values='***')
+    df=df.iloc[:, :13]
+    df=df.melt(id_vars='Year')
+    df['time']=pd.to_datetime(df['Year'].astype(str)+'-'+df['variable'].astype(str))
+    df = df.set_index('time')
+    df = df.drop(['Year', 'variable'], axis=1)
+    df.columns=['T']
+    df = df.resample('AS').mean()
+    pw=xr.load_dataset(work_path/'GNSS_PW_monthly_anoms_thresh_50.nc')
+    pw=pw.to_array('s').mean('s')
+    df['pwv'] = pw.to_dataframe('PWV')
+    return df
+
+
+def plot_SST_med_with_PWV_first_annual_harmonic(path=work_yuval,
+                                                sst_path=work_yuval/'SST',
+                                                ims_path=ims_path,
+                                                station='tela', fontsize=16,
+                                                save=True):
+    import xarray as xr
+    from aux_gps import month_to_doy_dict
+    import pandas as pd
+    import numpy as np
+    from aux_gps import lat_mean
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as patches
+    import seaborn as sns
+    sns.set_style('whitegrid')
+    sns.set_style('ticks')
+    # load harmonics:
+    ds = xr.load_dataset(path/'GNSS_PW_harmonics_annual.nc')
+    # stns = group_sites_to_xarray(scope='annual').sel(group='coastal').values
+    # harms = []
+    # for stn in stns:
+    #     da = ds['{}_mean'.format(stn)].sel(cpy=1)
+    #     harms.append(da)
+    # harm_da = xr.concat(harms, 'station')
+    # harm_da['station'] = stns
+    harm_da = ds['{}_mean'.format(station)].sel(cpy=1).reset_coords(drop=True)
+    # harm_da = harm_da.reset_coords(drop=True)
+    harm_da['month'] = [month_to_doy_dict.get(
+        x) for x in harm_da['month'].values]
+    harm_da = harm_da.rename({'month': 'dayofyear'})
+    # df = harm_da.to_dataset('station').to_dataframe()
+    df = harm_da.to_dataframe(station)
+    # load surface temperature data:
+    da = xr.open_dataset(ims_path/'GNSS_hourly_TD_ALL_1996_2020.nc')[station]
+    # da += 273.15
+    da_mean = da.groupby('time.dayofyear').mean()
+    df['{}_ST'.format(da_mean.name)] = da_mean.to_dataframe()
+    # add 366 dayofyear for visualization:
+    df366 = pd.DataFrame(df.iloc[0].values+0.01).T
+    df366.index = [366]
+    df366.columns = df.columns
+    df = df.append(df366)
+    ind = np.arange(1, 367)
+    df = df.reindex(ind)
+    df = df.interpolate('cubic')
+    # now load sst for MED
+    ds = xr.open_dataset(
+        sst_path/'med1-1981_2020-NCEI-L4_GHRSST-SSTblend-AVHRR_OI-GLOB-v02.0-fv02.0.nc')
+    sst = ds['analysed_sst'].sel(time=slice('1997', '2019')).load()
+    # sst_mean = sst.sel(lon=slice(25,35)).mean('lon')
+    sst -= 273.15
+    sst_mean = sst.mean('lon')
+    sst_mean = lat_mean(sst_mean)
+    sst_clim = sst_mean.groupby('time.dayofyear').mean()
+    df['Med-SST'] = sst_clim.to_dataframe()
+    df.columns = ['TELA-PWV-S1', 'TELA-Temp.', 'Med-SST']
+    fig, ax = plt.subplots(figsize=(8, 6))
+    # first plot temp:
+    df[['TELA-Temp.', 'Med-SST']].plot(ax=ax, color=['tab:red', 'tab:blue'],
+                                       style=['-', '-'], lw=2, legend=False)
+    ax.set_xticks(np.linspace(0, 365, 13)[:-1])
+    ax.set_xticklabels(np.arange(1, 13))
+    ax.grid(True)
+    ax.tick_params(labelsize=fontsize)
+    ax.set_ylabel(r'Temperature [$^{\circ}$C]', fontsize=fontsize)
+    vl = df[['TELA-Temp.', 'Med-SST']].idxmax().to_frame('x')
+    vl['colors'] = ['tab:red', 'tab:blue']
+    vl['ymin'] = df[['TELA-Temp.', 'Med-SST']].min()
+    vl['ymax'] = df[['TELA-Temp.', 'Med-SST']].max()
+    print(vl)
+    ax.vlines(x=vl['x'], ymin=vl['ymin'], ymax=vl['ymax'],
+              colors=vl['colors'], zorder=0)
+    ax.plot(vl.iloc[0]['x'], vl.iloc[0]['ymax'], color=vl.iloc[0]['colors'],
+            linewidth=0, marker='o', zorder=15)
+    ax.plot(vl.iloc[1]['x'], vl.iloc[1]['ymax'], color=vl.iloc[1]['colors'],
+            linewidth=0, marker='o', zorder=15)
+
+    # ax.annotate(text='', xy=(213,15), xytext=(235,15), arrowprops=dict(arrowstyle='<->'), color='k')
+    # ax.arrow(213, 15, dx=21, dy=0, shape='full', color='k', width=0.25)
+    #p1 = patches.FancyArrowPatch((213, 15), (235, 15), arrowstyle='<->', mutation_scale=20)
+    t = ax.text(
+        224, 15.8, "22 days", ha="center", va="center", rotation=0, size=12,
+        bbox=dict(boxstyle="round4,pad=0.15", fc="white", ec="k", lw=1), zorder=20)
+    ax.arrow(217, 15, 16, 0, head_width=0.14, head_length=2,
+             linewidth=2, color='k', length_includes_head=True)
+    ax.arrow(231, 15, -16, 0, head_width=0.14, head_length=2,
+             linewidth=2, color='k', length_includes_head=True)
+    twin = ax.twinx()
+    df['TELA-PWV-S1'].plot(ax=twin, color='tab:cyan', style='--', lw=2)
+    twin.set_ylabel('PWV annual anomalies [mm]', fontsize=fontsize)
+    ax.set_xlabel('month', fontsize=fontsize)
+    locator = ticker.MaxNLocator(7)
+    ax.yaxis.set_major_locator(locator)
+    twin.yaxis.set_major_locator(ticker.MaxNLocator(7))
+    # add legend:
+    handles, labels = [], []
+    for ax in fig.axes:
+        for h, l in zip(*ax.get_legend_handles_labels()):
+            handles.append(h)
+            labels.append(l)
+
+    ax.legend(handles, labels, prop={'size': fontsize-2})
+    # ax.right_ax.set_yticks(np.linspace(ax.right_ax.get_yticks()[0], ax.right_ax.get_yticks()[-1], 7))
+    twin.vlines(x=df['TELA-PWV-S1'].idxmax(), ymin=df['TELA-PWV-S1'].min(),
+                ymax=df['TELA-PWV-S1'].max(), colors=['tab:cyan'], ls=['--'], zorder=0)
+    twin.tick_params(labelsize=fontsize)
+    # plot points:
+    twin.plot(df['TELA-PWV-S1'].idxmax(), df['TELA-PWV-S1'].max(),
+              color='tab:cyan', linewidth=0, marker='o')
+    fig.tight_layout()
+    if save:
+        filename = 'Med_SST_surface_temp_PWV_harmonic_annual_{}.png'.format(
+            station)
+        plt.savefig(savefig_path / filename, orientation='portrait')
+    return df
+
+
 def plot_pw_lapse_rate_fit(path=work_yuval, model='TSEN', plot=True):
     from PW_stations import produce_geo_gnss_solved_stations
     import xarray as xr
@@ -6451,3 +6584,4 @@ def produce_single_param_grid_table(model='MLP'):
     df = df[['Parameters', 'Options']]
     df = df.reset_index(drop=True)
     return df
+    
