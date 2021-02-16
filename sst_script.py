@@ -16,15 +16,22 @@ savepath = work_yuval/'SST'
 
 
 def save_yearly(movepath, savepath, years):
+    from dask.diagnostics import ProgressBar
     ps = path_glob(movepath, '*.nc')
     for year in years:
         print('saving year {}...'.format(year))
-        ps_year = [x for x in ps if str(year) in x.as_posix()]
-        ds = xr.open_mfdataset(ps_year)
-        years, datasets = zip(*ds.groupby("time.year"))
+        ps_year = [x for x in ps if str(year) in x.as_posix().split('/')[-1][0:4]]
+        # ds = xr.open_mfdataset(ps_year)
+        print(len(ps_year))
+        ds_list = [xr.open_dataset(x) for x in ps_year]
+        ds = xr.concat(ds_list, 'time')
+        ds = ds.sortby('time')
+        # years, datasets = zip(*ds.groupby("time.year"))
         filename = '{}-'.format(year) + '-'.join(ps[0].as_posix().split('/')[-1].split('-')[1:])
         filepath = savepath / filename
-        ds.to_netcdf(filepath)
+        delayed = ds.to_netcdf(filepath, compute=False)
+        with ProgressBar():
+            results = delayed.compute()
     print('Done!')
     return
     # # now builds the filenames:
@@ -38,8 +45,12 @@ def save_yearly(movepath, savepath, years):
 
 
 def save_subset(savepath, subset='med1'):
+    from dask.diagnostics import ProgressBar
     ps = path_glob(savepath, '*.nc')
-    ds = xr.open_mfdataset(ps)
+    print(len(ps))
+    ds_list = [xr.open_dataset(x, chunks={'time': 10})[['analysed_sst', 'analysis_error']] for x in ps]
+    ds = xr.concat(ds_list, 'time')
+    ds = ds.sortby('time')
     if subset == 'med1':
         print('subsetting to med1')
         lat_slice = [30, 50]
@@ -49,13 +60,15 @@ def save_subset(savepath, subset='med1'):
     yrmax = ds['time'].dt.year.max().item()
     filename = '{}-{}_{}-'.format(subset, yrmin, yrmax) + \
         '-'.join(ps[0].as_posix().split('/')[-1].split('-')[1:])
-    ds.to_netcdf(savepath / filename)
+    delayed = ds.to_netcdf(savepath / filename, compute=False)
+    with ProgressBar():
+        results = delayed.compute()
     return ds
 
 # years = move_or_copy_files_from_doy_dir_structure_to_single_path(yearly_path=sst_path, movepath=movepath, opr='copy')
 # print('opening copied files and saving to {}'.format(movepath))
-years = np.arange(1981, 2021)
-save_yearly(movepath, savepath, years)
+# years = np.arange(2000, 2021)
+# save_yearly(movepath, savepath, years)
 save_subset(savepath, subset='med1')
 
 
