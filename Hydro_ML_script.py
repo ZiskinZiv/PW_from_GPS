@@ -59,6 +59,10 @@ def main_hydro_ML(args):
     from hydro_procedures import nested_cross_validation_procedure
     from hydro_procedures import cross_validation_with_holdout
     from aux_gps import get_all_possible_combinations_from_list
+    if args.rseed is None:
+        seed = 42
+    else:
+        seed = args.rseed
     if args.param_grid is None:
         param_grid = 'normal'
     else:
@@ -149,7 +153,7 @@ def main_hydro_ML(args):
                     outer_splits=outer_splits,
                     refit_scorer=scorer,
                     verbose=verbose,
-                    param_grid=param_grid,
+                    param_grid=param_grid, seed=seed,
                     savepath=savepath, n_jobs=n_jobs)
     elif args.cv_type == 'holdout':
         if args.test_ratio is None:
@@ -171,7 +175,7 @@ def main_hydro_ML(args):
                 n_splits=inner_splits,
                 verbose=verbose,
                 param_grid=param_grid,
-                test_ratio=test_ratio,
+                test_ratio=test_ratio, seed=seed,
                 savepath=savepath, n_jobs=n_jobs)
 
         # else:
@@ -268,6 +272,10 @@ if __name__ == '__main__':
     optional.add_argument(
         '--n_jobs',
         help='number of CPU threads to do gridsearch and cross-validate',
+        type=int)
+    optional.add_argument(
+        '--rseed',
+        help='random seed interger to start psuedo-random number generator',
         type=int)
     optional.add_argument(
         '--verbose',
