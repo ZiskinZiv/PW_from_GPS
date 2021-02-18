@@ -3414,7 +3414,6 @@ def plot_global_warming_with_pwv_annual(climate_path=climate_path, work_path=wor
     # df['pwv'] = pw_df.resample('AS').mean()
     df['PWV'] = pw_df
     df = df.loc['2003': '2019']
-    return df
     df = df.resample('AS').mean()
 
     fig, ax = plt.subplots(figsize=(15, 6))
