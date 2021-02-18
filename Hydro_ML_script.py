@@ -59,6 +59,10 @@ def main_hydro_ML(args):
     from hydro_procedures import nested_cross_validation_procedure
     from hydro_procedures import cross_validation_with_holdout
     from aux_gps import get_all_possible_combinations_from_list
+    if args.n_repeats is None:
+        n_repeats = None
+    else:
+        n_repeats = args.n_repeats
     if args.rseed is None:
         seed = 42
     else:
@@ -115,11 +119,11 @@ def main_hydro_ML(args):
     # if model_name != 'SVC':
     #     scorers = ['precision']
     features = get_all_possible_combinations_from_list(
-        f, reduce_single_list=True)
+        f, reduce_single_list=True, combine_by_sep=None)
     if args.inner_splits is not None:
         inner_splits = args.inner_splits
     else:
-        inner_splits = 3
+        inner_splits = 4
     if args.outer_splits is not None:
         outer_splits = args.outer_splits
     else:
@@ -176,7 +180,8 @@ def main_hydro_ML(args):
                 verbose=verbose,
                 param_grid=param_grid,
                 test_ratio=test_ratio, seed=seed,
-                savepath=savepath, n_jobs=n_jobs)
+                savepath=savepath, n_jobs=n_jobs,
+                n_repeats=n_repeats)
 
         # else:
         #     cnt += 1
@@ -294,6 +299,7 @@ if __name__ == '__main__':
             'SVC',
             'MLP',
             'RF'])
+    optional.add_argument('--n_repeats', help='number of repeats in holdout CV', type=int)
     required.add_argument('--cv_type', help='select CV type', choices=['nested', 'holdout'])
 #    optional.add_argument('--feature', help='select features for ML', type=check_features, nargs='+')
     parser._action_groups.append(optional)  # added this line
