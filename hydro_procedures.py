@@ -86,7 +86,7 @@ def select_features_from_X(X, features='pwv'):
     return X
 
 
-def combine_pos_neg_from_nc_file(hydro_path=hydro_path, seed=1):
+def combine_pos_neg_from_nc_file(hydro_path=hydro_path, all_neg=False, seed=1):
     from aux_gps import path_glob
     import xarray as xr
     import numpy as np
@@ -101,14 +101,16 @@ def combine_pos_neg_from_nc_file(hydro_path=hydro_path, seed=1):
     y_pos['sample'] = X_pos['sample']
     # choose at random y_pos size of negative class:
     X_neg = ds['X_neg'].rename({'negative_sample': 'sample'})
-    dts = np.random.choice(
-        X_neg['sample'], y_pos['sample'].size, replace=False)
-    X_neg = X_neg.sel(sample=dts)
+    if not all_neg:
+        dts = np.random.choice(
+            X_neg['sample'], y_pos['sample'].size, replace=False)
+        X_neg = X_neg.sel(sample=dts)
     y_neg = xr.DataArray(np.zeros(X_neg['sample'].shape), dims=['sample'])
     y_neg['sample'] = X_neg['sample']
     # now concat all X's and y's:
     X = xr.concat([X_pos, X_neg], 'sample')
     y = xr.concat([y_pos, y_neg], 'sample')
+    X.name = 'X'
     return X, y
 
 
@@ -692,9 +694,11 @@ def cross_validation_with_holdout(X, y, model_name='SVC', features='pwv',
                                   scorers=['f1', 'recall', 'tss', 'hss',
                                            'precision', 'accuracy'],
                                   seed=42, savepath=None, verbose=0,
-                                  param_grid='normal', n_jobs=-1):
+                                  param_grid='normal', n_jobs=-1,
+                                  n_repeats=None):
     # from sklearn.model_selection import cross_validate
     from sklearn.model_selection import StratifiedKFold
+    from sklearn.model_selection import RepeatedStratifiedKFold
     from sklearn.model_selection import GridSearchCV
     from sklearn.model_selection import train_test_split
     from sklearn.metrics import make_scorer
@@ -734,11 +738,16 @@ def cross_validation_with_holdout(X, y, model_name='SVC', features='pwv',
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_ratio,
                                                         random_state=seed,
                                                         stratify=y)
-    # configure the cross-validation procedure
-    cv = StratifiedKFold(n_splits=n_splits, shuffle=True,
-                         random_state=seed)
-    print('CV StratifiedKfolds of {}.'.format(n_splits))
-    # define the model and search space:
+    if n_repeats is None:
+        # configure the cross-validation procedure
+        cv = StratifiedKFold(n_splits=n_splits, shuffle=True,
+                             random_state=seed)
+        print('CV StratifiedKfolds of {}.'.format(n_splits))
+        # define the model and search space:
+    else:
+        cv = RepeatedStratifiedKFold(n_splits=n_splits, n_repeats=n_repeats,
+                                     random_state=seed)
+        print('CV RepeatedStratifiedKFold of {} with {} repeats.'.format(n_splits, n_repeats))
     ml = ML_Classifier_Switcher()
     print('param grid group is set to {}.'.format(param_grid))
     sk_model = ml.pick_model(model_name, pgrid=param_grid)
@@ -3561,7 +3570,7 @@ class ML_Classifier_Switcher(object):
                                'gamma': np.logspace(-5, 0, 25),
                                'degree': [1, 2, 3, 4, 5],
                                'coef0': [0, 1, 2, 3, 4]}
-        return SVC(random_state=42, class_weight='balanced')
+        return SVC(random_state=42, class_weight=None)
 
     def MLP(self):
         import numpy as np
@@ -3606,4 +3615,4 @@ class ML_Classifier_Switcher(object):
                                'n_estimators': [100, 200, 300, 500, 700, 1000, 1300, 1500]
                                }
         return RandomForestClassifier(random_state=42, n_jobs=-1,
-                                      class_weight='balanced')
+                                      class_weight=None)
