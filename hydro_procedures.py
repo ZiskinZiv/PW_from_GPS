@@ -20,7 +20,7 @@ hydro_pw_dict = {'nizn': 25191, 'klhv': 21105, 'yrcm': 55165,
 
 hydro_st_name_dict = {25191: 'Lavan - new nizana road',
                       21105: 'Shikma - Tel milcha',
-                      55165: 'Mamasheet',
+                      55165: 'Mamsheet',
                       56140: 'Ramon',
                       48125: 'Draga',
                       48192: 'Chiemar - down the cliff',
