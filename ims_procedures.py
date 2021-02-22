@@ -30,7 +30,7 @@ gnss_ims_dict = {
     'mrav': 'MAALE-GILBOA', 'yosh': 'ARIEL', 'jslm': 'JERUSALEM-GIVAT-RAM',
     'drag': 'METZOKE-DRAGOT', 'dsea': 'SEDOM', 'ramo': 'MIZPE-RAMON-20120927',
     'nrif': 'NEOT-SMADAR', 'elat': 'ELAT', 'klhv': 'SHANI',
-    'yrcm': 'ZOMET-HANEGEV'}
+    'yrcm': 'ZOMET-HANEGEV', 'spir': 'PARAN-20060124', 'nizn':'EZUZ'}
 
 ims_units_dict = {
     'BP': 'hPa',
