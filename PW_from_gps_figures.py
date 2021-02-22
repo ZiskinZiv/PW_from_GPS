@@ -842,7 +842,7 @@ def plot_gustiness_facetgrid(path=work_yuval, ims_path=ims_path,
         'mrav': 'MAALE-GILBOA', 'yosh': 'ARIEL', 'jslm': 'JERUSALEM-GIVAT-RAM',
         'drag': 'METZOKE-DRAGOT', 'dsea': 'SEDOM', 'ramo': 'MIZPE-RAMON-20120927',
         'nrif': 'NEOT-SMADAR', 'elat': 'ELAT', 'klhv': 'SHANI',
-        'yrcm': 'ZOMET-HANEGEV'}
+        'yrcm': 'ZOMET-HANEGEV', 'spir': 'PARAN-20060124'}
     da = xr.DataArray([x for x in gnss_ims_dict.values()], dims=['GNSS'])
     da['GNSS'] = [x for x in gnss_ims_dict.keys()]
     to_remove = ['kabr', 'nzrt', 'katz', 'elro', 'klhv', 'yrcm', 'slom']
@@ -1278,7 +1278,8 @@ def plot_annual_pw(path=work_yuval, fontsize=20, labelsize=18, compare='uerra',
             fontsize=fontsize,
             labelsize=labelsize, hue=None,
             save=False, bins=None)
-        tmm = xr.load_dataset(path / 'GNSS_TD_monthly_1996_2020.nc')
+        # tmm = xr.load_dataset(path / 'GNSS_TD_monthly_1996_2020.nc')
+        tmm = xr.load_dataset(path / 'IMS_T/GNSS_TD_daily.nc')
         tmm = tmm.groupby('time.month').mean()
         dftm = tmm.to_dataframe()
         # dftm.columns = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
@@ -1294,7 +1295,8 @@ def plot_annual_pw(path=work_yuval, fontsize=20, labelsize=18, compare='uerra',
                         label='Temperature')
             # dftm[sites[i]].plot(ax=twinax, color='r', markersize=10,
             #                     marker='s', lw=1, markerfacecolor="None")
-            twinax.set_ylim(7, 30)
+            twinax.set_ylim(5, 37)
+            twinax.set_yticks(np.arange(5, 40, 10))
             twinax.tick_params(axis='y', which='major', labelcolor='tab:red',
                                labelsize=labelsize)
             if sites_flat[i] in sites.sel(group='eastern'):
@@ -3495,6 +3497,34 @@ def plot_SST_med(sst_path=work_yuval/'SST', fontsize=16, loop=True):
     return df
 
 
+def plot_SST_med_with_PWV_S1_panel(path=work_yuval,
+                                   sst_path=work_yuval/'SST',
+                                   ims_path=ims_path,
+                                   stations=['tela', 'jslm'], fontsize=16, save=True):
+    from ims_procedures import gnss_ims_dict
+    import matplotlib.pyplot as plt
+    ims_stations = [gnss_ims_dict.get(x) for x in stations]
+    fig, axes = plt.subplots(1, len(stations), figsize=(15, 6))
+    for i, (pwv, ims) in enumerate(zip(stations, ims_stations)):
+        plot_SST_med_with_PWV_first_annual_harmonic(path=work_yuval,
+                                                    sst_path=sst_path,
+                                                    ims_path=ims_path,
+                                                    station=pwv, ims_station=ims,
+                                                    fontsize=16, ax=axes[i],
+                                                    save=False)
+        twin = get_twin(axes[i], 'x')
+        twin.set_ylim(-4.5, 4.5)
+        axes[i].set_ylim(8, 30)
+
+
+    fig.tight_layout()
+    if save:
+        filename = 'Med_SST_surface_temp_PWV_harmonic_annual_{}_{}.png'.format(
+            *stations)
+        plt.savefig(savefig_path / filename, orientation='portrait')
+    return
+
+
 def plot_SST_med_with_PWV_first_annual_harmonic(path=work_yuval,
                                                 sst_path=work_yuval/'SST',
                                                 ims_path=ims_path,
@@ -3553,13 +3583,13 @@ def plot_SST_med_with_PWV_first_annual_harmonic(path=work_yuval,
     sst_clim = sst_mean.groupby('time.dayofyear').mean()
     df['Med-SST'] = sst_clim.to_dataframe()
     pwv_name = '{} PWV-S1'.format(station.upper())
-    ims_name = '{} IMS-T'.format(ims_station)
+    ims_name = '{} IMS-ST'.format(station.upper())
     df.columns = [pwv_name, ims_name, 'Med-SST']
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 6))
     # first plot temp:
     df[[ims_name, 'Med-SST']].plot(ax=ax, color=['tab:red', 'tab:blue'],
-                                       style=['-', '-'], lw=2, legend=False)
+                                   style=['-', '-'], lw=2, legend=False)
     ax.set_xticks(np.linspace(0, 365, 13)[:-1])
     ax.set_xticklabels(np.arange(1, 13))
     ax.grid(True)
@@ -3591,14 +3621,14 @@ def plot_SST_med_with_PWV_first_annual_harmonic(path=work_yuval,
     dy = vl.iloc[1]['x'] - vl.iloc[0]['x'] - 8
     days = dy + 8
     ax.arrow(start, 15, dy, 0, head_width=0.14, head_length=2,
-              linewidth=2, color='k', length_includes_head=True)
+              linewidth=1.5, color='k', length_includes_head=True, zorder=20)
     ax.arrow(end, 15, -dy, 0, head_width=0.14, head_length=2,
-             linewidth=2, color='k', length_includes_head=True)
+             linewidth=1.5, color='k', length_includes_head=True, zorder=20)
     t = ax.text(
         mid, 15.8, "{} days".format(days), ha="center", va="center", rotation=0, size=12,
-        bbox=dict(boxstyle="round4,pad=0.15", fc="white", ec="k", lw=1), zorder=20)
+        bbox=dict(boxstyle="round4,pad=0.15", fc="white", ec="k", lw=1), zorder=21)
     twin = ax.twinx()
-    df[pwv_name].plot(ax=twin, color='tab:cyan', style='--', lw=2)
+    df[pwv_name].plot(ax=twin, color='tab:cyan', style='--', lw=2, zorder=0)
     twin.set_ylabel('PWV annual anomalies [mm]', fontsize=fontsize)
     ax.set_xlabel('month', fontsize=fontsize)
     locator = ticker.MaxNLocator(7)
