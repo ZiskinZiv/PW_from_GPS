@@ -1886,7 +1886,8 @@ def prepare_X_y_for_holdout_test(features='pwv+doy', model_name='SVC', path=hydr
 
 
 def holdout_test(path=hydro_path, gr_path=hydro_ml_path/'holdout',
-                 model_name='SVC', features='pwv', return_RF_FI=False):
+                 model_name='SVC', features='pwv', return_RF_FI=False,
+                 verbose=False):
     """do a holdout test with best model from gridsearchcv
     with all scorers"""
     from sklearn.model_selection import train_test_split
@@ -1905,6 +1906,9 @@ def holdout_test(path=hydro_path, gr_path=hydro_ml_path/'holdout',
                                                         test_size=ts,
                                                         random_state=int(seed),
                                                         stratify=y)
+    if verbose:
+        print('y train pos/neg:{}, {}'.format((y_train==1).sum().item(),(y_train==0).sum().item()))
+        print('y test pos/neg:{}, {}'.format((y_test==1).sum().item(),(y_test==0).sum().item()))
     # pick model and set the params to best from gridsearchcv:
     ml = ML_Classifier_Switcher()
     print('Picking {} model with best params'.format(model_name))
@@ -1915,6 +1919,8 @@ def holdout_test(path=hydro_path, gr_path=hydro_ml_path/'holdout',
         sk_model = ml.pick_model(model_name)
         # get best params (drop two last cols since they are not params):
         params = best_df.T[scorer][:-2].to_dict()
+        if verbose:
+            print('{} scorer, params:{}'.format(scorer, params))
         sk_model.set_params(**params)
         sk_model.fit(X_train, y_train)
         if hasattr(sk_model, 'feature_importances_'):
