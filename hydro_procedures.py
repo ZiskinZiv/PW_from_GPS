@@ -1846,19 +1846,30 @@ def run_holdout_test_on_all_models_and_features(path=hydro_path, gr_path=hydro_m
         ['pwv', 'pressure', 'doy'], reduce_single_list=True, combine_by_sep='+')
     models = ['MLP', 'SVC', 'RF']
     model_list = []
+    model_list2 = []
     for model in models:
         feat_list = []
+        feat_list2 = []
         for feat in feats:
-            best = holdout_test(path=path, gr_path=gr_path,
-                                model_name=model, features=feat)
+            best, roc = holdout_test(path=path, gr_path=gr_path,
+                                     model_name=model, features=feat)
             best.index.name = 'scorer'
             ds = best[['mean_score', 'std_score', 'holdout_test_scores']].to_xarray()
+            roc.index.name = 'FPR'
+            roc_da = roc.to_xarray().to_array('scorer')
             feat_list.append(ds)
+            feat_list2.append(roc_da)
         dsf = xr.concat(feat_list, 'features')
+        dsf2 = xr.concat(feat_list2, 'features')
         dsf['features'] = feats
+        dsf2['features'] = feats
         model_list.append(dsf)
+        model_list2.append(dsf2)
     dss = xr.concat(model_list, 'model')
+    rocs = xr.concat(model_list2, 'model')
     dss['model'] = models
+    rocs['model'] = models
+    dss['roc'] = rocs
     return dss
 
 
@@ -1891,7 +1902,11 @@ def holdout_test(path=hydro_path, gr_path=hydro_ml_path/'holdout',
     """do a holdout test with best model from gridsearchcv
     with all scorers"""
     from sklearn.model_selection import train_test_split
+    from sklearn.metrics import roc_curve
+    from sklearn.metrics import roc_auc_score
     import xarray as xr
+    import pandas as pd
+    import numpy as np
     # process gridsearchcv results:
     best_df, test_ratio, seed = load_one_gridsearchcv_object(path=gr_path,
                                                              cv_type='holdout',
@@ -1915,6 +1930,9 @@ def holdout_test(path=hydro_path, gr_path=hydro_ml_path/'holdout',
     print('Features are: {}'.format(features))
     test_scores = []
     fi_list = []
+    mean_fpr = np.linspace(0, 1, 100)
+    tprs = []
+    roc_aucs = []
     for scorer in best_df.index:
         sk_model = ml.pick_model(model_name)
         # get best params (drop two last cols since they are not params):
@@ -1928,15 +1946,25 @@ def holdout_test(path=hydro_path, gr_path=hydro_ml_path/'holdout',
             FI['feature'] = X_train['feature']
             fi_list.append(FI)
         y_pred = sk_model.predict(X_test)
+        fpr, tpr, _ = roc_curve(y_test, y_pred)
+        interp_tpr = np.interp(mean_fpr, fpr, tpr)
+        interp_tpr[0] = 0.0
+        roc_auc = roc_auc_score(y_test, y_pred)
+        roc_aucs.append(roc_auc)
+        tprs.append(interp_tpr)
         score = scorer_function(scorer, y_test, y_pred)
         test_scores.append(score)
+    roc_df = pd.DataFrame(tprs).T
+    roc_df.columns = [x for x in best_df.index]
+    roc_df.index = mean_fpr
     best_df['holdout_test_scores'] = test_scores
+    best_df['roc_auc_score'] = roc_aucs
     if fi_list and return_RF_FI:
         da = xr.concat(fi_list, 'scorer')
         da['scorer'] = best_df.index.values
         da.name = 'RF_feature_importances'
         return da
-    return best_df
+    return best_df, roc_df
 
 
 def load_one_gridsearchcv_object(path=hydro_ml_path, cv_type='holdout', features='pwv',
