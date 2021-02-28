@@ -54,15 +54,18 @@ def check_path(path):
 def main_hydro_ML(args):
     # from hydro_procedures import produce_X_y
     # from hydro_procedures import produce_X_y_from_list
+    from sklearn.model_selection import StratifiedKFold
     from hydro_procedures import combine_pos_neg_from_nc_file
+    from hydro_procedures import save_cv_params_to_file
     # from hydro_procedures import select_features_from_X
-    from hydro_procedures import nested_cross_validation_procedure
-    from hydro_procedures import cross_validation_with_holdout
+    # from hydro_procedures import nested_cross_validation_procedure
+    # from hydro_procedures import cross_validation_with_holdout
+    from hydro_procedures import single_cross_validation
     from aux_gps import get_all_possible_combinations_from_list
-    if args.n_repeats is None:
-        n_repeats = None
-    else:
-        n_repeats = args.n_repeats
+    # if args.n_repeats is None:
+    #     n_repeats = None
+    # else:
+    #     n_repeats = args.n_repeats
     if args.rseed is None:
         seed = 42
     else:
@@ -138,50 +141,55 @@ def main_hydro_ML(args):
         savepath = hydro_path
 #    if args.model is not None:
     cnt = 0
-    if args.cv_type == 'nested':
-        total_cnt = len(scorers) * len(features)
-        for scorer in scorers:
-            # if model_name != 'RF':
-            for feature in features:
-                cnt += 1
-                logger.info('Running nested CV # {} out of {}'.format(cnt, total_cnt))
-                logger.info(
-                    'Running {} model with {} test scorer and {},{} (inner, outer) nsplits, features={}'.format(
-                        model_name, scorer, inner_splits, outer_splits, feature))
-                model = nested_cross_validation_procedure(
-                    X,
-                    y, scorers=scorers,
-                    model_name=model_name,
-                    features=feature,
-                    inner_splits=inner_splits,
-                    outer_splits=outer_splits,
-                    refit_scorer=scorer,
-                    verbose=verbose,
-                    param_grid=param_grid, seed=seed,
-                    savepath=savepath, n_jobs=n_jobs)
-    elif args.cv_type == 'holdout':
-        if args.test_ratio is None:
-            test_ratio = 0.25
-        else:
-            test_ratio = args.test_ratio
-        total_cnt = len(features)
-        for feature in features:
-            cnt += 1
-            logger.info('Running holdout CV # {} out of {}'.format(cnt, total_cnt))
-            logger.info(
-                'Running {} model with {} nsplits and {} holdout ratio, features={}'.format(
-                    model_name, inner_splits, test_ratio, feature))
-            model = cross_validation_with_holdout(
-                X,
-                y, scorers=scorers,
+    # if args.cv_type == 'nested':
+    outer_cv = StratifiedKFold(shuffle=True, n_splits=outer_splits,
+                               random_state=seed)
+    save_cv_params_to_file(outer_cv, savepath, 'CV_outer')
+    total_cnt = len(features)
+    for feature in features:
+        cnt += 1
+        logger.info('Running nested CV # {} out of {}'.format(cnt, total_cnt))
+        logger.info(
+            'Running {} model with {},{} (inner, outer) nsplits, features={}'.format(
+                model_name, inner_splits, outer_splits, feature))
+        for i, (train_index, test_index) in enumerate(outer_cv.split(X, y)):
+            X_val = X[train_index]
+            y_val = y[train_index]
+            model = single_cross_validation(
+                X_val,
+                y_val,
                 model_name=model_name,
                 features=feature,
                 n_splits=inner_splits,
+                outer_split='{}-{}'.format(i+1, outer_splits),
                 verbose=verbose,
-                param_grid=param_grid,
-                test_ratio=test_ratio, seed=seed,
-                savepath=savepath, n_jobs=n_jobs,
-                n_repeats=n_repeats)
+                param_grid=param_grid, seed=seed,
+                savepath=savepath, n_jobs=n_jobs)
+    print('')
+    logger.info('Done!')
+    # elif args.cv_type == 'holdout':
+    #     if args.test_ratio is None:
+    #         test_ratio = 0.25
+    #     else:
+    #         test_ratio = args.test_ratio
+    #     total_cnt = len(features)
+    #     for feature in features:
+    #         cnt += 1
+    #         logger.info('Running holdout CV # {} out of {}'.format(cnt, total_cnt))
+    #         logger.info(
+    #             'Running {} model with {} nsplits and {} holdout ratio, features={}'.format(
+    #                 model_name, inner_splits, test_ratio, feature))
+    #         model = cross_validation_with_holdout(
+    #             X,
+    #             y, scorers=scorers,
+    #             model_name=model_name,
+    #             features=feature,
+    #             n_splits=inner_splits,
+    #             verbose=verbose,
+    #             param_grid=param_grid,
+    #             test_ratio=test_ratio, seed=seed,
+    #             savepath=savepath, n_jobs=n_jobs,
+    #             n_repeats=n_repeats)
 
         # else:
         #     cnt += 1
@@ -258,10 +266,10 @@ if __name__ == '__main__':
         '--inner_splits',
         help='how many splits for the inner nested loop, in case of cv_type=holdout, inner_splits is the n_splits for hp tuning',
         type=int)
-    optional.add_argument(
-        '--test_ratio',
-        help='how much test data for holdout CV (0 to 1)',
-        type=float)
+    # optional.add_argument(
+    #     '--test_ratio',
+    #     help='how much test data for holdout CV (0 to 1)',
+    #     type=float)
     optional.add_argument(
         '--param_grid',
         help='param grids for gridsearchcv object',
@@ -299,8 +307,8 @@ if __name__ == '__main__':
             'SVC',
             'MLP',
             'RF'])
-    optional.add_argument('--n_repeats', help='number of repeats in holdout CV', type=int)
-    required.add_argument('--cv_type', help='select CV type', choices=['nested', 'holdout'])
+    # optional.add_argument('--n_repeats', help='number of repeats in holdout CV', type=int)
+    # required.add_argument('--cv_type', help='select CV type', choices=['nested', 'holdout'])
 #    optional.add_argument('--feature', help='select features for ML', type=check_features, nargs='+')
     parser._action_groups.append(optional)  # added this line
     args = parser.parse_args()
@@ -313,14 +321,20 @@ if __name__ == '__main__':
     if args.savepath is None:
         print('savepath is a required argument, run with -h...')
         sys.exit()
-    if args.cv_type is None:
-        print('cv_type is a required argument, run with -h...')
-        sys.exit()
+    # if args.cv_type is None:
+    #     print('cv_type is a required argument, run with -h...')
+    #     sys.exit()
     # if args.hydro_id is None:
     #     print('hydro_id is a required argument, run with -h...')
     #     sys.exit()
     if args.model is None:
         print('model is a required argument, run with -h...')
         sys.exit()
-    logger.info('Running ML, {} CV with {} model'.format(args.cv_type, args.model))
+    # if args.outer_splits is not None and args.test_ratio is None:
+    #     print('pls pick test_ratio for single CV holdout train or nested CV train with outer_splits > 1')
+    #     sys.exit()
+    # if args.test_ratio is not None and args.outer_splits > 1:
+    #     print('pls dont set test_ratio for nested CV train or set outer_splits = 1 for holdout CV train')
+    #     sys.exit()
+    logger.info('Running ML, CV with {} model'.format(args.model))
     main_hydro_ML(args)
