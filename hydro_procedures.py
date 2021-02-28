@@ -114,6 +114,22 @@ def combine_pos_neg_from_nc_file(hydro_path=hydro_path, all_neg=False, seed=1):
     return X, y
 
 
+def drop_hours_in_pwv_pressure_features(X, last_hours=7, verbose=True):
+    import numpy as np
+    Xcopy = X.copy()
+    pwvs_to_drop = ['pwv_{}'.format(x) for x in np.arange(24-last_hours + 1, 25)]
+    if set(pwvs_to_drop).issubset(set(X.feature.values)):
+        if verbose:
+            print('dropping {} from X.'.format(', '.join(pwvs_to_drop)))
+        Xcopy = Xcopy.drop_sel(feature=pwvs_to_drop)
+    pressures_to_drop = ['pressure_{}'.format(x) for x in np.arange(24-last_hours + 1, 25)]
+    if set(pressures_to_drop).issubset(set(X.feature.values)):
+        if verbose:
+            print('dropping {} from X.'.format(', '.join(pressures_to_drop)))
+        Xcopy = Xcopy.drop_sel(feature=pressures_to_drop)
+    return Xcopy
+
+
 def check_if_negatives_are_within_positives(neg_da, hydro_path=hydro_path):
     import xarray as xr
     import pandas as pd
@@ -1039,6 +1055,92 @@ def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
 #     else:
 #         return model
 
+
+def plot_hyper_parameters_heatmaps_from_nested_CV_model(path=hydro_path, model_name='MLP',
+                                                        features='pwv+pressure+doy', save=True):
+    import xarray as xr
+    import matplotlib.pyplot as plt
+    ds = xr.load_dataset(
+        path / 'nested_CV_test_results_{}_all_features_with_hyper.nc'.format(model_name))
+    ds = ds.sel(features=features).reset_coords(drop=True)
+    non_hp_vars = ['mean_score', 'std_score',
+                   'test_score', 'roc_auc_score', 'TPR']
+    if model_name == 'RF':
+        non_hp_vars.append('feature_importances')
+    ds = ds[[x for x in ds if x not in non_hp_vars]]
+    seq = 'Blues'
+    cat = 'Dark2'
+    cmap_hp_dict = {
+        'alpha': seq, 'activation': cat,
+        'hidden_layer_sizes': cat, 'learning_rate': cat,
+        'solver': cat, 'kernel': cat, 'C': seq,
+        'gamma': seq, 'degree': seq, 'coef0': seq,
+        'max_depth': seq, 'max_features': cat,
+        'min_samples_leaf': seq, 'min_samples_split': seq,
+        'n_estimators': seq
+    }
+    # fix stuff for SVC:
+    if model_name == 'SVC':
+        ds['degree'] = ds['degree'].where(ds['kernel']=='poly').fillna('NA')
+        ds['coef0'] = ds['coef0'].where(ds['kernel']=='poly').fillna('NA')
+    # da = ds.to_arrray('hyper_parameters')
+    # fg = xr.plot.FacetGrid(
+    #     da,
+    #     col='hyper_parameters',
+    #     sharex=False,
+    #     sharey=False, figsize=(16, 10))
+    fig, axes = plt.subplots(5, 1, sharex=True, figsize=(4, 10))
+    for i, da in enumerate(ds):
+        df = ds[da].reset_coords(drop=True).to_dataset('scorer').to_dataframe()
+        df.index.name = 'Outer Split'
+        cmap = cmap_hp_dict.get(da, 'Set1')
+        plot_heatmap_for_hyper_parameters_df(df, ax=axes[i], title=da, cmap=cmap)
+    fig.tight_layout()
+    if save:
+        filename = 'Hyper-parameters_nested_{}.png'.format(
+            model_name)
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
+    return
+
+
+def plot_heatmap_for_hyper_parameters_df(df, ax=None, cmap='colorblind',
+                                         title=None, fontsize=12):
+    import pandas as pd
+    import seaborn as sns
+    sns.set_style('ticks')
+    sns.set_style('whitegrid')
+    sns.set(font_scale=1.2)
+    value_to_int = {j: i for i, j in enumerate(
+        pd.unique(df.values.ravel()))} # like you did
+    try:
+        sorted_v_to_i = dict(sorted(value_to_int.items()))
+    except TypeError:
+        sorted_v_to_i = value_to_int
+    n = len(value_to_int)
+    # discrete colormap (n samples from a given cmap)
+    cmap = sns.color_palette(cmap, n)
+    if ax is None:
+        ax = sns.heatmap(df.replace(sorted_v_to_i), cmap=cmap,
+                         linewidth=1, linecolor='k', square=False,
+                         cbar_kws={"shrink": .9})
+    else:
+        ax = sns.heatmap(df.replace(sorted_v_to_i), cmap=cmap,
+                         ax=ax, linewidth=1, linecolor='k',
+                         square=False, cbar_kws={"shrink": .9})
+    if title is not None:
+        ax.set_title(title, fontsize=fontsize)
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=30)
+    ax.set_yticklabels(ax.get_yticklabels(), rotation=0)
+    ax.tick_params(labelsize=fontsize)
+    ax.set_ylabel(ax.get_ylabel(), fontsize=fontsize)
+    ax.set_xlabel(ax.get_xlabel(), fontsize=fontsize)
+    colorbar = ax.collections[0].colorbar
+    r = colorbar.vmax - colorbar.vmin
+    colorbar.set_ticks([colorbar.vmin + r / n * (0.5 + i) for i in range(n)])
+    colorbar.set_ticklabels(list(value_to_int.keys()))
+    return ax
+
+
 def plot_ROC_curves_for_all_models_and_scorers(dss, save=False,
                                                fontsize=24, fig_split=1,
                                                feat=['pwv', 'pwv+pressure', 'pwv+pressure+doy']):
@@ -1055,22 +1157,22 @@ def plot_ROC_curves_for_all_models_and_scorers(dss, save=False,
         dss = dss.sel(scorer=['accuracy', 'tss', 'hss'])
     fg = xr.plot.FacetGrid(
         dss,
-        col='scorer',
-        row='model',
+        col='model',
+        row='scorer',
         sharex=True,
         sharey=True, figsize=(20, 20))
     for i in range(fg.axes.shape[0]):  # i is rows
         for j in range(fg.axes.shape[1]):  # j is cols
             ax = fg.axes[i, j]
-            modelname = dss['model'].isel(model=i).item()
-            scorer = dss['scorer'].isel(scorer=j).item()
+            modelname = dss['model'].isel(model=j).item()
+            scorer = dss['scorer'].isel(scorer=i).item()
             chance_plot = [False for x in feat]
             chance_plot[-1] = True
             for k, f in enumerate(feat):
                 #     name = '{}-{}-{}'.format(modelname, scoring, feat)
                 # model = dss.isel({'model': j, 'scoring': i}).sel(
                 #     {'features': feat})
-                model = dss.isel({'model': i, 'scorer': j}
+                model = dss.isel({'model': j, 'scorer': i}
                                  ).sel({'features': f})
                 # return model
                 title = 'ROC of {} model ({})'.format(modelname.replace('SVC', 'SVM'), scorer)
@@ -1094,8 +1196,12 @@ def plot_ROC_curves_for_all_models_and_scorers(dss, save=False,
             ax.grid('on')
             if j >= 1:
                 ax.set_ylabel('')
-            if i <= 1:
+            if fig_split == 1:
                 ax.set_xlabel('')
+                ax.tick_params(labelbottom=False)
+            else:
+                if i <= 1:
+                    ax.set_xlabel('')
     # title = '{} station: {} total events'.format(
     #         station.upper(), events)
     # if max_flow > 0:
