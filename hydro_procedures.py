@@ -1081,8 +1081,8 @@ def plot_hyper_parameters_heatmaps_from_nested_CV_model(path=hydro_path, model_n
     }
     # fix stuff for SVC:
     if model_name == 'SVC':
-        ds['degree'] = ds['degree'].where(ds['kernel']=='poly').fillna('NA')
-        ds['coef0'] = ds['coef0'].where(ds['kernel']=='poly').fillna('NA')
+        ds['degree'] = ds['degree'].where(ds['kernel']=='poly')
+        ds['coef0'] = ds['coef0'].where(ds['kernel']=='poly')
     # da = ds.to_arrray('hyper_parameters')
     # fg = xr.plot.FacetGrid(
     #     da,
@@ -1107,11 +1107,19 @@ def plot_heatmap_for_hyper_parameters_df(df, ax=None, cmap='colorblind',
                                          title=None, fontsize=12):
     import pandas as pd
     import seaborn as sns
+    import numpy as np
     sns.set_style('ticks')
     sns.set_style('whitegrid')
     sns.set(font_scale=1.2)
     value_to_int = {j: i for i, j in enumerate(
-        pd.unique(df.values.ravel()))} # like you did
+        sorted(pd.unique(df.values.ravel())))} # like you did
+    # for key in value_to_int.copy().keys():
+    #     try:
+    #         if np.isnan(key):
+    #             value_to_int['NA'] = value_to_int.pop(key)
+    #             df = df.fillna('NA')
+    #     except TypeError:
+    #         pass
     try:
         sorted_v_to_i = dict(sorted(value_to_int.items()))
     except TypeError:
