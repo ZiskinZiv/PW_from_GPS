@@ -57,6 +57,7 @@ def main_hydro_ML(args):
     from sklearn.model_selection import StratifiedKFold
     from hydro_procedures import combine_pos_neg_from_nc_file
     from hydro_procedures import save_cv_params_to_file
+    from hydro_procedures import drop_hours_in_pwv_pressure_features
     # from hydro_procedures import select_features_from_X
     # from hydro_procedures import nested_cross_validation_procedure
     # from hydro_procedures import cross_validation_with_holdout
@@ -66,6 +67,7 @@ def main_hydro_ML(args):
     #     n_repeats = None
     # else:
     #     n_repeats = args.n_repeats
+
     if args.rseed is None:
         seed = 42
     else:
@@ -106,6 +108,8 @@ def main_hydro_ML(args):
     #                    neg_pos_ratio=neg_pos_ratio)
     X, y = combine_pos_neg_from_nc_file(hydro_path)
     # scorers = ['roc_auc', 'f1', 'recall', 'precision']
+    if args.drop_hours is not None:
+        X = drop_hours_in_pwv_pressure_features(X, args.drop_hours, verbose=True)
     if args.scorers is None:
         scorers = ['f1', 'recall', 'tss', 'hss',
                    'precision', 'accuracy']
@@ -294,6 +298,7 @@ if __name__ == '__main__':
         '--verbose',
         help='verbosity 0, 1, 2',
         type=int)
+    optional.add_argument('--drop_hours', help='drop the last x hours before flood from pwv and pressure features', type=int)
     optional.add_argument(
         '--scorers',
         nargs='+',
