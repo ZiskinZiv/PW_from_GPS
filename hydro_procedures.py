@@ -52,6 +52,7 @@ hydro_st_name_dict = {25191: 'Lavan - new nizana road',
 # use holdout set
 # implement repeatedstratifiedkfold and run it...
 # check for stability of the gridsearch CV...also run with 4-folds ?
+# finalize the permutation_importances and permutation_test_scores
 
 def prepare_tide_events_GNSS_dataset(hydro_path=hydro_path):
     import xarray as xr
@@ -1907,14 +1908,15 @@ def plot_feature_importances_from_dss(
         axes[i].set_ylabel('Feature importance [%]')
         axes[i].grid(axis='y', zorder=1)
     if fix_xticklabels:
+        n = sum(['pwv' in x for x in dss.feature.values])
         axes[0].xaxis.set_ticklabels('')
-        hrs = np.arange(-24, 0)
+        hrs = np.arange(-24, -24+n)
         axes[1].set_xticklabels(hrs, rotation=30, ha="center", fontsize=12)
         axes[2].set_xticklabels(hrs, rotation=30, ha="center", fontsize=12)
         axes[1].set_xlabel('Hours prior to flood')
         axes[2].set_xlabel('Hours prior to flood')
-    if save:
         fig.tight_layout()
+    if save:
         filename = 'RF_feature_importances_all_scorers_{}.png'.format(features)
         plt.savefig(savefig_path / filename, bbox_inches='tight')
     return
@@ -2320,7 +2322,8 @@ def load_nested_CV_test_results_from_all_models(path=hydro_path, load_hyper=Fals
 
 
 def run_CV_nested_tests_on_all_features(path=hydro_path, gr_path=hydro_ml_path/'nested4',
-                                        verbose=False, model_name='SVC', savepath=None):
+                                        verbose=False, model_name='SVC',
+                                        savepath=None, drop_hours=None):
     """returns the nested CV test results for all scorers, features and models,
     if model is chosen, i.e., model='MLP', returns just this model results
     and its hyper-parameters per each outer split"""
@@ -2362,7 +2365,7 @@ def run_CV_nested_tests_on_all_features(path=hydro_path, gr_path=hydro_ml_path/'
         ds = CV_test_after_GridSearchCV(path=path, gr_path=gr_path,
                                         model_name=model_name,
                                         features=feat,
-                                        verbose=verbose)
+                                        verbose=verbose, drop_hours=drop_hours)
         feat_list.append(ds)
     dsf = xr.concat(feat_list, 'features')
     dsf['features'] = feats
@@ -2408,7 +2411,8 @@ def run_holdout_test_on_all_models_and_features(path=hydro_path, gr_path=hydro_m
     return dss
 
 
-def prepare_X_y_for_holdout_test(features='pwv+doy', model_name='SVC', path=hydro_path):
+def prepare_X_y_for_holdout_test(features='pwv+doy', model_name='SVC',
+                                 path=hydro_path, drop_hours=None):
     # combine X,y and split them according to test ratio and seed:
     X, y = combine_pos_neg_from_nc_file(path)
     # re arange X features according to model:
@@ -2428,12 +2432,14 @@ def prepare_X_y_for_holdout_test(features='pwv+doy', model_name='SVC', path=hydr
             feats = ['doy_sin']
             feats.append('doy_cos')
     X = select_features_from_X(X, feats)
+    if drop_hours is not None:
+        X = drop_hours_in_pwv_pressure_features(X, drop_hours, verbose=True)
     return X, y
 
 
 def CV_test_after_GridSearchCV(path=hydro_path, gr_path=hydro_ml_path/'nested4',
                                model_name='SVC', features='pwv',
-                               verbose=False):
+                               verbose=False, drop_hours=None, pi_repeats=30):
     """do cross_validate with all scorers on all gridsearchcv folds,
     reads the nested outer splits CV file in gr_path"""
     import xarray as xr
@@ -2446,10 +2452,13 @@ def CV_test_after_GridSearchCV(path=hydro_path, gr_path=hydro_ml_path/'nested4',
                                                  features=features,
                                                  model_name=model_name,
                                                  verbose=verbose)
-    X, y = prepare_X_y_for_holdout_test(features, model_name, path)
+    X, y = prepare_X_y_for_holdout_test(features, model_name, path,
+                                        drop_hours=drop_hours)
     outer_bests = []
     outer_rocs = []
     fis = []
+    pi_means = []
+    pi_stds = []
     for i, (train_index, test_index) in enumerate(cv.split(X, y)):
         X_train = X[train_index]
         y_train = y[train_index]
@@ -2459,13 +2468,15 @@ def CV_test_after_GridSearchCV(path=hydro_path, gr_path=hydro_ml_path/'nested4',
         best_params_df = param_df_dict.get(outer_split)
         if model_name == 'RF':
             bdf, roc, fi = run_test_on_CV_split(X_train, y_train, X_test, y_test,
-                                                best_params_df,
+                                                best_params_df, pi_repeats=None,
                                                 model_name=model_name, verbose=verbose)
             fis.append(fi)
         else:
-            bdf, roc = run_test_on_CV_split(X_train, y_train, X_test, y_test,
-                                            best_params_df,
-                                            model_name=model_name, verbose=verbose)
+            bdf, roc, pi_mean, pi_std = run_test_on_CV_split(X_train, y_train, X_test, y_test,
+                                                             best_params_df, pi_repeats=pi_repeats,
+                                                             model_name=model_name, verbose=verbose)
+            pi_means.append(pi_mean)
+            pi_stds.append(pi_std)
         bdf.index.name = 'scorer'
         roc.index.name = 'FPR'
         if 'hidden_layer_sizes' in bdf.columns:
@@ -2482,16 +2493,24 @@ def CV_test_after_GridSearchCV(path=hydro_path, gr_path=hydro_ml_path/'nested4',
     if model_name == 'RF':
         fi_da = xr.concat(fis, 'outer_split')
         best['feature_importances'] = fi_da
+    else:
+        pi_mean_da = xr.concat(pi_means, 'outer_split')
+        pi_std_da = xr.concat(pi_stds, 'outer_split')
+        best['PI_mean'] = pi_mean_da
+        best['PI_std'] = pi_std_da
     return best
 
 
 def run_test_on_CV_split(X_train, y_train, X_test, y_test, best_df,
-                         model_name='SVC', verbose=False):
+                         model_name='SVC', verbose=False, pi_repeats=30,
+                         n_permutations=None):
     import numpy as np
     import xarray as xr
     import pandas as pd
     from sklearn.metrics import roc_curve
     from sklearn.metrics import roc_auc_score
+    from sklearn.inspection import permutation_importance
+    from sklearn.model_selection import permutation_test_score
     ml = ML_Classifier_Switcher()
     if verbose:
         print('Picking {} model with best params'.format(model_name))
@@ -2501,6 +2520,9 @@ def run_test_on_CV_split(X_train, y_train, X_test, y_test, best_df,
     mean_fpr = np.linspace(0, 1, 100)
     tprs = []
     roc_aucs = []
+    pi_mean_list = []
+    pi_std_list = []
+    
     for scorer in best_df.index:
         sk_model = ml.pick_model(model_name)
         # get best params (drop two last cols since they are not params):
@@ -2513,6 +2535,18 @@ def run_test_on_CV_split(X_train, y_train, X_test, y_test, best_df,
             FI = xr.DataArray(sk_model.feature_importances_, dims=['feature'])
             FI['feature'] = X_train['feature']
             fi_list.append(FI)
+        pi = permutation_importance(sk_model, X_test, y_test,
+                                    n_repeats=pi_repeats,
+                                    scoring=scorers(scorer),
+                                    random_state=0, n_jobs=-1)
+        pi_mean = xr.DataArray(pi['importances_mean'], dims='feature')
+        pi_std = xr.DataArray(pi['importances_std'], dims='feature')
+        pi_mean.name = 'PI_mean'
+        pi_std.name = 'PI_std'
+        pi_mean['feature'] = X_train['feature']
+        pi_std['feature'] = X_train['feature']
+        pi_mean_list.append(pi_mean)
+        pi_std_list.append(pi_std)
         y_pred = sk_model.predict(X_test)
         fpr, tpr, _ = roc_curve(y_test, y_pred)
         interp_tpr = np.interp(mean_fpr, fpr, tpr)
@@ -2522,6 +2556,10 @@ def run_test_on_CV_split(X_train, y_train, X_test, y_test, best_df,
         tprs.append(interp_tpr)
         score = scorer_function(scorer, y_test, y_pred)
         test_scores.append(score)
+    pi_mean_da = xr.concat(pi_mean_list, 'scorer')
+    pi_std_da = xr.concat(pi_std_list, 'scorer')
+    pi_mean_da['scorer'] = [x for x in best_df.index.values]
+    pi_std_da['scorer'] = [x for x in best_df.index.values]
     roc_df = pd.DataFrame(tprs).T
     roc_df.columns = [x for x in best_df.index]
     roc_df.index = mean_fpr
@@ -2531,6 +2569,8 @@ def run_test_on_CV_split(X_train, y_train, X_test, y_test, best_df,
         fi = xr.concat(fi_list, 'scorer')
         fi['scorer'] = [x for x in best_df.index.values]
         return best_df, roc_df, fi
+    elif pi_repeats is not None:
+        return best_df, roc_df, pi_mean_da, pi_std_da
     else:
         return best_df, roc_df
 
@@ -4161,6 +4201,15 @@ def check_if_tide_events_from_stations_are_within_time_window(df_list, rounding=
     else:
         return df
 
+
+def scorers(scorer_str):
+    from sklearn.metrics import make_scorer
+    if scorer_str == 'tss':
+        return make_scorer(tss_score)
+    elif scorer_str == 'hss':
+        return make_scorer(hss_score)
+    else:
+        return scorer_str
 
 def scorer_function(scorer_label, y_true, y_pred):
     import sklearn.metrics as sm
