@@ -4078,6 +4078,30 @@ def save_PPP_field_unselected_data_and_errors(savepath=None, savename='israel',
     return ds
 
 
+def calculate_long_term_trend_from_gnss_station(station='tela', var='alt',
+                                                times=None, plot=True):
+    from aux_gps import linear_fit_using_scipy_da_ts
+    from aux_gps import anomalize_xr
+    from aux_gps import keep_iqr
+    import matplotlib.pyplot as plt
+    da = load_gipsyx_results(station=station, sample_rate='D',
+                             plot_fields=None)[var]
+    if times is not None:
+        time_dim = list(set(da.dims))[0]
+        da = da.sel({time_dim: slice(*times)})
+    da = keep_iqr(da, k=2)
+    da_anoms = anomalize_xr(da, 'DOY')
+    # da_anoms_mm = da_anoms.resample(time='MS', keep_attrs=True).mean(keep_attrs=True)
+    da_anoms_in_cm = da_anoms * 100
+    # use linear_fit_using_scipy_da_ts only with days!
+    tds, resd = linear_fit_using_scipy_da_ts(da_anoms_in_cm, plot=plot,
+                                             slope_factor=3652.5, units='cm/decade')
+    ax = plt.gca()
+    ax.set_title('{} station long term {}'.format(station.upper(), var))
+    ax.set_ylabel('{} [cm]'.format(var))
+    return tds, resd
+
+
 def get_long_trends_from_gnss_station(station='tela', modelname='LR',
                                       plot=True, times=None):
     import xarray as xr
