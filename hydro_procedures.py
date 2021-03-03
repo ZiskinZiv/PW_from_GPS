@@ -2321,6 +2321,35 @@ def load_nested_CV_test_results_from_all_models(path=hydro_path, load_hyper=Fals
     return dss
 
 
+def plot_single_permutation_test_result(dss, feats=None,
+                                        ax=None, scorer='f1', model='MLP'):
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    sns.set_style('whitegrid')
+    sns.set_style('ticks')
+    dss = dss.mean('outer_split')
+    if feats is None:
+        feats = ['pwv', 'pwv+pressure', 'pwv+pressure+doy']
+    dst = dss.sel(features=feats)  # .reset_coords(drop=True)
+    df = dst['permutation_score'].to_dataframe()
+    df['permutations'] = df.index.droplevel(2).droplevel(1).droplevel(0)
+    df['scorer'] = df.index.droplevel(3).droplevel(1).droplevel(0)
+    df['features'] = df.index.droplevel(3).droplevel(2).droplevel(0)
+    df['model'] = df.index.droplevel(3).droplevel(2).droplevel(1)
+    df['model'] = df['model'].str.replace('SVC', 'SVM')
+    df = df.melt(value_vars='permutation_score', id_vars=[
+        'features', 'model', 'scorer'], var_name='test_score')
+    df = df[df['model'] == model]
+    df = df[df['scorer'] == scorer]
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(6, 8))
+    sns.histplot(
+        df, x="value", hue="features", legend=True)
+    # dss['permutation_score'].plot.hist(ax=ax, bins=25, color=color)
+    ax.axvline(dss['true_score'].item(), linestyle='--', color=color)
+    return ax
+
+
 def run_CV_nested_tests_on_all_features(path=hydro_path, gr_path=hydro_ml_path/'nested4',
                                         verbose=False, model_name='SVC',
                                         savepath=None, drop_hours=None, PI=30, Ptest=None):
