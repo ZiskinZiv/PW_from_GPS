@@ -2323,7 +2323,7 @@ def load_nested_CV_test_results_from_all_models(path=hydro_path, load_hyper=Fals
 
 def run_CV_nested_tests_on_all_features(path=hydro_path, gr_path=hydro_ml_path/'nested4',
                                         verbose=False, model_name='SVC',
-                                        savepath=None, drop_hours=None):
+                                        savepath=None, drop_hours=None, PI=30, Ptest=None):
     """returns the nested CV test results for all scorers, features and models,
     if model is chosen, i.e., model='MLP', returns just this model results
     and its hyper-parameters per each outer split"""
@@ -2332,46 +2332,22 @@ def run_CV_nested_tests_on_all_features(path=hydro_path, gr_path=hydro_ml_path/'
     from aux_gps import save_ncfile
     feats = get_all_possible_combinations_from_list(
         ['pwv', 'pressure', 'doy'], reduce_single_list=True, combine_by_sep='+')
-    # if model is None:
-    #     models = ['MLP', 'SVC', 'RF']
-    #     model_list = []
-    #     # model_list2 = []
-    #     for model in models:
-    #         feat_list = []
-    #         # feat_list2 = []
-    #         for feat in feats:
-    #             ds = CV_test_after_GridSearchCV(path=path, gr_path=gr_path,
-    #                                             model_name=model, features=feat, verbose=verbose)
-    #             # best.index.name = 'scorer'
-    #             ds = ds[['mean_score', 'std_score', 'test_score', 'roc_auc_score', 'TPR']]
-    #             # roc.index.name = 'FPR'
-    #             # roc_da = roc.to_xarray().to_array('scorer')
-    #             feat_list.append(ds)
-    #             # feat_list2.append(roc_da)
-    #         dsf = xr.concat(feat_list, 'features')
-    #         # dsf2 = xr.concat(feat_list2, 'features')
-    #         dsf['features'] = feats
-    #         # dsf2['features'] = feats
-    #         model_list.append(dsf)
-    #         # model_list2.append(dsf2)
-    #     dss = xr.concat(model_list, 'model')
-    #     # rocs = xr.concat(model_list2, 'model')
-    #     dss['model'] = models
-    #     filename = 'nested_CV_test_results_all_models_all_features.nc'
-    # else:
     feat_list = []
     for feat in feats:
         print('Running CV on feature {}'.format(feat))
         ds = CV_test_after_GridSearchCV(path=path, gr_path=gr_path,
                                         model_name=model_name,
-                                        features=feat,
+                                        features=feat, PI=PI, Ptest=Ptest,
                                         verbose=verbose, drop_hours=drop_hours)
         feat_list.append(ds)
     dsf = xr.concat(feat_list, 'features')
     dsf['features'] = feats
     dss = dsf
     dss.attrs['model'] = model_name
-    filename = 'nested_CV_test_results_{}_all_features_with_hyper.nc'.format(model_name)
+    if Ptest is not None:
+        filename = 'nested_CV_test_results_{}_all_features_with_hyper_permutation_tests.nc'.format(model_name)
+    else:
+        filename = 'nested_CV_test_results_{}_all_features_with_hyper.nc'.format(model_name)
     if savepath is not None:
         save_ncfile(dss, savepath, filename)
     return dss
@@ -2439,7 +2415,7 @@ def prepare_X_y_for_holdout_test(features='pwv+doy', model_name='SVC',
 
 def CV_test_after_GridSearchCV(path=hydro_path, gr_path=hydro_ml_path/'nested4',
                                model_name='SVC', features='pwv',
-                               verbose=False, drop_hours=None, pi_repeats=30):
+                               verbose=False, drop_hours=None, PI=None, Ptest=None):
     """do cross_validate with all scorers on all gridsearchcv folds,
     reads the nested outer splits CV file in gr_path"""
     import xarray as xr
@@ -2454,6 +2430,10 @@ def CV_test_after_GridSearchCV(path=hydro_path, gr_path=hydro_ml_path/'nested4',
                                                  verbose=verbose)
     X, y = prepare_X_y_for_holdout_test(features, model_name, path,
                                         drop_hours=drop_hours)
+    if Ptest is not None:
+        ds = run_permutation_classifier_test(X, y, cv, param_df_dict, Ptest=Ptest,
+                                             model_name=model_name, verbose=verbose)
+        return ds
     outer_bests = []
     outer_rocs = []
     fis = []
@@ -2467,16 +2447,16 @@ def CV_test_after_GridSearchCV(path=hydro_path, gr_path=hydro_ml_path/'nested4',
         outer_split = '{}-{}'.format(i+1, cv.n_splits)
         best_params_df = param_df_dict.get(outer_split)
         if model_name == 'RF':
-            bdf, roc, fi = run_test_on_CV_split(X_train, y_train, X_test, y_test,
-                                                best_params_df, pi_repeats=None,
-                                                model_name=model_name, verbose=verbose)
+            bdf, roc, fi, pi_mean, pi_std = run_test_on_CV_split(X_train, y_train, X_test, y_test,
+                                                                 best_params_df, PI=PI, Ptest=Ptest,
+                                                                 model_name=model_name, verbose=verbose)
             fis.append(fi)
         else:
             bdf, roc, pi_mean, pi_std = run_test_on_CV_split(X_train, y_train, X_test, y_test,
-                                                             best_params_df, pi_repeats=pi_repeats,
+                                                             best_params_df, PI=PI,
                                                              model_name=model_name, verbose=verbose)
-            pi_means.append(pi_mean)
-            pi_stds.append(pi_std)
+        pi_means.append(pi_mean)
+        pi_stds.append(pi_std)
         bdf.index.name = 'scorer'
         roc.index.name = 'FPR'
         if 'hidden_layer_sizes' in bdf.columns:
@@ -2493,24 +2473,70 @@ def CV_test_after_GridSearchCV(path=hydro_path, gr_path=hydro_ml_path/'nested4',
     if model_name == 'RF':
         fi_da = xr.concat(fis, 'outer_split')
         best['feature_importances'] = fi_da
-    else:
-        pi_mean_da = xr.concat(pi_means, 'outer_split')
-        pi_std_da = xr.concat(pi_stds, 'outer_split')
-        best['PI_mean'] = pi_mean_da
-        best['PI_std'] = pi_std_da
+    pi_mean_da = xr.concat(pi_means, 'outer_split')
+    pi_std_da = xr.concat(pi_stds, 'outer_split')
+    best['PI_mean'] = pi_mean_da
+    best['PI_std'] = pi_std_da
     return best
 
 
-def run_test_on_CV_split(X_train, y_train, X_test, y_test, best_df,
-                         model_name='SVC', verbose=False, pi_repeats=30,
-                         n_permutations=None):
+def run_permutation_classifier_test(X, y, cv, best_params_df, Ptest=100,
+                                    model_name='SVC', verbose=False):
+    from sklearn.model_selection import permutation_test_score
+    import xarray as xr
+    import numpy as np
+    ml = ML_Classifier_Switcher()
+    if verbose:
+        print('Picking {} model with best params'.format(model_name))
+    splits = []
+    for i, df in enumerate(best_params_df.values()):
+        if verbose:
+            print('running on split #{}'.format(i+1))
+        true_scores = []
+        pvals = []
+        perm_scores = []
+        for scorer in df.index:
+            sk_model = ml.pick_model(model_name)
+            # get best params (drop two last cols since they are not params):
+            params = df.T[scorer][:-2].to_dict()
+            if verbose:
+                print('{} scorer, params:{}'.format(scorer, params))
+            true, perm_scrs, pval = permutation_test_score(sk_model, X, y,
+                                                           cv=cv,
+                                                           n_permutations=Ptest,
+                                                           scoring=scorers(scorer),
+                                                           random_state=0,
+                                                           n_jobs=-1)
+            true_scores.append(true)
+            pvals.append(pval)
+            perm_scores.append(perm_scrs)
+        true_da = xr.DataArray(true_scores, dims=['scorer'])
+        true_da['scorer'] = [x for x in df.index.values]
+        true_da.name = 'true_score'
+        pval_da = xr.DataArray(pvals, dims=['scorer'])
+        pval_da['scorer'] = [x for x in df.index.values]
+        pval_da.name = 'pvalue'
+        perm_da = xr.DataArray(perm_scores, dims=['scorer', 'permutations'])
+        perm_da['scorer'] = [x for x in df.index.values]
+        perm_da['permutations'] = np.arange(1, Ptest+1)
+        perm_da.name = 'permutation_score'
+        ds = xr.merge([true_da, pval_da, perm_da])
+        splits.append(ds)
+    dss = xr.concat(splits, dim='outer_split')
+    dss['outer_split'] = np.arange(1, len(best_params_df)+ 1)
+    return dss
+
+
+def run_test_on_CV_split(X_train, y_train, X_test, y_test, param_df,
+                         model_name='SVC', verbose=False, PI=None,
+                         Ptest=None):
     import numpy as np
     import xarray as xr
     import pandas as pd
     from sklearn.metrics import roc_curve
     from sklearn.metrics import roc_auc_score
     from sklearn.inspection import permutation_importance
-    from sklearn.model_selection import permutation_test_score
+    best_df = param_df.copy()
     ml = ML_Classifier_Switcher()
     if verbose:
         print('Picking {} model with best params'.format(model_name))
@@ -2522,7 +2548,6 @@ def run_test_on_CV_split(X_train, y_train, X_test, y_test, best_df,
     roc_aucs = []
     pi_mean_list = []
     pi_std_list = []
-    
     for scorer in best_df.index:
         sk_model = ml.pick_model(model_name)
         # get best params (drop two last cols since they are not params):
@@ -2535,8 +2560,17 @@ def run_test_on_CV_split(X_train, y_train, X_test, y_test, best_df,
             FI = xr.DataArray(sk_model.feature_importances_, dims=['feature'])
             FI['feature'] = X_train['feature']
             fi_list.append(FI)
+        y_pred = sk_model.predict(X_test)
+        fpr, tpr, _ = roc_curve(y_test, y_pred)
+        interp_tpr = np.interp(mean_fpr, fpr, tpr)
+        interp_tpr[0] = 0.0
+        roc_auc = roc_auc_score(y_test, y_pred)
+        roc_aucs.append(roc_auc)
+        tprs.append(interp_tpr)
+        score = scorer_function(scorer, y_test, y_pred)
+        test_scores.append(score)
         pi = permutation_importance(sk_model, X_test, y_test,
-                                    n_repeats=pi_repeats,
+                                    n_repeats=PI,
                                     scoring=scorers(scorer),
                                     random_state=0, n_jobs=-1)
         pi_mean = xr.DataArray(pi['importances_mean'], dims='feature')
@@ -2547,15 +2581,6 @@ def run_test_on_CV_split(X_train, y_train, X_test, y_test, best_df,
         pi_std['feature'] = X_train['feature']
         pi_mean_list.append(pi_mean)
         pi_std_list.append(pi_std)
-        y_pred = sk_model.predict(X_test)
-        fpr, tpr, _ = roc_curve(y_test, y_pred)
-        interp_tpr = np.interp(mean_fpr, fpr, tpr)
-        interp_tpr[0] = 0.0
-        roc_auc = roc_auc_score(y_test, y_pred)
-        roc_aucs.append(roc_auc)
-        tprs.append(interp_tpr)
-        score = scorer_function(scorer, y_test, y_pred)
-        test_scores.append(score)
     pi_mean_da = xr.concat(pi_mean_list, 'scorer')
     pi_std_da = xr.concat(pi_std_list, 'scorer')
     pi_mean_da['scorer'] = [x for x in best_df.index.values]
@@ -2568,8 +2593,8 @@ def run_test_on_CV_split(X_train, y_train, X_test, y_test, best_df,
     if hasattr(sk_model, 'feature_importances_'):
         fi = xr.concat(fi_list, 'scorer')
         fi['scorer'] = [x for x in best_df.index.values]
-        return best_df, roc_df, fi
-    elif pi_repeats is not None:
+        return best_df, roc_df, fi, pi_mean_da, pi_std_da
+    elif PI is not None:
         return best_df, roc_df, pi_mean_da, pi_std_da
     else:
         return best_df, roc_df
