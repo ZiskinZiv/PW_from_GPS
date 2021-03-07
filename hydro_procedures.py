@@ -54,6 +54,7 @@ hydro_st_name_dict = {25191: 'Lavan - new nizana road',
 # check for stability of the gridsearch CV...also run with 4-folds ?
 # finalize the permutation_importances and permutation_test_scores
 
+
 def prepare_tide_events_GNSS_dataset(hydro_path=hydro_path):
     import xarray as xr
     import pandas as pd
@@ -1498,7 +1499,8 @@ def load_ML_run_results(path=hydro_ml_path, prefix='CVR',
     return dss
 
 
-def plot_nested_CV_test_scores(dss, feats='pwv+pressure+doy'):
+def plot_nested_CV_test_scores(dss, feats=None, fontsize=16,
+                               save=True):
     import seaborn as sns
     import matplotlib.pyplot as plt
 
@@ -1521,10 +1523,10 @@ def plot_nested_CV_test_scores(dss, feats='pwv+pressure+doy'):
         feats = ['pwv', 'pwv+pressure', 'pwv+pressure+doy']
     dst = dss.sel(features=feats)  # .reset_coords(drop=True)
     df = dst['test_score'].to_dataframe()
-    df['scorer'] = df.index.droplevel(2).droplevel(1).droplevel(0)
-    df['model'] = df.index.droplevel(3).droplevel(2).droplevel(1)
-    df['features'] = df.index.droplevel(2).droplevel(2).droplevel(0)
-    df['outer_splits'] = df.index.droplevel(0).droplevel(2).droplevel(0)
+    df['scorer'] = df.index.get_level_values(3)
+    df['model'] = df.index.get_level_values(0)
+    df['features'] = df.index.get_level_values(1)
+    df['outer_splits'] = df.index.get_level_values(2)
     df['model'] = df['model'].str.replace('SVC', 'SVM')
     df = df.melt(value_vars='test_score', id_vars=[
         'features', 'model', 'scorer', 'outer_splits'], var_name='test_score',
@@ -1532,17 +1534,46 @@ def plot_nested_CV_test_scores(dss, feats='pwv+pressure+doy'):
     sns.set(font_scale=1.5)
     sns.set_style('whitegrid')
     sns.set_style('ticks')
-    g = sns.catplot(x="model", y="score", hue='features',
-                    col="scorer", ci='sd', row=None,
-                    col_wrap=3,
-                    data=df, kind="bar", capsize=0.25,
-                    height=4, aspect=1.5, errwidth=1.5)
-    g.set_xticklabels(rotation=45)
-    [x.grid(True) for x in g.axes.flatten()]
-    show_values_on_bars(g.axes)
-    filename = 'ML_scores_models_nested_CV_{}.png'.format('_'.join(feats))
-    plt.savefig(savefig_path / filename, bbox_inches='tight')
-    return df
+    cmap = sns.color_palette('tab10', n_colors=3)
+    fg = sns.FacetGrid(data=df, row='model', col='scorer', height=4, aspect=0.8)
+    fg.map_dataframe(sns.barplot, x='test_score', y="score", hue='features',
+                     ci='sd', capsize=0.25, errwidth=1.5, palette=cmap)
+    # g = sns.catplot(x='test_score', y="score", hue='features',
+    #                 col="scorer", row='model', ci='sd',
+    #                 data=df, kind="bar", capsize=0.25,
+    #                 height=4, aspect=1.5, errwidth=1.5)
+    #fg.set_xticklabels(rotation=45)
+    # fg.set_yticklabels([0, 0.2, 0.4, 0.6, 0.8, 1.0], fontsize=fontsize)
+    fg.set_ylabels('score')
+    [x.grid(True) for x in fg.axes.flatten()]
+    handles, labels = fg.axes[0, 0].get_legend_handles_labels()
+    show_values_on_bars(fg.axes, fs=fontsize)
+    for i in range(fg.axes.shape[0]):  # i is rows
+        model = dss['model'].isel(model=i).item()
+        if model == 'SVC':
+            model = 'SVM'
+        for j in range(fg.axes.shape[1]):  # j is cols
+            ax = fg.axes[i, j]
+            scorer = dss['scorer'].isel(scorer=j).item()
+            title = '{} | scorer={}'.format(model, scorer)
+            ax.set_title(title, fontsize=fontsize)
+            ax.set_xlabel('')
+    fg.set_xlabels(' ')
+    fg.fig.legend(handles=handles, labels=labels, prop={'size': fontsize}, edgecolor='k',
+                  framealpha=0.5, fancybox=True, facecolor='white',
+                  ncol=5, fontsize=fontsize, loc='upper center', bbox_to_anchor=(0.5, 1.005),
+                  bbox_transform=plt.gcf().transFigure)
+    # true_scores = dst.sel(scorer=scorer, model=model)['true_score']
+
+    # dss['permutation_score'].plot.hist(ax=ax, bins=25, color=color)
+    # ymax = ax.get_ylim()[-1] - 0.2
+    # ax.vlines(x=true_scores.values, ymin=0, ymax=ymax, linestyle='--', color=cmap)
+    fg.fig.tight_layout()
+    fg.fig.subplots_adjust(top=0.92)
+    if save:
+        filename = 'ML_scores_models_nested_CV_{}.png'.format('_'.join(feats))
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
+    return fg
 
 
 def plot_holdout_test_scores(dss, feats='pwv+pressure+doy'):
