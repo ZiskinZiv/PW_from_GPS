@@ -185,6 +185,14 @@ def align_yaxis_np(ax1, ax2):
 #     ax2.set_ylim(miny+dy, maxy+dy)
 
 
+def get_legend_labels_handles_title_seaborn_histplot(ax):
+    old_legend = ax.legend_
+    handles = old_legend.legendHandles
+    labels = [t.get_text() for t in old_legend.get_texts()]
+    title = old_legend.get_title().get_text()
+    return handles, labels, title
+
+
 def alignYaxes(axes, align_values=None):
     '''Align the ticks of multiple y axes
     Args:
@@ -6308,7 +6316,7 @@ def plot_typical_tide_event_with_PWV(work_path=work_yuval,
     return df
 
 
-def plot_hydro_pressure_anomalies(hydro_path=hydro_path,
+def plot_hydro_pressure_anomalies(hydro_path=hydro_path, std=False,
                                   fontsize=16, save=True):
     import xarray as xr
     import pandas as pd
@@ -6317,7 +6325,10 @@ def plot_hydro_pressure_anomalies(hydro_path=hydro_path,
     import seaborn as sns
     sns.set_style('whitegrid')
     sns.set_style('ticks')
-    feats = xr.load_dataset(hydro_path/'hydro_tides_hourly_features_with_positives.nc')
+    if std:
+        feats = xr.load_dataset(hydro_path/'hydro_tides_hourly_features_with_positives_std.nc')
+    else:
+        feats = xr.load_dataset(hydro_path/'hydro_tides_hourly_features_with_positives.nc')
     dts = pd.DatetimeIndex(feats['X_pos']['positive_sample'].values)
     bd = feats['bet-dagan']
     dts_ranges = []
@@ -6337,7 +6348,11 @@ def plot_hydro_pressure_anomalies(hydro_path=hydro_path,
     ax.fill_between(x=ts.index, y1=ts-ts_std, y2=ts+ts_std, color='k', alpha=0.4)
     ax.set_xlim(ts.index.min(), ts.index.max())  #+
                       # pd.Timedelta(15, unit='D'))
-    ax.set_ylabel('Pressure mean anomalies [hPa]', fontsize=fontsize-2)
+    if std:
+        label = 'Pressure mean standartized anomalies'
+    else:
+        label = 'Pressure mean anomalies [hPa]'
+    ax.set_ylabel(label, fontsize=fontsize-2)
     ax.set_xlabel('Days before/after a tide event', fontsize=fontsize-2)
     ax.axvline(0, color='r', ls='--')
     ax.grid(True)
