@@ -87,14 +87,18 @@ def select_features_from_X(X, features='pwv'):
     return X
 
 
-def combine_pos_neg_from_nc_file(hydro_path=hydro_path, all_neg=False, seed=1):
+def combine_pos_neg_from_nc_file(hydro_path=hydro_path, all_neg=False, seed=1, std=True):
     from aux_gps import path_glob
     import xarray as xr
     import numpy as np
     # import pandas as pd
     np.random.seed(seed)
-    file = path_glob(
-        hydro_path, 'hydro_tides_hourly_features_with_positives_negatives_*.nc')[-1]
+    if std:
+        file = path_glob(
+            hydro_path, 'hydro_tides_hourly_features_with_positives_negatives_std*.nc')[-1]
+    else:
+        file = path_glob(
+            hydro_path, 'hydro_tides_hourly_features_with_positives_negatives_*.nc')[-1]
     ds = xr.open_dataset(file)
     # get the positive features and produce target:
     X_pos = ds['X_pos'].rename({'positive_sample': 'sample'})
@@ -149,7 +153,7 @@ def check_if_negatives_are_within_positives(neg_da, hydro_path=hydro_path):
 
 
 def produce_negatives_events_from_feature_file(hydro_path=hydro_path, seed=42,
-                                               batches=1, verbose=1):
+                                               batches=1, verbose=1, std=True):
     # do the same thing for pressure (as for pwv), but not for
     import xarray as xr
     import numpy as np
@@ -157,11 +161,15 @@ def produce_negatives_events_from_feature_file(hydro_path=hydro_path, seed=42,
     from aux_gps import save_ncfile
     feats = xr.load_dataset(hydro_path / 'hydro_tides_hourly_features.nc')
     feats = feats.rename({'doy': 'DOY'})
+    if std:
+        pos_filename = 'hydro_tides_hourly_features_with_positives_std.nc'
+    else:
+        pos_filename = 'hydro_tides_hourly_features_with_positives.nc'
     all_tides = xr.open_dataset(
-        hydro_path / 'hydro_tides_hourly_features_with_positives.nc')['X_pos']
+        hydro_path / pos_filename)['X_pos']
     # pos_tides = xr.open_dataset(hydro_path / 'hydro_tides_hourly_features_with_positives.nc')['tide_datetimes']
     tides = xr.open_dataset(
-        hydro_path / 'hydro_tides_hourly_features_with_positives.nc')['Tides']
+        hydro_path / pos_filename)['Tides']
     # get the positives (tide events) for each station:
     df_stns = tides.to_dataset('GNSS').to_dataframe()
     # get all positives (tide events) for all stations:
@@ -278,19 +286,26 @@ def produce_negatives_events_from_feature_file(hydro_path=hydro_path, seed=42,
     feats['X_pwv_stns'] = tides
     # feats['tide_datetimes'] = pos_tides
     feats = feats.rename({'sample': 'negative_sample'})
-    filename = 'hydro_tides_hourly_features_with_positives_negatives_{}.nc'.format(
+    if std:
+        filename = 'hydro_tides_hourly_features_with_positives_negatives_std_{}.nc'.format(
+        batches)
+    else:
+        filename = 'hydro_tides_hourly_features_with_positives_negatives_{}.nc'.format(
         batches)
     save_ncfile(feats, hydro_path, filename)
     return neg_batch_da
 
 
-def produce_positives_from_feature_file(hydro_path=hydro_path):
+def produce_positives_from_feature_file(hydro_path=hydro_path, std=True):
     import xarray as xr
     import pandas as pd
     import numpy as np
     from aux_gps import save_ncfile
     # load features:
-    file = hydro_path / 'hydro_tides_hourly_features.nc'
+    if std:
+        file = hydro_path / 'hydro_tides_hourly_features_std.nc'
+    else:
+        file = hydro_path / 'hydro_tides_hourly_features.nc'
     feats = xr.load_dataset(file)
     feats = feats.rename({'doy': 'DOY'})
     # load positive event for each station:
@@ -356,7 +371,10 @@ def produce_positives_from_feature_file(hydro_path=hydro_path):
     da_ff = xr.concat(da_list, 'feature')
     da_ff['feature'] = ['DOY', 'doy_sin', 'doy_cos']
     da = xr.concat([da_pwv, da_f, da_ff], 'feature')
-    filename = 'hydro_tides_hourly_features_with_positives.nc'
+    if std:
+        filename = 'hydro_tides_hourly_features_with_positives_std.nc'
+    else:
+        filename = 'hydro_tides_hourly_features_with_positives.nc'
     feats['X_pos'] = da
     # now add positives per stations:
     pdf = pd.DataFrame(positives_per_station).T
@@ -372,19 +390,25 @@ def produce_positives_from_feature_file(hydro_path=hydro_path):
 
 
 def prepare_features_and_save_hourly(work_path=work_yuval, ims_path=ims_path,
-                                     savepath=hydro_path):
+                                     savepath=hydro_path, std=True):
     import xarray as xr
     from aux_gps import save_ncfile
     import numpy as np
     # pwv = xr.load_dataset(
+    if std:
+        pwv_filename = 'GNSS_PW_thresh_0_hour_dayofyear_anoms_sd.nc'
+        pre_filename = 'IMS_BD_hourly_anoms_std_ps_1964-2020.nc'
+    else:
+        pwv_filename = 'GNSS_PW_thresh_0_hour_dayofyear_anoms.nc'
+        pre_filename = 'IMS_BD_hourly_anoms_ps_1964-2020.nc'
     #     work_path / 'GNSS_PW_thresh_0_hour_dayofyear_anoms.nc')
-    pwv = xr.load_dataset(work_path /'GNSS_PW_thresh_0_hour_dayofyear_anoms_sd.nc')
+    pwv = xr.load_dataset(work_path / pwv_filename)
     pwv_stations = [x for x in hydro_pw_dict.keys()]
     pwv = pwv[pwv_stations]
     # pwv = pwv.rolling(time=12, keep_attrs=True).mean(keep_attrs=True)
     pwv = pwv.resample(time='1H', keep_attrs=True).mean(keep_attrs=True)
     # bd = xr.load_dataset(ims_path / 'IMS_BD_anoms_5min_ps_1964-2020.nc')
-    bd = xr.load_dataset(ims_path / 'IMS_BD_hourly_anoms_std_ps_1964-2020.nc')
+    bd = xr.load_dataset(ims_path / pre_filename)
     # min_time = pwv.dropna('time')['time'].min()
     # bd = bd.sel(time=slice('1996', None)).resample(time='1H').mean()
     bd = bd.sel(time=slice('1996', None))
@@ -396,7 +420,10 @@ def prepare_features_and_save_hourly(work_path=work_yuval, ims_path=ims_path,
     doy_cos = np.cos(doy * np.pi / 183)
     doy_cos.name = 'doy_cos'
     ds = xr.merge([pwv, pressure, doy, doy_sin, doy_cos])
-    filename = 'hydro_tides_hourly_features.nc'
+    if std:
+        filename = 'hydro_tides_hourly_features_std.nc'
+    else:
+        filename = 'hydro_tides_hourly_features.nc'
     save_ncfile(ds, savepath, filename)
     return ds
 
@@ -1850,14 +1877,161 @@ def plot_heatmaps_for_all_models_and_scorings(dss, var='roc-auc'):  # , save=Tru
     return fg
 
 
+def plot_ROC_from_dss(dss, feats=None, fontsize=16, save=True):
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+    sns.set_style('whitegrid')
+    sns.set_style('ticks')
+    cmap = sns.color_palette('tab10', n_colors=3)
+    if feats is None:
+        feats = ['pwv', 'pwv+pressure', 'pwv+pressure+doy']
+    dst = dss.sel(features=feats)  # .reset_coords(drop=True)
+    df = dst['TPR'].to_dataframe()
+    df['FPR'] = df.index.get_level_values(4)
+    df['model'] = df.index.get_level_values(0)
+    df['scorer'] = df.index.get_level_values(3)
+    df['features'] = df.index.get_level_values(1)
+    df = df.melt(value_vars='TPR', id_vars=[
+        'features', 'model', 'scorer', 'FPR'], var_name='score')
+    df['model'] = df['model'].str.replace('SVC', 'SVM')
+    fg = sns.FacetGrid(df, col='scorer', row='model')
+    fg.map_dataframe(sns.lineplot, x='FPR', y='value',
+                     hue='features', ci='sd', palette=cmap)
+    for i in range(fg.axes.shape[0]):  # i is rows
+        model = dss['model'].isel(model=i).item()
+        auc_model = dst.sel(model=model)
+        if model == 'SVC':
+            model = 'SVM'
+        for j in range(fg.axes.shape[1]):  # j is cols
+            scorer = dss['scorer'].isel(scorer=j).item()
+            auc_scorer_mean = auc_model['roc_auc_score'].sel(scorer=scorer).mean('outer_split')
+            auc_scorer_std = auc_model['roc_auc_score'].sel(scorer=scorer).std('outer_split')
+            auc_mean = auc_scorer_mean.to_dataframe()['roc_auc_score'].values
+            auc_std = auc_scorer_std.to_dataframe()['roc_auc_score'].values
+            ax = fg.axes[i, j]
+            ax.plot([0, 1], [0, 1], color='tab:red', linestyle='--', lw=2,
+                    label='Chance')
+            title = '{} | scorer={}'.format(model, scorer)
+            ax.set_title(title, fontsize=fontsize)
+            handles, labels = ax.get_legend_handles_labels()
+            hands = handles[0:3]
+            # labes = labels[0:3]
+            new_labes = []
+            for auc, auc_sd in zip(auc_mean, auc_std):
+                l = r'{:.2}$\pm${:.1}'.format(auc, auc_sd)
+                new_labes.append(l)
+            ax.legend(handles=hands, labels=new_labes, loc='lower right',
+                      title='AUCs', prop={'size': fontsize-4})
+            ax.set_xticks([0, 0.2, 0.4, 0.6, 0.8, 1])
+            ax.grid(True)
+            # return handles, labels
+    fg.set_ylabels('True Positive Rate', fontsize=fontsize)
+    fg.set_xlabels('False Positive Rate', fontsize=fontsize)
+    fg.fig.legend(handles=handles, labels=labels, prop={'size': fontsize}, edgecolor='k',
+                  framealpha=0.5, fancybox=True, facecolor='white',
+                  ncol=5, fontsize=fontsize, loc='upper center', bbox_to_anchor=(0.5, 1.005),
+                  bbox_transform=plt.gcf().transFigure)
+    # true_scores = dst.sel(scorer=scorer, model=model)['true_score']
+
+    # dss['permutation_score'].plot.hist(ax=ax, bins=25, color=color)
+    # ymax = ax.get_ylim()[-1] - 0.2
+    # ax.vlines(x=true_scores.values, ymin=0, ymax=ymax, linestyle='--', color=cmap)
+    fg.fig.tight_layout()
+    fg.fig.subplots_adjust(top=0.915)
+    if save:
+        filename = 'ROC_plots.png'
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
+    return fg
+
+
+def plot_permutation_importances_from_dss(dss, feat_dim='features',
+                                          outer_dim='outer_split',
+                                          features='pwv+pressure+doy',
+                                          fix_xticklabels=True,split=1,
+                                          axes=None, save=True):
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import seaborn as sns
+    from natsort import natsorted
+    sns.set_palette('Dark2', 6)
+    sns.set_style('whitegrid')
+    sns.set_style('ticks')
+    model = dss.attrs['model']
+    # use dss.sel(model='RF') first as input
+    dss['feature'] = dss['feature'].str.replace('DOY', 'doy')
+    dss = dss.sel({feat_dim: features})
+    # tests_ds = dss['test_score']
+    # tests_ds = tests_ds.sel(scorer=scorer)
+    # max_score_split = int(tests_ds.idxmax(outer_dim).item())
+    # use mean outer split:
+    # dss = dss.mean(outer_dim)
+    dss = dss.sel({outer_dim: split})
+    feats = features.split('+')
+    fn = len(feats)
+    if fn == 1:
+        gr_spec = None
+        fix_xticklabels = False
+    elif fn == 2:
+        gr_spec = [1, 1]
+    elif fn == 3:
+        gr_spec = [2, 5, 5]
+    if axes is None:
+        fig, axes = plt.subplots(1, fn, sharey=True, figsize=(17, 5), gridspec_kw={'width_ratios': gr_spec})
+        try:
+            axes.flatten()
+        except AttributeError:
+            axes = [axes]
+    for i, f in enumerate(sorted(feats)):
+        fe = [x for x in dss['feature'].values if f in x]
+        dsf = dss['PI_mean'].sel(
+            feature=fe).reset_coords(
+            drop=True)
+        sorted_feat = natsorted([x for x in dsf.feature.values])
+        dsf = dsf.reindex(feature=sorted_feat)
+        print([x for x in dsf.feature.values])
+        # dsf = dss['PI_mean'].sel(
+        #     feature=fe).reset_coords(
+        #     drop=True)
+        dsf = dsf.to_dataset('scorer').to_dataframe(
+        ).reset_index(drop=True)
+        title = '{}'.format(f.upper())
+        dsf.plot.bar(ax=axes[i], title=title, rot=0, legend=False, zorder=20,
+                     width=.8)
+        dsf_sum = dsf.sum().tolist()
+        handles, labels = axes[i].get_legend_handles_labels()
+        labels = [
+            '{} ({:.1f})'.format(
+                x, y) for x, y in zip(
+                labels, dsf_sum)]
+        axes[i].legend(handles=handles, labels=labels, prop={'size': 10}, loc='upper left')
+        axes[i].set_ylabel('Scores')
+        axes[i].grid(axis='y', zorder=1)
+    if fix_xticklabels:
+        n = sum(['pwv' in x for x in dss.feature.values])
+        axes[0].xaxis.set_ticklabels('')
+        hrs = np.arange(-24, -24+n)
+        axes[1].set_xticklabels(hrs, rotation=30, ha="center", fontsize=12)
+        axes[2].set_xticklabels(hrs, rotation=30, ha="center", fontsize=12)
+        axes[1].set_xlabel('Hours prior to flood')
+        axes[2].set_xlabel('Hours prior to flood')
+        fig.tight_layout()
+    fig.suptitle('permutation importance scores for {} model split #{}'.format(model, split))
+    fig.subplots_adjust(top=0.904)
+    if save:
+        filename = 'permutation_importances_{}_split_{}_all_scorers_{}.png'.format(model, split, features)
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
+    return
+
+
 def plot_feature_importances_from_dss(
         dss,
         feat_dim='features', outer_dim='outer_split',
         features='pwv+pressure+doy', fix_xticklabels=True,
-        axes=None, save=True):
+        axes=None, save=True, ylim=[0, 12]):
     import matplotlib.pyplot as plt
     import numpy as np
     import seaborn as sns
+    from natsort import natsorted
     sns.set_palette('Dark2', 6)
     sns.set_style('whitegrid')
     sns.set_style('ticks')
@@ -1886,13 +2060,15 @@ def plot_feature_importances_from_dss(
             axes = [axes]
     for i, f in enumerate(sorted(feats)):
         fe = [x for x in dss['feature'].values if f in x]
-        print(fe)
-        # dsf = dss['feature_importances'].sel(
-        #     feature=fe).sel({outer_dim: max_score_split}).reset_coords(
-        #     drop=True)
         dsf = dss['feature_importances'].sel(
             feature=fe).reset_coords(
             drop=True)
+        # dsf = dss['PI_mean'].sel(
+        #     feature=fe).reset_coords(
+        #     drop=True)
+        sorted_feat = natsorted([x for x in dsf.feature.values])
+        print(sorted_feat)
+        dsf = dsf.reindex(feature=sorted_feat)
         dsf = dsf.to_dataset('scorer').to_dataframe(
         ).reset_index(drop=True) * 100
         title = '{}'.format(f.upper())
@@ -1907,6 +2083,8 @@ def plot_feature_importances_from_dss(
         axes[i].legend(handles=handles, labels=labels, prop={'size': 10}, loc='upper left')
         axes[i].set_ylabel('Feature importance [%]')
         axes[i].grid(axis='y', zorder=1)
+    if ylim is not None:
+        [ax.set_ylim(*ylim) for ax in axes]
     if fix_xticklabels:
         n = sum(['pwv' in x for x in dss.feature.values])
         axes[0].xaxis.set_ticklabels('')
@@ -2321,33 +2499,111 @@ def load_nested_CV_test_results_from_all_models(path=hydro_path, load_hyper=Fals
     return dss
 
 
-def plot_single_permutation_test_result(dss, feats=None,
-                                        ax=None, scorer='f1', model='MLP'):
+# def plot_all_permutation_test_results(dss, feats=None):
+#     import xarray as xr
+#     fg = xr.plot.FacetGrid(
+#         dss,
+#         col='scorer',
+#         row='model',
+#         sharex=True,
+#         sharey=True, figsize=(20, 20))
+#     for i in range(fg.axes.shape[0]):  # i is rows
+#         model = dss['model'].isel(model=i).item()
+#         for j in range(fg.axes.shape[1]):  # j is cols
+#             ax = fg.axes[i, j]
+#             scorer = dss['scorer'].isel(scorer=j).item()
+#             ax = plot_single_permutation_test_result(dss, feats=feats,
+#                                                      scorer=scorer,
+#                                                      model=model,
+#                                                      ax=ax)
+#     fg.fig.tight_layout()
+#     return fg
+
+
+def plot_permutation_test_results(dss, feats=None, fontsize=14,
+                                  save=True):
+                                        # ax=None, scorer='f1', model='MLP'):
     import matplotlib.pyplot as plt
     import seaborn as sns
+    from PW_from_gps_figures import get_legend_labels_handles_title_seaborn_histplot
     sns.set_style('whitegrid')
     sns.set_style('ticks')
     dss = dss.mean('outer_split')
+    cmap = sns.color_palette('tab10', n_colors=3)
     if feats is None:
         feats = ['pwv', 'pwv+pressure', 'pwv+pressure+doy']
     dst = dss.sel(features=feats)  # .reset_coords(drop=True)
-    df = dst['permutation_score'].to_dataframe()
-    df['permutations'] = df.index.droplevel(2).droplevel(1).droplevel(0)
-    df['scorer'] = df.index.droplevel(3).droplevel(1).droplevel(0)
-    df['features'] = df.index.droplevel(3).droplevel(2).droplevel(0)
-    df['model'] = df.index.droplevel(3).droplevel(2).droplevel(1)
+    df = dst[['permutation_score', 'true_score', 'pvalue']].to_dataframe()
+    df['permutations'] = df.index.get_level_values(2)
+    df['scorer'] = df.index.get_level_values(3)
+    df['features'] = df.index.get_level_values(0)
+    df['model'] = df.index.get_level_values(1)
     df['model'] = df['model'].str.replace('SVC', 'SVM')
-    df = df.melt(value_vars='permutation_score', id_vars=[
-        'features', 'model', 'scorer'], var_name='test_score')
-    df = df[df['model'] == model]
-    df = df[df['scorer'] == scorer]
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(6, 8))
-    sns.histplot(
-        df, x="value", hue="features", legend=True)
+    df = df.melt(value_vars=['permutation_score', 'true_score', 'pvalue'], id_vars=[
+        'features', 'model', 'scorer'], var_name='scores')
+    # df = df[df['model'] == model]
+    # df = df[df['scorer'] == scorer]
+    df_p = df[df['scores'] == 'permutation_score']
+    # if ax is None:
+    #     fig, ax = plt.subplots(figsize=(6, 8))
+    fg = sns.FacetGrid(df_p, col='scorer', row='model', legend_out=True,
+                       sharex=False)
+    fg.map_dataframe(sns.histplot, x="value", hue="features",
+                     legend=True, palette=cmap,
+                     stat='density', kde=True,
+                     element='bars', bins=10)
+    # pvals = dst.sel(scorer=scorer, model=model)[
+    #     'pvalue'].reset_coords(drop=True)
+    # pvals = pvals.values
+    # handles, labels, title = get_legend_labels_handles_title_seaborn_histplot(ax)
+    # new_labels = []
+    # for pval, label in zip(pvals, labels):
+    #     label += ' (p={:.1})'.format(pval)
+    #     new_labels.append(label)
+    # ax.legend(handles, new_labels, title=title)
+    df_t = df[df['scores'] == 'true_score']
+    for i in range(fg.axes.shape[0]):  # i is rows
+        model = dss['model'].isel(model=i).item()
+        if model == 'SVC':
+            model = 'SVM'
+        df_model = df_t[df_t['model'] == model]
+        for j in range(fg.axes.shape[1]):  # j is cols
+            scorer = dss['scorer'].isel(scorer=j).item()
+            df1 = df_model[df_model['scorer'] == scorer]
+            ax = fg.axes[i, j]
+            ymax = ax.get_ylim()[-1] - 0.2
+            for k, feat in enumerate(feats):
+                val = df1[df1['features']==feat]['value'].unique().item()
+                # print(i, val, feat, scorer, model)
+                ax.axvline(x=val, ymin=0, ymax=ymax, linestyle='--', color=cmap[k],
+                           label=feat)
+            handles, labels = ax.get_legend_handles_labels()
+            if 'hss' in scorer or 'tss' in scorer:
+                ax.set_xlim(-0.35, 0.6)
+            else:
+                ax.set_xlim(0.3, 0.8)
+                ax.set_xticks([0.3, 0.4, 0.5, 0.6, 0.7, 0.8])
+            # handles, labels, title = get_legend_labels_handles_title_seaborn_histplot(ax)
+            title = '{} | scorer={}'.format(model, scorer)
+            ax.set_title(title, fontsize=fontsize)
+    fg.set_ylabels('Density', fontsize=fontsize)
+    fg.set_xlabels('Score', fontsize=fontsize)
+    fg.fig.legend(handles=handles, labels=labels, prop={'size': fontsize}, edgecolor='k',
+                  framealpha=0.5, fancybox=True, facecolor='white',
+                  ncol=5, fontsize=fontsize, loc='upper center', bbox_to_anchor=(0.5, 1.005),
+                  bbox_transform=plt.gcf().transFigure)
+
+    # true_scores = dst.sel(scorer=scorer, model=model)['true_score']
+
     # dss['permutation_score'].plot.hist(ax=ax, bins=25, color=color)
-    ax.axvline(dss['true_score'].item(), linestyle='--', color=color)
-    return ax
+    # ymax = ax.get_ylim()[-1] - 0.2
+    # ax.vlines(x=true_scores.values, ymin=0, ymax=ymax, linestyle='--', color=cmap)
+    fg.fig.tight_layout()
+    fg.fig.subplots_adjust(top=0.92)
+    if save:
+        filename = 'permutation_test_results.png'
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
+    return fg
 
 
 def run_CV_nested_tests_on_all_features(path=hydro_path, gr_path=hydro_ml_path/'nested4',
