@@ -82,7 +82,8 @@ def compare_radio_and_wrf_massada(des_path=des_path, plot=True):
     return
 
 
-def compare_gnss_dsea_with_wrf(des_path=des_path, work_path=work_yuval, dsea_da=None, plot=True):
+def compare_gnss_dsea_with_wrf_radiometer(des_path=des_path, work_path=work_yuval,
+                                          dsea_da=None, plot=True):
     import xarray as xr
     from aux_gps import dim_intersection
     import matplotlib.pyplot as plt
@@ -101,14 +102,21 @@ def compare_gnss_dsea_with_wrf(des_path=des_path, work_path=work_yuval, dsea_da=
     gnss1517 = gnss.sel(time=slice('2014-08-15', '2014-08-16'))
     wrf79 = wrf.sel(time=slice('2014-08-07', '2014-08-08'))
     wrf1517 = wrf.sel(time=slice('2014-08-15', '2014-08-16'))
+    iwv_rad = read_radiometers(des_path)
+    rad79 = iwv_rad.sel(time=slice('2014-08-07', '2014-08-08'))
+    rad79.name = 'radiometer'
+    rad1517 = iwv_rad.sel(time=slice('2014-08-15', '2014-08-16'))
+    rad1517.name = 'radiometer'
 
     if plot:
         fig, axes = plt.subplots(1, 2, figsize=(15, 5))
         gnss79.to_dataframe()['gnss'].plot(ax=axes[1], lw=2)
         wrf79.to_dataframe()['wrf'].plot(ax=axes[1], lw=2)
+        rad79.to_dataframe()['radiometer'].plot(ax=axes[1], lw=2)
         gnss1517.to_dataframe()['gnss'].plot(ax=axes[0], lw=2)
         wrf1517.to_dataframe()['wrf'].plot(ax=axes[0], lw=2)
-        axes[0].set_ylim(10, 40)
+        rad1517.to_dataframe()['radiometer'].plot(ax=axes[0], lw=2)
+        axes[0].set_ylim(10, 45)
         axes[0].set_ylabel('PWV [mm]')
         axes[0].grid()
         axes[0].legend()
@@ -116,7 +124,7 @@ def compare_gnss_dsea_with_wrf(des_path=des_path, work_path=work_yuval, dsea_da=
         axes[1].set_ylabel('PWV [mm]')
         axes[1].grid()
         axes[1].legend()
-        fig.suptitle('WRF vs. GNSS PWV at DSEA station (31.037N, 35.369E), ~31 km south to massada st.')
+        fig.suptitle('WRF vs.radiometer GNSS vs. PWV at DSEA station (31.037N, 35.369E), ~31 km south to massada st.')
         fig.tight_layout()
     return
 
@@ -300,7 +308,7 @@ def assemble_WRF_pwv(path=des_path, work_path=work_yuval, radius=1):
     return wrf_pw
 
 
-def compare_WRF_GNSS_pwv(path=des_path, work_path=work_yuval, plot=True):
+def compare_WRF_GNSS_radiometer_pwv(path=des_path, work_path=work_yuval, plot=True):
     import xarray as xr
     import matplotlib.pyplot as plt
     import numpy as np
@@ -310,9 +318,12 @@ def compare_WRF_GNSS_pwv(path=des_path, work_path=work_yuval, plot=True):
         work_path / 'GNSS_PW_thresh_50_homogenized.nc')['dsea']
     # load WRF:
     wrf = xr.load_dataset(path / 'pwv_wrf_dsea_gnss_point_2014-08.nc')
+    # load radiometer:
+    radio = read_radiometers(path)
     ds = xr.Dataset()
     ds['WRF'] = wrf['pw']
     ds['GNSS'] = gnss
+    ds['Radiometer'] = radio
     ds = ds.reset_coords(drop=True)
     if plot:
         fig, ax = plt.subplots(figsize=(18, 5.5))
@@ -328,8 +339,11 @@ def compare_WRF_GNSS_pwv(path=des_path, work_path=work_yuval, plot=True):
                                                 color='tab:blue', marker='s', alpha=0.2)
         gnssln = plot_mean_with_fill_between_std(ds['GNSS'], grp='hour', mean_dim='time', ax=ax,
                                                  color='tab:orange', marker='o', alpha=0.2)
+        radioln = plot_mean_with_fill_between_std(ds['Radiometer'], grp='hour', mean_dim='time', ax=ax,
+                                                  color='tab:green', marker='o', alpha=0.2)
+
         ax.xaxis.set_ticks(np.arange(0, 24, 1))
-        ax.legend(wrfln+gnssln, ['WRF', 'GNSS'])
+        ax.legend(wrfln+gnssln+radioln, ['WRF', 'GNSS', 'Radiometer'])
         ax.grid()
         ax.set_ylabel('PWV [mm]')
         ax.set_xlabel('hour of the day [UTC]')
@@ -465,4 +479,110 @@ def compare_all_zwd(path=dsea_gipsy_path,
     ds = xr.merge(da_list)
     ds_dry = xr.merge(dry_list)
     return ds, ds_dry
+
+
+def read_radiometers(path=des_path):
+    from aux_gps import path_glob
+    import xarray as xr
+    files = path_glob(des_path, 'KIT_HATPRO_*.nc')
+    dsl = [xr.load_dataset(x) for x in files]
+    ds = xr.concat(dsl, 'time')
+    iwv = ds['iwv'].resample(time='5T').mean()
+    return iwv
+
+
+def read_kit_rs(path=des_path):
+    """read kit_rs nc files, but they reach up to 12 kms while
+    the original txt files for each profile goes up to 18 kms"""
+    from aux_gps import path_glob
+    import xarray as xr
+    files = path_glob(des_path, 'KIT_RS_*.nc')
+    dsl = [xr.load_dataset(x) for x in files]
+    ds = xr.concat(dsl, 'time')
+    ds['DewPoint'].attrs['units'] = 'degC'
+    return ds
+
+
+def calculate_pwv_from_kit_rs(path=des_path):
+    """ for kit_rs that go up to 12kms"""
+    from metpy.calc import precipitable_water
+    import xarray as xr
+    ds = read_kit_rs(path)
+    dew = ds['DewPoint']
+    P = ds['Pressure']
+    times = []
+    for dt in P.time:
+        d = dew.sel(time=dt)
+        p = P.sel(time=dt)
+        pwv = precipitable_water(p, d).magnitude
+        times.append(pwv)
+    pwv_rs = xr.DataArray(times, dims=['time'])
+    pwv_rs['time'] = P.time
+    pwv_rs.name = 'pwv'
+    pwv_rs.attrs['long_name'] = 'precipitable water'
+    pwv_rs.attrs['units'] = 'mm'
+    pwv_rs.attrs['action'] = 'proccesed by metpy.calc on KIT-RS data'
+    return pwv_rs
+
+
+def read_surface_pressure(path=des_path):
+    import pandas as pd
+    from aux_gps import path_glob
+    file = path_glob(path, 'EBS1_*_pressure.txt')[0]
+    df = pd.read_csv(file)
+    df['Time'] = pd.to_datetime(df['Time'], format='%d-%b-%Y %H:%M:%S')
+    df = df.set_index('Time')
+    df.index.name = 'time'
+    da = df.to_xarray()['Press']
+    return da
+
+
+def wrap_xr_metpy_pw(dewpt, pressure, bottom=None, top=None, verbose=False,
+                     cumulative=False):
+    from metpy.calc import precipitable_water
+    from metpy.units import units
+    import numpy as np
+    # try:
+    #     T_unit = dewpt.attrs['units']
+    #     assert T_unit == 'degC'
+    # except KeyError:
+    #     T_unit = 'degC'
+    #     if verbose:
+    #         print('assuming dewpoint units are degC...')
+    dew_values = dewpt.values * units('K')
+    try:
+        P_unit = pressure.attrs['units']
+        assert P_unit == 'hPa'
+    except KeyError:
+        P_unit = 'hPa'
+        if verbose:
+            print('assuming pressure units are hPa...')
+    if top is not None:
+        top_with_units = top * units(P_unit)
+    else:
+        top_with_units = None
+    if bottom is not None:
+        bottom_with_units = bottom * units(P_unit)
+    else:
+        bottom_with_units = None
+    pressure_values = pressure.values * units(P_unit)
+    if cumulative:
+        pw_list = []
+        # first value is nan:
+        pw_list.append(np.nan)
+        for pre_val in pressure_values[1:]:
+            if np.isnan(pre_val):
+                pw_list.append(np.nan)
+                continue
+            pw = precipitable_water(pressure_values, dew_values, bottom=None,
+                                    top=pre_val)
+            pw_units = pw.units.format_babel('~P')
+            pw_list.append(pw.magnitude)
+        pw = np.array(pw_list)
+        return pw, pw_units
+    else:
+        pw = precipitable_water(pressure_values, dew_values,
+                                bottom=bottom_with_units, top=top_with_units)
+        pw_units = pw.units.format_babel('~P')
+        return pw.magnitude, pw_units
 
