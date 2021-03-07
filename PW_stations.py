@@ -3468,7 +3468,28 @@ def produce_all_GNSS_PW_anomalies(load_path=work_yuval, thresh=50,
     return GNSS_pw_anom
 
 
-def perform_annual_harmonic_analysis_all_GNSS(path=work_yuval,
+def process_alt_GNSS_stations_and_save(path=work_yuval, minor_filtering=True):
+    import xarray as xr
+    from aux_gps import keep_iqr
+    from aux_gps import save_ncfile
+    alt = load_gipsyx_results(field_all='alt')
+    alts = [keep_iqr(alt[x], k=2) for x in alt]
+    alt = xr.merge(alts)
+    filename = 'GNSS_alt.nc'
+    save_ncfile(alt, path, filename)
+    filename = 'GNSS_alt_hourly.nc'
+    alt_h = alt.resample(time='H', keep_attrs=True).mean(keep_attrs=True)
+    save_ncfile(alt_h, path, filename)
+    filename = 'GNSS_alt_daily.nc'
+    alt_d = alt.resample(time='D', keep_attrs=True).mean(keep_attrs=True)
+    save_ncfile(alt_d, path, filename)
+    filename = 'GNSS_alt_monthly.nc'
+    alt_m = alt.resample(time='MS', keep_attrs=True).mean(keep_attrs=True)
+    save_ncfile(alt_m, path, filename)
+    return
+
+
+def perform_annual_harmonic_analysis_all_GNSS(path=work_yuval, field='PW',
                                               era5=False, n=6, keep_full_years=True):
     from aux_gps import harmonic_da_ts
     from aux_gps import save_ncfile
@@ -3476,9 +3497,9 @@ def perform_annual_harmonic_analysis_all_GNSS(path=work_yuval,
     import xarray as xr
     from aux_gps import anomalize_xr
     if era5:
-        pw = xr.load_dataset(path / 'GNSS_era5_monthly_PW.nc')
+        pw = xr.load_dataset(path / 'GNSS_era5_monthly_{}.nc'.format(field))
     else:
-        pw = xr.load_dataset(path / 'GNSS_PW_monthly_thresh_50.nc')
+        pw = xr.load_dataset(path / 'GNSS_{}_monthly_thresh_50.nc'.format(field))
     if keep_full_years:
         print('kept full years only')
         pw = pw.map(keep_full_years_of_monthly_mean_data, verbose=False)
@@ -3494,9 +3515,9 @@ def perform_annual_harmonic_analysis_all_GNSS(path=work_yuval,
     dss_all.attrs['field'] = 'PWV'
     dss_all.attrs['units'] = 'mm'
     if era5:
-        filename = 'GNSS_PW_ERA5_harmonics_annual.nc'
+        filename = 'GNSS_{}_ERA5_harmonics_annual.nc'.format(field)
     else:
-        filename = 'GNSS_PW_harmonics_annual.nc'
+        filename = 'GNSS_{}_harmonics_annual.nc'.format(field)
     save_ncfile(dss_all, path, filename)
     return dss_all
 
