@@ -27,6 +27,14 @@ hydro_st_name_dict = {25191: 'Lavan - new nizana road',
                       46150: 'Nekrot - Top',
                       60105: 'Yaelon - Kibutz Yahel',
                       60190: 'Solomon - Eilat'}
+
+best_hp_models_dict = {'SVC': {'kernel': 'rbf', 'C': 10, 'gamma': 0.001},
+                       'RF': {'max_depth': 7, 'max_features': 'auto',
+                              'min_samples_leaf': 1, 'min_samples_split': 5,
+                              'n_estimators': 400},
+                       'MLP': {'alpha': 0.0001, 'activation': 'tanh', 
+                       'hidden_layer_sizes': (100,), 'learning_rate': 'constant',
+                       'solver': 'lbfgs'}}
 # TODO: treat all pwv from events as follows:
 #    For each station:
 #    0) rolling mean to all pwv 1 hour
@@ -1504,6 +1512,18 @@ def plot_nested_CV_test_scores(dss, feats=None, fontsize=16,
     import seaborn as sns
     import matplotlib.pyplot as plt
 
+    def change_width(ax, new_value) :
+        for patch in ax.patches :
+            current_width = patch.get_width()
+            diff = current_width - new_value
+        
+            # we change the bar width
+            patch.set_width(new_value)
+        
+            # we recenter the bar
+            patch.set_x(patch.get_x() + diff * .5)
+
+
     def show_values_on_bars(axs, fs=12, fw='bold'):
         import numpy as np
         def _show_on_single_plot(ax):
@@ -1511,7 +1531,7 @@ def plot_nested_CV_test_scores(dss, feats=None, fontsize=16,
                 _x = p.get_x() + p.get_width() / 2
                 _y = p.get_y() + p.get_height()
                 value = '{:.2f}'.format(p.get_height())
-                ax.text(_x, _y, value, ha="center",
+                ax.text(_x, _y, value, ha="right",
                         fontsize=fs, fontweight=fw, zorder=20)
 
         if isinstance(axs, np.ndarray):
@@ -1519,6 +1539,8 @@ def plot_nested_CV_test_scores(dss, feats=None, fontsize=16,
                 _show_on_single_plot(ax)
         else:
             _show_on_single_plot(axs)
+
+    dss = dss.sortby('model', ascending=False)
     if feats is None:
         feats = ['pwv', 'pwv+pressure', 'pwv+pressure+doy']
     dst = dss.sel(features=feats)  # .reset_coords(drop=True)
@@ -1534,10 +1556,17 @@ def plot_nested_CV_test_scores(dss, feats=None, fontsize=16,
     sns.set(font_scale=1.5)
     sns.set_style('whitegrid')
     sns.set_style('ticks')
-    cmap = sns.color_palette('tab10', n_colors=3)
-    fg = sns.FacetGrid(data=df, row='model', col='scorer', height=4, aspect=0.8)
+    cmap = sns.color_palette('tab10', n_colors=len(feats))
+    cmap = ['tab:purple', 'tab:red', 'tab:blue', 'tab:orange', 'tab:green']
+    fg = sns.FacetGrid(data=df, row='model', col='scorer', height=4, aspect=0.9)
+    # fg.map_dataframe(sns.stripplot, x="test_score", y="score", hue="features",
+    #                  data=df, dodge=True, alpha=1, zorder=1, palette=cmap)
+    # fg.map_dataframe(sns.pointplot, x="test_score", y="score", hue="features",
+    #                  data=df, dodge=True, join=False, palette=cmap,
+    #                  markers="o", scale=.75, ci=None)
     fg.map_dataframe(sns.barplot, x='test_score', y="score", hue='features',
-                     ci='sd', capsize=0.25, errwidth=1.5, palette=cmap)
+                      ci='sd', capsize=None, errwidth=2, errcolor='k',
+                      palette=cmap, dodge=True)
     # g = sns.catplot(x='test_score', y="score", hue='features',
     #                 col="scorer", row='model', ci='sd',
     #                 data=df, kind="bar", capsize=0.25,
@@ -1547,7 +1576,7 @@ def plot_nested_CV_test_scores(dss, feats=None, fontsize=16,
     fg.set_ylabels('score')
     [x.grid(True) for x in fg.axes.flatten()]
     handles, labels = fg.axes[0, 0].get_legend_handles_labels()
-    show_values_on_bars(fg.axes, fs=fontsize)
+    show_values_on_bars(fg.axes, fs=fontsize-2)
     for i in range(fg.axes.shape[0]):  # i is rows
         model = dss['model'].isel(model=i).item()
         if model == 'SVC':
@@ -1558,6 +1587,7 @@ def plot_nested_CV_test_scores(dss, feats=None, fontsize=16,
             title = '{} | scorer={}'.format(model, scorer)
             ax.set_title(title, fontsize=fontsize)
             ax.set_xlabel('')
+            change_width(ax, 0.110)
     fg.set_xlabels(' ')
     fg.fig.legend(handles=handles, labels=labels, prop={'size': fontsize}, edgecolor='k',
                   framealpha=0.5, fancybox=True, facecolor='white',
@@ -1916,6 +1946,7 @@ def plot_ROC_from_dss(dss, feats=None, fontsize=16, save=True):
     cmap = sns.color_palette('tab10', n_colors=3)
     if feats is None:
         feats = ['pwv', 'pwv+pressure', 'pwv+pressure+doy']
+    dss = dss.sortby('model', ascending=False)
     dst = dss.sel(features=feats)  # .reset_coords(drop=True)
     df = dst['TPR'].to_dataframe()
     df['FPR'] = df.index.get_level_values(4)
@@ -2551,14 +2582,15 @@ def load_nested_CV_test_results_from_all_models(path=hydro_path, load_hyper=Fals
 #     return fg
 
 
-def plot_permutation_test_results(dss, feats=None, fontsize=14,
-                                  save=True):
+def plot_permutation_test_results_from_dss(dss, feats=None, fontsize=14,
+                                           save=True):
                                         # ax=None, scorer='f1', model='MLP'):
     import matplotlib.pyplot as plt
     import seaborn as sns
     from PW_from_gps_figures import get_legend_labels_handles_title_seaborn_histplot
     sns.set_style('whitegrid')
     sns.set_style('ticks')
+    dss = dss.sortby('model', ascending=False)
     dss = dss.mean('outer_split')
     cmap = sns.color_palette('tab10', n_colors=3)
     if feats is None:
@@ -2638,8 +2670,9 @@ def plot_permutation_test_results(dss, feats=None, fontsize=14,
 
 
 def run_CV_nested_tests_on_all_features(path=hydro_path, gr_path=hydro_ml_path/'nested4',
-                                        verbose=False, model_name='SVC',
-                                        savepath=None, drop_hours=None, PI=30, Ptest=None):
+                                        verbose=False, model_name='SVC', params=None,
+                                        savepath=None, drop_hours=None, PI=30, Ptest=None,
+                                        suffix=None):
     """returns the nested CV test results for all scorers, features and models,
     if model is chosen, i.e., model='MLP', returns just this model results
     and its hyper-parameters per each outer split"""
@@ -2652,7 +2685,7 @@ def run_CV_nested_tests_on_all_features(path=hydro_path, gr_path=hydro_ml_path/'
     for feat in feats:
         print('Running CV on feature {}'.format(feat))
         ds = CV_test_after_GridSearchCV(path=path, gr_path=gr_path,
-                                        model_name=model_name,
+                                        model_name=model_name, params=params,
                                         features=feat, PI=PI, Ptest=Ptest,
                                         verbose=verbose, drop_hours=drop_hours)
         feat_list.append(ds)
@@ -2661,9 +2694,12 @@ def run_CV_nested_tests_on_all_features(path=hydro_path, gr_path=hydro_ml_path/'
     dss = dsf
     dss.attrs['model'] = model_name
     if Ptest is not None:
-        filename = 'nested_CV_test_results_{}_all_features_with_hyper_permutation_tests.nc'.format(model_name)
+        filename = 'nested_CV_test_results_{}_all_features_with_hyper_permutation_tests'.format(model_name)
     else:
-        filename = 'nested_CV_test_results_{}_all_features_with_hyper.nc'.format(model_name)
+        filename = 'nested_CV_test_results_{}_all_features_with_hyper'.format(model_name)
+    if suffix is not None:
+        filename += '_{}'.format(suffix)
+    filename += '.nc'
     if savepath is not None:
         save_ncfile(dss, savepath, filename)
     return dss
@@ -2730,7 +2766,7 @@ def prepare_X_y_for_holdout_test(features='pwv+doy', model_name='SVC',
 
 
 def CV_test_after_GridSearchCV(path=hydro_path, gr_path=hydro_ml_path/'nested4',
-                               model_name='SVC', features='pwv',
+                               model_name='SVC', features='pwv', params=None,
                                verbose=False, drop_hours=None, PI=None, Ptest=None):
     """do cross_validate with all scorers on all gridsearchcv folds,
     reads the nested outer splits CV file in gr_path"""
@@ -2750,6 +2786,9 @@ def CV_test_after_GridSearchCV(path=hydro_path, gr_path=hydro_ml_path/'nested4',
         ds = run_permutation_classifier_test(X, y, cv, param_df_dict, Ptest=Ptest,
                                              model_name=model_name, verbose=verbose)
         return ds
+    if params is not None:
+        if verbose:
+            print('running with custom hyper parameters: ', params)
     outer_bests = []
     outer_rocs = []
     fis = []
@@ -2762,6 +2801,9 @@ def CV_test_after_GridSearchCV(path=hydro_path, gr_path=hydro_ml_path/'nested4',
         y_test = y[test_index]
         outer_split = '{}-{}'.format(i+1, cv.n_splits)
         best_params_df = param_df_dict.get(outer_split)
+        if params is not None:
+            for key, value in params.items():
+                best_params_df[key] = value
         if model_name == 'RF':
             bdf, roc, fi, pi_mean, pi_std = run_test_on_CV_split(X_train, y_train, X_test, y_test,
                                                                  best_params_df, PI=PI, Ptest=Ptest,
