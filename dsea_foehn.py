@@ -12,12 +12,55 @@ ims_path = work_yuval / 'IMS_T'
 dsea_gipsy_path = work_yuval / 'dsea_gipsyx'
 
 
-def calculate_zenith_hydrostatic_delay_dsea(ims_path=ims_path):
+def produce_final_dsea_pwv(ims_station=None, savepath=None, use_pressure=True):
+    """use ims_station='SEDOM' to get close ts, pressure"""
+    import xarray as xr
+    from aux_gps import save_ncfile
+    if ims_station is not None:
+        ts = xr.open_dataset(ims_path/'IMS_TD_israeli_10mins.nc')[ims_station]
+        pres = xr.open_dataset(ims_path/'IMS_BP_israeli_10mins.nc')[ims_station]
+        ts.load()
+        pres.load()
+        ts = ts.resample(time='5T').ffill()
+        pres = pres.resample(time='5T', keep_attrs=True).ffill()
+    if use_pressure:
+        wetz = produce_wetz_dsea_from_ztd(pres=pres)
+    else:
+        p = dsea_gipsy_path / 'results-{}'.format('GPT2')
+        wetz = read_all_final_tdps_dsea(return_mean=True,
+                                        dryz=False)
+    pwv = produce_pwv_from_zwd_with_ts_tm_from_deserve(ts=ts, zwd=wetz)
+    pwv.attrs['units'] = 'mm'
+    pwv.attrs['long_name'] = 'precipitable water vapor'
+    pwv.name = 'pwv'
+    pwv.attrs['action'] = 'corrected wetz using surface pressure and ts-tm from radiosonde'
+    if savepath is not None:
+        if ims_station is not None:
+            filename = 'DSEA_PWV_{}.nc'.format(ims_station)
+            save_ncfile(pwv, savepath, filename)
+    return pwv
+
+
+def produce_wetz_dsea_from_ztd(path=dsea_gipsy_path,
+                               ims_path=ims_path, pres=None,
+                               solution='GPT2'):
+    p = path / 'results-{}'.format(solution)
+    wetz = read_all_final_tdps_dsea(path=p, return_mean=True,
+                                    dryz=False)
+    dryz = get_dryz_from_one_station(p)
+    ztd = wetz + dryz.resample(time='5T').ffill()
+    zhd = calculate_zenith_hydrostatic_delay_dsea(ims_path, pres)
+    wetz = ztd - zhd
+    return wetz
+
+
+def calculate_zenith_hydrostatic_delay_dsea(ims_path=ims_path, pres=None):
     from PW_stations import calculate_ZHD
     from PW_stations import produce_geo_gnss_solved_stations
     from aux_gps import xr_reindex_with_date_range
     import xarray as xr
-    pres = xr.open_dataset(ims_path / 'IMS_BP_israeli_10mins.nc')['SEDOM']
+    if pres is None:
+        pres = xr.open_dataset(ims_path / 'IMS_BP_israeli_10mins.nc')['SEDOM']
     p_sta_ht_km = pres.attrs['station_alt'] / 1000
     df = produce_geo_gnss_solved_stations(plot=False)
     lat = df.loc['dsea', 'lat']
@@ -29,8 +72,9 @@ def calculate_zenith_hydrostatic_delay_dsea(ims_path=ims_path):
     return zhd
 
 
-def calibrate_zwd_with_ts_tm_from_deserve(path=work_yuval, des_path=des_path,
-                                          ims_path=ims_path, zwd=None):
+def produce_pwv_from_zwd_with_ts_tm_from_deserve(path=work_yuval,
+                                                 des_path=des_path, ts=None,
+                                                 ims_path=ims_path, zwd=None):
     import xarray as xr
     from PW_stations import ml_models_T_from_sounding
     from PW_stations import produce_kappa_ml_with_cats
@@ -42,7 +86,8 @@ def calibrate_zwd_with_ts_tm_from_deserve(path=work_yuval, des_path=des_path,
     else:
         dsea_zwd = xr.open_dataset(path / 'ZWD_unselected_israel_1996-2020.nc')['dsea']
         dsea_zwd.load()
-    ts = xr.open_dataset(ims_path / 'GNSS_5mins_TD_ALL_1996_2020.nc')['dsea']
+    if ts is None:
+        ts = xr.open_dataset(ims_path / 'GNSS_5mins_TD_ALL_1996_2020.nc')['dsea']
     k, dk = produce_kappa_ml_with_cats(ts, mda=mda, model_name='TSEN')
     dsea = k * dsea_zwd
     return dsea
@@ -86,6 +131,7 @@ def compare_gnss_dsea_with_wrf_radiometer(des_path=des_path, work_path=work_yuva
                                           dsea_da=None, plot=True):
     import xarray as xr
     from aux_gps import dim_intersection
+    import pandas as pd
     import matplotlib.pyplot as plt
     if dsea_da is not None:
         gnss = dsea_da
@@ -116,11 +162,13 @@ def compare_gnss_dsea_with_wrf_radiometer(des_path=des_path, work_path=work_yuva
         gnss1517.to_dataframe()['gnss'].plot(ax=axes[0], lw=2)
         wrf1517.to_dataframe()['wrf'].plot(ax=axes[0], lw=2)
         rad1517.to_dataframe()['radiometer'].plot(ax=axes[0], lw=2)
-        axes[0].set_ylim(10, 45)
+        axes[0].set_ylim(0, 50)
         axes[0].set_ylabel('PWV [mm]')
         axes[0].grid()
         axes[0].legend()
-        axes[1].set_ylim(10, 40)
+        # axes[0].set_xlim(pd.to_datetime('2014-08-16T13:00:00'), pd.to_datetime('2014-08-16T19:00:00'))
+        axes[1].set_ylim(0, 50)
+        # axes[1].set_xlim(pd.to_datetime('2014-08-08T13:00:00'), pd.to_datetime('2014-08-08T19:00:00'))
         axes[1].set_ylabel('PWV [mm]')
         axes[1].grid()
         axes[1].legend()
@@ -487,7 +535,8 @@ def read_radiometers(path=des_path):
     files = path_glob(des_path, 'KIT_HATPRO_*.nc')
     dsl = [xr.load_dataset(x) for x in files]
     ds = xr.concat(dsl, 'time')
-    iwv = ds['iwv'].resample(time='5T').mean()
+    ds = ds.sortby('time')
+    iwv = ds['iwv'].resample(time='5T', keep_attrs=True).mean(keep_attrs=True)
     return iwv
 
 
@@ -525,15 +574,25 @@ def calculate_pwv_from_kit_rs(path=des_path):
     return pwv_rs
 
 
-def read_surface_pressure(path=des_path):
+def read_surface_pressure(path=des_path, dem_path=work_yuval/'AW3D30'):
+    """taken from ein gedi spa 31.417313616189308, 35.378962961491474"""
     import pandas as pd
     from aux_gps import path_glob
+    from aux_gps import get_unique_index
+    import xarray as xr
+    awd = xr.open_rasterio(dem_path / 'israel_dem.tif')
+    awd = awd.squeeze(drop=True)
+    alt = awd.sel(x=35.3789,y=31.4173,method='nearest').item()
     file = path_glob(path, 'EBS1_*_pressure.txt')[0]
     df = pd.read_csv(file)
     df['Time'] = pd.to_datetime(df['Time'], format='%d-%b-%Y %H:%M:%S')
     df = df.set_index('Time')
     df.index.name = 'time'
     da = df.to_xarray()['Press']
+    da = get_unique_index(da)
+    da.attrs['station_alt'] = alt
+    da.attrs['lat'] = 31.4173
+    da.attrs['lon'] = 35.3789
     return da
 
 
