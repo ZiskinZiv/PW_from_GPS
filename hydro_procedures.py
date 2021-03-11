@@ -2138,6 +2138,7 @@ def plot_feature_importances_from_dss(
         #     feature=fe).reset_coords(
         #     drop=True)
         sorted_feat = natsorted([x for x in dsf.feature.values])
+        # sorted_feat = [x for x in dsf.feature.values]
         print(sorted_feat)
         dsf = dsf.reindex(feature=sorted_feat)
         dsf = dsf.to_dataset('scorer').to_dataframe(
@@ -2437,6 +2438,38 @@ def plot_ROC_PR_curve_from_dss(
     # ax.legend(handles=handles, labels=labels, loc="lower right",
     #           fontsize=fontsize)
     return ax
+
+
+def load_cv_splits_from_pkl(savepath):
+    import joblib
+    from aux_gps import path_glob
+    file = path_glob(savepath, 'CV_inds_*.pkl')[0]
+    n_splits = int(file.as_posix().split('/')[-1].split('_')[2])
+    shuffle = file.as_posix().split('/')[-1].split('.')[0].split('=')[-1]
+    cv_dict = joblib.load(file)
+    spl = len([x for x in cv_dict.keys()])
+    assert spl == n_splits
+    print('loaded {} with {} splits.'.format(file, n_splits))
+    return cv_dict
+
+
+def save_cv_splits_to_dict(X, y, cv, train_key='train', test_key='test',
+                           savepath=None):
+    import joblib
+    cv_dict = {}
+    for i, (train, test) in enumerate(cv.split(X, y)):
+        cv_dict[i+1] = {train_key: train, test_key: test}
+    # check for completness:
+    all_train = [x['train'] for x in cv_dict.values()]
+    flat_train = set([item for sublist in all_train for item in sublist])
+    all_test = [x['test'] for x in cv_dict.values()]
+    flat_test = set([item for sublist in all_test for item in sublist])
+    assert flat_test == flat_train
+    if savepath is not None:
+        filename = 'CV_inds_{}_splits_shuffle={}.pkl'.format(cv.n_splits, cv.shuffle)
+        joblib.dump(cv_dict, savepath / filename)
+        print('saved {} to {}.'.format(filename, savepath))
+    return cv_dict
 
 
 def plot_many_ROC_curves(model, X, y, name='', color='b', ax=None,
@@ -2786,9 +2819,10 @@ def CV_test_after_GridSearchCV(path=hydro_path, gr_path=hydro_ml_path/'nested4',
     reads the nested outer splits CV file in gr_path"""
     import xarray as xr
     import numpy as np
-    cv = read_cv_params_and_instantiate(gr_path/'CV_outer.csv')
+    # cv = read_cv_params_and_instantiate(gr_path/'CV_outer.csv')
+    cv_dict = load_cv_splits_from_pkl(gr_path)
     if verbose:
-        print(cv)
+        print(cv_dict)
     param_df_dict = load_one_gridsearchcv_object(path=gr_path,
                                                  cv_type='nested',
                                                  features=features,
@@ -2798,7 +2832,7 @@ def CV_test_after_GridSearchCV(path=hydro_path, gr_path=hydro_ml_path/'nested4',
                                         drop_hours=drop_hours)
     if Ptest is not None:
         print('Permutation Test is in progress!')
-        ds = run_permutation_classifier_test(X, y, cv, param_df_dict, Ptest=Ptest,
+        ds = run_permutation_classifier_test(X, y, 4, param_df_dict, Ptest=Ptest,
                                              model_name=model_name, verbose=verbose)
         return ds
     if params is not None:
@@ -2809,12 +2843,19 @@ def CV_test_after_GridSearchCV(path=hydro_path, gr_path=hydro_ml_path/'nested4',
     fis = []
     pi_means = []
     pi_stds = []
-    for i, (train_index, test_index) in enumerate(cv.split(X, y)):
-        X_train = X[train_index]
-        y_train = y[train_index]
-        X_test = X[test_index]
-        y_test = y[test_index]
-        outer_split = '{}-{}'.format(i+1, cv.n_splits)
+    n_splits = len([x for x in cv_dict.keys()])
+    for split, tt in cv_dict.items():
+        X_train = X[tt['train']]
+        y_train = y[tt['train']]
+        X_test = X[tt['test']]
+        y_test = y[tt['test']]
+        outer_split = '{}-{}'.format(split, n_splits)
+    # for i, (train_index, test_index) in enumerate(cv.split(X, y)):
+    #     X_train = X[train_index]
+    #     y_train = y[train_index]
+    #     X_test = X[test_index]
+    #     y_test = y[test_index]
+    #     outer_split = '{}-{}'.format(i+1, cv.n_splits)
         best_params_df = param_df_dict.get(outer_split)
         if params is not None:
             for key, value in params.items():
@@ -2853,7 +2894,7 @@ def CV_test_after_GridSearchCV(path=hydro_path, gr_path=hydro_ml_path/'nested4',
     best_da = xr.concat(outer_bests, 'outer_split')
     roc_da = xr.concat(outer_rocs, 'outer_split')
     best = xr.merge([best_da, roc_da])
-    best['outer_split'] = np.arange(1, cv.n_splits + 1)
+    best['outer_split'] = np.arange(1, n_splits + 1)
     if model_name == 'RF':
         fi_da = xr.concat(fis, 'outer_split')
         best['feature_importances'] = fi_da
@@ -2942,6 +2983,8 @@ def run_test_on_CV_split(X_train, y_train, X_test, y_test, param_df,
         sk_model.set_params(**params)
         sk_model.fit(X_train, y_train)
         if hasattr(sk_model, 'feature_importances_'):
+            # print(X_train['feature'])
+            # input('press any key')
             FI = xr.DataArray(sk_model.feature_importances_, dims=['feature'])
             FI['feature'] = X_train['feature']
             fi_list.append(FI)
@@ -3122,29 +3165,51 @@ def read_one_gridsearchcv_object(gr):
     """read one gridsearchcv multimetric object and
     get the best params, best mean/std scores"""
     import pandas as pd
-    # param grid dict:
-    params = gr.param_grid
-    # scorer names:
-    scoring = [x for x in gr.scoring.keys()]
-    # df:
-    df = pd.DataFrame().from_dict(gr.cv_results_)
-    # produce multiindex from param_grid dict:
-    param_names = [x for x in params.keys()]
-    # unpack param_grid vals to list of lists:
-    pro = [[y for y in x] for x in params.values()]
-    ind = pd.MultiIndex.from_product((pro), names=param_names)
-    df.index = ind
+    # first get all the scorers used:
+    scorers = [x for x in gr.scorer_.keys()]
+    # now loop over the scorers:
     best_params = []
     best_mean_scores = []
     best_std_scores = []
-    for scorer in scoring:
-        best_params.append(df[df['rank_test_{}'.format(scorer)]==1]['mean_test_{}'.format(scorer)].index[0])
-        best_mean_scores.append(df[df['rank_test_{}'.format(scorer)]==1]['mean_test_{}'.format(scorer)].iloc[0])
-        best_std_scores.append(df[df['rank_test_{}'.format(scorer)]==1]['std_test_{}'.format(scorer)].iloc[0])
-    best_df = pd.DataFrame(best_params, index=scoring, columns=param_names)
+    for scorer in scorers:
+        df_mean = pd.concat([pd.DataFrame(gr.cv_results_["params"]), pd.DataFrame(
+            gr.cv_results_["mean_test_{}".format(scorer)], columns=[scorer])], axis=1)
+        df_std = pd.concat([pd.DataFrame(gr.cv_results_["params"]), pd.DataFrame(
+            gr.cv_results_["std_test_{}".format(scorer)], columns=[scorer])], axis=1)
+        # best index = highest score:
+        best_ind = df_mean[scorer].idxmax()
+        best_mean_scores.append(df_mean.iloc[best_ind][scorer])
+        best_std_scores.append(df_std.iloc[best_ind][scorer])
+        best_params.append(df_mean.iloc[best_ind].to_frame().T.iloc[:, :-1])
+    best_df = pd.concat(best_params)
     best_df['mean_score'] = best_mean_scores
     best_df['std_score'] = best_std_scores
+    best_df.index = scorers
     return best_df
+        
+    # # param grid dict:
+    # params = gr.param_grid
+    # # scorer names:
+    # scoring = [x for x in gr.scoring.keys()]
+    # # df:
+    # df = pd.DataFrame().from_dict(gr.cv_results_)
+    # # produce multiindex from param_grid dict:
+    # param_names = [x for x in params.keys()]
+    # # unpack param_grid vals to list of lists:
+    # pro = [[y for y in x] for x in params.values()]
+    # ind = pd.MultiIndex.from_product((pro), names=param_names)
+    # df.index = ind
+    # best_params = []
+    # best_mean_scores = []
+    # best_std_scores = []
+    # for scorer in scoring:
+    #     best_params.append(df[df['rank_test_{}'.format(scorer)]==1]['mean_test_{}'.format(scorer)].index[0])
+    #     best_mean_scores.append(df[df['rank_test_{}'.format(scorer)]==1]['mean_test_{}'.format(scorer)].iloc[0])
+    #     best_std_scores.append(df[df['rank_test_{}'.format(scorer)]==1]['std_test_{}'.format(scorer)].iloc[0])
+    # best_df = pd.DataFrame(best_params, index=scoring, columns=param_names)
+    # best_df['mean_score'] = best_mean_scores
+    # best_df['std_score'] = best_std_scores
+    # return best_df, best_df_1
 
 
 def process_gridsearch_results(GridSearchCV, model_name,
@@ -4748,6 +4813,7 @@ class ML_Classifier_Switcher(object):
                                'hidden_layer_sizes': [(50, 50, 50), (50, 100, 50), (100,)],
                                'learning_rate': ['constant', 'adaptive'],
                                'solver': ['adam', 'lbfgs', 'sgd']}
+            #(1,),(2,),(3,),(4,),(5,),(6,),(7,),(8,),(9,),(10,),(11,), (12,),(13,),(14,),(15,),(16,),(17,),(18,),(19,),(20,),(21,)
         return MLPClassifier(random_state=42, max_iter=200)
 
     def RF(self):
