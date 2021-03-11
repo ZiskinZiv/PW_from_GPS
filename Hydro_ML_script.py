@@ -56,7 +56,7 @@ def main_hydro_ML(args):
     # from hydro_procedures import produce_X_y_from_list
     from sklearn.model_selection import StratifiedKFold
     from hydro_procedures import combine_pos_neg_from_nc_file
-    from hydro_procedures import save_cv_params_to_file
+    from hydro_procedures import save_cv_splits_to_dict
     from hydro_procedures import drop_hours_in_pwv_pressure_features
     # from hydro_procedures import select_features_from_X
     # from hydro_procedures import nested_cross_validation_procedure
@@ -148,7 +148,8 @@ def main_hydro_ML(args):
     # if args.cv_type == 'nested':
     outer_cv = StratifiedKFold(shuffle=True, n_splits=outer_splits,
                                random_state=seed)
-    save_cv_params_to_file(outer_cv, savepath, 'CV_outer')
+    save_cv_splits_to_dict(X, y, outer_cv, savepath=savepath)
+    # save_cv_params_to_file(outer_cv, savepath, 'CV_outer')
     total_cnt = len(features)
     for feature in features:
         cnt += 1
