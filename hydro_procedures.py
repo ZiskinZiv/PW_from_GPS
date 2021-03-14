@@ -1137,6 +1137,10 @@ def plot_hyper_parameters_heatmaps_from_nested_CV_model(path=hydro_path, model_n
     for i, da in enumerate(ds):
         df = ds[da].reset_coords(drop=True).to_dataset('scorer').to_dataframe()
         df.index.name = 'Outer Split'
+        try:
+            df = df.astype(float).round(2)
+        except ValueError:
+            pass
         cmap = cmap_hp_dict.get(da, 'Set1')
         plot_heatmap_for_hyper_parameters_df(df, ax=axes[i], title=da, cmap=cmap)
     fig.tight_layout()
