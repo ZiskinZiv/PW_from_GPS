@@ -4100,7 +4100,8 @@ def save_PPP_field_unselected_data_and_errors(savepath=None, savename='israel',
 
 
 def calculate_long_term_trend_from_gnss_station(station='tela', var='alt',
-                                                times=None, plot=True):
+                                                times=None, plot=True,
+                                                anomalize='DOY'):
     from aux_gps import linear_fit_using_scipy_da_ts
     from aux_gps import anomalize_xr
     from aux_gps import keep_iqr
@@ -4112,8 +4113,14 @@ def calculate_long_term_trend_from_gnss_station(station='tela', var='alt',
         time_dim = list(set(da.dims))[0]
         da = da.sel({time_dim: slice(*times)})
     da = keep_iqr(da, k=2)
-    da_anoms = anomalize_xr(da, 'DOY')
-    # da_anoms_mm = da_anoms.resample(time='MS', keep_attrs=True).mean(keep_attrs=True)
+    if anomalize is not None:
+        if anomalize == 'mean':
+            mean_da = da.mean('time').values
+            da_anoms = da - mean_da
+        else:
+            da_anoms = anomalize_xr(da, anomalize)
+    else:
+        da_anoms = da
     # use linear_fit_using_scipy_da_ts only with days!
     # now do lat[deg]:
     if var == 'lon':
@@ -4122,70 +4129,118 @@ def calculate_long_term_trend_from_gnss_station(station='tela', var='alt',
         factor = np.cos(np.deg2rad(lon0)) * one_degree_at_eq
         # convert factor to cm:
         da_anoms_in_cm = da_anoms * factor * 1e5
+        name = '{}_east'.format(station)
     elif var == 'lat':
         one_degree_in_km = 110.574
         da_anoms_in_cm = da_anoms * one_degree_in_km * 1e5
+        name = '{}_north'.format(station)
     else:
         da_anoms_in_cm = da_anoms * 100
-
+        name = 'Altitude'
     tds, resd = linear_fit_using_scipy_da_ts(da_anoms_in_cm, plot=plot,
                                              slope_factor=3652.5, units='cm/decade')
-    ax = plt.gca()
-    ax.set_title('{} station long term {}'.format(station.upper(), var))
-    ax.set_ylabel('{} [cm]'.format(var))
-    return tds, resd
-
-
-def get_long_trends_from_gnss_station(station='tela', modelname='LR',
-                                      plot=True, times=None):
-    import xarray as xr
-    import numpy as np
-    from aux_gps import plot_tmseries_xarray
-    # dont try anonther model than LR except for lower-sampled data
-    ds = load_gipsyx_results(station, sample_rate='1H', plot_fields=None)
-    if ds is None:
-        raise FileNotFoundError
-    # first do altitude [m]:
-    if times is not None:
-        time_dim = list(set(ds.dims))[0]
-        ds = ds.sel({time_dim: slice(*times)})
-    da_alt = ML_fit_model_to_tmseries(ds['alt'], modelname=modelname,
-                                      plot=False)
-    years = da_alt.attrs['total_years']
-    meters_per_year = da_alt.attrs['slope_per_year']
-    da_alt.attrs['trend>mm_per_year'] = 1000.0 * meters_per_year
-    # now do lat[deg]:
-    one_degree_at_eq = 111.32  # km
-    lat0 = ds['lat'].dropna('time')[0].values.item()
-    factor = np.cos(np.deg2rad(lat0)) * one_degree_at_eq
-    da_lat = ML_fit_model_to_tmseries(ds['lat'], modelname=modelname,
-                                      plot=False)
-    degs_per_year = da_lat.attrs['slope_per_year']
-    da_lat.attrs['trend>cm_per_year'] = factor * 1e5 * degs_per_year
-    da_lon = ML_fit_model_to_tmseries(ds['lon'], modelname=modelname,
-                                      plot=False)
-    degs_per_year = da_lon.attrs['slope_per_year']
-    da_lon.attrs['trend>cm_per_year'] = factor * 1e5 * degs_per_year
-    rds = xr.Dataset()
-    # the following attrs are being read to israeli_gnss_stations procedure
-    # above and used in its dataframe, so don't touch these attrs:
-    rds['alt'] = ds['alt']
-    rds['lat'] = ds['lat']
-    rds['lon'] = ds['lon']
-    rds['alt_trend'] = da_alt
-    rds['lat_trend'] = da_lat
-    rds['lon_trend'] = da_lon
-    rds.attrs['lat_trend>cm_per_year'] = rds['lat_trend'].attrs['trend>cm_per_year']
-    rds.attrs['lon_trend>cm_per_year'] = rds['lon_trend'].attrs['trend>cm_per_year']
-    rds.attrs['alt_trend>mm_per_year'] = rds['alt_trend'].attrs['trend>mm_per_year']
-    rds.attrs['years'] = years
-    rds.attrs['station'] = station
-    rds.attrs['lat'] = ds['lat'].dropna('time')[0].values.item()
-    rds.attrs['lon'] = ds['lon'].dropna('time')[0].values.item()
-    rds.attrs['alt'] = ds['alt'].dropna('time')[0].values.item()
     if plot:
-        plot_tmseries_xarray(rds)
-    return rds
+        ax = plt.gca()
+        ax.set_title('{} station long term {}'.format(station.upper(), var))
+        ax.set_ylabel('{} [cm]'.format(var))
+    da_anoms_mm = da_anoms_in_cm.resample(time='MS', keep_attrs=True).mean(keep_attrs=True)
+    da_anoms_mm.name = name
+    da_anoms_mm.attrs['units'] = 'cm'
+    da_anoms_mm.attrs['trend'] = resd['slope']
+    da_anoms_mm.attrs['trend_units'] = 'cm/decade'
+    da_anoms_mm.attrs['ci_95'] = (resd['slope_hi']-resd['slope_lo'])/2
+    # if anomalize == 'mean':
+    #     da_anoms_mm.attrs['mean'] = mean_da
+    return tds, resd, da_anoms_mm
+
+
+
+def produce_all_lat_lon_long_term_trends():
+    import xarray as xr
+    from aux_gps import save_ncfile
+    df = produce_geo_gnss_solved_stations(plot=False)
+    stns = [x for x in df.index]
+    lats = []
+    lons = []
+    lat_anoms = []
+    lon_anoms = []
+    for stn in stns:
+        _, _, da_lat_anom = calculate_long_term_trend_from_gnss_station(station=stn,
+                                                                   var='lat',
+                                                                   plot=False,
+                                                                   anomalize='mean')
+        _, _, da_lon_anom = calculate_long_term_trend_from_gnss_station(station=stn,
+                                                                   var='lon',
+                                                                   plot=False,
+                                                                   anomalize='mean')
+        _, _, da_lat = calculate_long_term_trend_from_gnss_station(station=stn,
+                                                                   var='lat',
+                                                                   plot=False,
+                                                                   anomalize=None)
+        _, _, da_lon = calculate_long_term_trend_from_gnss_station(station=stn,
+                                                                   var='lon',
+                                                                   plot=False,
+                                                                   anomalize=None)
+        da_lat_anom.name = '{}_anom'.format(da_lat.name)
+        lat_anoms.append(da_lat_anom)
+        da_lon_anom.name = '{}_anom'.format(da_lon.name)
+        lon_anoms.append(da_lon_anom)
+        lats.append(da_lat)
+        lons.append(da_lon)
+    ds = xr.merge([xr.merge(lats), xr.merge(lons), xr.merge(lat_anoms), xr.merge(lon_anoms)])
+    save_ncfile(ds, work_yuval, 'GNSS_lat_lon_trends.nc')
+    return ds
+
+# def get_long_trends_from_gnss_station(station='tela', modelname='LR',
+#                                       plot=True, times=None):
+#     import xarray as xr
+#     import numpy as np
+#     from aux_gps import plot_tmseries_xarray
+#     # dont try anonther model than LR except for lower-sampled data
+#     ds = load_gipsyx_results(station, sample_rate='1H', plot_fields=None)
+#     if ds is None:
+#         raise FileNotFoundError
+#     # first do altitude [m]:
+#     if times is not None:
+#         time_dim = list(set(ds.dims))[0]
+#         ds = ds.sel({time_dim: slice(*times)})
+#     da_alt = ML_fit_model_to_tmseries(ds['alt'], modelname=modelname,
+#                                       plot=False)
+#     years = da_alt.attrs['total_years']
+#     meters_per_year = da_alt.attrs['slope_per_year']
+#     da_alt.attrs['trend>mm_per_year'] = 1000.0 * meters_per_year
+#     # now do lat[deg]:
+#     one_degree_at_eq = 111.32  # km
+#     lat0 = ds['lat'].dropna('time')[0].values.item()
+#     factor = np.cos(np.deg2rad(lat0)) * one_degree_at_eq
+#     da_lat = ML_fit_model_to_tmseries(ds['lat'], modelname=modelname,
+#                                       plot=False)
+#     degs_per_year = da_lat.attrs['slope_per_year']
+#     da_lat.attrs['trend>cm_per_year'] = factor * 1e5 * degs_per_year
+#     da_lon = ML_fit_model_to_tmseries(ds['lon'], modelname=modelname,
+#                                       plot=False)
+#     degs_per_year = da_lon.attrs['slope_per_year']
+#     da_lon.attrs['trend>cm_per_year'] = factor * 1e5 * degs_per_year
+#     rds = xr.Dataset()
+#     # the following attrs are being read to israeli_gnss_stations procedure
+#     # above and used in its dataframe, so don't touch these attrs:
+#     rds['alt'] = ds['alt']
+#     rds['lat'] = ds['lat']
+#     rds['lon'] = ds['lon']
+#     rds['alt_trend'] = da_alt
+#     rds['lat_trend'] = da_lat
+#     rds['lon_trend'] = da_lon
+#     rds.attrs['lat_trend>cm_per_year'] = rds['lat_trend'].attrs['trend>cm_per_year']
+#     rds.attrs['lon_trend>cm_per_year'] = rds['lon_trend'].attrs['trend>cm_per_year']
+#     rds.attrs['alt_trend>mm_per_year'] = rds['alt_trend'].attrs['trend>mm_per_year']
+#     rds.attrs['years'] = years
+#     rds.attrs['station'] = station
+#     rds.attrs['lat'] = ds['lat'].dropna('time')[0].values.item()
+#     rds.attrs['lon'] = ds['lon'].dropna('time')[0].values.item()
+#     rds.attrs['alt'] = ds['alt'].dropna('time')[0].values.item()
+#     if plot:
+#         plot_tmseries_xarray(rds)
+#     return rds
 
 def pettitt_test_on_pw(da_ts, sample=None, alpha=0.05):
 #    [m n]=size(data);
