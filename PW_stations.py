@@ -4105,6 +4105,7 @@ def calculate_long_term_trend_from_gnss_station(station='tela', var='alt',
     from aux_gps import anomalize_xr
     from aux_gps import keep_iqr
     import matplotlib.pyplot as plt
+    import numpy as np
     da = load_gipsyx_results(station=station, sample_rate='D',
                              plot_fields=None)[var]
     if times is not None:
@@ -4113,8 +4114,20 @@ def calculate_long_term_trend_from_gnss_station(station='tela', var='alt',
     da = keep_iqr(da, k=2)
     da_anoms = anomalize_xr(da, 'DOY')
     # da_anoms_mm = da_anoms.resample(time='MS', keep_attrs=True).mean(keep_attrs=True)
-    da_anoms_in_cm = da_anoms * 100
     # use linear_fit_using_scipy_da_ts only with days!
+    # now do lat[deg]:
+    if var == 'lon':
+        one_degree_at_eq = 111.32 # km
+        lon0 = da_anoms.dropna('time')[0].values.item()
+        factor = np.cos(np.deg2rad(lon0)) * one_degree_at_eq
+        # convert factor to cm:
+        da_anoms_in_cm = da_anoms * factor * 1e5
+    elif var == 'lat':
+        one_degree_in_km = 110.574
+        da_anoms_in_cm = da_anoms * one_degree_in_km * 1e5
+    else:
+        da_anoms_in_cm = da_anoms * 100
+
     tds, resd = linear_fit_using_scipy_da_ts(da_anoms_in_cm, plot=plot,
                                              slope_factor=3652.5, units='cm/decade')
     ax = plt.gca()
