@@ -520,8 +520,30 @@ def produce_relative_frequency_wind_direction(path=ims_path,
     return Q_freq
 
 
+def plot_closest_line_from_point_to_israeli_coast(point, ax=None, epsg=None,
+                                                  path=gis_path, color='k',
+                                                  ls='-', lw=1.0):
+    import matplotlib.pyplot as plt
+    from shapely.geometry import LineString
+    coast_gdf = get_israeli_coast_line(path=path, epsg=epsg)
+    coast_pts = coast_gdf.geometry.unary_union
+    point_in_coast = get_closest_point_from_a_line_to_a_point(point, coast_pts)
+    AB = LineString([point_in_coast, point])
+    if ax is None:
+        fig, ax = plt.subplots()
+    ax.plot(*AB.xy, color='k', linestyle=ls, linewidth=lw)
+    return
+
+
+def get_closest_point_from_a_line_to_a_point(point, line):
+    from shapely.ops import nearest_points
+    p1, p2 = nearest_points(point, line)
+    return p2
+
+
 def get_israeli_coast_line(path=gis_path, minx=34.0, miny=30.0, maxx=36.0,
-                           maxy=34.0):
+                           maxy=34.0, epsg=None):
+    """use epsg=2039 to return in meters"""
     from shapely.geometry import box
     import geopandas as gpd
     # create bounding box using shapely:
@@ -530,6 +552,8 @@ def get_israeli_coast_line(path=gis_path, minx=34.0, miny=30.0, maxx=36.0,
     coast = gpd.read_file(gis_path / 'ne_10m_coastline.shp')
     # clip:
     gdf = gpd.clip(coast, bbox)
+    if epsg is not None:
+        gdf = gdf.to_crs('epsg:{}'.format(epsg))
     return gdf
 
 
