@@ -1596,6 +1596,7 @@ def plot_nested_CV_test_scores(dss, feats=None, fontsize=16,
             title = '{} | scorer={}'.format(model, scorer)
             ax.set_title(title, fontsize=fontsize)
             ax.set_xlabel('')
+            ax.set_ylim(0, 1)
             change_width(ax, 0.110)
     fg.set_xlabels(' ')
     fg.fig.legend(handles=handles, labels=labels, prop={'size': fontsize}, edgecolor='k',
@@ -1955,6 +1956,9 @@ def plot_ROC_from_dss(dss, feats=None, fontsize=16, save=True):
     cmap = sns.color_palette('tab10', n_colors=3)
     if feats is None:
         feats = ['pwv', 'pwv+pressure', 'pwv+pressure+doy']
+    if 'model' not in dss.dims:
+        dss = dss.expand_dims('model')
+        dss['model'] = [dss.attrs['model']]
     dss = dss.sortby('model', ascending=False)
     dst = dss.sel(features=feats)  # .reset_coords(drop=True)
     df = dst['TPR'].to_dataframe()
@@ -2688,11 +2692,11 @@ def plot_permutation_test_results_from_dss(dss, feats=None, fontsize=14,
                 ax.axvline(x=val, ymin=0, ymax=ymax, linestyle='--', color=cmap[k],
                            label=feat)
             handles, labels = ax.get_legend_handles_labels()
-            if 'hss' in scorer or 'tss' in scorer:
-                ax.set_xlim(-0.35, 0.6)
-            else:
-                ax.set_xlim(0.3, 0.8)
-                ax.set_xticks([0.3, 0.4, 0.5, 0.6, 0.7, 0.8])
+            # if 'hss' in scorer or 'tss' in scorer:
+            #     # ax.set_xlim(-0.35, None)
+            # else:
+                # ax.set_xlim(0.3, None)
+                # ax.set_xticks([0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.1])
             # handles, labels, title = get_legend_labels_handles_title_seaborn_histplot(ax)
             title = '{} | scorer={}'.format(model, scorer)
             ax.set_title(title, fontsize=fontsize)
@@ -3186,7 +3190,7 @@ def read_one_gridsearchcv_object(gr):
     best_df['std_score'] = best_std_scores
     best_df.index = scorers
     return best_df
-        
+
     # # param grid dict:
     # params = gr.param_grid
     # # scorer names:
@@ -4786,8 +4790,8 @@ class ML_Classifier_Switcher(object):
                                'coef0': [0, 1, 2, 3, 4]}
         elif self.pgrid == 'dense':
             self.param_grid = {'kernel': ['rbf', 'sigmoid', 'linear', 'poly'],
-                               'C': order_of_mag(-2, 2),
-                               'gamma': order_of_mag(-5, 0),
+                               'C': np.logspace(-2,2,10), # order_of_mag(-2, 2),
+                               'gamma': np.logspace(-5, 1, 14), # order_of_mag(-5, 0),
                                'degree': [1, 2, 3, 4, 5],
                                'coef0': [0, 1, 2, 3, 4]}
         return SVC(random_state=42, class_weight=None)
@@ -4810,11 +4814,11 @@ class ML_Classifier_Switcher(object):
         elif self.pgrid == 'dense':
             self.param_grid = {'alpha': order_of_mag(-5, 1),
                                'activation': ['identity', 'logistic', 'tanh', 'relu'],
-                               'hidden_layer_sizes': [(50, 50, 50), (50, 100, 50), (100,)],
+                               'hidden_layer_sizes': [(10, 10, 10), (10, 20, 10), (10,), (5,), (1,)],
                                'learning_rate': ['constant', 'adaptive'],
                                'solver': ['adam', 'lbfgs', 'sgd']}
             #(1,),(2,),(3,),(4,),(5,),(6,),(7,),(8,),(9,),(10,),(11,), (12,),(13,),(14,),(15,),(16,),(17,),(18,),(19,),(20,),(21,)
-        return MLPClassifier(random_state=42, max_iter=200)
+        return MLPClassifier(random_state=42, max_iter=500, learning_rate_init=0.1)
 
     def RF(self):
         from sklearn.ensemble import RandomForestClassifier
