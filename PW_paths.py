@@ -34,6 +34,15 @@ if platform.system() == 'Linux':
         cwd = Path().cwd()
         geo_path = Path('/home/ziskin/')
         savefig_path = Path('/home/ziskin/Pictures')
+    elif platform.node() == 'mn03':
+        work_path = Path('/home/ziskin/')
+        work_yuval = work_path / 'PW_yuval'
+        # work_chaim = work_path / 'Chaim_Stratosphere_Data'
+        cwd = Path().cwd()
+        # geo_path = Path('/home/ziskin/geo_ariel_home/')
+        # adams_path = Path('/home/ziskin/adams_home/')
+        # data11_path = Path('/home/ziskin/data11/')
+        savefig_path = Path('/home/ziskin/Pictures')
         # geo_path = Path('/home/ziskin/geo_ariel_home/')
         # adams_path = Path('/home/ziskin/adams_home/')
         # data11_path = Path('/home/ziskin/data11/')
