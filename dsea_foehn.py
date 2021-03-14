@@ -10,6 +10,7 @@ from PW_paths import savefig_path
 des_path = work_yuval / 'deserve'
 ims_path = work_yuval / 'IMS_T'
 dsea_gipsy_path = work_yuval / 'dsea_gipsyx'
+dem_path = work_yuval / 'AW3D30'
 
 
 def produce_final_dsea_pwv(ims_station=None, savepath=None, use_pressure=True):
@@ -645,3 +646,50 @@ def wrap_xr_metpy_pw(dewpt, pressure, bottom=None, top=None, verbose=False,
         pw_units = pw.units.format_babel('~P')
         return pw.magnitude, pw_units
 
+
+def plot_line_from_dsea_massada_to_coast(dem_path=dem_path):
+    from PW_from_gps_figures import plot_israel_map
+    from PW_stations import produce_geo_gnss_solved_stations
+    from ims_procedures import plot_closest_line_from_point_to_israeli_coast
+    from shapely.geometry import Point
+    import matplotlib.pyplot as plt
+    import cartopy.crs as ccrs
+    from aux_gps import geo_annotate
+    import xarray as xr
+    df = produce_geo_gnss_solved_stations(plot=False)
+    fig = plt.figure(figsize=(7, 15))
+    ax = fig.add_subplot(projection=ccrs.PlateCarree())  # plt.subplot(122)
+    # fig, ax = plt.subplots(projection=ccrs.PlateCarree())
+    extent = [34, 36.0, 30.7, 32.0]
+    ax.set_extent(extent)
+    ax = plot_israel_map(ax=ax)
+    cmap = plt.get_cmap('terrain', 41)
+    dem = xr.open_dataarray(dem_path / 'israel_dem_250_500.nc')
+    # dem = xr.open_dataarray(dem_path / 'israel_dem_500_1000.nc')
+    dem = dem.sel(lat=slice(29.2, 32.5), lon=slice(34, 36.3))
+    fg = dem.plot.imshow(ax=ax, alpha=0.5, cmap=cmap,
+                         vmin=dem.min(), vmax=dem.max(), add_colorbar=False)
+#    scale_bar(ax_map, 50)
+    cbar_kwargs = {'fraction': 0.1, 'aspect': 50, 'pad': 0.03}
+    cb = plt.colorbar(fg, **cbar_kwargs)
+    cb.set_label(label='meters above sea level',
+                 size=14, weight='normal')
+    cb.ax.tick_params(labelsize=14)
+
+    dsea = df.loc['dsea'].geometry
+    massada = Point(35.3725, 31.3177)
+    plot_closest_line_from_point_to_israeli_coast(dsea, ax=ax, color='k')
+    ax.plot(*massada.xy, marker='o', markersize=5, color='k')
+    ax.plot(*dsea.xy, marker='o', markersize=5, color='k')
+    geo_annotate(ax, [dsea.x], [dsea.y],
+                 ['GNSS-dsea'], xytext=(4, -6), fmt=None,
+                 c='k', fw='bold', fs=14, colorupdown=False)
+    plot_closest_line_from_point_to_israeli_coast(massada, ax=ax, color='k')
+    geo_annotate(ax, [massada.x], [massada.y],
+                 ['Massada-pt.'], xytext=(4, -6), fmt=None,
+                 c='k', fw='bold', fs=14, colorupdown=False)
+    ax.set_xticks([34, 35, 36])
+    ax.set_yticks([29.5, 30, 30.5, 31, 31.5, 32, 32.5])
+    ax.tick_params(top=True, bottom=True, left=True, right=True,
+                   direction='out', labelsize=14)
+    return ax
