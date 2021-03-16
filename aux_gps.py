@@ -303,7 +303,7 @@ def linear_fit_using_scipy_da_ts(da_ts, model='TSEN', slope_factor=3650.25,
             else:
                 sigma = None
             best_fit_ab, covar = curve_fit(func, jul_no_nans, y,
-                                           sigma = sigma,p0=[0, 0],
+                                           sigma=sigma, p0=[0, 0],
                                            absolute_sigma = False)
             sigma_ab = np.sqrt(np.diagonal(covar))
             coef = best_fit_ab[0]
@@ -328,7 +328,7 @@ def linear_fit_using_scipy_da_ts(da_ts, model='TSEN', slope_factor=3650.25,
     trend[time_dim] = da_ts[time_dim]
     slope_in_factor_scale = coef * slope_factor
     if plot:
-        labels =  ['{}'.format(da_ts.name)]
+        labels = ['{}'.format(da_ts.name)]
         if ax is None:
             fig, ax = plt.subplots()
         origln = da_ts.plot.line('k-', marker='o', ax=ax, linewidth=1.5, markersize=2.5)

@@ -4101,7 +4101,7 @@ def save_PPP_field_unselected_data_and_errors(savepath=None, savename='israel',
 
 def calculate_long_term_trend_from_gnss_station(station='tela', var='alt',
                                                 times=None, plot=True,
-                                                anomalize='DOY'):
+                                                anomalize='DOY', convert_to_cm=True):
     from aux_gps import linear_fit_using_scipy_da_ts
     from aux_gps import anomalize_xr
     from aux_gps import keep_iqr
@@ -4113,46 +4113,82 @@ def calculate_long_term_trend_from_gnss_station(station='tela', var='alt',
         time_dim = list(set(da.dims))[0]
         da = da.sel({time_dim: slice(*times)})
     da = keep_iqr(da, k=2)
-    if anomalize is not None:
-        if anomalize == 'mean':
-            mean_da = da.mean('time').values
-            da_anoms = da - mean_da
-        else:
-            da_anoms = anomalize_xr(da, anomalize)
-    else:
-        da_anoms = da
+
     # use linear_fit_using_scipy_da_ts only with days!
     # now do lat[deg]:
     if var == 'lon':
         one_degree_at_eq = 111.32 # km
-        lon0 = da_anoms.dropna('time')[0].values.item()
+        lon0 = da.dropna('time')[0].values.item()
         factor = np.cos(np.deg2rad(lon0)) * one_degree_at_eq
         # convert factor to cm:
-        da_anoms_in_cm = da_anoms * factor * 1e5
+        da_in_cm = da * factor * 1e5
         name = '{}_east'.format(station)
     elif var == 'lat':
         one_degree_in_km = 110.574
-        da_anoms_in_cm = da_anoms * one_degree_in_km * 1e5
+        da_in_cm = da * one_degree_in_km * 1e5
         name = '{}_north'.format(station)
     else:
-        da_anoms_in_cm = da_anoms * 100
+        da_in_cm = da * 100
         name = 'Altitude'
-    tds, resd = linear_fit_using_scipy_da_ts(da_anoms_in_cm, plot=plot,
-                                             slope_factor=3652.5, units='cm/decade')
+    # if anomalize is not None:
+    #     if anomalize == 'mean':
+    #         mean_da = da.mean('time').values
+    #         da_anoms = da - mean_da
+    #     elif anomalize == 'first':
+    #         da_anoms = da - da.isel(time=0)
+    #     else:
+    #         da_anoms = anomalize_xr(da, anomalize)
+    # else:
+    #     da_anoms = da
+    if convert_to_cm:
+        da = da_in_cm
+        units = 'cm/decade'
+    else:
+        units = 'deg/decade'
+    tds, resd = linear_fit_using_scipy_da_ts(da, plot=plot,
+                                             slope_factor=3652.5, units=units)
     if plot:
         ax = plt.gca()
         ax.set_title('{} station long term {}'.format(station.upper(), var))
         ax.set_ylabel('{} [cm]'.format(var))
-    da_anoms_mm = da_anoms_in_cm.resample(time='MS', keep_attrs=True).mean(keep_attrs=True)
-    da_anoms_mm.name = name
-    da_anoms_mm.attrs['units'] = 'cm'
-    da_anoms_mm.attrs['trend'] = resd['slope']
-    da_anoms_mm.attrs['trend_units'] = 'cm/decade'
-    da_anoms_mm.attrs['ci_95'] = (resd['slope_hi']-resd['slope_lo'])/2
+    da_mm = da.resample(time='MS', keep_attrs=True).mean(keep_attrs=True)
+    da_mm.name = name
+    da_mm.attrs['units'] = 'cm'
+    da_mm.attrs['trend'] = resd['slope']
+    da_mm.attrs['trend_units'] = units
+    da_mm.attrs['ci_95'] = (resd['slope_hi']-resd['slope_lo'])/2
     # if anomalize == 'mean':
     #     da_anoms_mm.attrs['mean'] = mean_da
-    return tds, resd, da_anoms_mm
+    return tds, resd, da_mm
 
+
+def save_lon_lat_trends_to_csv(savepath=work_yuval):
+    import xarray as xr
+    ds = xr.load_dataset(savepath / 'GNSS_lat_lon_trends.nc')
+    dff = ds.to_dataframe()
+    dff.to_csv(savepath / 'GNSS_lat_lon_timeseries_israel.csv', na_rep='NaN')
+    # now trends:
+    df = produce_geo_gnss_solved_stations(plot=False)
+    df = df[['lat', 'lon', 'alt']]
+    df['north_trend'] = 1
+    df['north_trend_ci95'] = 1
+    df['north_trend_cm'] = 1
+    df['north_trend_cm_ci95'] = 1
+    df['east_trend'] = 1
+    df['east_trend_ci95'] = 1
+    df['east_trend_cm'] = 1
+    df['east_trend_cm_ci95'] = 1
+    for stn in df.index:
+        df.loc[stn, 'north_trend'] = ds['{}_north'.format(stn)].attrs['trend']
+        df.loc[stn, 'north_trend_ci95'] = ds['{}_north'.format(stn)].attrs['ci_95']
+        df.loc[stn, 'north_trend_cm'] = ds['{}_north_cm'.format(stn)].attrs['trend']
+        df.loc[stn, 'north_trend_cm_ci95'] = ds['{}_north_cm'.format(stn)].attrs['ci_95']
+        df.loc[stn, 'east_trend'] = ds['{}_east'.format(stn)].attrs['trend']
+        df.loc[stn, 'east_trend_ci95'] = ds['{}_east'.format(stn)].attrs['ci_95']
+        df.loc[stn, 'east_trend_cm'] = ds['{}_east_cm'.format(stn)].attrs['trend']
+        df.loc[stn, 'east_trend_cm_ci95'] = ds['{}_east_cm'.format(stn)].attrs['ci_95']
+    df.to_csv(savepath / 'GNSS_lat_lon_trends_israel.csv')
+    return df
 
 
 def produce_all_lat_lon_long_term_trends():
@@ -4165,26 +4201,24 @@ def produce_all_lat_lon_long_term_trends():
     lat_anoms = []
     lon_anoms = []
     for stn in stns:
-        _, _, da_lat_anom = calculate_long_term_trend_from_gnss_station(station=stn,
-                                                                   var='lat',
-                                                                   plot=False,
-                                                                   anomalize='mean')
-        _, _, da_lon_anom = calculate_long_term_trend_from_gnss_station(station=stn,
-                                                                   var='lon',
-                                                                   plot=False,
-                                                                   anomalize='mean')
         _, _, da_lat = calculate_long_term_trend_from_gnss_station(station=stn,
                                                                    var='lat',
                                                                    plot=False,
-                                                                   anomalize=None)
+                                                                   convert_to_cm=False)
         _, _, da_lon = calculate_long_term_trend_from_gnss_station(station=stn,
                                                                    var='lon',
                                                                    plot=False,
-                                                                   anomalize=None)
-        da_lat_anom.name = '{}_anom'.format(da_lat.name)
-        lat_anoms.append(da_lat_anom)
-        da_lon_anom.name = '{}_anom'.format(da_lon.name)
-        lon_anoms.append(da_lon_anom)
+                                                                   convert_to_cm=False)
+        _, _, da_lat_cm = calculate_long_term_trend_from_gnss_station(station=stn,
+                                                                   var='lat',
+                                                                   plot=False)
+        _, _, da_lon_cm = calculate_long_term_trend_from_gnss_station(station=stn,
+                                                                   var='lon',
+                                                                   plot=False)
+        da_lat_cm.name = '{}_cm'.format(da_lat.name)
+        lat_anoms.append(da_lat_cm)
+        da_lon_cm.name = '{}_cm'.format(da_lon.name)
+        lon_anoms.append(da_lon_cm)
         lats.append(da_lat)
         lons.append(da_lon)
     ds = xr.merge([xr.merge(lats), xr.merge(lons), xr.merge(lat_anoms), xr.merge(lon_anoms)])
