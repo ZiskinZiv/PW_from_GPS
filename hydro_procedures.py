@@ -35,6 +35,8 @@ best_hp_models_dict = {'SVC': {'kernel': 'rbf', 'C': 10, 'gamma': 0.001},
                        'MLP': {'alpha': 0.0001, 'activation': 'tanh',
                        'hidden_layer_sizes': (100,), 'learning_rate': 'constant',
                        'solver': 'lbfgs'}}
+
+scorer_order = ['precision', 'recall', 'f1', 'accuracy', 'tss', 'hss']
 # TODO: treat all pwv from events as follows:
 #    For each station:
 #    0) rolling mean to all pwv 1 hour
@@ -96,8 +98,11 @@ def select_features_from_X(X, features='pwv'):
     return X
 
 
-def combine_pos_neg_from_nc_file(hydro_path=hydro_path, all_neg=False, seed=1, std=True):
+def combine_pos_neg_from_nc_file(hydro_path=hydro_path,
+                                 negative_sample_num=1,
+                                 seed=1, std=True):
     from aux_gps import path_glob
+    from sklearn.utils import resample
     import xarray as xr
     import numpy as np
     # import pandas as pd
@@ -114,18 +119,33 @@ def combine_pos_neg_from_nc_file(hydro_path=hydro_path, all_neg=False, seed=1, s
     y_pos['sample'] = X_pos['sample']
     # choose at random y_pos size of negative class:
     X_neg = ds['X_neg'].rename({'negative_sample': 'sample'})
-    if not all_neg:
-        np.random.seed(seed)
-        dts = np.random.choice(
-            X_neg['sample'], y_pos['sample'].size, replace=False)
-        X_neg = X_neg.sel(sample=dts)
-    y_neg = xr.DataArray(np.zeros(X_neg['sample'].shape), dims=['sample'])
-    y_neg['sample'] = X_neg['sample']
-    # now concat all X's and y's:
-    X = xr.concat([X_pos, X_neg], 'sample')
-    y = xr.concat([y_pos, y_neg], 'sample')
-    X.name = 'X'
-    return X, y
+    pos_size = y_pos['sample'].size
+    np.random.seed(seed)
+    # negatives = []
+    for n_samples in [x for x in range(negative_sample_num)]:
+        # dts = np.random.choice(X_neg['sample'], size=y_pos['sample'].size,
+        #                        replace=False)
+        # print(np.unique(dts).shape)
+        # negatives.append(X_neg.sel(sample=dts))
+        negative = resample(X_neg, replace=False,
+                            n_samples=pos_size * negative_sample_num,
+                            random_state=seed)
+        negatives = np.split(negative, negative_sample_num, axis=0)
+    Xs = []
+    ys = []
+    for X_negative in negatives:
+        y_neg = xr.DataArray(np.zeros(X_negative['sample'].shape), dims=['sample'])
+        y_neg['sample'] = X_negative['sample']
+        # now concat all X's and y's:
+        X = xr.concat([X_pos, X_negative], 'sample')
+        y = xr.concat([y_pos, y_neg], 'sample')
+        X.name = 'X'
+        Xs.append(X)
+        ys.append(y)
+    if len(negatives) == 1:
+        return Xs[0], ys[0]
+    else:
+        return Xs, ys
 
 
 def drop_hours_in_pwv_pressure_features(X, last_hours=7, verbose=True):
@@ -1519,7 +1539,7 @@ def load_ML_run_results(path=hydro_ml_path, prefix='CVR',
 
 
 def plot_nested_CV_test_scores(dss, feats=None, fontsize=16,
-                               save=True):
+                               save=True, wv_label='pwv'):
     import seaborn as sns
     import matplotlib.pyplot as plt
 
@@ -1554,6 +1574,7 @@ def plot_nested_CV_test_scores(dss, feats=None, fontsize=16,
         dss = dss.expand_dims('model')
         dss['model'] = [dss.attrs['model']]
     dss = dss.sortby('model', ascending=False)
+    dss = dss.reindex(scorer=scorer_order)
     if feats is None:
         feats = ['pwv', 'pwv+pressure', 'pwv+pressure+doy']
     dst = dss.sel(features=feats)  # .reset_coords(drop=True)
@@ -1603,6 +1624,8 @@ def plot_nested_CV_test_scores(dss, feats=None, fontsize=16,
             ax.set_ylim(0, 1)
             change_width(ax, 0.110)
     fg.set_xlabels(' ')
+    if wv_label is not None:
+        labels = [x.replace('pwv', wv_label) for x in labels]
     fg.fig.legend(handles=handles, labels=labels, prop={'size': fontsize}, edgecolor='k',
                   framealpha=0.5, fancybox=True, facecolor='white',
                   ncol=5, fontsize=fontsize, loc='upper center', bbox_to_anchor=(0.5, 1.005),
@@ -1952,12 +1975,13 @@ def plot_heatmaps_for_all_models_and_scorings(dss, var='roc-auc'):  # , save=Tru
     return fg
 
 
-def plot_ROC_from_dss(dss, feats=None, fontsize=16, save=True):
+def plot_ROC_from_dss(dss, feats=None, fontsize=16, save=True, wv_label='pwv'):
     import seaborn as sns
     import matplotlib.pyplot as plt
     sns.set_style('whitegrid')
     sns.set_style('ticks')
     cmap = sns.color_palette('tab10', n_colors=3)
+    dss = dss.reindex(scorer=scorer_order)
     if feats is None:
         feats = ['pwv', 'pwv+pressure', 'pwv+pressure+doy']
     if 'model' not in dss.dims:
@@ -1966,16 +1990,27 @@ def plot_ROC_from_dss(dss, feats=None, fontsize=16, save=True):
     dss = dss.sortby('model', ascending=False)
     dst = dss.sel(features=feats)  # .reset_coords(drop=True)
     df = dst['TPR'].to_dataframe()
-    df['FPR'] = df.index.get_level_values(4)
-    df['model'] = df.index.get_level_values(0)
-    df['scorer'] = df.index.get_level_values(3)
-    df['features'] = df.index.get_level_values(1)
+    if 'neg_sample' in dss.dims:
+        fpr_lnum = 5
+        model_lnum = 0
+        scorer_lnum = 4
+        features_lnum = 1
+    else:
+        fpr_lnum = 4
+        model_lnum = 0
+        scorer_lnum = 3
+        features_lnum = 1
+    df['FPR'] = df.index.get_level_values(fpr_lnum)
+    df['model'] = df.index.get_level_values(model_lnum)
+    df['scorer'] = df.index.get_level_values(scorer_lnum)
+    df['features'] = df.index.get_level_values(features_lnum)
     df = df.melt(value_vars='TPR', id_vars=[
         'features', 'model', 'scorer', 'FPR'], var_name='score')
     df['model'] = df['model'].str.replace('SVC', 'SVM')
     fg = sns.FacetGrid(df, col='scorer', row='model')
     fg.map_dataframe(sns.lineplot, x='FPR', y='value',
-                     hue='features', ci='sd', palette=cmap)
+                     hue='features', ci='sd', palette=cmap, n_boot=None,
+                     estimator='mean')
     for i in range(fg.axes.shape[0]):  # i is rows
         model = dss['model'].isel(model=i).item()
         auc_model = dst.sel(model=model)
@@ -1983,13 +2018,14 @@ def plot_ROC_from_dss(dss, feats=None, fontsize=16, save=True):
             model = 'SVM'
         for j in range(fg.axes.shape[1]):  # j is cols
             scorer = dss['scorer'].isel(scorer=j).item()
-            auc_scorer_mean = auc_model['roc_auc_score'].sel(scorer=scorer).mean('outer_split')
-            auc_scorer_std = auc_model['roc_auc_score'].sel(scorer=scorer).std('outer_split')
-            auc_mean = auc_scorer_mean.to_dataframe()['roc_auc_score'].values
-            auc_std = auc_scorer_std.to_dataframe()['roc_auc_score'].values
+            auc_scorer_df = auc_model['roc_auc_score'].sel(scorer=scorer).reset_coords(drop=True).to_dataframe()
+            auc_scorer_mean = [auc_scorer_df.loc[x].mean() for x in feats]
+            auc_scorer_std = [auc_scorer_df.loc[x].std() for x in feats]
+            auc_mean = [x.item() for x in auc_scorer_mean]
+            auc_std = [x.item() for x in auc_scorer_std]
             ax = fg.axes[i, j]
             ax.plot([0, 1], [0, 1], color='tab:red', linestyle='--', lw=2,
-                    label='Chance')
+                    label='chance')
             title = '{} | scorer={}'.format(model, scorer)
             ax.set_title(title, fontsize=fontsize)
             handles, labels = ax.get_legend_handles_labels()
@@ -2006,6 +2042,8 @@ def plot_ROC_from_dss(dss, feats=None, fontsize=16, save=True):
             # return handles, labels
     fg.set_ylabels('True Positive Rate', fontsize=fontsize)
     fg.set_xlabels('False Positive Rate', fontsize=fontsize)
+    if wv_label is not None:
+        labels = [x.replace('pwv', wv_label) for x in labels]
     fg.fig.legend(handles=handles, labels=labels, prop={'size': fontsize}, edgecolor='k',
                   framealpha=0.5, fancybox=True, facecolor='white',
                   ncol=5, fontsize=fontsize, loc='upper center', bbox_to_anchor=(0.5, 1.005),
@@ -2638,13 +2676,14 @@ def load_nested_CV_test_results_from_all_models(path=hydro_path, load_hyper=Fals
 
 
 def plot_permutation_test_results_from_dss(dss, feats=None, fontsize=14,
-                                           save=True):
+                                           save=True, wv_label='pwv'):
                                         # ax=None, scorer='f1', model='MLP'):
     import matplotlib.pyplot as plt
     import seaborn as sns
     from PW_from_gps_figures import get_legend_labels_handles_title_seaborn_histplot
     sns.set_style('whitegrid')
     sns.set_style('ticks')
+    dss = dss.reindex(scorer=scorer_order)
     dss = dss.sortby('model', ascending=False)
     dss = dss.mean('outer_split')
     cmap = sns.color_palette('tab10', n_colors=3)
@@ -2706,6 +2745,8 @@ def plot_permutation_test_results_from_dss(dss, feats=None, fontsize=14,
             ax.set_title(title, fontsize=fontsize)
     fg.set_ylabels('Density', fontsize=fontsize)
     fg.set_xlabels('Score', fontsize=fontsize)
+    if wv_label is not None:
+        labels = [x.replace('pwv', wv_label) for x in labels]
     fg.fig.legend(handles=handles, labels=labels, prop={'size': fontsize}, edgecolor='k',
                   framealpha=0.5, fancybox=True, facecolor='white',
                   ncol=5, fontsize=fontsize, loc='upper center', bbox_to_anchor=(0.5, 1.005),
@@ -2727,7 +2768,7 @@ def plot_permutation_test_results_from_dss(dss, feats=None, fontsize=14,
 def run_CV_nested_tests_on_all_features(path=hydro_path, gr_path=hydro_ml_path/'nested4',
                                         verbose=False, model_name='SVC', params=None,
                                         savepath=None, drop_hours=None, PI=30, Ptest=None,
-                                        suffix=None):
+                                        suffix=None, sample_from_negatives=1):
     """returns the nested CV test results for all scorers, features and models,
     if model is chosen, i.e., model='MLP', returns just this model results
     and its hyper-parameters per each outer split"""
@@ -2742,7 +2783,8 @@ def run_CV_nested_tests_on_all_features(path=hydro_path, gr_path=hydro_ml_path/'
         ds = CV_test_after_GridSearchCV(path=path, gr_path=gr_path,
                                         model_name=model_name, params=params,
                                         features=feat, PI=PI, Ptest=Ptest,
-                                        verbose=verbose, drop_hours=drop_hours)
+                                        verbose=verbose, drop_hours=drop_hours,
+                                        sample_from_negatives=sample_from_negatives)
         feat_list.append(ds)
     dsf = xr.concat(feat_list, 'features')
     dsf['features'] = feats
@@ -2795,9 +2837,10 @@ def run_holdout_test_on_all_models_and_features(path=hydro_path, gr_path=hydro_m
 
 
 def prepare_X_y_for_holdout_test(features='pwv+doy', model_name='SVC',
-                                 path=hydro_path, drop_hours=None):
+                                 path=hydro_path, drop_hours=None,
+                                 negative_samples=1):
     # combine X,y and split them according to test ratio and seed:
-    X, y = combine_pos_neg_from_nc_file(path)
+    X, y = combine_pos_neg_from_nc_file(path, negative_sample_num=negative_samples)
     # re arange X features according to model:
     feats = features.split('+')
     if model_name == 'RF' and 'doy' in feats:
@@ -2814,15 +2857,29 @@ def prepare_X_y_for_holdout_test(features='pwv+doy', model_name='SVC',
         elif isinstance(feats, str):
             feats = ['doy_sin']
             feats.append('doy_cos')
-    X = select_features_from_X(X, feats)
+    if isinstance(X, list):
+        Xs = []
+        for X1 in X:
+            Xs.append(select_features_from_X(X1, feats))
+        X = Xs
+    else:
+        X = select_features_from_X(X, feats)
     if drop_hours is not None:
-        X = drop_hours_in_pwv_pressure_features(X, drop_hours, verbose=True)
+        if isinstance(X, list):
+            Xs = []
+            for X1 in X:
+                Xs.append(drop_hours_in_pwv_pressure_features(X1, drop_hours,
+                                                              verbose=True))
+            X = Xs
+        else:
+            X = drop_hours_in_pwv_pressure_features(X, drop_hours, verbose=True)
     return X, y
 
 
 def CV_test_after_GridSearchCV(path=hydro_path, gr_path=hydro_ml_path/'nested4',
                                model_name='SVC', features='pwv', params=None,
-                               verbose=False, drop_hours=None, PI=None, Ptest=None):
+                               verbose=False, drop_hours=None, PI=None,
+                               Ptest=None, sample_from_negatives=1):
     """do cross_validate with all scorers on all gridsearchcv folds,
     reads the nested outer splits CV file in gr_path"""
     import xarray as xr
@@ -2836,82 +2893,95 @@ def CV_test_after_GridSearchCV(path=hydro_path, gr_path=hydro_ml_path/'nested4',
                                                  features=features,
                                                  model_name=model_name,
                                                  verbose=verbose)
-    X, y = prepare_X_y_for_holdout_test(features, model_name, path,
-                                        drop_hours=drop_hours)
-    if Ptest is not None:
-        print('Permutation Test is in progress!')
-        ds = run_permutation_classifier_test(X, y, 4, param_df_dict, Ptest=Ptest,
-                                             model_name=model_name, verbose=verbose)
-        return ds
-    if params is not None:
-        if verbose:
-            print('running with custom hyper parameters: ', params)
-    outer_bests = []
-    outer_rocs = []
-    fis = []
-    pi_means = []
-    pi_stds = []
-    n_splits = len([x for x in cv_dict.keys()])
-    for split, tt in cv_dict.items():
-        X_train = X[tt['train']]
-        y_train = y[tt['train']]
-        X_test = X[tt['test']]
-        y_test = y[tt['test']]
-        outer_split = '{}-{}'.format(split, n_splits)
-    # for i, (train_index, test_index) in enumerate(cv.split(X, y)):
-    #     X_train = X[train_index]
-    #     y_train = y[train_index]
-    #     X_test = X[test_index]
-    #     y_test = y[test_index]
-    #     outer_split = '{}-{}'.format(i+1, cv.n_splits)
-        best_params_df = param_df_dict.get(outer_split)
+    Xs, ys = prepare_X_y_for_holdout_test(features, model_name, path,
+                                          drop_hours=drop_hours,
+                                          negative_samples=sample_from_negatives)
+    bests = []
+    for i, negative_sample in enumerate(np.arange(1, sample_from_negatives + 1)):
+        print('running with negative sample #{} out of {}'.format(
+            negative_sample, sample_from_negatives))
+        X = Xs[i]
+        y = ys[i]
+        if Ptest is not None:
+            print('Permutation Test is in progress!')
+            ds = run_permutation_classifier_test(X, y, 4, param_df_dict, Ptest=Ptest,
+                                                 model_name=model_name, verbose=verbose)
+            return ds
         if params is not None:
-            for key, value in params.items():
-                best_params_df[key] = value
-        if model_name == 'RF':
-            if PI is not None:
-                bdf, roc, fi, pi_mean, pi_std = run_test_on_CV_split(X_train, y_train, X_test, y_test,
-                                                                     best_params_df, PI=PI, Ptest=Ptest,
+            if verbose:
+                print('running with custom hyper parameters: ', params)
+        outer_bests = []
+        outer_rocs = []
+        fis = []
+        pi_means = []
+        pi_stds = []
+        n_splits = len([x for x in cv_dict.keys()])
+        for split, tt in cv_dict.items():
+            X_train = X[tt['train']]
+            y_train = y[tt['train']]
+            X_test = X[tt['test']]
+            y_test = y[tt['test']]
+            outer_split = '{}-{}'.format(split, n_splits)
+        # for i, (train_index, test_index) in enumerate(cv.split(X, y)):
+        #     X_train = X[train_index]
+        #     y_train = y[train_index]
+        #     X_test = X[test_index]
+        #     y_test = y[test_index]
+        #     outer_split = '{}-{}'.format(i+1, cv.n_splits)
+            best_params_df = param_df_dict.get(outer_split)
+            if params is not None:
+                for key, value in params.items():
+                    best_params_df[key] = value
+            if model_name == 'RF':
+                if PI is not None:
+                    bdf, roc, fi, pi_mean, pi_std = run_test_on_CV_split(X_train, y_train, X_test, y_test,
+                                                                         best_params_df, PI=PI, Ptest=Ptest,
+                                                                         model_name=model_name, verbose=verbose)
+                else:
+                    bdf, roc, fi = run_test_on_CV_split(X_train, y_train, X_test, y_test,
+                                                        best_params_df, PI=PI, Ptest=Ptest,
+                                                        model_name=model_name, verbose=verbose)
+                fis.append(fi)
+            else:
+                if PI is not None:
+                    bdf, roc, pi_mean, pi_std = run_test_on_CV_split(X_train, y_train, X_test, y_test,
+                                                                     best_params_df, PI=PI,
                                                                      model_name=model_name, verbose=verbose)
-            else:
-                bdf, roc, fi = run_test_on_CV_split(X_train, y_train, X_test, y_test,
-                                                    best_params_df, PI=PI, Ptest=Ptest,
+                else:
+                    bdf, roc = run_test_on_CV_split(X_train, y_train, X_test, y_test,
+                                                    best_params_df, PI=PI,
                                                     model_name=model_name, verbose=verbose)
-            fis.append(fi)
-        else:
             if PI is not None:
-                bdf, roc, pi_mean, pi_std = run_test_on_CV_split(X_train, y_train, X_test, y_test,
-                                                                 best_params_df, PI=PI,
-                                                                 model_name=model_name, verbose=verbose)
-            else:
-                bdf, roc = run_test_on_CV_split(X_train, y_train, X_test, y_test,
-                                                best_params_df, PI=PI,
-                                                model_name=model_name, verbose=verbose)
+                pi_means.append(pi_mean)
+                pi_stds.append(pi_std)
+            bdf.index.name = 'scorer'
+            roc.index.name = 'FPR'
+            if 'hidden_layer_sizes' in bdf.columns:
+                bdf['hidden_layer_sizes'] = bdf['hidden_layer_sizes'].astype(str)
+            bdf_da = bdf.to_xarray()
+            roc_da = roc.to_xarray().to_array('scorer')
+            roc_da.name = 'TPR'
+            outer_bests.append(bdf_da)
+            outer_rocs.append(roc_da)
+        best_da = xr.concat(outer_bests, 'outer_split')
+        roc_da = xr.concat(outer_rocs, 'outer_split')
+        best = xr.merge([best_da, roc_da])
+        best['outer_split'] = np.arange(1, n_splits + 1)
+        if model_name == 'RF':
+            fi_da = xr.concat(fis, 'outer_split')
+            best['feature_importances'] = fi_da
         if PI is not None:
-            pi_means.append(pi_mean)
-            pi_stds.append(pi_std)
-        bdf.index.name = 'scorer'
-        roc.index.name = 'FPR'
-        if 'hidden_layer_sizes' in bdf.columns:
-            bdf['hidden_layer_sizes'] = bdf['hidden_layer_sizes'].astype(str)
-        bdf_da = bdf.to_xarray()
-        roc_da = roc.to_xarray().to_array('scorer')
-        roc_da.name = 'TPR'
-        outer_bests.append(bdf_da)
-        outer_rocs.append(roc_da)
-    best_da = xr.concat(outer_bests, 'outer_split')
-    roc_da = xr.concat(outer_rocs, 'outer_split')
-    best = xr.merge([best_da, roc_da])
-    best['outer_split'] = np.arange(1, n_splits + 1)
-    if model_name == 'RF':
-        fi_da = xr.concat(fis, 'outer_split')
-        best['feature_importances'] = fi_da
-    if PI is not None:
-        pi_mean_da = xr.concat(pi_means, 'outer_split')
-        pi_std_da = xr.concat(pi_stds, 'outer_split')
-        best['PI_mean'] = pi_mean_da
-        best['PI_std'] = pi_std_da
-    return best
+            pi_mean_da = xr.concat(pi_means, 'outer_split')
+            pi_std_da = xr.concat(pi_stds, 'outer_split')
+            best['PI_mean'] = pi_mean_da
+            best['PI_std'] = pi_std_da
+        bests.append(best)
+    if len(bests) == 1:
+        return bests[0]
+    else:
+        best_ds = xr.concat(bests, 'neg_sample')
+        best_ds['neg_sample'] = np.arange(1, sample_from_negatives + 1)
+        return best_ds
 
 
 def run_permutation_classifier_test(X, y, cv, best_params_df, Ptest=100,
