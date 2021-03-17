@@ -28,12 +28,12 @@ hydro_st_name_dict = {25191: 'Lavan - new nizana road',
                       60105: 'Yaelon - Kibutz Yahel',
                       60190: 'Solomon - Eilat'}
 
-best_hp_models_dict = {'SVC': {'kernel': 'rbf', 'C': 10, 'gamma': 0.001},
-                       'RF': {'max_depth': 7, 'max_features': 'auto',
-                              'min_samples_leaf': 1, 'min_samples_split': 5,
+best_hp_models_dict = {'SVC': {'kernel': 'rbf', 'C': 1.0, 'gamma': 0.02},
+                       'RF': {'max_depth': 5, 'max_features': 'auto',
+                              'min_samples_leaf': 1, 'min_samples_split': 2,
                               'n_estimators': 400},
-                       'MLP': {'alpha': 0.0001, 'activation': 'tanh',
-                       'hidden_layer_sizes': (100,), 'learning_rate': 'constant',
+                       'MLP': {'alpha': 0.1, 'activation': 'relu',
+                       'hidden_layer_sizes': (10,10,10), 'learning_rate': 'constant',
                        'solver': 'lbfgs'}}
 
 scorer_order = ['precision', 'recall', 'f1', 'accuracy', 'tss', 'hss']
@@ -2900,8 +2900,12 @@ def CV_test_after_GridSearchCV(path=hydro_path, gr_path=hydro_ml_path/'nested4',
     for i, negative_sample in enumerate(np.arange(1, sample_from_negatives + 1)):
         print('running with negative sample #{} out of {}'.format(
             negative_sample, sample_from_negatives))
-        X = Xs[i]
-        y = ys[i]
+        if isinstance(Xs, list):
+            X = Xs[i]
+            y = ys[i]
+        else:
+            X = Xs
+            y = ys
         if Ptest is not None:
             print('Permutation Test is in progress!')
             ds = run_permutation_classifier_test(X, y, 4, param_df_dict, Ptest=Ptest,
@@ -2931,7 +2935,11 @@ def CV_test_after_GridSearchCV(path=hydro_path, gr_path=hydro_ml_path/'nested4',
             best_params_df = param_df_dict.get(outer_split)
             if params is not None:
                 for key, value in params.items():
-                    best_params_df[key] = value
+                    if isinstance(value, tuple):
+                        for ind in best_params_df.index:
+                            best_params_df.at[ind, key] = value
+                    else:
+                        best_params_df[key] = value
             if model_name == 'RF':
                 if PI is not None:
                     bdf, roc, fi, pi_mean, pi_std = run_test_on_CV_split(X_train, y_train, X_test, y_test,
