@@ -28,7 +28,8 @@ hydro_st_name_dict = {25191: 'Lavan - new nizana road',
                       60105: 'Yaelon - Kibutz Yahel',
                       60190: 'Solomon - Eilat'}
 
-best_hp_models_dict = {'SVC': {'kernel': 'rbf', 'C': 1.0, 'gamma': 0.02},
+best_hp_models_dict = {'SVC': {'kernel': 'rbf', 'C': 1.0, 'gamma': 0.02,
+                               'coef0': 0.0, 'degree': 1},
                        'RF': {'max_depth': 5, 'max_features': 'auto',
                               'min_samples_leaf': 1, 'min_samples_split': 2,
                               'n_estimators': 400},
@@ -2683,12 +2684,15 @@ def plot_permutation_test_results_from_dss(dss, feats=None, fontsize=14,
     from PW_from_gps_figures import get_legend_labels_handles_title_seaborn_histplot
     sns.set_style('whitegrid')
     sns.set_style('ticks')
+    if 'model' not in dss.dims:
+        dss = dss.expand_dims('model')
+        dss['model'] = [dss.attrs['model']]
     dss = dss.reindex(scorer=scorer_order)
-    dss = dss.sortby('model', ascending=False)
     dss = dss.mean('outer_split')
     cmap = sns.color_palette('tab10', n_colors=3)
     if feats is None:
         feats = ['pwv', 'pwv+pressure', 'pwv+pressure+doy']
+    dss = dss.sortby('model', ascending=False)
     dst = dss.sel(features=feats)  # .reset_coords(drop=True)
     df = dst[['permutation_score', 'true_score', 'pvalue']].to_dataframe()
     df['permutations'] = df.index.get_level_values(2)
@@ -2791,9 +2795,13 @@ def run_CV_nested_tests_on_all_features(path=hydro_path, gr_path=hydro_ml_path/'
     dss = dsf
     dss.attrs['model'] = model_name
     if Ptest is not None:
-        filename = 'nested_CV_test_results_{}_all_features_with_hyper_permutation_tests'.format(model_name)
+        filename = 'nested_CV_test_results_{}_all_features_permutation_tests'.format(model_name)
     else:
-        filename = 'nested_CV_test_results_{}_all_features_with_hyper'.format(model_name)
+        filename = 'nested_CV_test_results_{}_all_features_with_hyper_params'.format(model_name)
+    if params is not None:
+        dss.attrs['comment'] = 'using best hyper parameters for all features and outer splits'
+        filename += '_best_hp'
+    filename += '_neg_{}'.format(sample_from_negatives)
     if suffix is not None:
         filename += '_{}'.format(suffix)
     filename += '.nc'
@@ -2908,7 +2916,7 @@ def CV_test_after_GridSearchCV(path=hydro_path, gr_path=hydro_ml_path/'nested4',
             y = ys
         if Ptest is not None:
             print('Permutation Test is in progress!')
-            ds = run_permutation_classifier_test(X, y, 4, param_df_dict, Ptest=Ptest,
+            ds = run_permutation_classifier_test(X, y, 5, param_df_dict, Ptest=Ptest,
                                                  model_name=model_name, verbose=verbose)
             return ds
         if params is not None:
