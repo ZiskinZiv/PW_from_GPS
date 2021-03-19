@@ -796,6 +796,22 @@ def harmonic_da_ts(da_ts, n=3, grp='month'):
     return ds
 
 
+def convert_da_to_long_form_df(da, var_name=None, value_name=None):
+    """ convert xarray dataarray to long form pandas df
+    to use with seaborn"""
+    if var_name is None:
+        var_name = 'var'
+    if value_name is None:
+        value_name = 'value'
+    dims = [x for x in da.dims]
+    df = da.to_dataframe()
+    for i, dim in enumerate(da.dims):
+        df[dim] = df.index.get_level_values(i)
+    df = df.melt(value_vars=[da.name], value_name=value_name,
+                 id_vars=dims, var_name=var_name)
+    return df
+
+
 def get_season_for_pandas_dtindex(df):
     import pandas as pd
     if not isinstance(df.index, pd.DatetimeIndex):
