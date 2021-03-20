@@ -1543,6 +1543,7 @@ def plot_nested_CV_test_scores(dss, feats=None, fontsize=16,
                                save=True, wv_label='pwv'):
     import seaborn as sns
     import matplotlib.pyplot as plt
+    from aux_gps import convert_da_to_long_form_df
 
     def change_width(ax, new_value) :
         for patch in ax.patches :
@@ -1579,15 +1580,16 @@ def plot_nested_CV_test_scores(dss, feats=None, fontsize=16,
     if feats is None:
         feats = ['pwv', 'pwv+pressure', 'pwv+pressure+doy']
     dst = dss.sel(features=feats)  # .reset_coords(drop=True)
-    df = dst['test_score'].to_dataframe()
-    df['scorer'] = df.index.get_level_values(3)
-    df['model'] = df.index.get_level_values(0)
-    df['features'] = df.index.get_level_values(1)
-    df['outer_splits'] = df.index.get_level_values(2)
-    df['model'] = df['model'].str.replace('SVC', 'SVM')
-    df = df.melt(value_vars='test_score', id_vars=[
-        'features', 'model', 'scorer', 'outer_splits'], var_name='test_score',
-        value_name='score')
+    # df = dst['test_score'].to_dataframe()
+    # df['scorer'] = df.index.get_level_values(3)
+    # df['model'] = df.index.get_level_values(0)
+    # df['features'] = df.index.get_level_values(1)
+    # df['outer_splits'] = df.index.get_level_values(2)
+    # df['model'] = df['model'].str.replace('SVC', 'SVM')
+    # df = df.melt(value_vars='test_score', id_vars=[
+    #     'features', 'model', 'scorer', 'outer_splits'], var_name='test_score',
+    #     value_name='score')
+    df = convert_da_to_long_form_df(dst['test_score'], value_name='score', var_name='test_score')
     sns.set(font_scale=1.5)
     sns.set_style('whitegrid')
     sns.set_style('ticks')
@@ -1600,8 +1602,8 @@ def plot_nested_CV_test_scores(dss, feats=None, fontsize=16,
     #                  data=df, dodge=True, join=False, palette=cmap,
     #                  markers="o", scale=.75, ci=None)
     fg.map_dataframe(sns.barplot, x='test_score', y="score", hue='features',
-                      ci='sd', capsize=None, errwidth=2, errcolor='k',
-                      palette=cmap, dodge=True)
+                     ci='sd', capsize=None, errwidth=2, errcolor='k',
+                     palette=cmap, dodge=True)
     # g = sns.catplot(x='test_score', y="score", hue='features',
     #                 col="scorer", row='model', ci='sd',
     #                 data=df, kind="bar", capsize=0.25,
