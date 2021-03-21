@@ -1572,6 +1572,16 @@ def plot_nested_CV_test_scores(dss, feats=None, fontsize=16,
                 _show_on_single_plot(ax)
         else:
             _show_on_single_plot(axs)
+    splits = dss['outer_split'].size
+    try:
+        assert 'best' in dss.attrs['comment']
+        best = True
+    except AssertionError:
+        best = False
+    if 'neg_sample' in dss.dims:
+        neg = dss['neg_sample'].size
+    else:
+        neg = 1
     if 'model' not in dss.dims:
         dss = dss.expand_dims('model')
         dss['model'] = [dss.attrs['model']]
@@ -1589,7 +1599,10 @@ def plot_nested_CV_test_scores(dss, feats=None, fontsize=16,
     # df = df.melt(value_vars='test_score', id_vars=[
     #     'features', 'model', 'scorer', 'outer_splits'], var_name='test_score',
     #     value_name='score')
-    df = convert_da_to_long_form_df(dst['test_score'], value_name='score', var_name='test_score')
+    da = dst['test_score']
+    da.name = 'feature groups'
+    df = convert_da_to_long_form_df(da, value_name='score',
+                                    var_name='feature groups')
     sns.set(font_scale=1.5)
     sns.set_style('whitegrid')
     sns.set_style('ticks')
@@ -1601,7 +1614,7 @@ def plot_nested_CV_test_scores(dss, feats=None, fontsize=16,
     # fg.map_dataframe(sns.pointplot, x="test_score", y="score", hue="features",
     #                  data=df, dodge=True, join=False, palette=cmap,
     #                  markers="o", scale=.75, ci=None)
-    fg.map_dataframe(sns.barplot, x='test_score', y="score", hue='features',
+    fg.map_dataframe(sns.barplot, x='feature groups', y="score", hue='features',
                      ci='sd', capsize=None, errwidth=2, errcolor='k',
                      palette=cmap, dodge=True)
     # g = sns.catplot(x='test_score', y="score", hue='features',
@@ -1613,7 +1626,7 @@ def plot_nested_CV_test_scores(dss, feats=None, fontsize=16,
     fg.set_ylabels('score')
     [x.grid(True) for x in fg.axes.flatten()]
     handles, labels = fg.axes[0, 0].get_legend_handles_labels()
-    show_values_on_bars(fg.axes, fs=fontsize-2)
+    show_values_on_bars(fg.axes, fs=fontsize-4)
     for i in range(fg.axes.shape[0]):  # i is rows
         model = dss['model'].isel(model=i).item()
         if model == 'SVC':
@@ -1641,7 +1654,10 @@ def plot_nested_CV_test_scores(dss, feats=None, fontsize=16,
     fg.fig.tight_layout()
     fg.fig.subplots_adjust(top=0.92)
     if save:
-        filename = 'ML_scores_models_nested_CV_{}.png'.format('_'.join(feats))
+        if best:
+            filename = 'ML_scores_models_nested_CV_best_hp_{}_{}_neg_{}.png'.format('_'.join(feats), splits, neg)
+        else:
+            filename = 'ML_scores_models_nested_CV_{}_{}_neg_{}.png'.format('_'.join(feats), splits, neg)
         plt.savefig(savefig_path / filename, bbox_inches='tight')
     return fg
 
@@ -1978,12 +1994,20 @@ def plot_heatmaps_for_all_models_and_scorings(dss, var='roc-auc'):  # , save=Tru
     return fg
 
 
-def plot_ROC_from_dss(dss, feats=None, fontsize=16, save=True, wv_label='pwv'):
+def plot_ROC_from_dss(dss, feats=None, fontsize=16, save=True, wv_label='pwv',
+                      best=False):
     import seaborn as sns
     import matplotlib.pyplot as plt
+    from aux_gps import convert_da_to_long_form_df
     sns.set_style('whitegrid')
     sns.set_style('ticks')
+    sns.set(font_scale=1.0)
     cmap = sns.color_palette('tab10', n_colors=3)
+    splits = dss['outer_split'].size
+    if 'neg_sample' in dss.dims:
+        neg = dss['neg_sample'].size
+    else:
+        neg = 1
     dss = dss.reindex(scorer=scorer_order)
     if feats is None:
         feats = ['pwv', 'pwv+pressure', 'pwv+pressure+doy']
@@ -1992,25 +2016,30 @@ def plot_ROC_from_dss(dss, feats=None, fontsize=16, save=True, wv_label='pwv'):
         dss['model'] = [dss.attrs['model']]
     dss = dss.sortby('model', ascending=False)
     dst = dss.sel(features=feats)  # .reset_coords(drop=True)
-    df = dst['TPR'].to_dataframe()
-    if 'neg_sample' in dss.dims:
-        fpr_lnum = 5
-        model_lnum = 0
-        scorer_lnum = 4
-        features_lnum = 1
+    # df = dst['TPR'].to_dataframe()
+    # if 'neg_sample' in dss.dims:
+    #     fpr_lnum = 5
+    #     model_lnum = 0
+    #     scorer_lnum = 4
+    #     features_lnum = 1
+    # else:
+    #     fpr_lnum = 4
+    #     model_lnum = 0
+    #     scorer_lnum = 3
+    #     features_lnum = 1
+    # df['FPR'] = df.index.get_level_values(fpr_lnum)
+    # df['model'] = df.index.get_level_values(model_lnum)
+    # df['scorer'] = df.index.get_level_values(scorer_lnum)
+    # df['features'] = df.index.get_level_values(features_lnum)
+    df = convert_da_to_long_form_df(dst['TPR'], var_name='score')
+    # df = df.melt(value_vars='TPR', id_vars=[
+    #     'features', 'model', 'scorer', 'FPR'], var_name='score')
+    if best:
+        col=None
     else:
-        fpr_lnum = 4
-        model_lnum = 0
-        scorer_lnum = 3
-        features_lnum = 1
-    df['FPR'] = df.index.get_level_values(fpr_lnum)
-    df['model'] = df.index.get_level_values(model_lnum)
-    df['scorer'] = df.index.get_level_values(scorer_lnum)
-    df['features'] = df.index.get_level_values(features_lnum)
-    df = df.melt(value_vars='TPR', id_vars=[
-        'features', 'model', 'scorer', 'FPR'], var_name='score')
+        col = 'scorer'
     df['model'] = df['model'].str.replace('SVC', 'SVM')
-    fg = sns.FacetGrid(df, col='scorer', row='model')
+    fg = sns.FacetGrid(df, col=col, row='model', aspect=1)
     fg.map_dataframe(sns.lineplot, x='FPR', y='value',
                      hue='features', ci='sd', palette=cmap, n_boot=None,
                      estimator='mean')
@@ -2029,7 +2058,10 @@ def plot_ROC_from_dss(dss, feats=None, fontsize=16, save=True, wv_label='pwv'):
             ax = fg.axes[i, j]
             ax.plot([0, 1], [0, 1], color='tab:red', linestyle='--', lw=2,
                     label='chance')
-            title = '{} | scorer={}'.format(model, scorer)
+            if best:
+                title = '{}'.format(model)
+            else:
+                title = '{} | scorer={}'.format(model, scorer)
             ax.set_title(title, fontsize=fontsize)
             handles, labels = ax.get_legend_handles_labels()
             hands = handles[0:3]
@@ -2047,19 +2079,36 @@ def plot_ROC_from_dss(dss, feats=None, fontsize=16, save=True, wv_label='pwv'):
     fg.set_xlabels('False Positive Rate', fontsize=fontsize)
     if wv_label is not None:
         labels = [x.replace('pwv', wv_label) for x in labels]
-    fg.fig.legend(handles=handles, labels=labels, prop={'size': fontsize}, edgecolor='k',
-                  framealpha=0.5, fancybox=True, facecolor='white',
-                  ncol=5, fontsize=fontsize, loc='upper center', bbox_to_anchor=(0.5, 1.005),
-                  bbox_transform=plt.gcf().transFigure)
+    if best:
+        fg.fig.legend(handles=handles, labels=labels, prop={'size': fontsize},
+                      edgecolor='k',
+                      framealpha=0.5, fancybox=True, facecolor='white',
+                      ncol=1, fontsize=fontsize, loc='upper center', bbox_to_anchor=(0.5, 1.005),
+                      bbox_transform=plt.gcf().transFigure)
+        fg.fig.tight_layout()
+        fg.fig.subplots_adjust(top=0.825,
+                               bottom=0.079,
+                               left=0.184,
+                               right=0.933,
+                               hspace=0.176,
+                               wspace=0.2)
+    else:
+        fg.fig.legend(handles=handles, labels=labels, prop={'size': fontsize}, edgecolor='k',
+                      framealpha=0.5, fancybox=True, facecolor='white',
+                      ncol=5, fontsize=fontsize, loc='upper center', bbox_to_anchor=(0.5, 1.005),
+                      bbox_transform=plt.gcf().transFigure)
     # true_scores = dst.sel(scorer=scorer, model=model)['true_score']
 
     # dss['permutation_score'].plot.hist(ax=ax, bins=25, color=color)
     # ymax = ax.get_ylim()[-1] - 0.2
     # ax.vlines(x=true_scores.values, ymin=0, ymax=ymax, linestyle='--', color=cmap)
-    fg.fig.tight_layout()
-    fg.fig.subplots_adjust(top=0.915)
+        fg.fig.tight_layout()
+        fg.fig.subplots_adjust(top=0.915)
     if save:
-        filename = 'ROC_plots.png'
+        if best:
+            filename = 'ROC_plots_models_nested_CV_best_hp_{}_{}_neg_{}.png'.format('_'.join(feats), splits, neg)
+        else:
+            filename = 'ROC_plots_models_nested_CV_{}_{}_neg_{}.png'.format('_'.join(feats), splits, neg)
         plt.savefig(savefig_path / filename, bbox_inches='tight')
     return fg
 
@@ -2638,22 +2687,30 @@ def run_RF_feature_importance_on_all_features(path=hydro_path, gr_path=hydro_ml_
     return daa
 
 
-def load_nested_CV_test_results_from_all_models(path=hydro_path, load_hyper=False, splits=4):
+def load_nested_CV_test_results_from_all_models(path=hydro_ml_path, best=False,
+                                                neg=1, splits=4,
+                                                permutation=False):
     from aux_gps import path_glob
     import xarray as xr
-    if splits is not None:
-        file_str = 'nested_CV_test_results_*_all_features_with_hyper_{}-{}.nc'.format(splits, splits)
+    if best:
+        if splits is not None:
+            file_str = 'nested_CV_test_results_*_all_features_with_hyper_params_best_hp_neg_{}_{}a.nc'.format(neg, splits)
+        if permutation:
+            file_str = 'nested_CV_test_results_*_all_features_permutation_tests_best_hp_neg_{}_{}a.nc'.format(neg, splits)
     else:
-        file_str = 'nested_CV_test_results_*_all_features_with_hyper.nc'
+        if splits is not None:
+            file_str = 'nested_CV_test_results_*_all_features_with_hyper_params_neg_{}_{}a.nc'.format(neg, splits)
+        if permutation:
+            file_str = 'nested_CV_test_results_*_all_features_permutation_tests_neg_{}_{}a.nc'.format(neg, splits)
     files = path_glob(path, file_str)
     print(files)
     models = [x.as_posix().split('/')[-1].split('_')[4] for x in files]
-    if not load_hyper:
-        print('loading CV test results only for {} models'.format(', '.join(models)))
-        dsl = [xr.load_dataset(x) for x in files]
+    print('loading CV test results only for {} models'.format(', '.join(models)))
+    dsl = [xr.load_dataset(x) for x in files]
+    if not permutation:
         dsl = [x[['mean_score', 'std_score', 'test_score', 'roc_auc_score', 'TPR']] for x in dsl]
-        dss = xr.concat(dsl, 'model')
-        dss['model'] = models
+    dss = xr.concat(dsl, 'model')
+    dss['model'] = models
     return dss
 
 
