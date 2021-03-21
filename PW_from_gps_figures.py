@@ -6367,7 +6367,8 @@ def plot_hydro_pressure_anomalies(hydro_path=hydro_path, std=False,
 def plot_hydro_pwv_anomalies_with_station_mean(work_path=work_yuval,
                                                hydro_path=hydro_path,
                                                days_prior=3, fontsize=14,
-                                               save=True, smoothed=False):
+                                               save=True, smoothed=False,
+                                               wv_label='PWV'):
     import xarray as xr
     from hydro_procedures import hydro_pw_dict
     from hydro_procedures import produce_pwv_days_before_tide_events
@@ -6389,6 +6390,10 @@ def plot_hydro_pwv_anomalies_with_station_mean(work_path=work_yuval,
     sns.set_style('whitegrid')
     sns.set_style('ticks')
     cmap = 'jet' #sns.color_palette('gist_rainbow_r', as_cmap=True)
+    if wv_label == 'PWV':
+        units = 'mm'
+    elif wv_label == 'IWV':
+        units = 'kg$\cdot$m$^{-2}$'
     pw = xr.open_dataset(work_path / 'GNSS_PW_thresh_0_hour_dayofyear_anoms.nc')
     pws = [pw[x].load() for x in hydro_pw_dict.keys()]
     dfs = [read_station_from_tide_database(hydro_pw_dict.get(x), hydro_path=hydro_path) for x in hydro_pw_dict.keys()]
@@ -6424,8 +6429,8 @@ def plot_hydro_pwv_anomalies_with_station_mean(work_path=work_yuval,
         yticklabels=True,
         ax=ax_heat,
         cbar_ax=cbar_ax,
-        cbar_kws={'label': 'PWV anomalies [mm]'}, xticklabels=False)
-    cbar_ax.set_ylabel('PWV anomalies [mm]', fontsize=fontsize-2)
+        cbar_kws={'label': r'{} anomalies [{}]'.format(wv_label, units)}, xticklabels=False)
+    cbar_ax.set_ylabel(r'{} anomalies [{}]'.format(wv_label, units), fontsize=fontsize-2)
     cbar_ax.tick_params(labelsize=fontsize)
     zero_in_heat = df_mean.index.get_loc(0, method='nearest') + 1
     ax_heat.vlines([zero_in_heat], *ax_heat.get_ylim(), color='k',
@@ -6453,7 +6458,7 @@ def plot_hydro_pwv_anomalies_with_station_mean(work_path=work_yuval,
     # barax.tick_params(labelsize=fontsize)
     ax_group.set_xlim(ts.index.min(), ts.index.max())  #+
                       # pd.Timedelta(15, unit='D'))
-    ax_group.set_ylabel('PWV mean anomalies [mm]', fontsize=fontsize-2)
+    ax_group.set_ylabel(r'{} mean anomalies [{}]'.format(wv_label, units), fontsize=fontsize-2)
     ax_group.set_xlabel('Days before/after a tide event', fontsize=fontsize-2)
     # set ticks and align with heatmap axis (move by 0.5):
     # ax_group.xaxis.set_major_locator(ticker.MultipleLocator(0.25))
