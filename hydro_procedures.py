@@ -1544,6 +1544,8 @@ def plot_nested_CV_test_scores(dss, feats=None, fontsize=16,
     import seaborn as sns
     import matplotlib.pyplot as plt
     from aux_gps import convert_da_to_long_form_df
+    import numpy as np
+    import xarray as xr
 
     def change_width(ax, new_value) :
         for patch in ax.patches :
@@ -1557,21 +1559,23 @@ def plot_nested_CV_test_scores(dss, feats=None, fontsize=16,
             patch.set_x(patch.get_x() + diff * .5)
 
 
-    def show_values_on_bars(axs, fs=12, fw='bold'):
+    def show_values_on_bars(axs, fs=12, fw='bold', exclude_bar_num=None):
         import numpy as np
-        def _show_on_single_plot(ax):
-            for p in ax.patches:
-                _x = p.get_x() + p.get_width() / 2
-                _y = p.get_y() + p.get_height()
-                value = '{:.2f}'.format(p.get_height())
-                ax.text(_x, _y, value, ha="right",
-                        fontsize=fs, fontweight=fw, zorder=20)
+        def _show_on_single_plot(ax, exclude_bar_num=3):
+            for i, p in enumerate(ax.patches):
+                if i != exclude_bar_num and exclude_bar_num is not None:
+                    _x = p.get_x() + p.get_width() / 2
+                    _y = p.get_y() + p.get_height()
+                    value = '{:.2f}'.format(p.get_height())
+                    ax.text(_x, _y, value, ha="right",
+                            fontsize=fs, fontweight=fw, zorder=20)
 
         if isinstance(axs, np.ndarray):
             for idx, ax in np.ndenumerate(axs):
-                _show_on_single_plot(ax)
+                _show_on_single_plot(ax, exclude_bar_num)
         else:
-            _show_on_single_plot(axs)
+            _show_on_single_plot(axs, exclude_bar_num)
+
     splits = dss['outer_split'].size
     try:
         assert 'best' in dss.attrs['comment']
@@ -1600,6 +1604,13 @@ def plot_nested_CV_test_scores(dss, feats=None, fontsize=16,
     #     'features', 'model', 'scorer', 'outer_splits'], var_name='test_score',
     #     value_name='score')
     da = dst['test_score']
+    if len(feats) == 5:
+        da_empty = da.isel(features=0).copy(
+            data=np.zeros(da.isel(features=0).shape))
+        da_empty['features'] = 'empty'
+        da = xr.concat([da, da_empty], 'features')
+        da = da.reindex(features=['doy', 'pressure', 'pwv',
+                                  'empty', 'pwv+pressure', 'pwv+pressure+doy'])
     da.name = 'feature groups'
     df = convert_da_to_long_form_df(da, value_name='score',
                                     var_name='feature groups')
@@ -1607,7 +1618,9 @@ def plot_nested_CV_test_scores(dss, feats=None, fontsize=16,
     sns.set_style('whitegrid')
     sns.set_style('ticks')
     cmap = sns.color_palette('tab10', n_colors=len(feats))
-    cmap = ['tab:purple', 'tab:red', 'tab:blue', 'tab:orange', 'tab:green']
+    if len(feats) == 5:
+        cmap = ['tab:purple', 'tab:brown', 'tab:blue', 'tab:blue',
+                'tab:orange', 'tab:green']
     fg = sns.FacetGrid(data=df, row='model', col='scorer', height=4, aspect=0.9)
     # fg.map_dataframe(sns.stripplot, x="test_score", y="score", hue="features",
     #                  data=df, dodge=True, alpha=1, zorder=1, palette=cmap)
@@ -1626,7 +1639,10 @@ def plot_nested_CV_test_scores(dss, feats=None, fontsize=16,
     fg.set_ylabels('score')
     [x.grid(True) for x in fg.axes.flatten()]
     handles, labels = fg.axes[0, 0].get_legend_handles_labels()
-    show_values_on_bars(fg.axes, fs=fontsize-4)
+    if len(feats) == 5:
+        del handles[3]
+        del labels[3]
+    show_values_on_bars(fg.axes, fs=fontsize-4, exclude_bar_num=3)
     for i in range(fg.axes.shape[0]):  # i is rows
         model = dss['model'].isel(model=i).item()
         if model == 'SVC':
@@ -1644,7 +1660,7 @@ def plot_nested_CV_test_scores(dss, feats=None, fontsize=16,
         labels = [x.replace('pwv', wv_label) for x in labels]
     fg.fig.legend(handles=handles, labels=labels, prop={'size': fontsize}, edgecolor='k',
                   framealpha=0.5, fancybox=True, facecolor='white',
-                  ncol=5, fontsize=fontsize, loc='upper center', bbox_to_anchor=(0.5, 1.005),
+                  ncol=len(feats), fontsize=fontsize, loc='upper center', bbox_to_anchor=(0.5, 1.005),
                   bbox_transform=plt.gcf().transFigure)
     # true_scores = dst.sel(scorer=scorer, model=model)['true_score']
 
