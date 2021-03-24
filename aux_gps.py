@@ -748,7 +748,8 @@ def harmonic_da(da_ts, n=3, field=None, init=None):
     return ds
 
 
-def harmonic_da_ts(da_ts, n=3, grp='month'):
+def harmonic_da_ts(da_ts, n=3, grp='month', return_ts_fit=False,
+                   verbose=True):
     from aux_gps import fit_da_ts_to_sine_model
     import xarray as xr
     time_dim = list(set(da_ts.dims))[0]
@@ -764,8 +765,10 @@ def harmonic_da_ts(da_ts, n=3, grp='month'):
     params_list = []
     di_mean_list = []
     di_std_list = []
+    tss = []
     for cycle, init_freq in zip(harmonics, init_freqs):
-        print('fitting harmonic #{}'.format(cycle))
+        if verbose:
+            print('fitting harmonic #{}'.format(cycle))
         res = fit_da_ts_to_sine_model(
             da_ts, init_freq=init_freq, verbose=False, plot=False)
         name = da_ts.name.split('_')[0]
@@ -784,6 +787,7 @@ def harmonic_da_ts(da_ts, n=3, grp='month'):
         params_list.append(params_da)
         di_mean_list.append(diurnal_mean)
         di_std_list.append(diurnal_std)
+        tss.append(res)
     da_mean = xr.concat(di_mean_list, cunits)
     da_std = xr.concat(di_std_list, cunits)
     da_params = xr.concat(params_list, cunits)
@@ -793,6 +797,9 @@ def harmonic_da_ts(da_ts, n=3, grp='month'):
     ds[cunits].attrs['long_name'] = cu_name
     ds[da_params.name] = da_params
     ds[da_ts.name] = da_ts.groupby('{}.{}'.format(time_dim, grp)).mean(keep_attrs=True)
+    if return_ts_fit:
+        ds = xr.concat(tss, cunits)
+        ds[cunits] = harmonics
     return ds
 
 
@@ -1095,6 +1102,15 @@ def loess_curve(da_ts, time_dim='time', season=None, plot=True):
         plt.fill_between(x, ll, ul, alpha=.33)
         plt.show()
     return da_lowess
+
+
+def detrend_ts(da_ts, verbose=False):
+    trend = loess_curve(da_ts, plot=False)
+    if verbose:
+        print('detrending using loess.')
+    detrended = da_ts - trend['mean']
+    detrended.name = da_ts.name
+    return detrended
 
 
 def autocorr_plot(da_ts, max_lag=40):
