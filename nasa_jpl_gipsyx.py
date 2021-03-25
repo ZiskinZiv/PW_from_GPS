@@ -137,18 +137,31 @@ def produce_seasonal_trend_breakdown_time_series_from_jpl_gipsyx_site(station='b
     harm = xr_reindex_with_date_range(harm, time_dim='time', freq='D')
     harm1 = harm.sel(cpy=1).reset_coords(drop=True)
     harm1.name = da_ts.name + '_annual'
+    harm1_keys = [x for x in harm1.attrs.keys() if '_1' in x]
+    harm1.attrs = dict(zip(harm1_keys, [harm1.attrs[x] for x in harm1_keys]))
     harm2 = harm.sel(cpy=2).reset_coords(drop=True)
     harm2.name = da_ts.name + '_semiannual'
+    harm2_keys = [x for x in harm2.attrs.keys() if '_2' in x]
+    harm2.attrs = dict(zip(harm2_keys, [harm2.attrs[x] for x in harm2_keys]))
     resid = da_ts_detrended - harm1 - harm2
     resid.name = da_ts.name + '_residual'
     ds = xr.merge([da_ts, trend, harm1, harm2, resid])
     # load breakpoints:
-    breakpoints = xr.open_dataset(
-        jpl_path/'jpl_break_estimates.nc').sel(station=station.upper())[var]
-    df = breakpoints.dropna('year')['year'].to_dataframe()
+    try:
+        breakpoints = xr.open_dataset(
+            jpl_path/'jpl_break_estimates.nc').sel(station=station.upper())[var]
+        df = breakpoints.dropna('year')['year'].to_dataframe()
     # load seasonal coeffs:
-    df['dt'] = df['year'].apply(decimal_year_to_datetime)
-    df['dt'] = df['dt'].round('D')
+        df['dt'] = df['year'].apply(decimal_year_to_datetime)
+        df['dt'] = df['dt'].round('D')
+        bp_da = df.set_index(df['dt'])['dt'].to_xarray()
+        bp_da = bp_da.rename({'dt': 'time'})
+        ds['{}_{}_breakpoints'.format(station, var)] = bp_da
+        no_bp = False
+    except KeyError:
+        if verbose:
+            print('no breakpoints found for {}!'.format(station))
+            no_bp = True
     # seas = xr.load_dataset(
     #     jpl_path/'jpl_seasonal_estimates.nc').sel(station=station.upper())
     # ac1, as1, ac2, as2 = seas[var].values
@@ -168,10 +181,136 @@ def produce_seasonal_trend_breakdown_time_series_from_jpl_gipsyx_site(station='b
     # ds = xr.merge([annual, semiannual, da_ts])
     if plot:
         # plt.figure(figsize=(20, 20))
-        axes = ds.to_dataframe().plot(subplots=True, figsize=(20, 20), color='k')
+        dst = ds[[x for x in ds if 'breakpoints' not in x]]
+        axes = dst.to_dataframe().plot(subplots=True, figsize=(20, 20), color='k')
         [ax.grid() for ax in axes]
         [ax.set_ylabel('[mm]') for ax in axes]
-        for bp in df['dt']:
-            [ax.axvline(bp, color='red') for ax in axes]
+        if not no_bp:
+            for bp in df['dt']:
+                [ax.axvline(bp, color='red') for ax in axes]
         plt.tight_layout()
+        fig, ax = plt.subplots(figsize=(7, 7))
+        harm_mm = harmonic_da_ts(da_ts_detrended.dropna('time'), n=2, grp='month',
+                                 return_ts_fit=False, verbose=verbose)
+        harm_mm['{}_{}_detrended'.format(station, var)].plot.line(ax=ax, linewidth=0, marker='o', color='k')
+        harm_mm['{}_mean'.format(station)].sel(cpy=1).plot.line(ax=ax, marker=None, color='tab:red')
+        harm_mm['{}_mean'.format(station)].sel(cpy=2).plot.line(ax=ax, marker=None, color='tab:blue')
+        harm_mm['{}_mean'.format(station)].sum('cpy').plot.line(ax=ax, marker=None, color='tab:purple')
+        ax.grid()
     return ds
+
+
+def read_geodetic_positions_and_height(path=jpl_path):
+    import pandas as pd
+    import requests
+    from io import StringIO
+    from aux_gps import save_ncfile
+    url = 'https://sideshow.jpl.nasa.gov/post/tables/table2.html'
+    r = requests.get(url)
+    data = r.text
+    df = pd.read_csv(StringIO(data), delim_whitespace=True, skiprows=7)
+    df.drop(df.tail(1).index, inplace=True)  # drop last n rows
+    df = df.unstack()
+    cols0 = df.columns.get_level_values(0)
+    cols1 = df.columns.get_level_values(1)
+    cols = ['{}_{}'.format(x, y) for x, y in zip(cols0, cols1)]
+    df.columns = cols
+    df.index.name = 'station'
+    ds = df.to_xarray()
+    pos_das = [x for x in ds if 'POS' in x]
+    vel_das = [x for x in ds if 'VEL' in x]
+    for da in pos_das:
+        if 'V' in da.split('_')[0]:
+            ds[da].attrs['units'] = 'mm'
+        else:
+            ds[da].attrs['units'] = 'deg'
+    ds['SN_POS'].attrs['units'] = 'mm'
+    ds['SE_POS'].attrs['units'] = 'mm'
+    for da in vel_das:
+        ds[da].attrs['units'] = 'mm/yr'
+    ds.attrs['name'] = 'geodetic positions and height and velocities'
+    ds.attrs['reference frame'] = 'IGS14'
+    ds.attrs['reference epoch'] = '2020-01-01'
+    ds.attrs['reference ellipsoid'] = 'GRS80'
+    filename = 'jpl_geodetic_positions_velocities.nc'
+    save_ncfile(ds, path, filename)
+    return ds
+
+
+def run_harmonic_analysis_on_all_jpl_products(path=jpl_path, savepath=jpl_path/'harmonic_analysis'):
+    from aux_gps import save_ncfile
+    dss = read_geodetic_positions_and_height(path=path)
+    for i, station in enumerate(dss['station'].values):
+        print('processing station {} ({} out of {})'.format(station, i+1, dss['station'].size))
+        ds = produce_seasonal_trend_breakdown_time_series_from_jpl_gipsyx_site(station=station, verbose=False, plot=False)
+        filename = '{}_V_harmonic_mm.nc'.format(station)
+        save_ncfile(ds, savepath, filename)
+    return
+
+
+def build_jpl_station_geodataframe(path=jpl_path, plot=True):
+    import geopandas as gpd
+    import matplotlib.pyplot as plt
+    import xarray as xr
+    pos_ds = xr.load_dataset(path / 'jpl_geodetic_positions_velocities.nc')
+    df = pos_ds[['N_POS', 'E_POS']].to_dataframe()
+    gdf = gpd.GeoDataFrame(
+        df, geometry=gpd.points_from_xy(df['E_POS'], df['N_POS']))
+
+    # lat = np.arange(-90, 90.25, 0.25)
+    # lon = np.arange(-180, 180, 0.25)
+    # lat_da = xr.DataArray(lat, dims=['lat'])
+    # lat_da['lat'] = lat
+    # lon_da = xr.DataArray(lon, dims=['lon'])
+    # lon_da['lon'] = lon
+    # grid = np.zeros((lat.shape[0], lon.shape[0]), dtype=str)
+    # cnt = 0
+    # for station in pos_ds['station'].values:
+    #     north = pos_ds['N_POS'].sel(station=station)
+    #     lat_in_grid = lat_da.sel(lat=north, method='nearest').item()
+    #     north_ind = np.where(lat==lat_in_grid)[0]
+    #     east = pos_ds['E_POS'].sel(station=station)
+    #     lon_in_grid = lon_da.sel(lon=east, method='nearest').item()
+    #     east_ind = np.where(lon==lon_in_grid)[0]
+    #     if grid[north_ind, east_ind] != '':
+    #         print('grid point already taken')
+    #         cnt += 1
+    #     grid[north_ind, east_ind] = station
+    # print('total taken points: {}'.format(cnt))
+    if plot:
+        world = gpd.read_file(gpd.datasets.get_path('naturalearth_lowres'))
+        base = world.plot(color='white', edgecolor='black', figsize=(15, 15))
+        gdf.plot(ax=base, marker='o', color='red', markersize=5)
+        plt.tight_layout()
+    return gdf
+
+
+def read_all_jpl_station_harmonic_analysis(path=jpl_path, harm_path=jpl_path/'harmonic_analysis'):
+    from aux_gps import path_glob
+    import xarray as xr
+    import pandas as pd
+    files = sorted(path_glob(harm_path, '*_V_harmonic_mm.nc'))
+    dsl = [xr.open_dataset(x) for x in files]
+    stations = [x.as_posix().split('/')[-1].split('_')[0] for x in files]
+    annual_params = []
+    semiannual_params = []
+    annual_peak_doy = []
+    semiannual_peak_doy = []
+    for i, ds in enumerate(dsl):
+        # print('processing {} station'.format(stations[i]))
+        a_name = '{}_V_annual'.format(stations[i])
+        sa_name = '{}_V_semiannual'.format(stations[i])
+        annual_params.append([x[0] for x in ds[a_name].attrs.values()])
+        semiannual_params.append([x[0] for x in ds[sa_name].attrs.values()])
+        annual_peak_doy.append(ds[a_name].idxmax().dt.dayofyear)
+        semiannual_peak_doy.append(ds[sa_name].idxmax().dt.dayofyear)
+        continue
+    df = pd.DataFrame(annual_params, index=stations)
+    df.columns = ['A_Amp', 'A_offset', 'A_freq', 'A_x0']
+    df['SA_Amp'] = [x[0] for x in semiannual_params]
+    df['SA_offset'] = [x[1] for x in semiannual_params]
+    df['SA_freq'] = [x[2] for x in semiannual_params]
+    df['SA_x0'] = [x[3] for x in semiannual_params]
+    df['A_peak_doy'] = [x.item() for x in annual_peak_doy]
+    df['SA_peak_doy'] = [x.item() for x in semiannual_peak_doy]
+    return df
