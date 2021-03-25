@@ -766,6 +766,7 @@ def harmonic_da_ts(da_ts, n=3, grp='month', return_ts_fit=False,
     di_mean_list = []
     di_std_list = []
     tss = []
+    params_dicts = []
     for cycle, init_freq in zip(harmonics, init_freqs):
         if verbose:
             print('fitting harmonic #{}'.format(cycle))
@@ -788,6 +789,7 @@ def harmonic_da_ts(da_ts, n=3, grp='month', return_ts_fit=False,
         di_mean_list.append(diurnal_mean)
         di_std_list.append(diurnal_std)
         tss.append(res)
+        params_dicts.append(res.attrs)
     da_mean = xr.concat(di_mean_list, cunits)
     da_std = xr.concat(di_std_list, cunits)
     da_params = xr.concat(params_list, cunits)
@@ -800,6 +802,11 @@ def harmonic_da_ts(da_ts, n=3, grp='month', return_ts_fit=False,
     if return_ts_fit:
         ds = xr.concat(tss, cunits)
         ds[cunits] = harmonics
+        di = {}
+        for i, harm in enumerate(harmonics):
+            keys = [x + '_{}'.format(harm) for x in params_dicts[i].keys()]
+            di.update(dict(zip(keys, [x for x in params_dicts[i].values()])))
+        ds.attrs = di
     return ds
 
 
