@@ -1114,20 +1114,10 @@ def nested_cross_validation_procedure(X, y, model_name='SVC', features='pwv',
 #         return model
 
 
-def plot_hyper_parameters_heatmaps_from_nested_CV_model(path=hydro_path, model_name='MLP', splits=4,
-                                                        features='pwv+pressure+doy', save=True, dss=None):
-    import xarray as xr
+def plot_hyper_parameters_heatmaps_from_nested_CV_model(dss, path=hydro_path, model_name='MLP',
+                                                        features='pwv+pressure+doy', save=True):
     import matplotlib.pyplot as plt
-    if dss is not None:
-        ds = dss
-    else:
-        if splits is None:
-            file_str = 'nested_CV_test_results_{}_all_features_with_hyper.nc'.format(model_name)
-        else:
-            file_str = 'nested_CV_test_results_{}_all_features_with_hyper_{}-{}.nc'.format(model_name, splits,splits)
-        ds = xr.load_dataset(
-            path / file_str)
-    ds = ds.sel(features=features).reset_coords(drop=True)
+    ds = dss.sel(features=features).reset_coords(drop=True)
     non_hp_vars = ['mean_score', 'std_score',
                    'test_score', 'roc_auc_score', 'TPR']
     if model_name == 'RF':
@@ -1170,6 +1160,53 @@ def plot_hyper_parameters_heatmaps_from_nested_CV_model(path=hydro_path, model_n
             model_name)
         plt.savefig(savefig_path / filename, bbox_inches='tight')
     return
+
+
+def plot_heatmaps_for_hyper_parameters_data_splits(df1, df2, ax=None,
+                                                   cmap='colorblind',
+                                                   title=None,
+                                                   fontsize=12):
+    import pandas as pd
+    import seaborn as sns
+    import numpy as np
+    import matplotlib.pyplot as plt
+    sns.set_style('ticks')
+    sns.set_style('whitegrid')
+    sns.set(font_scale=1.2)
+    value_to_int = {j: i for i, j in enumerate(
+        sorted(pd.unique(pd.concat([df1, df2]).values.ravel())))} # like you did
+    try:
+        sorted_v_to_i = dict(sorted(value_to_int.items()))
+    except TypeError:
+        sorted_v_to_i = value_to_int
+    n = len(value_to_int)
+    # discrete colormap (n samples from a given cmap)
+    cmap = sns.color_palette(cmap, n)
+    if ax is None:
+        fig, axes = plt.subplots(2, 1, sharex=True, sharey=False)
+        sns.heatmap(df1.replace(sorted_v_to_i), cmap=cmap,
+                    ax=axes[0], linewidth=1, linecolor='k', square=False,
+                    cbar_kws={"shrink": .9})
+        sns.heatmap(df2.replace(sorted_v_to_i), cmap=cmap,
+                    ax=axes[1], linewidth=1, linecolor='k', square=False,
+                    cbar_kws={"shrink": .9})
+    # else:
+    #     ax = sns.heatmap(df.replace(sorted_v_to_i), cmap=cmap,
+    #                      ax=ax, linewidth=1, linecolor='k',
+    #                      square=False, cbar_kws={"shrink": .9})
+    if title is not None:
+        ax.set_title(title, fontsize=fontsize)
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=30)
+    ax.set_yticklabels(ax.get_yticklabels(), rotation=0)
+    ax.tick_params(labelsize=fontsize)
+    ax.set_ylabel(ax.get_ylabel(), fontsize=fontsize)
+    ax.set_xlabel(ax.get_xlabel(), fontsize=fontsize)
+    # colorbar = ax.collections[0].colorbar
+    colorbar = fig.colorbar
+    r = colorbar.vmax - colorbar.vmin
+    colorbar.set_ticks([colorbar.vmin + r / n * (0.5 + i) for i in range(n)])
+    colorbar.set_ticklabels(list(value_to_int.keys()))
+    return ax
 
 
 def plot_heatmap_for_hyper_parameters_df(df, ax=None, cmap='colorblind',
