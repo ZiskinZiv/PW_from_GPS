@@ -1162,51 +1162,189 @@ def plot_hyper_parameters_heatmaps_from_nested_CV_model(dss, path=hydro_path, mo
     return
 
 
-def plot_heatmaps_for_hyper_parameters_data_splits(df1, df2, ax=None,
+def plot_heatmaps_for_hyper_parameters_data_splits(df1, df2, axes=None,
                                                    cmap='colorblind',
-                                                   title=None,
-                                                   fontsize=12):
+                                                   title=None, fig=None,
+                                                   cbar_params=[.92, .12, .03, .75],
+                                                   fontsize=12,
+                                                   val_type='float'):
     import pandas as pd
     import seaborn as sns
     import numpy as np
+    # from mpl_toolkits.axes_grid1 import make_axes_locatable
+    from matplotlib.colors import Normalize
+    import matplotlib
     import matplotlib.pyplot as plt
+    import matplotlib.cm as cm
     sns.set_style('ticks')
     sns.set_style('whitegrid')
     sns.set(font_scale=1.2)
+    df1 = df1.astype(eval(val_type))
+    df2 = df2.astype(eval(val_type))
+    arr = pd.concat([df1, df2], axis=0).values.ravel()
     value_to_int = {j: i for i, j in enumerate(
-        sorted(pd.unique(pd.concat([df1, df2]).values.ravel())))} # like you did
-    try:
-        sorted_v_to_i = dict(sorted(value_to_int.items()))
-    except TypeError:
-        sorted_v_to_i = value_to_int
+        np.unique(arr))} # like you did
+    # try:
+    #     sorted_v_to_i = dict(sorted(value_to_int.items()))
+    # except TypeError:
+    # sorted_v_to_i = value_to_int
+    # print(value_to_int)
     n = len(value_to_int)
     # discrete colormap (n samples from a given cmap)
-    cmap = sns.color_palette(cmap, n)
-    if ax is None:
+    cmap_list = sns.color_palette(cmap, n)
+    if val_type == 'float':
+        # print([value_to_int.keys()])
+        cbar_ticklabels = ['{:.2g}'.format(x) for x in value_to_int.keys()]
+    elif val_type == 'int':
+        cbar_ticklabels = [int(x) for x in value_to_int.keys()]
+    elif val_type == 'str':
+        cbar_ticklabels = [x for x in value_to_int.keys()]
+    if 'nan' in value_to_int.keys():
+        cmap_list[-1] = (0.5, 0.5, 0.5)
+        new_value_to_int = {}
+        for key, val in value_to_int.items():
+            try:
+                new_value_to_int[str(int(float(key)))] = val
+            except ValueError:
+                new_value_to_int['NR'] = val
+        cbar_ticklabels = [x for x in new_value_to_int.keys()]
+
+    # u1 = np.unique(df1.replace(value_to_int)).astype(int)
+    # cmap1 = [cmap_list[x] for x in u1]
+    # u2 = np.unique(df2.replace(value_to_int)).astype(int)
+    # cmap2 = [cmap_list[x] for x in u2]
+    # prepare normalizer
+    ## Prepare bins for the normalizer
+    norm_bins = np.sort([*value_to_int.values()]) + 0.5
+    norm_bins = np.insert(norm_bins, 0, np.min(norm_bins) - 1.0)
+    # print(norm_bins)
+    ## Make normalizer and formatter
+    norm = matplotlib.colors.BoundaryNorm(norm_bins, n, clip=True)
+    # normalizer = Normalize(np.array([x for x in value_to_int.values()])[0],np.array([x for x in value_to_int.values()])[-1])
+    # im=cm.ScalarMappable(norm=normalizer)
+    if axes is None:
         fig, axes = plt.subplots(2, 1, sharex=True, sharey=False)
-        sns.heatmap(df1.replace(sorted_v_to_i), cmap=cmap,
-                    ax=axes[0], linewidth=1, linecolor='k', square=False,
-                    cbar_kws={"shrink": .9})
-        sns.heatmap(df2.replace(sorted_v_to_i), cmap=cmap,
-                    ax=axes[1], linewidth=1, linecolor='k', square=False,
-                    cbar_kws={"shrink": .9})
+    # divider = make_axes_locatable([axes[0], axes[1]])
+    # cbar_ax = divider.append_axes('right', size='5%', pad=0.05)
+    cbar_ax = fig.add_axes(cbar_params)
+    sns.heatmap(df1.replace(value_to_int), cmap=cmap_list, cbar=False,
+                ax=axes[0], linewidth=0.7, linecolor='k', square=True,
+                cbar_kws={"shrink": .9}, cbar_ax=cbar_ax, norm=norm)
+    sns.heatmap(df2.replace(value_to_int), cmap=cmap_list, cbar=False,
+                ax=axes[1], linewidth=0.7, linecolor='k', square=True,
+                cbar_kws={"shrink": .9}, cbar_ax=cbar_ax, norm=norm)
     # else:
     #     ax = sns.heatmap(df.replace(sorted_v_to_i), cmap=cmap,
     #                      ax=ax, linewidth=1, linecolor='k',
     #                      square=False, cbar_kws={"shrink": .9})
     if title is not None:
-        ax.set_title(title, fontsize=fontsize)
-    ax.set_xticklabels(ax.get_xticklabels(), rotation=30)
-    ax.set_yticklabels(ax.get_yticklabels(), rotation=0)
-    ax.tick_params(labelsize=fontsize)
-    ax.set_ylabel(ax.get_ylabel(), fontsize=fontsize)
-    ax.set_xlabel(ax.get_xlabel(), fontsize=fontsize)
-    # colorbar = ax.collections[0].colorbar
-    colorbar = fig.colorbar
+        axes[0].set_title(title, fontsize=fontsize)
+    for ax in axes:
+        ax.set_xticklabels(ax.get_xticklabels(), ha='right', va='top', rotation=45)
+        ax.set_yticklabels(ax.get_yticklabels(), rotation=0)
+        ax.tick_params(labelsize=fontsize, direction='out', bottom=True,
+                       left=True, length=2)
+        ax.set_ylabel(ax.get_ylabel(), fontsize=fontsize)
+        ax.set_xlabel(ax.get_xlabel(), fontsize=fontsize)
+    # colorbar = axes[0].collections[0].colorbar
+    # diff = norm_bins[1:] - norm_bins[:-1]
+    # tickz = norm_bins[:-1] + diff / 2
+    colorbar = fig.colorbar(cm.ScalarMappable(norm=norm, cmap=matplotlib.colors.ListedColormap(cmap_list)), ax=[axes[0], axes[1]],
+                            shrink=1, pad=0.05, cax=cbar_ax)
+    # colorbar = plt.gca().images[-1].colorbar
     r = colorbar.vmax - colorbar.vmin
     colorbar.set_ticks([colorbar.vmin + r / n * (0.5 + i) for i in range(n)])
-    colorbar.set_ticklabels(list(value_to_int.keys()))
-    return ax
+    colorbar.ax.set_yticklabels(cbar_ticklabels, fontsize=fontsize-2)
+    return axes
+
+
+def plot_hyper_parameters_heatmap_data_splits_per_model(dss4, dss5, fontsize=12,
+                                                        save=True, model_name='SVC',
+                                                        features='pwv+pressure+doy'):
+    import matplotlib.pyplot as plt
+    # import seaborn as sns
+    fig, axes = plt.subplots(2, 5, sharex=True, sharey=False ,figsize=(16, 5))
+    ds4 = dss4.sel(features=features).reset_coords(drop=True)
+    ds5 = dss5.sel(features=features).reset_coords(drop=True)
+    ds4 = ds4.reindex(scorer=scorer_order)
+    ds5 = ds5.reindex(scorer=scorer_order)
+    non_hp_vars = ['mean_score', 'std_score',
+                   'test_score', 'roc_auc_score', 'TPR']
+    if model_name == 'RF':
+        non_hp_vars.append('feature_importances')
+    if model_name == 'MLP':
+        adj_dict=dict(
+        top=0.946,
+        bottom=0.145,
+        left=0.046,
+        right=0.937,
+        hspace=0.121,
+        wspace=0.652)
+        cb_st = 0.167
+        cb_mul = 0.193
+    else:
+        adj_dict=dict(
+        wspace = 0.477,
+        top=0.921,
+        bottom=0.17,
+        left=0.046,
+        right=0.937,
+        hspace=0.121)
+        cb_st = 0.18
+        cb_mul = 0.19
+    ds4 = ds4[[x for x in ds4 if x not in non_hp_vars]]
+    ds5 = ds5[[x for x in ds5 if x not in non_hp_vars]]
+    seq = 'Blues'
+    cat = 'Dark2'
+    hp_dict = {
+        'alpha': ['Reds', 'float'], 'activation': ['Set1_r', 'str'],
+        'hidden_layer_sizes': ['Paired', 'str'], 'learning_rate': ['Spectral_r', 'str'],
+        'solver': ['Dark2', 'str'], 'kernel': ['Dark2', 'str'], 'C': ['Blues', 'float'],
+        'gamma': ['Oranges', 'float'], 'degree': ['Greens', 'str'], 'coef0': ['Spectral', 'str'],
+        'max_depth': ['Blues', 'int'], 'max_features': ['Dark2', 'str'],
+        'min_samples_leaf': ['Greens', 'int'], 'min_samples_split': ['Reds', 'int'],
+        'n_estimators': ['Oranges', 'int']
+    }
+    # fix stuff for SVC:
+    if model_name == 'SVC':
+        ds4['degree'] = ds4['degree'].where(ds4['kernel']=='poly')
+        ds4['coef0'] = ds4['coef0'].where(ds4['kernel']=='poly')
+        ds5['degree'] = ds5['degree'].where(ds5['kernel']=='poly')
+        ds5['coef0'] = ds5['coef0'].where(ds5['kernel']=='poly')
+    for i, (da4, da5) in enumerate(zip(ds4, ds5)):
+        df4 = ds4[da4].reset_coords(drop=True).to_dataset('scorer').to_dataframe()
+        df5 = ds5[da5].reset_coords(drop=True).to_dataset('scorer').to_dataframe()
+        df4.index.name = 'Outer Split'
+        df5.index.name = 'Outer Split'
+        # try:
+        #     df4 = df4.astype(float).round(2)
+        #     df5 = df5.astype(float).round(2)
+        # except ValueError:
+        #     pass
+        cmap = hp_dict.get(da4, 'Set1')[0]
+        val_type = hp_dict.get(da4, 'int')[1]
+        cbar_params = [cb_st + cb_mul*float(i), .175, .01, .71]
+        plot_heatmaps_for_hyper_parameters_data_splits(df4,
+                                                       df5,
+                                                       axes=[axes[0, i], axes[1, i]],
+                                                       fig=fig,
+                                                       title=da4,
+                                                       cmap=cmap,
+                                                       cbar_params=cbar_params,
+                                                       fontsize=fontsize,
+                                                       val_type=val_type)
+        if i > 0 :
+            axes[0, i].set_ylabel('')
+            axes[0, i].yaxis.set_tick_params(labelleft=False)
+            axes[1, i].set_ylabel('')
+            axes[1, i].yaxis.set_tick_params(labelleft=False)
+    fig.tight_layout()
+    fig.subplots_adjust(**adj_dict)
+    if save:
+        filename = 'Hyper-parameters_nested_{}.png'.format(
+                model_name)
+        plt.savefig(savefig_path / filename)
+    return fig
 
 
 def plot_heatmap_for_hyper_parameters_df(df, ax=None, cmap='colorblind',
@@ -5043,3 +5181,11 @@ class ML_Classifier_Switcher(object):
                                }
         return RandomForestClassifier(random_state=42, n_jobs=-1,
                                       class_weight=None)
+
+    def LR(self):
+        from sklearn.linear_model import LogisticRegression
+        return LogisticRegression(random_state=42, n_jobs=-1,
+                                  class_weight=None)
+    def KNN(self):
+        from sklearn.neighbors import KNeighborsClassifier
+        return KNeighborsClassifier(n_jobs=-1)
