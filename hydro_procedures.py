@@ -1258,7 +1258,7 @@ def plot_heatmaps_for_hyper_parameters_data_splits(df1, df2, axes=None,
     return axes
 
 
-def plot_hyper_parameters_heatmap_data_splits_per_model(dss4, dss5, fontsize=12,
+def plot_hyper_parameters_heatmap_data_splits_per_model(dss4, dss5, fontsize=14,
                                                         save=True, model_name='SVC',
                                                         features='pwv+pressure+doy'):
     import matplotlib.pyplot as plt
@@ -1343,7 +1343,7 @@ def plot_hyper_parameters_heatmap_data_splits_per_model(dss4, dss5, fontsize=12,
     if save:
         filename = 'Hyper-parameters_nested_{}.png'.format(
                 model_name)
-        plt.savefig(savefig_path / filename)
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
     return fig
 
 
