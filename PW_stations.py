@@ -283,10 +283,10 @@ def produce_gnss_pw_from_era5(era5_path=era5_path,
     for station in gps.index:
         slat = gps.loc[station, 'lat']
         slon = gps.loc[station, 'lon']
-        da = era5_pw.sel(latitude=slat, longitude=slon, method='nearest')
+        da = era5_pw.sel(lat=slat, lon=slon, method='nearest')
         da.name = station
-        da.attrs['era5_lat'] = da.latitude.values.item()
-        da.attrs['era5_lon'] = da.longitude.values.item()
+        da.attrs['era5_lat'] = da.lat.values.item()
+        da.attrs['era5_lon'] = da.lon.values.item()
         da = da.reset_coords(drop=True)
         era5_pw_list.append(da)
     ds_hourly = xr.merge(era5_pw_list)
@@ -3302,11 +3302,15 @@ def calculate_diurnal_variability(path=work_yuval, with_amp=False):
 
 
 def perform_diurnal_harmonic_analysis_all_GNSS(path=work_yuval, n=6,
-                                               savepath=work_yuval):
+                                               savepath=work_yuval, dss=None,
+                                               filename=None):
     import xarray as xr
     from aux_gps import harmonic_analysis_xr
     from aux_gps import save_ncfile
-    pw = xr.load_dataset(path / 'GNSS_PW_anom_50_for_diurnal_analysis_removed_daily.nc')
+    if dss is None:
+        pw = xr.load_dataset(path / 'GNSS_PW_anom_50_for_diurnal_analysis_removed_daily.nc')
+    else:
+        pw = dss
     dss_list = []
     for site in pw:
         print('performing harmonic analysis for GNSS {} site:'.format(site))
@@ -3317,7 +3321,8 @@ def perform_diurnal_harmonic_analysis_all_GNSS(path=work_yuval, n=6,
     dss_all.attrs['field'] = 'PW'
     dss_all.attrs['units'] = 'mm'
     if savepath is not None:
-        filename = 'GNSS_PW_harmonics_diurnal.nc'
+        if filename is None:
+            filename = 'GNSS_PW_harmonics_diurnal.nc'
         save_ncfile(dss_all, savepath, filename)
     return dss_all
 
