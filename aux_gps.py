@@ -813,15 +813,20 @@ def harmonic_da_ts(da_ts, n=3, grp='month', return_ts_fit=False,
 def convert_da_to_long_form_df(da, var_name=None, value_name=None):
     """ convert xarray dataarray to long form pandas df
     to use with seaborn"""
+    import xarray as xr
     if var_name is None:
         var_name = 'var'
     if value_name is None:
         value_name = 'value'
     dims = [x for x in da.dims]
+    if isinstance(da, xr.Dataset):
+        value_vars = [x for x in da]
+    elif isinstance(da, xr.DataArray):
+        value_vars = [da.name]
     df = da.to_dataframe()
     for i, dim in enumerate(da.dims):
         df[dim] = df.index.get_level_values(i)
-    df = df.melt(value_vars=[da.name], value_name=value_name,
+    df = df.melt(value_vars=value_vars, value_name=value_name,
                  id_vars=dims, var_name=var_name)
     return df
 
