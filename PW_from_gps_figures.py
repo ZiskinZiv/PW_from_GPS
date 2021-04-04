@@ -656,7 +656,7 @@ def plot_MLR_GNSS_PW_harmonics_facetgrid(path=work_yuval, season='JJA',
         xlabel = 'month'
     print('producing {} harmonics plot.'.format(scope))
     if era5:
-        harmonics = xr.load_dataset(path / 'GNSS_PW_ERA5_harmonics_{}.nc'.format('annual'))
+        harmonics = xr.load_dataset(path / 'GNSS_PW_era5_harmonics_{}.nc'.format(scope))
     else:
         harmonics = xr.load_dataset(path / 'GNSS_PW_harmonics_{}.nc'.format(scope))
 #    sites = sorted(list(set([x.split('_')[0] for x in harmonics])))
@@ -777,7 +777,10 @@ def plot_MLR_GNSS_PW_harmonics_facetgrid(path=work_yuval, season='JJA',
         hspace=0.15,
         wspace=0.12)
     if save:
-        filename = 'pw_{}_harmonics_{}_{}.png'.format(scope, n_max, season)
+        if era5:
+            filename = 'pw_era5_{}_harmonics_{}_{}.png'.format(scope, n_max, season)
+        else:
+            filename = 'pw_{}_harmonics_{}_{}.png'.format(scope, n_max, season)
 #        plt.savefig(savefig_path / filename, bbox_inches='tight')
         plt.savefig(savefig_path / filename, orientation='portrait')
     return fg
@@ -4010,11 +4013,14 @@ def plot_hist_with_seasons(da_ts):
 
 def plot_diurnal_pw_all_seasons(path=work_yuval, season='ALL', synoptic=None,
                                 fontsize=20, labelsize=18,
-                                ylim=[-2.7, 3.3], save=True):
+                                ylim=[-2.7, 3.3], save=True, dss=None):
     import xarray as xr
     from synoptic_procedures import slice_xr_with_synoptic_class
-    gnss_filename = 'GNSS_PW_thresh_50_for_diurnal_analysis_removed_daily.nc'
-    pw = xr.load_dataset(path / gnss_filename)
+    if dss is None:
+        gnss_filename = 'GNSS_PW_thresh_50_for_diurnal_analysis_removed_daily.nc'
+        pw = xr.load_dataset(path / gnss_filename)
+    else:
+        pw = dss
     df_annual = pw.groupby('time.hour').mean().to_dataframe()
     if season is None and synoptic is None:
         # plot annual diurnal cycle only:
