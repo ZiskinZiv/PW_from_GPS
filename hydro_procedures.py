@@ -1757,6 +1757,8 @@ def plot_nested_CV_test_scores(dss, feats=None, fontsize=16,
         best = True
     except AssertionError:
         best = False
+    except KeyError:
+        best = False
     if 'neg_sample' in dss.dims:
         neg = dss['neg_sample'].size
     else:
