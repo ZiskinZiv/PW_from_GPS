@@ -2971,7 +2971,10 @@ def plot_permutation_test_results_from_dss(dss, feats=None, fontsize=14,
     from aux_gps import convert_da_to_long_form_df
     sns.set_style('whitegrid')
     sns.set_style('ticks')
-    splits = dss['outer_split'].size
+    try:
+        splits = dss['outer_split'].size
+    except KeyError:
+        splits = 5
     try:
         assert 'best' in dss.attrs['comment']
         best = True
@@ -2985,7 +2988,7 @@ def plot_permutation_test_results_from_dss(dss, feats=None, fontsize=14,
         dss = dss.expand_dims('model')
         dss['model'] = [dss.attrs['model']]
     dss = dss.reindex(scorer=scorer_order)
-    dss = dss.mean('outer_split')
+    # dss = dss.mean('outer_split')
     cmap = sns.color_palette('tab10', n_colors=3)
     if feats is None:
         feats = ['pwv', 'pwv+pressure', 'pwv+pressure+doy']
@@ -3225,6 +3228,7 @@ def CV_test_after_GridSearchCV(path=hydro_path, gr_path=hydro_ml_path/'nested4',
         if Ptest is not None:
             print('Permutation Test is in progress!')
             ds = run_permutation_classifier_test(X, y, 5, param_df_dict, Ptest=Ptest,
+                                                 params=params,
                                                  model_name=model_name, verbose=verbose)
             return ds
         if params is not None:
@@ -3309,26 +3313,23 @@ def CV_test_after_GridSearchCV(path=hydro_path, gr_path=hydro_ml_path/'nested4',
 
 
 def run_permutation_classifier_test(X, y, cv, best_params_df, Ptest=100,
-                                    model_name='SVC', verbose=False):
+                                    model_name='SVC', verbose=False, params=None):
     from sklearn.model_selection import permutation_test_score
     import xarray as xr
     import numpy as np
-    ml = ML_Classifier_Switcher()
-    if verbose:
-        print('Picking {} model with best params'.format(model_name))
-    splits = []
-    for i, df in enumerate(best_params_df.values()):
-        if verbose:
-            print('running on split #{}'.format(i+1))
+
+    def run_one_permutation_test(X=X, y=y, cv=cv, bp_df=best_params_df,
+                                 model_name=model_name, n_perm=Ptest,
+                                 verbose=verbose):
         true_scores = []
         pvals = []
         perm_scores = []
-        for scorer in df.index:
+        for scorer in bp_df.index:
             sk_model = ml.pick_model(model_name)
             # get best params (drop two last cols since they are not params):
-            params = df.T[scorer][:-2].to_dict()
+            b_params = bp_df.T[scorer][:-2].to_dict()
             if verbose:
-                print('{} scorer, params:{}'.format(scorer, params))
+                print('{} scorer, params:{}'.format(scorer, b_params))
             true, perm_scrs, pval = permutation_test_score(sk_model, X, y,
                                                            cv=cv,
                                                            n_permutations=Ptest,
@@ -3339,19 +3340,39 @@ def run_permutation_classifier_test(X, y, cv, best_params_df, Ptest=100,
             pvals.append(pval)
             perm_scores.append(perm_scrs)
         true_da = xr.DataArray(true_scores, dims=['scorer'])
-        true_da['scorer'] = [x for x in df.index.values]
+        true_da['scorer'] = [x for x in bp_df.index.values]
         true_da.name = 'true_score'
         pval_da = xr.DataArray(pvals, dims=['scorer'])
-        pval_da['scorer'] = [x for x in df.index.values]
+        pval_da['scorer'] = [x for x in bp_df.index.values]
         pval_da.name = 'pvalue'
         perm_da = xr.DataArray(perm_scores, dims=['scorer', 'permutations'])
-        perm_da['scorer'] = [x for x in df.index.values]
+        perm_da['scorer'] = [x for x in bp_df.index.values]
         perm_da['permutations'] = np.arange(1, Ptest+1)
         perm_da.name = 'permutation_score'
         ds = xr.merge([true_da, pval_da, perm_da])
-        splits.append(ds)
-    dss = xr.concat(splits, dim='outer_split')
-    dss['outer_split'] = np.arange(1, len(best_params_df)+ 1)
+        return ds
+
+    ml = ML_Classifier_Switcher()
+    if params is not None:
+        best_p_df = best_params_df['1-{}'.format(len(best_params_df))]
+        for key, value in params.items():
+            if isinstance(value, tuple):
+                for ind in best_p_df.index:
+                    best_p_df.at[ind, key] = value
+            else:
+                best_p_df[key] = value
+        dss = run_one_permutation_test(bp_df=best_p_df)
+    else:
+        if verbose:
+            print('Picking {} model with best params'.format(model_name))
+        splits = []
+        for i, df in enumerate(best_params_df.values()):
+            if verbose:
+                print('running on split #{}'.format(i+1))
+                ds = run_one_permutation_test()
+            splits.append(ds)
+        dss = xr.concat(splits, dim='outer_split')
+        dss['outer_split'] = np.arange(1, len(best_params_df)+ 1)
     return dss
 
 
