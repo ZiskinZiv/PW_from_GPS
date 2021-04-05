@@ -2423,7 +2423,7 @@ def plot_feature_importances_from_dss(
         dss,
         feat_dim='features', outer_dim='outer_split',
         features='pwv+pressure+doy', fix_xticklabels=True,
-        axes=None, save=True, ylim=[0, 12]):
+        axes=None, save=True, ylim=[0, 12], fontsize=16):
     import matplotlib.pyplot as plt
     import numpy as np
     import seaborn as sns
@@ -2471,14 +2471,15 @@ def plot_feature_importances_from_dss(
         title = '{}'.format(f.upper())
         dsf.plot.bar(ax=axes[i], title=title, rot=0, legend=False, zorder=20,
                      width=.8)
+        axes[i].set_title(title, fontsize=fontsize)
         dsf_sum = dsf.sum().tolist()
         handles, labels = axes[i].get_legend_handles_labels()
         labels = [
             '{} ({:.1f} %)'.format(
                 x, y) for x, y in zip(
                 labels, dsf_sum)]
-        axes[i].legend(handles=handles, labels=labels, prop={'size': 10}, loc='upper left')
-        axes[i].set_ylabel('Feature importance [%]')
+        axes[i].legend(handles=handles, labels=labels, prop={'size': fontsize-3}, loc='upper center')
+        axes[i].set_ylabel('Feature importance [%]', fontsize=fontsize)
         axes[i].grid(axis='y', zorder=1)
     if ylim is not None:
         [ax.set_ylim(*ylim) for ax in axes]
@@ -2486,10 +2487,11 @@ def plot_feature_importances_from_dss(
         n = sum(['pwv' in x for x in dss.feature.values])
         axes[0].xaxis.set_ticklabels('')
         hrs = np.arange(-24, -24+n)
-        axes[1].set_xticklabels(hrs, rotation=30, ha="center", fontsize=12)
-        axes[2].set_xticklabels(hrs, rotation=30, ha="center", fontsize=12)
-        axes[1].set_xlabel('Hours prior to flood')
-        axes[2].set_xlabel('Hours prior to flood')
+        axes[1].set_xticklabels(hrs, rotation=30, ha="center", fontsize=fontsize-2)
+        axes[2].set_xticklabels(hrs, rotation=30, ha="center", fontsize=fontsize-2)
+        axes[0].tick_params(labelsize=fontsize)
+        axes[1].set_xlabel('Hours prior to flood', fontsize=fontsize)
+        axes[2].set_xlabel('Hours prior to flood', fontsize=fontsize)
         fig.tight_layout()
     if save:
         filename = 'RF_feature_importances_all_scorers_{}.png'.format(features)
