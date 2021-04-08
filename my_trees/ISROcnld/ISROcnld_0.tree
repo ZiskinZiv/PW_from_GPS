@@ -1,9 +1,8 @@
-#
-# I think it will work for an arbitrary set of stations as well as one, maybe add a ref clock
-# for differential. Data types will need to be adjusted for multi-GNSS applications. For multi-GNSS, note
-# commented out DataLinkSpecs, ConstellationBias for stations, GPS data types (P-code); without changes
-# currently compatible with rinex2.
-
+# This is the parameter tree for NASA's JPL Gipsy-X software used in:
+# Ziv, S. Z., Yair, Y., Alpert, P., Uzan, L., & Reuveni, Y. (2021).
+# The diurnal variability of precipitable water vapor derived from GPS tropospheric path delays over the Eastern Mediterranean.
+# Atmospheric Research, 249, 105307.
+# it includes minimum elevation cutoff angle of 15 degs (elmin parameter), GMF tropospheric mapping function (mapping parameter) and ocean loading for all stations (different file)
 
 Self
   Metadata On     # Use "On" to output originating file and line number
