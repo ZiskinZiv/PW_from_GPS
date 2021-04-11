@@ -238,7 +238,7 @@ def download_ims_single_station(stationid, savepath=None,
             if update is not None:
                 return da
             else:
-                filename = '_'.join([meta['name'], str(meta['id']), channel_name,
+                filename = '_'.join(['-'.join(meta['name'].split(' ')), str(meta['id']), channel_name,
                                      '10mins']) + '.nc'
                 comp = dict(zlib=True, complevel=9)  # best compression
                 encoding = {var: comp for var in da.to_dataset().data_vars}
@@ -298,7 +298,7 @@ def download_all_10mins_ims(savepath, channel_name='TD'):
                 file = path_glob(savepath, '*_{}_{}_10mins.nc'.format(st_id, channel_name))[0]
                 da_old = xr.load_dataarray(file)
                 da = xr.concat([da, da_old], time_dim)
-                filename = '_'.join([row['name'], str(st_id), channel_name,
+                filename = '_'.join(['-'.join(row['name'].split(' ')), str(st_id), channel_name,
                                      '10mins']) + '.nc'
                 comp = dict(zlib=True, complevel=9)  # best compression
                 encoding = {var: comp for var in da.to_dataset().data_vars}
@@ -353,6 +353,7 @@ if __name__ == '__main__':
 #        sys.exit()
     if args.channel is not None and not args.delete:
         download_all_10mins_ims(args.savepath, channel_name=args.channel)
+        logger.info('Done!')
     elif args.delete:
         generate_delete(args.savepath, args.channel)
     else:
