@@ -678,13 +678,15 @@ def plot_line_from_dsea_massada_to_coast(dem_path=dem_path):
 
     dsea = df.loc['dsea'].geometry
     massada = Point(35.3725, 31.3177)
-    plot_closest_line_from_point_to_israeli_coast(dsea, ax=ax, color='k')
+    ds1 = plot_closest_line_from_point_to_israeli_coast(dsea, ax=ax, color='k')
+    print(ds1)
     ax.plot(*massada.xy, marker='o', markersize=5, color='k')
     ax.plot(*dsea.xy, marker='o', markersize=5, color='k')
     geo_annotate(ax, [dsea.x], [dsea.y],
                  ['GNSS-dsea'], xytext=(4, -6), fmt=None,
                  c='k', fw='bold', fs=14, colorupdown=False)
-    plot_closest_line_from_point_to_israeli_coast(massada, ax=ax, color='k')
+    ds2 = plot_closest_line_from_point_to_israeli_coast(massada, ax=ax, color='k')
+    print(ds2)
     geo_annotate(ax, [massada.x], [massada.y],
                  ['Massada-pt.'], xytext=(4, -6), fmt=None,
                  c='k', fw='bold', fs=14, colorupdown=False)
