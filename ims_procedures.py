@@ -525,6 +525,8 @@ def plot_closest_line_from_point_to_israeli_coast(point, ax=None, epsg=None,
                                                   ls='-', lw=1.0):
     import matplotlib.pyplot as plt
     from shapely.geometry import LineString
+    from pyproj import Geod
+    """returns the distance in kms"""
     coast_gdf = get_israeli_coast_line(path=path, epsg=epsg)
     coast_pts = coast_gdf.geometry.unary_union
     point_in_coast = get_closest_point_from_a_line_to_a_point(point, coast_pts)
@@ -532,7 +534,9 @@ def plot_closest_line_from_point_to_israeli_coast(point, ax=None, epsg=None,
     if ax is None:
         fig, ax = plt.subplots()
     ax.plot(*AB.xy, color='k', linestyle=ls, linewidth=lw)
-    return
+    geod = Geod(ellps="WGS84")
+    distance = geod.geometry_length(AB) / 1000.0
+    return distance
 
 
 def get_closest_point_from_a_line_to_a_point(point, line):
