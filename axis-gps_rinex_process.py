@@ -61,10 +61,11 @@ def process_single_T02_file(T02_fileobj, year, savepath, verbose=False):
     import os
     import subprocess
     from pathlib import Path
+    from subprocess import CalledProcessError
     logger = logging.getLogger('axis_rinex_processer')
     station, doy, hrl = parse_T02_file(T02_fileobj)
     yy = str(year)[2:4]
-    filename = '{}{}{}.{}d.Z'.format(station, doy, hrl, yy)
+    filename = '{}{}{}.{}d.gz'.format(station, doy, hrl, yy)
     to_copy_path = savepath / str(year) / doy
     if not to_copy_path.is_dir():
         if verbose:
@@ -83,7 +84,10 @@ def process_single_T02_file(T02_fileobj, year, savepath, verbose=False):
     shutil.copy(T02_fileobj, ziskin_home / T02_filename)
     # convert to TGD:
     command = 'runpkr00 -d -g {}'.format(ziskin_home / T02_filename)
-    subprocess.run(command, shell=True, check=True)
+    try:
+        subprocess.run(command, shell=True, check=True)
+    except CalledProcessError:
+        return CalledProcessError
     # delete T02:
     (ziskin_home / T02_filename).unlink()
     tgd_filename = T02_filename.replace('T02', 'tgd')
@@ -94,23 +98,42 @@ def process_single_T02_file(T02_fileobj, year, savepath, verbose=False):
     # first, filenames:
     o_filename = T02_filename.replace('T02', '{}o'.format(yy))
     d_filename = T02_filename.replace('T02', '{}d'.format(yy))
-    dZ_filename = d_filename + '.Z'
+    # dZ_filename = d_filename + '.Z'
 
     # run teqc to convert to o:
     command = 'teqc -tr d {} > {}'.format(to_copy_path / tgd_filename, to_copy_path / o_filename)
-    subprocess.run(command, shell=True, check=True)
+    try:
+        subprocess.run(command, shell=True, check=True)
+    except CalledProcessError:
+        return CalledProcessError
     # delete tgd:
-    (to_copy_path / tgd_filename).unlink()
+    try:
+        (to_copy_path / tgd_filename).unlink()
+    except FileNotFoundError:
+        logger.warning('{} not found so no delete done.'.format(tgd_filename))
     # hatakanaka compress:
     command = 'RNX2CRX {}'.format(to_copy_path / o_filename)
-    subprocess.run(command, shell=True, check=True)
+    try:
+        subprocess.run(command, shell=True, check=True)
+    except CalledProcessError:
+        return CalledProcessError
     # delete o:
-    (to_copy_path / o_filename).unlink()
+    try:
+        (to_copy_path / o_filename).unlink()
+    except FileNotFoundError:
+        logger.warning('{} not found so no delete done.'.format(o_filename))
     # gzip compress:
-    command = 'tar -czvf {} {}'.format(to_copy_path / dZ_filename, to_copy_path / d_filename)
-    subprocess.run(command, shell=True, check=True)
+    # command = 'tar -czvf {} {}'.format(to_copy_path / dZ_filename, to_copy_path / d_filename)
+    command = 'gzip {}'.format(to_copy_path / d_filename)
+    try:
+        subprocess.run(command, shell=True, check=True)
+    except CalledProcessError:
+        return CalledProcessError
     # delete d:
-    (to_copy_path / d_filename).unlink()
+    try:        
+        (to_copy_path / d_filename).unlink()
+    except FileNotFoundError:
+        logger.warning('{} not found so no delete done.'.format(d_filename))
     return
 
 
@@ -140,6 +163,7 @@ def process_T02(args):
     import logging
     from pathlib import Path
     from aux_gps import path_glob
+    from subprocess import CalledProcessError
     logger = logging.getLogger('axis_rinex_processer')
     if args.mode is None:
         mode = 'whole'
@@ -182,7 +206,10 @@ def process_T02(args):
             day = [x for x in days if day_of_monthp1 in x.as_posix()][0]
             T02s = path_glob(day, '*.T02')
             for T02 in T02s:
-                process_single_T02_file(T02, year, savepath, verbose=True)
+                try:
+                    process_single_T02_file(T02, year, savepath, verbose=True)
+                except CalledProcessError:
+                    logger.warning('process failed on {}, skipping..'.format(T02))
         except IndexError:
             logger.warning('didnt find any files for {} doy.'.format(last_doyp1))
             return
