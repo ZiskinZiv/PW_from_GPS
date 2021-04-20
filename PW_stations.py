@@ -896,7 +896,7 @@ def read_log_files(path, savepath=None, fltr='updated_by_shlomi',
         if fltr not in filename:
             continue
         station = filename.split('_')[0]
-        print('reading station {} lLRog file'.format(station))
+        print('reading station {} log file'.format(station))
         with open(file) as f:
             content = f.readlines()
         content = [x.strip() for x in content]
@@ -909,7 +909,9 @@ def read_log_files(path, savepath=None, fltr='updated_by_shlomi',
             pos_list.append(xyz)
         text = [x for x in content if 'Site Name' in x][0]
         name = text.split(':')[-1]
-        record[station] = pos_list
+        st_id = [x for x in content if 'Four Character ID' in x][0]
+        st_id = st_id.split(':')[-1]
+        record[st_id] = pos_list
         pos_list.append(name)
     df = pd.DataFrame.from_dict(record, orient='index')
     posnames.append('name')
