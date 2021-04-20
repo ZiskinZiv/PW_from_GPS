@@ -174,56 +174,67 @@ def process_T02(args):
     else:
         year = args.year
     savepath = args.savepath
-    T02_path = Path('/home/axis-gps')
+    if args.T02_path is None:
+        T02_path = Path('/home/axis-gps')
+    else:
+        T02_path = args.T02_path
     # create year folder if not created yet:
     if not (savepath / str(year)).is_dir():
         logger.info('folder for year {} not found, creating folder.'.format(year))
         os.mkdir(savepath / str(year))
     # scan for files in T02_path:
-    months = path_glob(T02_path, 'Month.*')
-    if mode == 'last_doy':
-        # check for doy folders in savepath and flag last_doy:
-        doys = sorted(path_glob(savepath / str(year), '*/'))
-        doys = sorted([x for x in doys if x.is_dir()])
-        last_doy = doys[-1].as_posix().split('/')[-1]
-        month_abr, day_of_month = doy_to_datetime(last_doy, year)
-        month = [x for x in months if month_abr in x.as_posix()][0]
-        days = path_glob(month, 'Day.*')
-        try:
-            day = [x for x in days if day_of_month in x.as_posix()][0]
-            T02s = path_glob(day, '*.T02')
-            for T02 in T02s:
-                process_single_T02_file(T02, year, savepath, verbose=True)
-        except IndexError:
-            logger.warning('didnt find any files for {} doy.'.format(last_doy))
-            return
-        # also get doy+1 and check if any files exist:
-        last_doyp1 = str(int(last_doy) + 1)
-        month_abrp1, day_of_monthp1 = doy_to_datetime(last_doyp1, year)
-        month = [x for x in months if month_abrp1 in x.as_posix()][0]
-        days = path_glob(month, 'Day.*')
-        try:
-            day = [x for x in days if day_of_monthp1 in x.as_posix()][0]
-            T02s = path_glob(day, '*.T02')
-            for T02 in T02s:
-                try:
-                    process_single_T02_file(T02, year, savepath, verbose=True)
-                except CalledProcessError:
-                    logger.warning('process failed on {}, skipping..'.format(T02))
-        except IndexError:
-            logger.warning('didnt find any files for {} doy.'.format(last_doyp1))
-            return
-    else:
-        for month in months:
+    if args.T02_path is None:
+        months = path_glob(T02_path, 'Month.*')
+        if mode == 'last_doy':
+            # check for doy folders in savepath and flag last_doy:
+            doys = sorted(path_glob(savepath / str(year), '*/'))
+            doys = sorted([x for x in doys if x.is_dir()])
+            last_doy = doys[-1].as_posix().split('/')[-1]
+            month_abr, day_of_month = doy_to_datetime(last_doy, year)
+            month = [x for x in months if month_abr in x.as_posix()][0]
             days = path_glob(month, 'Day.*')
-            for day in days:
+            try:
+                day = [x for x in days if day_of_month in x.as_posix()][0]
                 T02s = path_glob(day, '*.T02')
                 for T02 in T02s:
-                    if mode == 'single_file':
+                    process_single_T02_file(T02, year, savepath, verbose=True)
+            except IndexError:
+                logger.warning('didnt find any files for {} doy.'.format(last_doy))
+                return
+            # also get doy+1 and check if any files exist:
+            last_doyp1 = str(int(last_doy) + 1)
+            month_abrp1, day_of_monthp1 = doy_to_datetime(last_doyp1, year)
+            month = [x for x in months if month_abrp1 in x.as_posix()][0]
+            days = path_glob(month, 'Day.*')
+            try:
+                day = [x for x in days if day_of_monthp1 in x.as_posix()][0]
+                T02s = path_glob(day, '*.T02')
+                for T02 in T02s:
+                    try:
                         process_single_T02_file(T02, year, savepath, verbose=True)
-                        return
-                    elif mode == 'whole':
-                        process_single_T02_file(T02, year, savepath, verbose=False)
+                    except CalledProcessError:
+                        logger.warning('process failed on {}, skipping..'.format(T02))
+            except IndexError:
+                logger.warning('didnt find any files for {} doy.'.format(last_doyp1))
+                return
+        else:
+            for month in months:
+                days = path_glob(month, 'Day.*')
+                for day in days:
+                    T02s = path_glob(day, '*.T02')
+                    for T02 in T02s:
+                        if mode == 'single_file':
+                            process_single_T02_file(T02, year, savepath, verbose=True)
+                            return
+                        elif mode == 'whole':
+                            process_single_T02_file(T02, year, savepath, verbose=False)
+    else:
+        T02s = path_glob(T02_path, '*.T02')
+        for T02 in T02s:
+            try:
+                process_single_T02_file(T02, year, savepath, verbose=True)
+            except CalledProcessError:
+                logger.warning('process failed on {}, skipping..'.format(T02))
     return
 
 
@@ -243,6 +254,7 @@ if __name__ == '__main__':
 #                          metavar=str(cds.start_year) + ' to ' + str(cds.end_year))
     optional.add_argument('--year', help='year of rinex files', type=check_year)
     optional.add_argument('--mode', help='which mode to run', type=str, choices=['last_doy', 'whole', 'single_file'])
+    optional.add_argument('--T02_path', help='where the T02 files are', type=check_path)
     parser._action_groups.append(optional)  # added this line
     args = parser.parse_args()
     # print(parser.format_help())
