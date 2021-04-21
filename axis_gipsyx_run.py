@@ -5,6 +5,9 @@ Created on Tue Apr 20 16:56:59 2021
 dataRecordDump -rnx Ohad103D.21d.gz -drFileNmOut Ohad103D.21d.dr.gz
 drMerge.py -i *.dr.gz -o merged.dr.gz
 gd2e.py -drEditedFile merged.dr.gz -GNSSproducts ultra -staDb ~/Python_Projects/PW_from_GPS/AXIS.staDb -treeS ~/Python_Projects/PW_from_GPS/my_trees/AXISOcnld/ -recList RAMO OHAD
+create folders in axis/2021/103 like final, rapid and ultra with solutions and extra files every hour for all stations
+first do datarecorddump for all hourly files and then merge them together
+use this func to do it seperately from main gipsyx run
 @author: ziskin
 """
 
@@ -28,14 +31,23 @@ def check_file_in_cwd(filename):
 
 
 def record_dump_and_merge(path):
+    """search for hourly rinex in folder for all stations and convert them to dr.gz
+    then merge them together"""
     import subprocess
-    
+    import logging
+    from aux_gps import path_glob
+    import string
+    logger = logging.getLogger('axis-gipsyx')
+    hours = [x.upper() for x in string.ascii_letters][:24]
+    for hour in hours:
+        files = path_glob(path, '*{}.*.gz'.format(hour))
     return
 
 
 def run_gd2e_all_stations_one_hour(args):
     import subprocess
-    
+    import logging
+    logger = logging.getLogger('axis-gipsyx')
     return
 
 
@@ -70,14 +82,27 @@ if __name__ == '__main__':
         '--staDb',
         help='add a station DB file for antennas and receivers in rinexpath',
         type=check_file_in_cwd)
+    optional.add_argument(
+        '--accuracy',
+        help='the orbit and clock accuracy products',
+        type=str, choices=['final', 'ql', 'ultra'])
+    optional.add_argument(
+        '--drmerger',
+        help='use this to just drRecordump to ultra/final/ql folder and merge all hourly files for all available stations',
+        type=bool)
     optional.add_argument('--tree', help='gipsyX tree directory.',
                           type=check_path)
     parser._action_groups.append(optional)  # added this line
     parser.set_defaults(rewrite=False)
     args = parser.parse_args()
+    if args.accuracy is None:
+        args.accuracy = 'ultra'
     if args.rinexpath is None:
         print('rinexpath is a required argument, run with -h...')
         sys.exit()
     if args.staDb is None:
         args.staDb = '$GOA_VAR/sta_info/sta_db_qlflinn'
-    run_gd2e_all_stations_one_hour(args)
+    if args.drmerger is None:
+        run_gd2e_all_stations_one_hour(args)
+    else:
+        record_dump_and_merge(args)
