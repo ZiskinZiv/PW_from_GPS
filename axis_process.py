@@ -98,9 +98,10 @@ def produce_geo_axis_gnss_solved_stations(axis_path=axis_path, path=gis_path,
     return stations
 
 
-def read_multi_station_tdp_file(file, stations):
+def read_multi_station_tdp_file(file, stations, savepath=None):
     import pandas as pd
     import xarray as xr
+    from aux_gps import save_ncfile
     df_raw = pd.read_csv(file, header=None, delim_whitespace=True)
     # first loop over list of stations and extract the data:
     df_stns = [df_raw[df_raw.iloc[:, -1].str.contains(x)] for x in stations]
@@ -134,13 +135,23 @@ def read_multi_station_tdp_file(file, stations):
             ppp[keys[i]] = df[keys[i]].values
             ppp[keys[i] + '_error'] = df[keys[i] + '_error'].values
             # rename all the Pos. to nothing:
-            ppp.columns = ppp.columns.str.replace('Pos.', '')
+            # ppp.columns = ppp.columns.str.replace('Pos.', '')
         ppps.append(ppp.to_xarray())
     ds = xr.concat(ppps, 'station')
     ds['station'] = stations
     for da in ds:
         if 'Wet' in da or 'Dry' in da or 'Grad' in da:
             ds[da] = ds[da] * 100
-        ds[da].attrs['units'] = units_dict.get(da)
-        ds[da].attrs['long_name'] = desc_dict.get(da)
+            if 'Wet' in da:
+                ds[da].attrs['units'] = units_dict.get('WetZ')
+            elif 'Grad' in da:
+                ds[da].attrs['units'] = units_dict.get('GradNorth')
+        ds[da].attrs['long_name'] = desc_dict.get(da, '')
+        if 'Pos' in da:
+            ds[da].attrs['units'] = 'm'
+    pos_names = [x for x in ds if 'Pos' in x]
+    pos_new_names = [x.split('.')[-1] for x in pos_names]
+    ds = ds.rename(dict(zip(pos_names, pos_new_names)))
+    if savepath is not None:
+        save_ncfile(ds, savepath, 'smoothFinal.nc')
     return ds
