@@ -23,6 +23,14 @@ month_to_doy_dict = {1: 1, 2: 32, 3: 61, 4: 92, 5: 122,
                      6: 153, 7: 183, 8: 214, 9: 245, 10: 275, 11: 306, 12: 336}
 
 
+def replace_char_at_string_position(string, char='s', pos=3):
+    if pos != -1:
+        string = string[:pos] + char + string[pos+1:]
+    else:
+        string = string[:pos] + char
+    return string
+
+
 def replace_xarray_time_series_with_its_group(da, grp='month', time_dim='time'):
     """run the same func on each dim in da"""
     import xarray as xr
