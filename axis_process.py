@@ -11,6 +11,170 @@ axis_path = work_yuval / 'axis'
 gis_path = work_yuval / 'gis'
 
 
+def read_and_concat_smoothFinals(rinexpath, solution='Final'):
+    import xarray as xr
+    from aux_gps import save_ncfile
+    from aux_gps import path_glob
+    years = [x.as_posix().split('/')[-1] for x in path_glob(rinexpath, '*/')]
+    years = [x for x in years if x.isnumeric()]
+    for year in years:
+        dsl = []
+        # doys = [x.as_posix().split('/')[-1] for x in path_glob(rinexpath/year, '*/')]
+        for doypath in path_glob(rinexpath/year, '*/'):
+            file = doypath / 'dr' / solution / 'smoothFinal.nc'
+            if file.is_file():
+                dsl.append(xr.load_dataset(file))
+                print('found smoothFinal.nc in {}'.format(doypath))
+        if dsl:
+            ds = xr.concat(dsl, 'time')
+            ds = ds.sortby('time')
+            save_ncfile(ds, rinexpath, 'smoothFinal_{}.nc'.format(year))
+    return ds
+
+
+def move_files(path_orig, path_dest, files, out_files=None, verbose=False):
+    """move files (a list containing the file names) and move them from
+    path_orig to path_dest"""
+    import shutil
+    import logging
+    logger = logging.getLogger('gipsyx')
+    if isinstance(files, str):
+        files = [files]
+    if out_files is not None:
+        if isinstance(out_files, str):
+            out_files = [out_files]
+    orig_filenames_paths = [path_orig / x for x in files]
+    if out_files is None:
+        out_files = files
+    dest_filenames_paths = [path_dest / x for x in out_files]
+    # delete files if size =0:
+    for file, orig, dest in zip(
+            files, orig_filenames_paths, dest_filenames_paths):
+        # check for file existance in orig:
+        if not orig.is_file():
+            if verbose:
+                logger.warning('{} does not exist in {}'.format(file, orig))
+            continue
+        # check if its size is 0:
+        if orig.stat().st_size == 0:
+            orig.resolve().unlink()
+        else:
+            shutil.move(orig.resolve(), dest.resolve())
+    return
+
+
+def run_rinex_compression_on_file(path_dir, filename, command='gunzip', cmd_path=None):
+    import subprocess
+    from subprocess import CalledProcessError
+    if not path_dir.is_dir():
+        raise ValueError('{} is not a directory!'.format(path_dir))
+    if command == 'gunzip':
+        cmd = 'gunzip {}'.format(filename)
+        try:
+            subprocess.run(cmd, shell=True, check=True, cwd=path_dir)
+        except CalledProcessError:
+            print('{} failed !'.format(command))
+            return
+    elif command == 'gzip':
+        cmd = 'gzip {}'.format(filename)
+        try:
+            subprocess.run(cmd, shell=True, check=True, cwd=path_dir)
+        except CalledProcessError:
+            print('{} failed !'.format(command))
+            return
+    elif command == 'crx2rnx':
+        if cmd_path is not None:
+            cmd = '{}/CRX2RNX -d {}'.format(cmd_path.as_posix(), filename)
+        else:
+            cmd = 'CRX2RNX -d {}'.format(filename)
+        try:
+            subprocess.run(cmd, shell=True, check=True, cwd=path_dir)
+        except CalledProcessError:
+            print('{} failed !'.format(command))
+            return
+    elif command == 'rnx2crx':
+        if cmd_path is not None:
+            cmd = '{}/RNX2CRX -d {}'.format(cmd_path.as_posix(), filename)
+        else:
+            cmd = 'RNX2CRX -d {}'.format(filename)
+        try:
+            subprocess.run(cmd, shell=True, check=True, cwd=path_dir)
+        except CalledProcessError:
+            print('{} failed !'.format(command))
+            return
+    else:
+        raise ValueError('{} not known! '.format(command))
+
+
+def run_rinex_compression_on_folder(path_dir, command='gunzip', glob='*.14d', cmd_path=None):
+    import subprocess
+    from subprocess import CalledProcessError
+    if not path_dir.is_dir():
+        raise ValueError('{} is not a directory!'.format(path_dir))
+    # subprocess.call("ls", cwd=path_dir)
+    if command == 'gunzip':
+        cmd = 'gunzip {}'.format(glob)
+        try:
+            subprocess.run(cmd, shell=True, check=True, cwd=path_dir)
+        except CalledProcessError:
+            print('{} failed !'.format(command))
+            return
+    elif command == 'gzip':
+        cmd = 'gzip {}'.format(glob)
+        try:
+            subprocess.run(cmd, shell=True, check=True, cwd=path_dir)
+        except CalledProcessError:
+            print('{} failed !'.format(command))
+            return
+    elif command == 'crx2rnx':
+        if cmd_path is not None:
+            cmd = 'for f in {} ; do {}/CRX2RNX $f ; done'.format(glob, cmd_path.as_posix())
+        else:
+            cmd = 'for f in {} ; do CRX2RNX $f ; done'.format(glob)
+        try:
+            subprocess.run(cmd, shell=True, check=True, cwd=path_dir)
+        except CalledProcessError:
+            print('{} failed !'.format(command))
+            return
+    elif command == 'rnx2crx':
+        if cmd_path is not None:
+            cmd = 'for f in {} ; do {}/RNX2CRX $f ; done'.format(glob, cmd_path.as_posix())
+        else:
+            cmd = 'for f in {} ; do RNX2CRX $f ; done'.format(glob)
+        try:
+            subprocess.run(cmd, shell=True, check=True, cwd=path_dir)
+        except CalledProcessError:
+            print('{} failed !'.format(command))
+            return
+    else:
+        raise ValueError('{} not known! '.format(command))
+
+
+def teqc_concat_rinex(path_dir, rfn=None, glob='*.14o', cmd_path=None):
+    import subprocess
+    from subprocess import CalledProcessError
+    from aux_gps import path_glob
+    from aux_gps import replace_char_at_string_position
+    if not path_dir.is_dir():
+        raise ValueError('{} is not a directory!'.format(path_dir))
+    # subprocess.call("ls", cwd=path_dir)
+    if rfn is None:
+        files = sorted(path_glob(path_dir, glob))
+        rfn = files[0].as_posix().split('/')[-1]
+        rfn = replace_char_at_string_position(rfn, char='0', pos=7)
+        print('rfn is : {}'.format(rfn))
+    if cmd_path is not None:
+        cmd = '{}/teqc -phc {} > {}'.format(cmd_path.as_posix(), glob, rfn)
+    else:
+        cmd = 'teqc -phc {} > {}'.format(glob, rfn)
+    try:
+        subprocess.run(cmd, shell=True, check=True, cwd=path_dir)
+    except CalledProcessError:
+        print('{} failed !'.format(cmd))
+        return
+
+
+
 def read_axis_stations(path=axis_path):
     from aux_gps import path_glob
     import pandas as pd
