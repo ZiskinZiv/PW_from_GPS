@@ -11,35 +11,6 @@ use this func to do it seperately from main gipsyx run
 @author: ziskin
 """
 
-def move_files(path_orig, path_dest, files, out_files=None, verbose=False):
-    """move files (a list containing the file names) and move them from
-    path_orig to path_dest"""
-    import shutil
-    import logging
-    logger = logging.getLogger('gipsyx')
-    if isinstance(files, str):
-        files = [files]
-    if out_files is not None:
-        if isinstance(out_files, str):
-            out_files = [out_files]
-    orig_filenames_paths = [path_orig / x for x in files]
-    if out_files is None:
-        out_files = files
-    dest_filenames_paths = [path_dest / x for x in out_files]
-    # delete files if size =0:
-    for file, orig, dest in zip(
-            files, orig_filenames_paths, dest_filenames_paths):
-        # check for file existance in orig:
-        if not orig.is_file():
-            if verbose:
-                logger.warning('{} does not exist in {}'.format(file, orig))
-            continue
-        # check if its size is 0:
-        if orig.stat().st_size == 0:
-            orig.resolve().unlink()
-        else:
-            shutil.move(orig.resolve(), dest.resolve())
-    return
 
 
 def check_year(year):
@@ -237,6 +208,221 @@ def record_dump_and_merge_at_single_folder(rinexpath, drmerger, staDb):
     return
 
 
+def daily_prep_all_steps(doypath, staDb):
+    from aux_gps import path_glob
+    from aux_gps import replace_char_at_string_position
+    try:
+        files = path_glob(doypath, '*.gz')
+    except FileNotFoundError:
+        files = path_glob(doypath, '*.Z')
+    rfn = files[0].as_posix().split('/')[-1]
+    rfn_dfile = replace_char_at_string_position(rfn, pos=7, char='0')[0:12]
+    # 1) rinex concat and prep:
+    daily_prep_and_concat_rinex(doypath)
+    # 2) dataRecordDump:
+    dataRecordDump_single_file(doypath/'dr', rfn_dfile + '.gz')
+    # 3) rinex edit:
+    rnxEditGde_single_file(doypath/'dr', rfn_dfile + '.dr.gz', staDb)
+    return
+
+
+def daily_prep_drdump_and_rnxedit(doypath, staDb):
+    from aux_gps import path_glob
+    from aux_gps import replace_char_at_string_position
+    import shutil
+    import os
+    try:
+        files = path_glob(doypath, '*.gz')
+        suff = '.gz'
+    except FileNotFoundError:
+        files = path_glob(doypath, '*.Z')
+        suff = '.Z'
+    rfn = files[0].as_posix().split('/')[-1]
+    rfn_dfile = replace_char_at_string_position(rfn, pos=7, char='0')[0:12]
+    dr_path = doypath / 'dr'
+    if not dr_path.is_dir():
+        os.mkdir(dr_path)
+    # 0) move daily files to dr_path:
+    file = dr_path / (rfn_dfile + suff)
+    shutil.copy(files[0], file)
+    # 1) dataRecordDump:
+    dataRecordDump_single_file(dr_path, rfn_dfile + suff)
+    # 3) rinex edit:
+    rnxEditGde_single_file(dr_path, rfn_dfile + '.dr.gz', staDb)
+    return
+
+
+def daily_prep_and_concat_rinex(doypath):
+    import logging
+    import os
+    from axis_process import run_rinex_compression_on_file
+    from axis_process import run_rinex_compression_on_folder
+    from axis_process import teqc_concat_rinex
+    from aux_gps import path_glob
+    from aux_gps import replace_char_at_string_position
+    from axis_process import move_files
+    logger = logging.getLogger('axis-gipsyx')
+    # get rfn,i.e., DSea2150.14o:
+    try:
+        files = path_glob(doypath, '*.gz')
+        unzip_glob = '*.gz'
+    except FileNotFoundError:
+        files = path_glob(doypath, '*.Z')
+        unzip_glob = '*.Z'
+    rfn = files[0].as_posix().split('/')[-1]
+    rfn_dfile = replace_char_at_string_position(rfn, pos=7, char='0')[0:12]
+    rfn_ofile = replace_char_at_string_position(rfn_dfile, pos=-1, char='o')
+    # create dr path if not exists:
+    dr_path = doypath / 'dr'
+    if not dr_path.is_dir():
+        os.mkdir(dr_path)
+    # 1) unzip all files:
+    logger.info('unzipping {}'.format(doypath))
+    run_rinex_compression_on_folder(doypath, command='gunzip', glob=unzip_glob)
+    # 2) convert to obs files:
+    logger.info('converting d to obs.')
+    run_rinex_compression_on_folder(doypath, command='crx2rnx', glob='*.*d')
+    # 3) concat using teqc:
+    logger.info('teqc concating.')
+    teqc_concat_rinex(doypath, rfn=rfn_ofile, glob='*.*o')
+    # 4) convert to d file:
+    logger.info('compressing concated file and moving to dr path.')
+    run_rinex_compression_on_file(doypath, filename=rfn_ofile, command='rnx2crx')
+    # 5) gzip d file:
+    # rfn = replace_char_at_string_position(rfn, char='d', pos=-1)
+    run_rinex_compression_on_file(doypath, rfn_dfile, command='gzip')
+    # 6) move copressed file to dr_path and delete all other files except original rinex gz:
+    move_files(doypath, dr_path, rfn_dfile + '.gz', rfn_dfile + '.gz')
+    files = path_glob(doypath, '*.*o')
+    [x.unlink() for x in files]
+    # 7) gzip all d files:
+    logger.info('gzipping {}'.format(doypath))
+    run_rinex_compression_on_folder(doypath, command='gzip', glob='*.*d')
+    # 8) dataRecordDump:
+    logger.info('Done preping daily {} path.'.format(doypath))
+    return
+
+
+def dataRecordDump_single_file(path_dir, filename):
+    import subprocess
+    import logging
+    logger = logging.getLogger('axis-gipsyx')
+    from subprocess import CalledProcessError
+    if not (path_dir/filename).is_file():
+        raise FileNotFoundError
+    logger.info('dataRecordDump on {}'.format(filename))
+    rfn = filename[0:12]
+    cmd = 'dataRecordDump -rnx {} -drFileNmOut {}.dr.gz'.format(filename, rfn)
+    try:
+        subprocess.run(cmd, shell=True, check=True, cwd=path_dir)
+    except CalledProcessError:
+        logger.error('{} failed !'.format(cmd))
+        return
+
+
+def rnxEditGde_single_file(path_dir, filename, staDb):
+    from aux_gps import get_var
+    import subprocess
+    import logging
+    from subprocess import CalledProcessError
+    logger = logging.getLogger('axis-gipsyx')
+    if not (path_dir/filename).is_file():
+        raise FileNotFoundError
+    logger.info('rnxEditGde on {} with {}.'.format(filename, staDb))
+    rfn = filename[0:12]
+    rfn_edited = rfn.split('.')[0] + '_edited' + '.' + rfn.split('.')[-1] + '.dr.gz'
+    station = rfn[0:4].upper()
+    cmd = 'rnxEditGde.py -type datarecord -recNm {} -data {} -out {} -staDb {}'.format(station, filename, rfn_edited, staDb)
+    try:
+        subprocess.run(cmd, shell=True, check=True, cwd=path_dir)
+    except CalledProcessError:
+        print('{} failed !'.format(cmd))
+        return
+
+
+def main_program(args):
+    import logging
+    from aux_gps import path_glob
+    logger = logging.getLogger('axis-gipsyx')
+    if args.year is None:
+        year = 2021
+    else:
+        year = args.year
+    if args.mode == 'daily_prep':
+        mode = 'daily_prep'
+    else:
+        mode = args.mode
+    if mode == 'daily_prep_all':
+        doys = sorted(path_glob(args.rinexpath / str(year), '*/'))
+        for doypath in doys:
+            logger.info('preping {}:'.format(doypath))
+            daily_prep_all_steps(doypath, args.staDb)
+        logger.info('Done preping all doys in {}.'.format(year))
+    elif mode == 'daily_prep_drdump_rnxedit':
+        doys = sorted(path_glob(args.rinexpath / str(year), '*/'))
+        for doypath in doys:
+            logger.info('preping {}:'.format(doypath))
+            daily_prep_drdump_and_rnxedit(doypath, args.staDb)
+        logger.info('Done preping all doys in {}.'.format(year))
+    elif mode == 'daily_run':
+        doys = sorted(path_glob(args.rinexpath / str(year), '*/'))
+        for doypath in doys:
+            logger.info('running GipsyX on {}:'.format(doypath))
+            daily_gd2e(doypath, args.staDb, args.tree)
+        logger.info('Done running GipsyX all doys in {}.'.format(year))
+
+
+def daily_gd2e(doypath, staDb, tree):
+    import logging
+    from aux_gps import path_glob
+    import subprocess
+    import os
+    from subprocess import CalledProcessError
+    from subprocess import TimeoutExpired
+    from axis_process import move_files
+    from axis_process import read_multi_station_tdp_file
+    logger = logging.getLogger('axis-gipsyx')
+    dr_path = doypath / 'dr'
+    res_path = dr_path / 'Final'
+    if not res_path.is_dir():
+        os.mkdir(res_path)
+    files = path_glob(dr_path, '*.gz')
+    edited = [x for x in files if 'edited' in x.as_posix()][0]
+    station = edited.as_posix().split('/')[-1][0:4].upper()
+    rfn = edited.as_posix().split('/')[-1][0:8]
+    cmd = 'gd2e.py -drEditedFile {} -recList {} -staDb {} -treeS {}  > {}.log 2>{}.err'.format(
+            edited.as_posix(), station, staDb.as_posix(), tree, rfn, rfn)
+    files_to_move = ['{}{}'.format(rfn, x)
+                     for x in ['.log', '.err']]
+    more_files = ['finalResiduals.out', 'smoothFinal.tdp']
+    more_files_new_name = ['{}_{}'.format(rfn, x) for x in more_files]
+    try:
+        subprocess.run(cmd, shell=True, check=True, timeout=300, cwd=dr_path)
+        ds = read_multi_station_tdp_file(dr_path/'smoothFinal.tdp',
+                                         [station], savepath=res_path)
+        move_files(Path().cwd(), res_path, 'smoothFinal.nc',
+                   '{}_smoothFinal.nc'.format(rfn))
+        move_files(Path().cwd(), res_path, more_files,
+                   more_files_new_name)
+        move_files(Path().cwd(), res_path, 'Summary',
+                   '{}_Summary.txt'.format(rfn))
+        # next(succ)
+        # cnt['succ'] += 1
+    except CalledProcessError:
+        logger.error('gipsyx failed on {}, copying log files.'.format(rfn))
+        # next(failed)
+        # cnt['failed'] += 1
+    except TimeoutExpired:
+        logger.error('gipsyx timed out on {}, copying log files.'.format(rfn))
+        # next(failed)
+        # cnt['failed'] += 1
+        # with open(Path().cwd() / files_to_move[1], 'a') as f:
+        #     f.write('GipsyX run has Timed out !')
+    move_files(Path().cwd(), res_path, files_to_move)
+    move_files(Path().cwd(), res_path, 'debug.tree', '{}_debug.tree'.format(rfn))
+    return
+
+
 def run_gd2e(args):
     import subprocess
     import logging
@@ -249,6 +435,7 @@ def run_gd2e_single_dr_path(dr_path, staDb, tree, acc='ultra', n_proc=4, network
     """
     from pathlib import Path
     import subprocess
+    from axis_process import move_files
     # from itertools import count
     from subprocess import CalledProcessError
     from subprocess import TimeoutExpired
@@ -302,7 +489,7 @@ def run_gd2e_single_dr_path(dr_path, staDb, tree, acc='ultra', n_proc=4, network
         stns = [x.upper() for x in df['station'].unique()]
         rec_list = '{}'.format(' '.join(stns))
         # dt, station = get_timedate_and_station_code_from_rinex(rfn)
-        
+
         # logger.info(
         #     'processing {} ({}, {}/{})'.format(
         #         rfn,
@@ -328,7 +515,7 @@ def run_gd2e_single_dr_path(dr_path, staDb, tree, acc='ultra', n_proc=4, network
             move_files(Path().cwd(), results_path, 'smoothFinal.nc',
                        '{}_smoothFinal.nc'.format(out_name))
 
-            move_files(Path().cwd(), results_path, more_files,
+            move_files(Path().cwdf(), results_path, more_files,
                        more_files_new_name)
             move_files(Path().cwd(), results_path, 'Summary',
                        '{}_Summary.txt'.format(out_name))
@@ -378,6 +565,10 @@ if __name__ == '__main__':
         '--rinexpath',
         help="a full path to the rinex path of the station, /home/ziskin/Work_Files/PW_yuval/rinex/TELA",
         type=check_path)
+    required.add_argument(
+        '--mode',
+        help="mode type",
+        choices=['daily_run', 'daily_prep_all', 'daily_prep_drdump_rnxedit'])
     optional.add_argument(
         '--staDb',
         help='add a station DB file for antennas and receivers in rinexpath',
@@ -385,15 +576,15 @@ if __name__ == '__main__':
     optional.add_argument(
         '--accuracy',
         help='the orbit and clock accuracy products',
-        type=str, choices=['final', 'ql', 'ultra'])
-    optional.add_argument(
-        '--drmerger',
-        help='use this to just drRecordump to dr folder and merge all hourly files for all available stations or daily of one station',
-        type=str, choices=['daily', 'hourly'])
+        type=str, choices=['Final', 'ql', 'ultra'])
+    # optional.add_argument(
+    #     '--drmerger',
+    #     help='use this to just drRecordump to dr folder and merge all hourly files for all available stations or daily of one station',
+    #     type=str, choices=['daily', 'hourly'])
     optional.add_argument('--tree', help='gipsyX tree directory.',
                           type=check_path)
-    optional.add_argument('--mode', help='which mode to run', type=str,
-                          choices=['last_doy', 'whole'])
+    # optional.add_argument('--mode', help='which mode to run', type=str,
+    #                       choices=['last_doy', 'whole'])
     optional.add_argument('--year', help='year of rinex files', type=check_year)
     optional.add_argument('--n_proc', help='number of processors to solve rtgx', type=int)
     parser._action_groups.append(optional)  # added this line
@@ -404,11 +595,15 @@ if __name__ == '__main__':
     if args.rinexpath is None:
         print('rinexpath is a required argument, run with -h...')
         sys.exit()
+    if args.mode is None:
+        print('mode is a required argument, run with -h...')
+        sys.exit()
     if args.staDb is None:
         args.staDb = '$GOA_VAR/sta_info/sta_db_qlflinn'
-    if args.drmerger is None:
-        run_gd2e_single_dr_path(args.rinexpath, args.staDb, args.tree,
-                                args.accuracy, n_proc=4, network_name='axis')
-        # run_gd2e(args)
-    else:
-        record_dump_and_merge(args)
+    main_program(args)
+    # if args.drmerger is None:
+    #     run_gd2e_single_dr_path(args.rinexpath, args.staDb, args.tree,
+    #                             args.accuracy, n_proc=4, network_name='axis')
+    #     # run_gd2e(args)
+    # else:
+    #     record_dump_and_merge(args)
