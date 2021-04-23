@@ -11,6 +11,68 @@ des_path = work_yuval / 'deserve'
 ims_path = work_yuval / 'IMS_T'
 dsea_gipsy_path = work_yuval / 'dsea_gipsyx'
 dem_path = work_yuval / 'AW3D30'
+axis_path = work_yuval/'axis'
+
+
+def plot_gnss_and_radiometer_timeseries(path=work_yuval, des_path=des_path):
+    import xarray as xr
+    import matplotlib.pyplot as plt
+    ds = xr.load_dataset(path / 'DSEA_PWV_GNSS_2014-08.nc')
+    radio = read_radiometers(des_path)
+    ds['pwv-radio'] = radio.resample(time='5T').mean()
+    df = ds.to_dataframe().loc['2014-08-04': '2014-08-12']
+    fig, ax = plt.subplots(figsize=(16, 5))
+    df.plot(ax=ax)
+    ax.set_ylabel('PWV [mm]')
+    ax.grid()
+    fig.tight_layout()
+    return fig
+
+
+def produce_and_save_soi_axis_pwv(axis_path=axis_path, soi_path=dsea_gipsy_path,
+                                  ims_path=ims_path, savepath=work_yuval):
+    import xarray as xr
+    from aux_gps import save_ncfile
+    soi_pwv = produce_pwv_from_dsea_axis_station(path=soi_path, ims_path=ims_path)
+    axis_pwv = produce_pwv_from_dsea_axis_station(path=axis_path, ims_path=ims_path)
+    soi_pwv.attrs['GNSS network'] = 'SOI-APN'
+    soi_pwv.attrs['station'] = 'dsea'
+    soi_pwv.attrs['units'] = 'mm'
+    soi_pwv = soi_pwv.reset_coords(drop=True)
+    axis_pwv.attrs['GNSS network'] = 'AXIS'
+    axis_pwv = axis_pwv.reset_coords(drop=True)
+    axis_pwv.attrs['station'] = 'dsea'
+    axis_pwv.attrs['units'] = 'mm'
+    ds = xr.Dataset()
+    ds['pwv-soi'] = soi_pwv
+    ds['pwv-axis'] = axis_pwv
+    save_ncfile(ds, savepath, 'DSEA_PWV_GNSS_2014-08.nc')
+    return ds
+
+
+
+def produce_pwv_from_dsea_axis_station(path=axis_path, ims_path=ims_path):
+    """use axis_path = work_yuval/dsea_gispyx for original soi-apn dsea station"""
+    import xarray as xr
+    from aux_gps import transform_ds_to_lat_lon_alt
+    from aux_gps import get_unique_index
+    ds = xr.load_dataset(path / 'smoothFinal_2014.nc').squeeze()
+    ds = get_unique_index(ds)
+    # for now cut:
+    if 'axis' in path.as_posix():
+        ds = ds.sel(time=slice(None, '2014-08-12'))
+    ds = transform_ds_to_lat_lon_alt(ds)
+    axis_zwd = ds['WetZ']
+    ts = xr.open_dataset(ims_path/'IMS_TD_israeli_10mins.nc')['SEDOM']
+    axis_pwv = produce_pwv_from_zwd_with_ts_tm_from_deserve(ts=ts, zwd=axis_zwd)
+    if 'axis' in path.as_posix():
+        axis_pwv.name = 'AXIS-DSEA'
+    else:
+        axis_pwv.name = 'SOI-DSEA'
+    axis_pwv.attrs['lat'] = ds['lat'].values[0]
+    axis_pwv.attrs['lon'] = ds['lon'].values[0]
+    axis_pwv.attrs['alt'] = ds['alt'].values[0]
+    return axis_pwv
 
 
 def produce_final_dsea_pwv(ims_station=None, savepath=None, use_pressure=True):
@@ -363,8 +425,9 @@ def compare_WRF_GNSS_radiometer_pwv(path=des_path, work_path=work_yuval, plot=Tr
     import numpy as np
     from PW_from_gps_figures import plot_mean_with_fill_between_std
     # load GNSS dsea:
-    gnss = xr.open_dataset(
-        work_path / 'GNSS_PW_thresh_50_homogenized.nc')['dsea']
+    # gnss = xr.open_dataset(
+    #     work_path / 'GNSS_PW_thresh_50_homogenized.nc')['dsea']
+    gnss = xr.load_dataset(work_path / 'DSEA_PWV_GNSS_2014-08.nc')['pwv-soi']
     # load WRF:
     wrf = xr.load_dataset(path / 'pwv_wrf_dsea_gnss_point_2014-08.nc')
     # load radiometer:
@@ -647,7 +710,7 @@ def wrap_xr_metpy_pw(dewpt, pressure, bottom=None, top=None, verbose=False,
         return pw.magnitude, pw_units
 
 
-def plot_line_from_dsea_massada_to_coast(dem_path=dem_path):
+def plot_line_from_dsea_massada_to_coast(dem_path=dem_path, work_path=work_yuval):
     from PW_from_gps_figures import plot_israel_map
     from PW_stations import produce_geo_gnss_solved_stations
     from ims_procedures import plot_closest_line_from_point_to_israeli_coast
@@ -656,11 +719,12 @@ def plot_line_from_dsea_massada_to_coast(dem_path=dem_path):
     import cartopy.crs as ccrs
     from aux_gps import geo_annotate
     import xarray as xr
-    df = produce_geo_gnss_solved_stations(plot=False)
+    # df = produce_geo_gnss_solved_stations(plot=False)
+    gnss = xr.load_dataset(work_path / 'DSEA_PWV_GNSS_2014-08.nc')
     fig = plt.figure(figsize=(7, 15))
     ax = fig.add_subplot(projection=ccrs.PlateCarree())  # plt.subplot(122)
     # fig, ax = plt.subplots(projection=ccrs.PlateCarree())
-    extent = [34, 36.0, 30.7, 32.0]
+    extent = [34.5, 35.75, 30.9, 31.89]
     ax.set_extent(extent)
     ax = plot_israel_map(ax=ax)
     cmap = plt.get_cmap('terrain', 41)
@@ -676,19 +740,26 @@ def plot_line_from_dsea_massada_to_coast(dem_path=dem_path):
                  size=14, weight='normal')
     cb.ax.tick_params(labelsize=14)
 
-    dsea = df.loc['dsea'].geometry
+    soi_point = Point(gnss['pwv-soi'].lon, gnss['pwv-soi'].lat)
+    axis_point = Point(gnss['pwv-axis'].lon, gnss['pwv-axis'].lat)
     massada = Point(35.3725, 31.3177)
-    ds1 = plot_closest_line_from_point_to_israeli_coast(dsea, ax=ax, color='k')
-    print(ds1)
+    ds1 = plot_closest_line_from_point_to_israeli_coast(soi_point, ax=ax, color='k')
+    print('{} km of soi-point to coast.'.format(ds1))
     ax.plot(*massada.xy, marker='o', markersize=5, color='k')
-    ax.plot(*dsea.xy, marker='o', markersize=5, color='k')
-    geo_annotate(ax, [dsea.x], [dsea.y],
-                 ['GNSS-dsea'], xytext=(4, -6), fmt=None,
+    ax.plot(*soi_point.xy, marker='o', markersize=5, color='k')
+    ax.plot(*axis_point.xy, marker='o', markersize=5, color='k')
+    geo_annotate(ax, [soi_point.x], [soi_point.y],
+                 ['GNSS-SOI ({:.0f} km)'.format(ds1)], xytext=(4, -6), fmt=None,
+                 c='k', fw='bold', fs=14, colorupdown=False)
+    ds3 = plot_closest_line_from_point_to_israeli_coast(axis_point, ax=ax, color='k')
+    print('{} km of axis-point to coast.'.format(ds3))
+    geo_annotate(ax, [axis_point.x], [axis_point.y],
+                 ['GNSS-AXIS ({:.0f} km)'.format(ds3)], xytext=(4, -6), fmt=None,
                  c='k', fw='bold', fs=14, colorupdown=False)
     ds2 = plot_closest_line_from_point_to_israeli_coast(massada, ax=ax, color='k')
-    print(ds2)
+    print('{} km of massada-point to coast.'.format(ds2))
     geo_annotate(ax, [massada.x], [massada.y],
-                 ['Massada-pt.'], xytext=(4, -6), fmt=None,
+                 ['Massada-pt. ({:.0f} km)'.format(ds2)], xytext=(4, -6), fmt=None,
                  c='k', fw='bold', fs=14, colorupdown=False)
     ax.set_xticks([34, 35, 36])
     ax.set_yticks([29.5, 30, 30.5, 31, 31.5, 32, 32.5])
