@@ -11,6 +11,47 @@ axis_path = work_yuval / 'axis'
 gis_path = work_yuval / 'gis'
 
 
+def copy_rinex_to_station_dir(main_rinexpath, filenames, suffix='.gz'):
+    import shutil
+    import os
+    from aux_gps import get_timedate_and_station_code_from_rinex
+    station = filenames[0][0:4]
+    station_dir = main_rinexpath / station
+    if not station_dir.is_dir():
+        os.mkdir(station_dir)
+    cnt = 0
+    for filename in filenames:
+        year = get_timedate_and_station_code_from_rinex(filename, just_dt=True).year
+        doy = filename[4:7]
+        if suffix is not None:
+            filename += suffix
+        to_copy_from = main_rinexpath / str(year) / doy / filename
+        to_copy_to = station_dir / filename
+        try:
+            shutil.copy(to_copy_from, to_copy_to)
+        except FileNotFoundError:
+            print('{} not found, missing ?'.format(filename))
+            continue
+        cnt += 1
+    print('Done copying {} rinex files to {}.'.format(cnt, station_dir))
+    return
+        
+
+def produce_rinex_filenames_at_time_window(station='Dimo',
+                                           end_dt='2021-04-13T02:00', window=24):
+    """given a end date and a time window (in hours) get the hourly files
+    of station going back window hours prior"""
+    import pandas as pd
+    from aux_gps import get_rinex_filename_from_datetime
+    end_dt = pd.to_datetime(end_dt)
+    start_dt = end_dt - pd.Timedelta('{} hour'.format(window - 1))
+    dt_range = pd.date_range(start_dt, end_dt, freq='1H')
+    # first = get_rinex_filename_from_datetime(station, dt=start_dt, st_lower=False)
+    dt_range = [x.strftime('%Y-%m-%dT%H:%M:%S') for x in dt_range]
+    filenames = get_rinex_filename_from_datetime(station, dt=dt_range, st_lower=False)
+    return filenames
+
+
 def read_and_concat_smoothFinals(rinexpath, solution='Final'):
     import xarray as xr
     from aux_gps import save_ncfile
