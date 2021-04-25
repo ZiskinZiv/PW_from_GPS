@@ -2874,20 +2874,29 @@ def find_cross_points(df, cols=None):
     return df
 
 
-def get_rinex_filename_from_datetime(station, dt='2012-05-07'):
+def get_rinex_filename_from_datetime(station, dt='2012-05-07', st_lower=True):
     """return rinex filename from datetime string"""
     import pandas as pd
 
     def filename_from_single_date(station, date):
         day = pd.to_datetime(date, format='%Y-%m-%d').dayofyear
         year = pd.to_datetime(date, format='%Y-%m-%d').year
+        if 'T' in date:
+            hour = pd.to_datetime(date, format='%Y-%m-%d').hour
+            hour = letters_to_hours_and_vice_verse(hour)
+        else:
+            hour = '0'
         if len(str(day)) == 1:
-            str_day = '00' + str(day) + '0'
+            str_day = '00' + str(day) + hour
         elif len(str(day)) == 2:
-            str_day = '0' + str(day) + '0'
+            str_day = '0' + str(day) + hour
         elif len(str(day)) == 3:
-            str_day = str(day) + '0'
-        filename = station.lower() + str_day + '.' + str(year)[2:4] + 'd'
+            str_day = str(day) + hour
+        if st_lower:
+            st = station.lower()
+        else:
+            st = station
+        filename = st + str_day + '.' + str(year)[2:4] + 'd'
         return filename
 
     if isinstance(dt, list):
@@ -2901,8 +2910,23 @@ def get_rinex_filename_from_datetime(station, dt='2012-05-07'):
         return filename
 
 
+def letters_to_hours_and_vice_verse(symbol):
+    """A - 0 hours, B- 1 hours, until X = 23 hours"""
+    import string
+    import numpy as np
+    import pandas as pd
+    hour_letters = [x.upper() for x in string.ascii_letters][:24]
+    hour_numbers = np.arange(0, 24)
+    hour_string_dict = dict(zip(hour_letters, hour_numbers))
+    reverse_dict = dict(zip(hour_numbers, hour_letters))
+    if isinstance(symbol, int):
+        return reverse_dict.get(symbol, 'NaN')
+    elif isinstance(symbol, str):
+        return pd.Timedelta('{} hour'.format(hour_string_dict.get(symbol), 'NaN'))
+
+
 def get_timedate_and_station_code_from_rinex(rinex_str='tela0010.05d',
-                                             just_dt=False):
+                                             just_dt=False, st_upper=True):
     """return datetime from rinex2 format"""
     import pandas as pd
     import datetime
@@ -2910,11 +2934,20 @@ def get_timedate_and_station_code_from_rinex(rinex_str='tela0010.05d',
     def get_dt_from_single_rinex(rinex_str):
         station = rinex_str[0:4]
         days = int(rinex_str[4:7])
+        hour = rinex_str[7]
         year = rinex_str[-3:-1]
         Year = datetime.datetime.strptime(year, '%y').strftime('%Y')
         dt = datetime.datetime(int(Year), 1, 1) + datetime.timedelta(days - 1)
         dt = pd.to_datetime(dt)
-        return dt, station.upper()
+        if hour != '0':
+            hours_to_add = letters_to_hours_and_vice_verse(hour)
+            # print(hours_to_add)
+            dt += hours_to_add
+        if st_upper:
+            st = station.upper()
+        else:
+            st = station
+        return dt, st
 
     if isinstance(rinex_str, list):
         dt_list = []
