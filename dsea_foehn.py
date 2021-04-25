@@ -14,6 +14,55 @@ dem_path = work_yuval / 'AW3D30'
 axis_path = work_yuval/'axis'
 
 
+def plot_IMS_data(ims_path=ims_path, station='SEDOM', path=work_yuval,
+                  times=['2014-08-01', '2014-08-31']):
+    import xarray as xr
+    import pandas as pd
+    import numpy as np
+    import matplotlib.pyplot as plt
+    ws = xr.open_dataset(
+        ims_path/'IMS_WS_israeli_10mins.nc')[station].sel(time=slice(*times))
+    wd = xr.open_dataset(
+        ims_path/'IMS_WD_israeli_10mins.nc')[station].sel(time=slice(*times))
+    rh = xr.open_dataset(
+        ims_path/'IMS_RH_israeli_10mins.nc')[station].sel(time=slice(*times))
+    ts = xr.open_dataset(
+        ims_path/'IMS_TD_israeli_10mins.nc')[station].sel(time=slice(*times))
+    ds = xr.Dataset()
+    ds['WS'] = ws
+    ds['WD'] = wd
+    ds['T'] = ts
+    ds['RH'] = rh
+    # convert to UTC, since IMS is always UTC+2
+    new_time = ds['time'] - pd.Timedelta(2, units='H')
+    new_time = new_time.dt.round('s')
+    ds['time'] = new_time
+    ds['PWV'] = xr.load_dataset(path / 'DSEA_PWV_GNSS_2014-08.nc')['pwv-soi']
+    da8 = ds.sel(time=slice('2014-08-08T13:00:00',
+                            '2014-08-08T19:00:00')).to_array('var')
+    da8['time'] = np.linspace(13, 19, len(da8['time']))
+    # da8['time'] = da8['time'].dt.time
+    da16 = ds.sel(time=slice('2014-08-16T13:00:00',
+                             '2014-08-16T19:00:00')).to_array('var')
+    da16['time'] = np.linspace(13, 19, len(da16['time']))
+    # da16['time'] = da16['time'].dt.time
+    dss = xr.concat([da8, da16],'date')
+    dss['date'] = [pd.to_datetime(x).date() for x in ['2014-08-08', '2014-08-16']]
+    fg = dss.plot(row='var', col='date', sharex=True, sharey=False, figsize=(10, 8))
+    [fg.axes[0][x].set_ylim(2.5, 11) for x in [0, 1]]
+    fg.axes[0][0].set_ylabel('Wind Speed [m/s]')
+    [fg.axes[1][x].set_ylim(0, 360) for x in [0, 1]]
+    fg.axes[1][0].set_ylabel(r'Wind Direction [$\degree$]')
+    [fg.axes[2][x].set_ylim(32, 41.5) for x in [0, 1]]
+    fg.axes[2][0].set_ylabel(r'Surface Temperature [$\degree$C]')
+    [fg.axes[3][x].set_ylim(17.5, 46) for x in [0, 1]]
+    fg.axes[3][0].set_ylabel('Relative Humidity [%]')
+    [fg.axes[4][x].set_ylim(17.5, 27) for x in [0, 1]]
+    fg.axes[4][0].set_ylabel('PWV [mm]')
+    fg.fig.tight_layout()
+    return fg
+
+
 def plot_gnss_and_radiometer_timeseries(path=work_yuval, des_path=des_path):
     import xarray as xr
     import matplotlib.pyplot as plt
@@ -354,14 +403,15 @@ def read_all_WRF_GNSS_files(path=des_path, var='pw', point=None):
     from aux_gps import path_glob
     from aux_gps import get_nearest_lat_lon_for_xy
     import xarray as xr
+    from netCDF4 import Dataset
     import wrf
     files = path_glob(path, 'wrfout_d04_*_GNSS.nc')
-    dsl = [xr.open_dataset(file) for file in files]
+    dsl = [Dataset(file) for file in files]
     if var is not None:
         var_list = []
         for ds in dsl:
-            wrfin = ds._file_obj.ds
-            wrfvar = wrf.getvar(wrfin=wrfin, varname=var, timeidx=wrf.ALL_TIMES)
+            # wrfin = ds._file_obj.ds
+            wrfvar = wrf.getvar(wrfin=ds, varname=var, timeidx=wrf.ALL_TIMES)
             var_list.append(wrfvar)
         ds = xr.concat(var_list, 'Time')
         ds = ds.sortby('Time')
