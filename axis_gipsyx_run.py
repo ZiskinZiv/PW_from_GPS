@@ -208,15 +208,19 @@ def record_dump_and_merge_at_single_folder(rinexpath, drmerger, staDb):
     return
 
 
-def daily_prep_all_steps(doypath, staDb):
+def daily_prep_all_steps(doypath, staDb, new_filename=False):
     from aux_gps import path_glob
     from aux_gps import replace_char_at_string_position
     try:
-        files = path_glob(doypath, '*.gz')
+        files = sorted(path_glob(doypath, '*.gz'))
     except FileNotFoundError:
-        files = path_glob(doypath, '*.Z')
+        files = sorted(path_glob(doypath, '*.Z'))
     rfn = files[0].as_posix().split('/')[-1]
-    rfn_dfile = replace_char_at_string_position(rfn, pos=7, char='0')[0:12]
+    if not new_filename:
+        rfn_dfile = replace_char_at_string_position(rfn, pos=7, char='0')[0:12]
+    else:
+        last_rfn = files[-1].as_posix().split('/')[-1]
+        rfn_dfile = rfn[0:8] + '-' + last_rfn[4:8] + rfn[8:]
     # 1) rinex concat and prep:
     daily_prep_and_concat_rinex(doypath)
     # 2) dataRecordDump:
