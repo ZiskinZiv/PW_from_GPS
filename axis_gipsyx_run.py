@@ -12,6 +12,26 @@ use this func to do it seperately from main gipsyx run
 """
 
 
+def check_window(window):
+    window = int(window)
+    if window < 1 or window > 30:
+        raise argparse.ArgumentTypeError('{} is not a valid window.'.format(window))
+    return window
+
+
+def check_end_datetime(end_dt):
+    end_dt = str(end_dt)
+    # if len(station) != 4:
+    #     raise argparse.ArgumentTypeError('{} is not a valid station name.'.format(station))
+    return end_dt
+
+
+def check_station(station):
+    station = str(station)
+    if len(station) != 4:
+        raise argparse.ArgumentTypeError('{} is not a valid station name.'.format(station))
+    return station
+
 
 def check_year(year):
     import datetime
@@ -40,172 +60,172 @@ def check_file_in_cwd(filename):
     return file_and_path
 
 
-def record_dump_and_merge(args):
-    # import os
-    import logging
-    from aux_gps import path_glob
-    logger = logging.getLogger('axis-gipsyx')
-    if args.mode is None:
-        mode = 'whole'
-    else:
-        mode = args.mode
-    if args.year is None:
-        year = 2021
-    else:
-        year = args.year
-    if mode == 'last_doy':
-        # check for doy folders in args.rinexpath and flag last_doy:
-        doys = sorted(path_glob(args.rinexpath / str(year), '*/'))
-        doys = sorted([x for x in doys if x.is_dir()])
-        last_doy = doys[-1].as_posix().split('/')[-1]
-        logger.info('drRecordDump on year {}, doy {}, using last_doy'.format(year, last_doy))
-        record_dump_and_merge_at_single_folder(doys[0], args.drmerger, args.staDb)
-    elif mode == 'whole':
-        doys = sorted(path_glob(args.rinexpath / str(year), '*/'))
-        doys = sorted([x for x in doys if x.is_dir()])
-        for doy in doys:
-            current_doy = doy.as_posix().split('/')[-1]
-            logger.info('drRecordDump on year {}, doy {},using whole data'.format(year, current_doy))
-            record_dump_and_merge_at_single_folder(doy, args.drmerger, args.staDb)
-    return
+# def record_dump_and_merge(args):
+#     # import os
+#     import logging
+#     from aux_gps import path_glob
+#     logger = logging.getLogger('axis-gipsyx')
+#     if args.mode is None:
+#         mode = 'whole'
+#     else:
+#         mode = args.mode
+#     if args.year is None:
+#         year = 2021
+#     else:
+#         year = args.year
+#     if mode == 'last_doy':
+#         # check for doy folders in args.rinexpath and flag last_doy:
+#         doys = sorted(path_glob(args.rinexpath / str(year), '*/'))
+#         doys = sorted([x for x in doys if x.is_dir()])
+#         last_doy = doys[-1].as_posix().split('/')[-1]
+#         logger.info('drRecordDump on year {}, doy {}, using last_doy'.format(year, last_doy))
+#         record_dump_and_merge_at_single_folder(doys[0], args.drmerger, args.staDb)
+#     elif mode == 'whole':
+#         doys = sorted(path_glob(args.rinexpath / str(year), '*/'))
+#         doys = sorted([x for x in doys if x.is_dir()])
+#         for doy in doys:
+#             current_doy = doy.as_posix().split('/')[-1]
+#             logger.info('drRecordDump on year {}, doy {},using whole data'.format(year, current_doy))
+#             record_dump_and_merge_at_single_folder(doy, args.drmerger, args.staDb)
+#     return
 
 
-def record_dump_and_merge_at_single_folder(rinexpath, drmerger, staDb):
-    """search for hourly rinex in folder for all stations and convert them to dr.gz
-    then merge them together"""
-    import subprocess
-    import os
-    import logging
-    from aux_gps import path_glob
-    import string
-    from subprocess import CalledProcessError
-    # from subprocess import TimeoutExpired
-    logger = logging.getLogger('axis-gipsyx')
-    # cnt = {'succ': 0, 'failed': 0}
-    # first check for rinexpath / dr, if doesn't exist create it:
-    dr_path = rinexpath / 'dr'
-    if not (dr_path).is_dir():
-        os.mkdir(dr_path)
-    # next check if performing hourly all stations, or daily one/all stations:
-    logger.info('performing {} drmerger for all rinex files.'.format(drmerger))
-    if drmerger == 'hourly':
-        hours = [x.upper() for x in string.ascii_letters][:24]
-        for hour in hours:
-            try:
-                files = path_glob(rinexpath, '*{}.*.gz'.format(hour))
-            except FileNotFoundError:
-                logger.warning('hour {} not found in rinex files.'.format(hour))
-                continue
-            dr_files = []
-            stations = []
-            doy = files[0].as_posix().split('/')[-1][0:12][4:7]
-            merged_file = dr_path / 'merged_{}_{}.dr.gz'.format(doy, hour)
-            if (merged_file).is_file():
-                logger.warning('{} already exists in {}, skipping...'.format(merged_file, dr_path))
-                continue
-            for file in files:
-                # rinex 2.11 filename:
-                filename = file.as_posix().split('/')[-1][0:12]
-                stn = filename[0:4].upper()
-                dr_file = dr_path / (filename + '.dr.gz')
-                dr_filename = dr_path / filename
-                command = 'dataRecordDump -rnx {} -drFileNmOut {} > {}.log 2>{}.err'.format(
-                    file.as_posix(), dr_file.as_posix(), dr_filename, dr_filename)
-                try:
-                    subprocess.run(command, shell=True, check=True)
-                    dr_files.append(dr_file)
-                    # keep station names that were succesufully dred:
-                    stations.append(filename[0:4])
-                    # cnt['succ'] += 1
-                except CalledProcessError:
-                    logger.error(
-                        'dataRecordDump failed on {}, deleting file.'.format(filename))
-                    dr_file.unlink()
-                # now rnxedit:
-                dr_edited_file = dr_path / (filename + '.dr_edited.gz')
-                command = 'rnxEditGde.py -type datarecord -recNm {} -data {} -out {} -staDb {} > {}.log 2>{}.err'.format(
-                    stn, dr_file.as_posix(), dr_edited_file.as_posix(),
-                    staDb.as_posix(), filename, filename)
-                try:
-                    subprocess.run(command, shell=True, check=True)
-    #                next(succ)
-                # cnt['succ'] += 1
-                except CalledProcessError:
-    #                next(failed)
-                    # cnt['failed'] += 1
-                    logger.error('rnxEditGde.py failed on {}...'.format(filename))
-                    dr_edited_file.unlink()
-                    # cnt['failed'] += 1
-            # now merge all dr files :
-            logger.info(
-                'merging dr files in doy {}, hour {}.'.format(doy, hour))
-            merged_glob = dr_path / '*{}{}.*.dr_edited.gz'.format(doy, hour)
-            merged_filename = dr_path / 'merged_{}_{}'.format(doy, hour)
-            command = 'drMerge.py -i {} -o {} > {}.log 2>{}.err'.format(
-                merged_glob.as_posix(), merged_file.as_posix(), merged_filename,
-                merged_filename)
-            try:
-                subprocess.run(command, shell=True, check=True)
-                # also create txt file with station names inside merged file:
-                with open('{}.txt'.format(merged_filename.as_posix()), "w") as outfile:
-                    outfile.write("\n".join(stations))
-            except CalledProcessError:
-                logger.error('drMerge.py failed on {}...'.format(
-                    merged_glob.as_posix()))
-                return
-            # now delete all single dr (whom i already merged):
-            [x.unlink() for x in dr_files]
-    elif drmerger == 'daily':
-        files = path_glob(rinexpath, '*.gz')
-        dr_files = []
-        stations = []
-        for file in files:
-            # rinex 2.11 filename:
-            filename = file.as_posix().split('/')[-1][0:12]
-            doy = filename[4:7]
-            merged_file = dr_path / 'merged_{}.dr.gz'.format(doy)
-            if (merged_file).is_file():
-                logger.warning('{} already exists in {}, skipping...'.format(merged_file, dr_path))
-                continue
-            dr_file = dr_path / (filename + '.dr.gz')
-            dr_filename = dr_path / filename
-            command = 'dataRecordDump -rnx {} -drFileNmOut {} > {}.log 2>{}.err'.format(
-                file.as_posix(), dr_file.as_posix(), dr_filename, dr_filename)
-            try:
-                subprocess.run(command, shell=True, check=True)
-                dr_files.append(dr_file)
-                stations.append(filename[0:4])
-                # cnt['succ'] += 1
-            except CalledProcessError:
-                logger.error('dataRecordDump failed on {}, deleting file.'.format(filename))
-                dr_file.unlink()
-                # cnt['failed'] += 1
-        # now merge all dr files :
-        logger.info('merging dr files in doy {}.'.format(doy))
-        merged_file = dr_path / 'merged_{}.dr.gz'.format(doy)
-        merged_filename = dr_path / 'merged_{}'.format(doy)
-        merged_glob = dr_path / '*{}*.*.dr.gz'.format(doy)
-        command = 'drMerge.py -i {} -o {} > {}.log 2>{}.err'.format(
-            merged_glob.as_posix(), merged_file.as_posix(), merged_filename, merged_filename)
-        try:
-            subprocess.run(command, shell=True, check=True)
-            with open('{}.txt'.format(merged_filename.as_posix()), "w") as outfile:
-                outfile.write("\n".join(stations))
-        except CalledProcessError:
-            logger.error('drMerge.py failed on {}...'.format(
-                merged_glob.as_posix()))
-        # now delete all single dr (whom i already merged):
-        [x.unlink() for x in dr_files]
-    # now delete all log and err files if empty:
-    log_files = path_glob(dr_path, '*.log')
-    for lfile in log_files:
-        if lfile.stat().st_size == 0:
-            lfile.unlink()
-    err_files = path_glob(dr_path, '*.err')
-    for efile in err_files:
-        if efile.stat().st_size == 0:
-            efile.unlink()
-    return
+# def record_dump_and_merge_at_single_folder(rinexpath, drmerger, staDb):
+#     """search for hourly rinex in folder for all stations and convert them to dr.gz
+#     then merge them together"""
+#     import subprocess
+#     import os
+#     import logging
+#     from aux_gps import path_glob
+#     import string
+#     from subprocess import CalledProcessError
+#     # from subprocess import TimeoutExpired
+#     logger = logging.getLogger('axis-gipsyx')
+#     # cnt = {'succ': 0, 'failed': 0}
+#     # first check for rinexpath / dr, if doesn't exist create it:
+#     dr_path = rinexpath / 'dr'
+#     if not (dr_path).is_dir():
+#         os.mkdir(dr_path)
+#     # next check if performing hourly all stations, or daily one/all stations:
+#     logger.info('performing {} drmerger for all rinex files.'.format(drmerger))
+#     if drmerger == 'hourly':
+#         hours = [x.upper() for x in string.ascii_letters][:24]
+#         for hour in hours:
+#             try:
+#                 files = path_glob(rinexpath, '*{}.*.gz'.format(hour))
+#             except FileNotFoundError:
+#                 logger.warning('hour {} not found in rinex files.'.format(hour))
+#                 continue
+#             dr_files = []
+#             stations = []
+#             doy = files[0].as_posix().split('/')[-1][0:12][4:7]
+#             merged_file = dr_path / 'merged_{}_{}.dr.gz'.format(doy, hour)
+#             if (merged_file).is_file():
+#                 logger.warning('{} already exists in {}, skipping...'.format(merged_file, dr_path))
+#                 continue
+#             for file in files:
+#                 # rinex 2.11 filename:
+#                 filename = file.as_posix().split('/')[-1][0:12]
+#                 stn = filename[0:4].upper()
+#                 dr_file = dr_path / (filename + '.dr.gz')
+#                 dr_filename = dr_path / filename
+#                 command = 'dataRecordDump -rnx {} -drFileNmOut {} > {}.log 2>{}.err'.format(
+#                     file.as_posix(), dr_file.as_posix(), dr_filename, dr_filename)
+#                 try:
+#                     subprocess.run(command, shell=True, check=True)
+#                     dr_files.append(dr_file)
+#                     # keep station names that were succesufully dred:
+#                     stations.append(filename[0:4])
+#                     # cnt['succ'] += 1
+#                 except CalledProcessError:
+#                     logger.error(
+#                         'dataRecordDump failed on {}, deleting file.'.format(filename))
+#                     dr_file.unlink()
+#                 # now rnxedit:
+#                 dr_edited_file = dr_path / (filename + '.dr_edited.gz')
+#                 command = 'rnxEditGde.py -type datarecord -recNm {} -data {} -out {} -staDb {} > {}.log 2>{}.err'.format(
+#                     stn, dr_file.as_posix(), dr_edited_file.as_posix(),
+#                     staDb.as_posix(), filename, filename)
+#                 try:
+#                     subprocess.run(command, shell=True, check=True)
+#     #                next(succ)
+#                 # cnt['succ'] += 1
+#                 except CalledProcessError:
+#     #                next(failed)
+#                     # cnt['failed'] += 1
+#                     logger.error('rnxEditGde.py failed on {}...'.format(filename))
+#                     dr_edited_file.unlink()
+#                     # cnt['failed'] += 1
+#             # now merge all dr files :
+#             logger.info(
+#                 'merging dr files in doy {}, hour {}.'.format(doy, hour))
+#             merged_glob = dr_path / '*{}{}.*.dr_edited.gz'.format(doy, hour)
+#             merged_filename = dr_path / 'merged_{}_{}'.format(doy, hour)
+#             command = 'drMerge.py -i {} -o {} > {}.log 2>{}.err'.format(
+#                 merged_glob.as_posix(), merged_file.as_posix(), merged_filename,
+#                 merged_filename)
+#             try:
+#                 subprocess.run(command, shell=True, check=True)
+#                 # also create txt file with station names inside merged file:
+#                 with open('{}.txt'.format(merged_filename.as_posix()), "w") as outfile:
+#                     outfile.write("\n".join(stations))
+#             except CalledProcessError:
+#                 logger.error('drMerge.py failed on {}...'.format(
+#                     merged_glob.as_posix()))
+#                 return
+#             # now delete all single dr (whom i already merged):
+#             [x.unlink() for x in dr_files]
+#     elif drmerger == 'daily':
+#         files = path_glob(rinexpath, '*.gz')
+#         dr_files = []
+#         stations = []
+#         for file in files:
+#             # rinex 2.11 filename:
+#             filename = file.as_posix().split('/')[-1][0:12]
+#             doy = filename[4:7]
+#             merged_file = dr_path / 'merged_{}.dr.gz'.format(doy)
+#             if (merged_file).is_file():
+#                 logger.warning('{} already exists in {}, skipping...'.format(merged_file, dr_path))
+#                 continue
+#             dr_file = dr_path / (filename + '.dr.gz')
+#             dr_filename = dr_path / filename
+#             command = 'dataRecordDump -rnx {} -drFileNmOut {} > {}.log 2>{}.err'.format(
+#                 file.as_posix(), dr_file.as_posix(), dr_filename, dr_filename)
+#             try:
+#                 subprocess.run(command, shell=True, check=True)
+#                 dr_files.append(dr_file)
+#                 stations.append(filename[0:4])
+#                 # cnt['succ'] += 1
+#             except CalledProcessError:
+#                 logger.error('dataRecordDump failed on {}, deleting file.'.format(filename))
+#                 dr_file.unlink()
+#                 # cnt['failed'] += 1
+#         # now merge all dr files :
+#         logger.info('merging dr files in doy {}.'.format(doy))
+#         merged_file = dr_path / 'merged_{}.dr.gz'.format(doy)
+#         merged_filename = dr_path / 'merged_{}'.format(doy)
+#         merged_glob = dr_path / '*{}*.*.dr.gz'.format(doy)
+#         command = 'drMerge.py -i {} -o {} > {}.log 2>{}.err'.format(
+#             merged_glob.as_posix(), merged_file.as_posix(), merged_filename, merged_filename)
+#         try:
+#             subprocess.run(command, shell=True, check=True)
+#             with open('{}.txt'.format(merged_filename.as_posix()), "w") as outfile:
+#                 outfile.write("\n".join(stations))
+#         except CalledProcessError:
+#             logger.error('drMerge.py failed on {}...'.format(
+#                 merged_glob.as_posix()))
+#         # now delete all single dr (whom i already merged):
+#         [x.unlink() for x in dr_files]
+#     # now delete all log and err files if empty:
+#     log_files = path_glob(dr_path, '*.log')
+#     for lfile in log_files:
+#         if lfile.stat().st_size == 0:
+#             lfile.unlink()
+#     err_files = path_glob(dr_path, '*.err')
+#     for efile in err_files:
+#         if efile.stat().st_size == 0:
+#             efile.unlink()
+#     return
 
 
 def daily_prep_all_steps(doypath, staDb, new_filename=False):
@@ -268,10 +288,10 @@ def daily_prep_and_concat_rinex(doypath):
     logger = logging.getLogger('axis-gipsyx')
     # get rfn,i.e., DSea2150.14o:
     try:
-        files = path_glob(doypath, '*.gz')
+        files = sorted(path_glob(doypath, '*.gz'))
         unzip_glob = '*.gz'
     except FileNotFoundError:
-        files = path_glob(doypath, '*.Z')
+        files = sorted(path_glob(doypath, '*.Z'))
         unzip_glob = '*.Z'
     rfn = files[0].as_posix().split('/')[-1]
     rfn_dfile = replace_char_at_string_position(rfn, pos=7, char='0')[0:12]
@@ -347,11 +367,22 @@ def rnxEditGde_single_file(path_dir, filename, staDb):
 def main_program(args):
     import logging
     from aux_gps import path_glob
+    from axis_process import copy_rinex_to_station_dir
+    from axis_process import produce_rinex_filenames_at_time_window
+    import pandas as pd
     logger = logging.getLogger('axis-gipsyx')
     if args.year is None:
         year = 2021
     else:
         year = args.year
+    if args.window is None:
+        window = 24
+    else:
+        window = args.window
+    if args.end_dt is None:
+        end_dt = pd.Timestamp.now().round('H')
+    else:
+        end_dt = args.end_dt
     if args.mode == 'daily_prep':
         mode = 'daily_prep'
     else:
@@ -374,6 +405,17 @@ def main_program(args):
             logger.info('running GipsyX on {}:'.format(doypath))
             daily_gd2e(doypath, args.staDb, args.tree)
         logger.info('Done running GipsyX all doys in {}.'.format(year))
+    elif mode == 'real_time':
+        # 1) first find rinex of station the last 24 hours and copy to dir:
+        fns = produce_rinex_filenames_at_time_window(
+            args.station, end_dt=end_dt, window=window)
+        copy_rinex_to_station_dir(args.rinexpath, fns)
+        # 2) then, concat them, and drdump and rnxedit to dr path inside station dir:
+
+        # 3) run gd2e.py
+        #) finally, delete first rinex file (earliest):
+        (args.rinexpath / args.station / fns[0]).unlink()
+
 
 
 def daily_gd2e(doypath, staDb, tree):
@@ -572,7 +614,11 @@ if __name__ == '__main__':
     required.add_argument(
         '--mode',
         help="mode type",
-        choices=['daily_run', 'daily_prep_all', 'daily_prep_drdump_rnxedit'])
+        choices=['daily_run', 'daily_prep_all', 'daily_prep_drdump_rnxedit', 'real-time'])
+    required.add_argument(
+        '--station',
+        help="GNSS 4 letter station code",
+        type=check_station)
     optional.add_argument(
         '--staDb',
         help='add a station DB file for antennas and receivers in rinexpath',
@@ -581,6 +627,14 @@ if __name__ == '__main__':
         '--accuracy',
         help='the orbit and clock accuracy products',
         type=str, choices=['Final', 'ql', 'ultra'])
+    optional.add_argument(
+        '--window',
+        help='the window in hours to perform ppp solution. typically 24',
+        type=check_window)
+    optional.add_argument(
+        '--end_dt',
+        help='end datetime of window ppp solution. for real-time it is now.',
+        type=check_end_datetime)
     # optional.add_argument(
     #     '--drmerger',
     #     help='use this to just drRecordump to dr folder and merge all hourly files for all available stations or daily of one station',
@@ -601,6 +655,9 @@ if __name__ == '__main__':
         sys.exit()
     if args.mode is None:
         print('mode is a required argument, run with -h...')
+        sys.exit()
+    if args.station is None:
+        print('station is a required argument, run with -h...')
         sys.exit()
     if args.staDb is None:
         args.staDb = '$GOA_VAR/sta_info/sta_db_qlflinn'
