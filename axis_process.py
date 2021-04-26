@@ -27,6 +27,9 @@ def copy_rinex_to_station_dir(main_rinexpath, filenames, suffix='.gz'):
             filename += suffix
         to_copy_from = main_rinexpath / str(year) / doy / filename
         to_copy_to = station_dir / filename
+        if to_copy_to.is_file():
+            print('{} already exists in {}, skipping.'.format(filename, station_dir))
+            continue
         try:
             shutil.copy(to_copy_from, to_copy_to)
         except FileNotFoundError:
@@ -35,7 +38,7 @@ def copy_rinex_to_station_dir(main_rinexpath, filenames, suffix='.gz'):
         cnt += 1
     print('Done copying {} rinex files to {}.'.format(cnt, station_dir))
     return
-        
+
 
 def produce_rinex_filenames_at_time_window(station='Dimo',
                                            end_dt='2021-04-13T02:00', window=24):
