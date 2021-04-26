@@ -13,13 +13,111 @@ dsea_gipsy_path = work_yuval / 'dsea_gipsyx'
 dem_path = work_yuval / 'AW3D30'
 axis_path = work_yuval/'axis'
 
+dsea_points = {'SEDOM': [31.0306, 35.3919], 'OPERA': [35.3725, 31.3177],
+               'SOI-GNSS': [31.03691605029973, 35.36882566157563],
+               'AXIS-GNSS': [31.153660742415386, 35.36488575585163]}
 
-def plot_IMS_data(ims_path=ims_path, station='SEDOM', path=work_yuval,
-                  times=['2014-08-01', '2014-08-31']):
+
+def plot_IMS_WRF_at_SEDOM(path=des_path, ims_path=ims_path):
+    import matplotlib.pyplot as plt
+    import xarray as xr
+    # import pandas as pd
+    wrf = process_wrf_data_at_point_on_both_dsea_foehns(path=path, point='SEDOM')
+    ims = process_IMS_data_at_station_on_dsea_foehn_dates(path=path, ims_path=ims_path, station='SEDOM')
+    fg = xr.plot.FacetGrid(wrf, col='date', row='var', sharex=True, sharey=False, figsize=(10, 9.5))
+    var_order = ['WS', 'WD', 'T', 'RH', 'PWV']
+    for i, row_ax in enumerate(fg.axes):
+        ax8 = row_ax[0]
+        ax16 = row_ax[1]
+        wrf8 = wrf.sel(date='2014-08-08')
+        wrf16 = wrf.sel(date='2014-08-16')
+        ims8 = ims.sel(date='2014-08-08')
+        ims16 = ims.sel(date='2014-08-16')
+        wrf8.sel(var=var_order[i]).plot(ax=ax8, color='tab:red', label=['WRF'])
+        wrf16.sel(var=var_order[i]).plot(ax=ax16, color='tab:red')
+        ims8.sel(var=var_order[i]).plot(ax=ax8, color='tab:blue', label=['IMS'])
+        ims16.sel(var=var_order[i]).plot(ax=ax16, color='tab:blue')
+        ax8.grid(True)
+        handles, labels = ax8.get_legend_handles_labels()
+        ax16.grid(True)
+        ax8.set_xlabel('')
+        ax16.set_xlabel('')
+        if i == 4:
+            ax8.set_xlabel('Time [UTC]')
+            ax16.set_xlabel('Time [UTC]')
+    [fg.axes[0][x].set_ylim(0.0, 11) for x in [0, 1]]
+    fg.axes[0][0].set_ylabel('Wind Speed [m/s]')
+    [fg.axes[1][x].set_ylim(0, 360) for x in [0, 1]]
+    fg.axes[1][0].set_ylabel(r'Wind Direction [$\degree$]')
+    [fg.axes[2][x].set_ylim(28.5, 41.5) for x in [0, 1]]
+    fg.axes[2][0].set_ylabel(r'Surface Temperature [$\degree$C]')
+    [fg.axes[3][x].set_ylim(17.5, 60) for x in [0, 1]]
+    fg.axes[3][0].set_ylabel('Relative Humidity [%]')
+    [fg.axes[4][x].set_ylim(15, 27) for x in [0, 1]]
+    fg.axes[4][0].set_ylabel('PWV [mm]')
+    # fg.fig.tight_layout()
+    # legend:
+    fg.fig.legend(handles=handles, labels=['WRF', 'IMS'], prop={'size': 14}, edgecolor='k',
+                  framealpha=0.5, fancybox=True, facecolor='white',
+                  ncol=2, fontsize=14, loc='upper center', bbox_to_anchor=(0.5, 1.005),
+                  bbox_transform=plt.gcf().transFigure)
+    fg.fig.suptitle('WRF vs. IMS vars at SEDOM point, PWV (IMS) from SOI-GNSS 2.3 kms west of SEDOM', y=0.95)
+    fg.fig.tight_layout()
+    fg.fig.subplots_adjust(top=0.906)
+    return
+
+
+def process_wrf_data_at_point_on_both_dsea_foehns(path=des_path, point='SEDOM'):
+    import numpy as np
+    import xarray as xr
+    import pandas as pd
+    da8 = process_wrf_data_at_point_on_dsea_foehn_dates(
+        path=path, dsea_point=point, date='2014-08-08')
+    da16 = process_wrf_data_at_point_on_dsea_foehn_dates(
+        path=path, dsea_point=point, date='2014-08-16')
+    da8 = da8.sel(time=slice('2014-08-08T13:00:00',
+                             '2014-08-08T19:00:00'))
+    da8['time'] = np.linspace(13, 19, len(da8['time']))
+    # da8['time'] = da8['time'].dt.time
+    da16 = da16.sel(time=slice('2014-08-16T13:00:00',
+                               '2014-08-16T19:00:00'))
+    da16['time'] = np.linspace(13, 19, len(da16['time']))
+    # da16['time'] = da16['time'].dt.time
+    dss = xr.concat([da8, da16],'date')
+    # dss['date'] = [pd.to_datetime(x).date for x in ['2014-08-08', '2014-08-16']]
+    dss['date'] = ['2014-08-08', '2014-08-16']
+    dss = dss.reset_coords(drop=True)
+    return dss
+
+
+def process_wrf_data_at_point_on_dsea_foehn_dates(path=des_path, dsea_point='SEDOM',
+                                                  date='2014-08-08'):
+    from aux_gps import convert_wind_direction
+    point = dsea_points.get(dsea_point)
+    ds = get_wrf_vars_with_a_specific_point(
+        path/'wrfout_d04_{}_40lev_T2_U10_V10_pw_rh2.nc'.format(date),
+        point=point, name=dsea_point)
+    ds = ds.rename({'Time': 'time'})
+    ws, wd = convert_wind_direction(u=ds['U10'], v=ds['V10'])
+    ds = ds.rename({'U10': 'WS', 'V10': 'WD', 'T2': 'T',
+                    'rh2': 'RH', 'pw': 'PWV'})
+    ds['WD'] = wd
+    ds['WS'] = ws
+    ds['T'] -= 273.15
+    ds['T'].attrs['units'] = 'deg_C'
+    da = ds.to_array('var')
+    da.attrs['description'] = 'WRF output vars'
+    da.attrs['dsea_point_name'] = dsea_point
+    da.attrs['dsea_point'] = point
+    return da
+
+
+def process_IMS_data_at_station_on_dsea_foehn_dates(ims_path=ims_path, station='SEDOM', path=des_path,
+                                                    times=['2014-08-01', '2014-08-31']):
     import xarray as xr
     import pandas as pd
     import numpy as np
-    import matplotlib.pyplot as plt
+    # import matplotlib.pyplot as plt
     ws = xr.open_dataset(
         ims_path/'IMS_WS_israeli_10mins.nc')[station].sel(time=slice(*times))
     wd = xr.open_dataset(
@@ -47,20 +145,9 @@ def plot_IMS_data(ims_path=ims_path, station='SEDOM', path=work_yuval,
     da16['time'] = np.linspace(13, 19, len(da16['time']))
     # da16['time'] = da16['time'].dt.time
     dss = xr.concat([da8, da16],'date')
-    dss['date'] = [pd.to_datetime(x).date() for x in ['2014-08-08', '2014-08-16']]
-    fg = dss.plot(row='var', col='date', sharex=True, sharey=False, figsize=(10, 8))
-    [fg.axes[0][x].set_ylim(2.5, 11) for x in [0, 1]]
-    fg.axes[0][0].set_ylabel('Wind Speed [m/s]')
-    [fg.axes[1][x].set_ylim(0, 360) for x in [0, 1]]
-    fg.axes[1][0].set_ylabel(r'Wind Direction [$\degree$]')
-    [fg.axes[2][x].set_ylim(32, 41.5) for x in [0, 1]]
-    fg.axes[2][0].set_ylabel(r'Surface Temperature [$\degree$C]')
-    [fg.axes[3][x].set_ylim(17.5, 46) for x in [0, 1]]
-    fg.axes[3][0].set_ylabel('Relative Humidity [%]')
-    [fg.axes[4][x].set_ylim(17.5, 27) for x in [0, 1]]
-    fg.axes[4][0].set_ylabel('PWV [mm]')
-    fg.fig.tight_layout()
-    return fg
+    # dss['date'] = [pd.to_datetime(x).date() for x in ['2014-08-08', '2014-08-16']]
+    dss['date'] = ['2014-08-08', '2014-08-16']
+    return dss
 
 
 def plot_gnss_and_radiometer_timeseries(path=work_yuval, des_path=des_path):
@@ -313,6 +400,51 @@ def get_wrf_pw_at_dsea_gnss_coord(path=des_path, work_path=work_yuval, point=Non
     pw_ts = xr.concat(pw_list, 'Time')
     pw_ts = get_unique_index(pw_ts, dim='Time')
     return pw_ts
+
+
+def get_wrf_vars_with_a_specific_point(wrfile, point=[31.0306, 35.3919], name='SEDOM',
+                                       savepath=None, ds=None):
+    from aux_gps import get_nearest_lat_lon_for_xy
+    import xarray as xr
+    if ds is None:
+        ds = xr.open_dataset(wrfile)
+    print('looking for {} at wrf ().'.format(point, name))
+    loc = get_nearest_lat_lon_for_xy(ds['XLAT'], ds['XLONG'], point)
+    print(loc)
+    ds = ds.isel(south_north=loc[0][0], west_east=loc[0][1])
+    ds = ds.sortby('Time')
+    ds.load()
+    return ds
+
+
+def concat_wrf_vars_same_date(path=des_path, date='2014-08-16'):
+    import xarray as xr
+    from aux_gps import path_glob
+    from aux_gps import save_ncfile
+    files = path_glob(path, 'wrfout_*_{}_*_*.nc'.format(date))
+    dsl = [xr.open_dataset(x) for x in files]
+    ds = xr.merge(dsl)
+    varnames = '_'.join(sorted([x for x in ds]))
+    name = files[0].as_posix().split('/')[-1].split('.')[0].split('_')[0:-1]
+    filename = '_'.join(name) + '_{}'.format(varnames) + '.nc'
+    save_ncfile(ds, path, filename)
+    return
+
+
+def load_wrf_var_from_wrf_file_and_save(file, varname="rh2", savepath=None):
+    """load one wrfvar from wrf file and save it to savepath"""
+    from netCDF4 import Dataset
+    import wrf
+    nc = Dataset(file)
+    from aux_gps import save_ncfile
+    name = file.as_posix().split('/')[-1].split('.')[0]
+    filename = '{}_{}.nc'.format(name, varname)
+    wrfvar = wrf.getvar(wrfin=nc, varname=varname, timeidx=wrf.ALL_TIMES)
+    if savepath is not None:
+        if wrfvar.attrs['projection'] is not None:
+            wrfvar.attrs['projection'] = wrfvar.attrs['projection'].proj4()
+        save_ncfile(wrfvar, savepath, filename)
+    return wrfvar
 
 
 def load_wrf_output_and_save_field(path=des_path, varname="pw", savepath=None):
@@ -760,7 +892,7 @@ def wrap_xr_metpy_pw(dewpt, pressure, bottom=None, top=None, verbose=False,
         return pw.magnitude, pw_units
 
 
-def plot_line_from_dsea_massada_to_coast(dem_path=dem_path, work_path=work_yuval):
+def plot_line_from_dsea_opera_to_coast(dem_path=dem_path, work_path=work_yuval):
     from PW_from_gps_figures import plot_israel_map
     from PW_stations import produce_geo_gnss_solved_stations
     from ims_procedures import plot_closest_line_from_point_to_israeli_coast
@@ -792,10 +924,10 @@ def plot_line_from_dsea_massada_to_coast(dem_path=dem_path, work_path=work_yuval
 
     soi_point = Point(gnss['pwv-soi'].lon, gnss['pwv-soi'].lat)
     axis_point = Point(gnss['pwv-axis'].lon, gnss['pwv-axis'].lat)
-    massada = Point(35.3725, 31.3177)
+    opera = Point(35.3725, 31.3177)
     ds1 = plot_closest_line_from_point_to_israeli_coast(soi_point, ax=ax, color='k')
     print('{} km of soi-point to coast.'.format(ds1))
-    ax.plot(*massada.xy, marker='o', markersize=5, color='k')
+    ax.plot(*opera.xy, marker='o', markersize=5, color='k')
     ax.plot(*soi_point.xy, marker='o', markersize=5, color='k')
     ax.plot(*axis_point.xy, marker='o', markersize=5, color='k')
     geo_annotate(ax, [soi_point.x], [soi_point.y],
@@ -806,10 +938,10 @@ def plot_line_from_dsea_massada_to_coast(dem_path=dem_path, work_path=work_yuval
     geo_annotate(ax, [axis_point.x], [axis_point.y],
                  ['GNSS-AXIS ({:.0f} km)'.format(ds3)], xytext=(4, -6), fmt=None,
                  c='k', fw='bold', fs=14, colorupdown=False)
-    ds2 = plot_closest_line_from_point_to_israeli_coast(massada, ax=ax, color='k')
-    print('{} km of massada-point to coast.'.format(ds2))
-    geo_annotate(ax, [massada.x], [massada.y],
-                 ['Massada-pt. ({:.0f} km)'.format(ds2)], xytext=(4, -6), fmt=None,
+    ds2 = plot_closest_line_from_point_to_israeli_coast(opera, ax=ax, color='k')
+    print('{} km of OPERA to coast.'.format(ds2))
+    geo_annotate(ax, [opera.x], [opera.y],
+                 ['Opera-pt. ({:.0f} km)'.format(ds2)], xytext=(4, -6), fmt=None,
                  c='k', fw='bold', fs=14, colorupdown=False)
     ax.set_xticks([34, 35, 36])
     ax.set_yticks([29.5, 30, 30.5, 31, 31.5, 32, 32.5])
