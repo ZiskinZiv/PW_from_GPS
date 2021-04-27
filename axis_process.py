@@ -46,10 +46,10 @@ def produce_rinex_filenames_at_time_window(station='Dimo',
     of station going back window hours prior"""
     import pandas as pd
     from aux_gps import get_rinex_filename_from_datetime
-    end_dt = pd.to_datetime(end_dt)
+    end_dt = pd.to_datetime(end_dt).floor('H')
     print('getting rinex for {} on {} with {} hours backwards.'.format(station, end_dt, window))
-    start_dt = end_dt - pd.Timedelta('{} hour'.format(window - 1))
-    dt_range = pd.date_range(start_dt, end_dt, freq='1H')
+    start_dt = end_dt - pd.Timedelta('{} hour'.format(window))
+    dt_range = pd.date_range(start_dt, end_dt - pd.Timedelta('1 hour', units='H'), freq='1H')
     # first = get_rinex_filename_from_datetime(station, dt=start_dt, st_lower=False)
     dt_range = [x.strftime('%Y-%m-%dT%H:%M:%S') for x in dt_range]
     filenames = get_rinex_filename_from_datetime(station, dt=dt_range, st_lower=False)
