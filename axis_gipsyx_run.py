@@ -394,7 +394,7 @@ def main_program(args):
     else:
         window = args.window
     if args.end_dt is None:
-        end_dt = pd.Timestamp.utcnow().round('H')
+        end_dt = pd.Timestamp.utcnow().floor('H')
     else:
         end_dt = args.end_dt
     if args.mode == 'daily_prep':
