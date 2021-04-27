@@ -178,7 +178,9 @@ def generate_rinex_reader(station, dates):
 #     return
 
 
-def generate_gipsyx_run(rinexpath, station, task, tree, staDb, accuracy, mode):
+def generate_gipsyx_run(rinexpath, station, task, tree, staDb, accuracy, mode,
+                        add_python_path=True):
+    """add_python_path is neccessary so crontab -e will run conda python and not system python"""
     from pathlib import Path
     lines = []
     cwd = Path().cwd()
@@ -202,8 +204,12 @@ def generate_gipsyx_run(rinexpath, station, task, tree, staDb, accuracy, mode):
         #         line += ' --daterange {} {}'.format(dates[0], dates[1])
         #     line += ' &>{}/nohup_{}_{}.txt&'.format(pwpath, curr_sta, task)
         if task == 'run':
-            line = 'nohup python -u {}/axis_gipsyx_run.py '.format(pwpath)\
-                    + '--station {} --rinexpath {} --staDb {} --mode {} --accuracy {}'.format(curr_sta, rinexpath, staDb, mode, accuracy)
+            if add_python_path:
+                line = 'nohup /home/ziskin/anaconda3/bin/python -u {}/axis_gipsyx_run.py '.format(pwpath)\
+                        + '--station {} --rinexpath {} --staDb {} --mode {} --accuracy {}'.format(curr_sta, rinexpath, staDb, mode, accuracy)
+            else:
+                line = 'nohup python -u {}/axis_gipsyx_run.py '.format(pwpath)\
+                        + '--station {} --rinexpath {} --staDb {} --mode {} --accuracy {}'.format(curr_sta, rinexpath, staDb, mode, accuracy)
             if tree is not None:
                 line += ' --tree {}'.format(tree)
             # if dates is not None:
@@ -330,6 +336,8 @@ if __name__ == '__main__':
                           type=str)
     optional.add_argument('--accuracy', help='accuracy of orbit and clock',
                           type=str, choices=['Final', 'ql', 'ultra'])
+    optional.add_argument('--divide', help='divide the script into subscripts',
+                          type=int)
     # optional.add_argument('--iqr_k', help='iqr k data filter criterion',
     #                       type=float)
     # optional.add_argument('--db', help='database to download rinex files from.',
