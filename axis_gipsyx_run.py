@@ -262,10 +262,10 @@ def daily_prep_drdump_and_rnxedit(path, staDb):
     import shutil
     import os
     try:
-        files = path_glob(path, '*.gz')
+        files = sorted(path_glob(path, '*.gz'))
         suff = '.gz'
     except FileNotFoundError:
-        files = path_glob(path, '*.Z')
+        files = sorted(path_glob(path, '*.Z'))
         suff = '.Z'
     rfn = files[0].as_posix().split('/')[-1]
     rfn_dfile = replace_char_at_string_position(rfn, pos=7, char='0')[0:12]
@@ -447,7 +447,7 @@ def daily_gd2e(path, staDb, tree, acc='Final', extended_rfn=False):
     if not res_path.is_dir():
         os.mkdir(res_path)
     files = path_glob(dr_path, '*.gz')
-    edited = [x for x in files if 'edited' in x.as_posix()][0]
+    edited = sorted([x for x in files if 'edited' in x.as_posix()])[-1]
     logger.info('started gd2e on {}'.format(edited))
     station = edited.as_posix().split('/')[-1][0:4].upper()
     rfn = edited.as_posix().split('/')[-1][0:8]
