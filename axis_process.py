@@ -47,6 +47,7 @@ def produce_rinex_filenames_at_time_window(station='Dimo',
     import pandas as pd
     from aux_gps import get_rinex_filename_from_datetime
     end_dt = pd.to_datetime(end_dt)
+    print('getting rinex for {} on {} with {} hours backwards.'.format(station, end_dt, window))
     start_dt = end_dt - pd.Timedelta('{} hour'.format(window - 1))
     dt_range = pd.date_range(start_dt, end_dt, freq='1H')
     # first = get_rinex_filename_from_datetime(station, dt=start_dt, st_lower=False)
@@ -361,5 +362,6 @@ def read_multi_station_tdp_file(file, stations, savepath=None):
     pos_new_names = [x.split('.')[-1] for x in pos_names]
     ds = ds.rename(dict(zip(pos_names, pos_new_names)))
     if savepath is not None:
+        # filename = file.as_posix().split('/')[-1].split()
         save_ncfile(ds, savepath, 'smoothFinal.nc')
     return ds
