@@ -164,7 +164,7 @@ def single_station_rinex_using_wget(save_dir, minimum_year=None,
         dts = pd.date_range('{}-01-01'.format(minimum_year), today,
                             freq='1D')
     else:
-        today = pd.Timestamp.now().strftime('%Y-%m-%d')
+        today = pd.Timestamp.utcnow().strftime('%Y-%m-%d')
         dts = pd.date_range('1988-01-01', today, freq='1D')
     rfns = [get_rinex_filename_from_datetime(station, x) for x in dts.to_list()]
     for rfn in rfns:
