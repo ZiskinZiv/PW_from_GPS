@@ -4,6 +4,10 @@
 Created on Tue Jun 25 14:29:10 2019
 This script needs more work, mainly on updating new data
 @author: ziskin
+implement a mode arg which will retain the long term update behaviour but will also
+add a real-time mode, which with a timestamp and window takes a parameter (TD)
+snapshot of all the stations togather and saves it to disk
+write another script with click!
 """
 
 
