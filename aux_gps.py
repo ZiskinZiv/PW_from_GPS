@@ -31,6 +31,42 @@ def replace_char_at_string_position(string, char='s', pos=3):
     return string
 
 
+def fill_na_xarray_time_series_with_its_group(xarray, grp='month', time_dim='time',
+                                              smooth=True, window=11, order=3,
+                                              plot=False):
+    """ fill the NaNs of a Dataset or DataArray with mean grp cycle
+    (hourly, monthly, etc) and smooth using savgol filter"""
+    from scipy.signal import savgol_filter
+    import xarray as xr
+    def fill_na_dataarray(da, grp=grp, time_dim=time_dim, smooth=smooth,
+                          window=window, order=order, plot=plot):
+        print('selected {}ly NaN filling for {}.'.format(grp, da.name))
+        da_old = da.copy()
+        mean_signal = da.groupby('{}.{}'.format(time_dim, grp)).mean()
+        da = da.groupby('{}.{}'.format(time_dim, grp)).fillna(mean_signal)
+        da = da.reset_coords(drop=True)
+        if smooth:
+            print('smoothing.')
+            da = da.copy(data=savgol_filter(da, window, order))
+            da.attrs['smoothing'] = 'savgol filter, window {}, order {}.'.format(window, order)
+        da.attrs['NaN filling'] = 'mean {}ly values'.format(grp)
+        if plot:
+            da.plot()
+            da_old.plot()
+        return da
+
+    if isinstance(xarray, xr.DataArray):
+        xarray = fill_na_dataarray(xarray)
+    elif isinstance(xarray, xr.Dataset):
+        dal = []
+        attrs = xarray.attrs
+        for da in xarray:
+            dal.append(fill_na_dataarray(xarray[da]))
+        xarray = xr.merge(dal)
+        xarray.attrs = attrs
+    return xarray
+
+
 def replace_xarray_time_series_with_its_group(da, grp='month', time_dim='time'):
     """run the same func on each dim in da"""
     import xarray as xr
@@ -97,6 +133,8 @@ def replace_time_series_with_its_group(da_ts, grp='month'):
     df = da_ts.to_dataframe(da_ts.name)
     if grp == 'month':
         grp_ind = df.index.month
+    elif grp == 'hour':
+        grp_ind = df.index.hour
     df = df.groupby(grp_ind).transform('mean')
     ds = df.to_xarray()
     da = ds[da_ts.name]
