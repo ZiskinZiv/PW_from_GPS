@@ -656,6 +656,16 @@ if __name__ == '__main__':
         '--end_dt',
         help='end datetime of window ppp solution. for real-time it is now.',
         type=check_end_datetime)
+    optional.add_argument(
+        '--imspath',
+        help="a full path to the IMS real-time TD data, /home/ziskin/Work_Files/PW_yuval/IMS_T/10mins/real-time",
+        type=check_path)
+    optional.add_argument(
+        '--awdpath',
+        help="a full path to the Digital Elevetion Model (AWD) data, /home/ziskin/Work_Files/PW_yuval/gis/AW3D30",
+        type=check_path)
+
+
     # optional.add_argument(
     #     '--drmerger',
     #     help='use this to just drRecordump to dr folder and merge all hourly files for all available stations or daily of one station',
