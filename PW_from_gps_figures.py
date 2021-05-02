@@ -5265,7 +5265,7 @@ def plot_correlation_pwv_mean_anoms_and_qflux_anoms(era5_path=era5_path,
         corr.index.name = 'season'
         fig, ax = plt.subplots(figsize=(6, 9))
         sns.heatmap(corr, annot=True, center=0, cmap='coolwarm', ax=ax, cbar_kws={
-                    'label': 'pearson correlation coefficient ', 'aspect': 40})
+                    'label': 'Pearson correlation coefficient ', 'aspect': 40})
         ax.set_ylabel('pressure level [hPa]')
         ax.set_xlabel('')
         # add line to separate integrated from level
