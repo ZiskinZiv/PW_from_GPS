@@ -11,6 +11,19 @@ axis_path = work_yuval / 'axis'
 gis_path = work_yuval / 'gis'
 
 
+def process_ims_TD_to_axis_coords(savepath):
+    from aux_gps import fill_na_xarray_time_series_with_its_group
+    from aux_gps import path_glob
+    import xarray as xr
+    files = sorted(path_glob(savepath, 'IMS_TD_*.nc'))
+    # load latest file:
+    ds = xr.load_dataset(files[-1])
+    ds_filled = fill_na_xarray_time_series_with_its_group(ds, grp='hour',
+                                                          plot=False)
+    
+    return
+
+
 def copy_rinex_to_station_dir(main_rinexpath, filenames, suffix='.gz'):
     import shutil
     import os
@@ -41,7 +54,8 @@ def copy_rinex_to_station_dir(main_rinexpath, filenames, suffix='.gz'):
 
 
 def produce_rinex_filenames_at_time_window(station='Dimo',
-                                           end_dt='2021-04-13T02:00', window=24):
+                                           end_dt='2021-04-13T02:00',
+                                           window=24):
     """given a end date and a time window (in hours) get the hourly files
     of station going back window hours prior"""
     import pandas as pd
