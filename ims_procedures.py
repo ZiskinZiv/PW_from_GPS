@@ -1380,17 +1380,19 @@ def create_lat_lon_mesh(lats=[29.5, 33.5], lons=[34, 36],
 
 
 def analyse_10mins_ims_field(path=ims_10mins_path, var='TD',
-                             gis_path=gis_path, dem_path=work_yuval/'AW3D30'):
+                             gis_path=gis_path, dem_path=work_yuval/'AW3D30',
+                             ds=None):
     import xarray as xr
     import collections
     import numpy as np
     # TODO: make 2d histogram of stations by altitude and time...
     awd = xr.open_rasterio(dem_path / 'israel_dem.tif')
     awd = awd.squeeze(drop=True)
-    filename = 'ims_' + var + '_10mins.nc'
-    ds = xr.open_dataset(path / filename)
+    if ds is None:
+        filename = 'ims_' + var + '_10mins.nc'
+        ds = xr.open_dataset(path / filename)
     meta = read_ims_metadata_from_files(path=gis_path,
-                                        filename='IMS_10mins_meta_data.xlsx')
+                                        freq='10mins')
     meta.index = meta.ID.astype('int')
     meta.drop('ID', axis=1, inplace=True)
     meta.sort_index(inplace=True)
