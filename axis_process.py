@@ -20,7 +20,7 @@ def process_ims_TD_to_axis_coords(savepath):
     ds = xr.load_dataset(files[-1])
     ds_filled = fill_na_xarray_time_series_with_its_group(ds, grp='hour',
                                                           plot=False)
-    
+
     return
 
 
@@ -239,11 +239,11 @@ def read_axis_stations(path=axis_path):
     import pandas as pd
     file = path_glob(path, 'Axis_StationInformation_*.csv')[-1]
     df = pd.read_csv(file, header=1)
-    df.columns = ['station_id', 'unique_id', 'station_code', 'X', 'Y', 'Z',
+    df.columns = ['station_id', 'unique_id', 'station', 'X', 'Y', 'Z',
                   'lat', 'lon', 'alt', 'ant_height', 'ant_name',
                   'station_name', 'menufacturer', 'rec_name', 'rec_firmware',
                   'rec_SN']
-    df = df.set_index('station_code')
+    df = df.set_index('station')
     return df
 
 
