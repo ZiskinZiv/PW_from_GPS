@@ -14,6 +14,7 @@ ims_path = work_yuval / 'IMS_T'
 gis_path = work_yuval / 'gis'
 ims_10mins_path = ims_path / '10mins'
 awd_path = work_yuval/'AW3D30'
+axis_path = work_yuval/'axis'
 cwd = Path().cwd()
 # fill missing data:
 #some_missing = ds.tmin.sel(time=ds['time.day'] > 15).reindex_like(ds)
@@ -30,7 +31,7 @@ gnss_ims_dict = {
     'mrav': 'MAALE-GILBOA', 'yosh': 'ARIEL', 'jslm': 'JERUSALEM-GIVAT-RAM',
     'drag': 'METZOKE-DRAGOT', 'dsea': 'SEDOM', 'ramo': 'MIZPE-RAMON-20120927',
     'nrif': 'NEOT-SMADAR', 'elat': 'ELAT', 'klhv': 'SHANI',
-    'yrcm': 'ZOMET-HANEGEV', 'spir': 'PARAN-20060124', 'nizn':'EZUZ'}
+    'yrcm': 'ZOMET-HANEGEV', 'spir': 'PARAN-20060124', 'nizn': 'EZUZ'}
 
 ims_units_dict = {
     'BP': 'hPa',
@@ -39,8 +40,8 @@ ims_units_dict = {
     'TD': 'deg_C',
     'WD': 'deg',
     'WS': 'm/s',
-    'U' : 'm/s',
-    'V' : 'm/s',
+    'U': 'm/s',
+    'V': 'm/s',
     'G': ''}
 
 
@@ -48,7 +49,8 @@ def save_daily_IMS_params_at_GNSS_loc(ims_path=ims_path,
                                       param_name='WS', stations=[x for x in gnss_ims_dict.keys()]):
     import xarray as xr
     from aux_gps import save_ncfile
-    param = xr.open_dataset(ims_path / 'IMS_{}_israeli_10mins.nc'.format(param_name))
+    param = xr.open_dataset(
+        ims_path / 'IMS_{}_israeli_10mins.nc'.format(param_name))
     ims_stns = [gnss_ims_dict.get(x) for x in stations]
     param = param[ims_stns]
     param = param.resample(time='D', keep_attrs=True).mean(keep_attrs=True)
@@ -79,7 +81,8 @@ def produce_bet_dagan_long_term_pressure(path=ims_path, rate='1H',
     # remove dayofyear mean, interpolate and reconstruct signal to fill it with climatology:
     climatology = bd.groupby('time.dayofyear').mean(keep_attrs=True)
     bd_anoms = anomalize_xr(bd, freq='DOY')
-    bd_inter = bd_anoms.interpolate_na('time', method='cubic', max_gap='24H', keep_attrs=True)
+    bd_inter = bd_anoms.interpolate_na(
+        'time', method='cubic', max_gap='24H', keep_attrs=True)
     # bd_inter = bd.interpolate_na('time', max_gap='3H', method='cubic')
     bd_inter = bd_inter.groupby('time.dayofyear') + climatology
     bd_inter = bd_inter.reset_coords(drop=True)
@@ -107,14 +110,16 @@ def produce_bet_dagan_long_term_pressure(path=ims_path, rate='1H',
         bd_anoms = get_unique_index(bd_anoms)
         bd_anoms = bd_anoms.sortby('time')
         bd_anoms = xr_reindex_with_date_range(bd_anoms, freq='5T')
-        bd_anoms = bd_anoms.interpolate_na('time', method='cubic', max_gap='2H')
+        bd_anoms = bd_anoms.interpolate_na(
+            'time', method='cubic', max_gap='2H')
         bd_anoms.name = 'bet-dagan'
         bd_anoms.attrs['action'] = 'interpolated from 3H'
         bd_anoms.attrs['filled'] = 'using Jerusalem-centre'
         bd_anoms.attrs['long_name'] = 'Pressure Anomalies'
         bd_anoms.attrs['units'] = 'hPa'
         bd_inter = bd_anoms.groupby('time.dayofyear') + climatology
-        bd_inter = bd_inter.resample(time='1H', keep_attrs=True).mean(keep_attrs=True)
+        bd_inter = bd_inter.resample(
+            time='1H', keep_attrs=True).mean(keep_attrs=True)
         # if savepath is not None:
         #     yr_min = bd_anoms.time.min().dt.year.item()
         #     yr_max = bd_anoms.time.max().dt.year.item()
@@ -209,7 +214,8 @@ def align_10mins_ims_to_gnss_and_save(ims_path=ims_path, field='G7',
     gnss_list = []
     for station, gnss_site in d.items():
         print('loading IMS station {}'.format(station))
-        ims_field = xr.load_dataset(ims_path / 'IMS_{}_israeli_10mins.nc'.format(field))[station]
+        ims_field = xr.load_dataset(
+            ims_path / 'IMS_{}_israeli_10mins.nc'.format(field))[station]
         gnss = ims_field.load()
         gnss.name = gnss_site
         gnss.attrs['IMS_station'] = station
@@ -235,7 +241,8 @@ def produce_10mins_gustiness(path=ims_path, rolling=5):
     for station in stations:
         print('proccesing station {}'.format(station))
         attrs = ws[station].attrs
-        g = ws[station].rolling(time=rolling, center=True).std() / ws[station].rolling(time=rolling, center=True).mean()
+        g = ws[station].rolling(time=rolling, center=True).std(
+        ) / ws[station].rolling(time=rolling, center=True).mean()
         g = keep_iqr(g)
         g = xr_reindex_with_date_range(g, freq='10min')
         g.name = station
@@ -295,7 +302,8 @@ def produce_wind_frequency_gustiness(path=ims_path,
     ws = ws.sel(time=ws['time.season'] == season)
     gustiness = ws.rolling(time=5).std() / ws.rolling(time=5).mean()
     gustiness = keep_iqr(gustiness)
-    gustiness_anoms = gustiness.groupby('time.month') - gustiness.groupby('time.month').mean('time')
+    gustiness_anoms = gustiness.groupby(
+        'time.month') - gustiness.groupby('time.month').mean('time')
     gustiness_anoms = gustiness_anoms.reset_coords(drop=True)
     G = gustiness_anoms.groupby('time.hour').mean('time')
     wd = xr.open_dataset(path / 'IMS_WD_israeli_10mins.nc')[station]
@@ -326,7 +334,8 @@ def produce_wind_frequency_gustiness(path=ims_path,
         ax2 = ax.twinx()
         G.plot.line(ax=ax2, color='k', marker='o')
         ax2.axhline(0, color='k', linestyle='--')
-        ax2.legend(['{} Gustiness anomalies'.format(station)], loc='upper right')
+        ax2.legend(['{} Gustiness anomalies'.format(station)],
+                   loc='upper right')
         ax2.set_ylabel('Gustiness anomalies')
     return
 
@@ -346,16 +355,16 @@ def produce_gustiness(path=ims_path,
         """adjust ax2 ylimit so that v2 in ax2 is aligned to v1 in ax1"""
         _, y1 = ax1.transData.transform((0, v1))
         _, y2 = ax2.transData.transform((0, v2))
-        adjust_yaxis(ax2,(y1-y2)/2,v2)
-        adjust_yaxis(ax1,(y2-y1)/2,v1)
+        adjust_yaxis(ax2, (y1-y2)/2, v2)
+        adjust_yaxis(ax1, (y2-y1)/2, v1)
 
-    def adjust_yaxis(ax,ydif,v):
+    def adjust_yaxis(ax, ydif, v):
         """shift axis ax by ydiff, maintaining point v at the same location"""
         inv = ax.transData.inverted()
         _, dy = inv.transform((0, 0)) - inv.transform((0, ydif))
         miny, maxy = ax.get_ylim()
         miny, maxy = miny - v, maxy - v
-        if -miny>maxy or (-miny==maxy and dy > 0):
+        if -miny > maxy or (-miny == maxy and dy > 0):
             nminy = miny
             nmaxy = miny*(maxy+dy)/(miny+dy)
         else:
@@ -404,7 +413,8 @@ def produce_gustiness(path=ims_path,
         axpw = ax.twinx()
         pw.plot.line(ax=axpw, color='k', marker='o')
         axpw.axhline(0, color='k', linestyle='--')
-        axpw.legend(['{} PW anomalies'.format(pw_station.upper())], loc='upper right')
+        axpw.legend(['{} PW anomalies'.format(
+            pw_station.upper())], loc='upper right')
         axpw.set_ylabel('PW anomalies [mm]')
         align_yaxis(ax, 0, axpw, 0)
         if temp:
@@ -416,7 +426,8 @@ def produce_gustiness(path=ims_path,
             make_patch_spines_invisible(axt)
             # Second, show the right spine.
             axt.spines["right"].set_visible(True)
-            p3, = T.plot.line(ax=axt, marker='s',color='m', label="Temperature")
+            p3, = T.plot.line(ax=axt, marker='s', color='m',
+                              label="Temperature")
             axt.yaxis.label.set_color(p3.get_color())
             axt.tick_params(axis='y', colors=p3.get_color())
             axt.set_ylabel('Temperature anomalies [$C\degree$]')
@@ -495,14 +506,16 @@ def produce_relative_frequency_wind_direction(path=ims_path,
                 work_yuval /
                 'GNSS_PW_thresh_50_homogenized.nc')[pw_station]
             pw.load().dropna('time')
-            pw = pw.groupby('time.month') - pw.groupby('time.month').mean('time')
+            pw = pw.groupby('time.month') - \
+                pw.groupby('time.month').mean('time')
             pw = pw.reset_coords(drop=True)
             pw = pw.sel(time=pw['time.season'] == season)
             pw = pw.groupby('time.hour').mean()
             axpw = ax.twinx()
             pw.plot.line(ax=axpw, color='k', marker='o')
             axpw.axhline(0, color='k', linestyle='--')
-            axpw.legend(['{} PW anomalies'.format(pw_station.upper())], loc='upper right')
+            axpw.legend(['{} PW anomalies'.format(
+                pw_station.upper())], loc='upper right')
             axpw.set_ylabel('PW anomalies [mm]')
             if temp:
                 axt = ax.twinx()
@@ -513,7 +526,8 @@ def produce_relative_frequency_wind_direction(path=ims_path,
                 make_patch_spines_invisible(axt)
                 # Second, show the right spine.
                 axt.spines["right"].set_visible(True)
-                p3, = T.plot.line(ax=axt, marker='s',color='m', label="Temperature")
+                p3, = T.plot.line(ax=axt, marker='s',
+                                  color='m', label="Temperature")
                 axt.yaxis.label.set_color(p3.get_color())
                 axt.tick_params(axis='y', colors=p3.get_color())
                 axt.set_ylabel('Temperature anomalies [$C\degree$]')
@@ -655,7 +669,10 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
                                               cut_days_ago=3,
                                               plot=False,
                                               verbose=False,
-                                              savepath=ims_path):
+                                              savepath=ims_path,
+                                              network='soi-apn',
+                                              axis_path=axis_path,
+                                              ds_td=None):
     """interpolate the IMS 10 mins field(e.g., TD) to the location
     of the GNSS sites in ISRAEL(use dt=None for this). other dt is treated
     as datetime str and will give the "snapshot" for the field for just this
@@ -669,6 +686,7 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
     import matplotlib.pyplot as plt
     import geopandas as gpd
     from sklearn.neighbors import KNeighborsRegressor
+    from axis_process import read_axis_stations
     # import time
 
     def pick_model(method, variogram, n_neighbors):
@@ -683,7 +701,8 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
             if n_neighbors is None:
                 model = KNeighborsRegressor(n_neighbors=5, weights='distance')
             else:
-                model = KNeighborsRegressor(n_neighbors=n_neighbors, weights='distance')
+                model = KNeighborsRegressor(
+                    n_neighbors=n_neighbors, weights='distance')
         else:
             raise Exception('{} is not supported yet...'.format(method))
         return model
@@ -742,11 +761,14 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
 #    import time
     dt = pd.to_datetime(dt)
     # read Israeli GNSS sites coords:
-    df = pd.read_csv(
+    if network == 'soi-apn':
+        df = pd.read_csv(
             cwd /
             'israeli_gnss_coords.txt',
             delim_whitespace=True,
             header=0)
+    elif network == 'axis':
+        df = read_axis_stations(path=axis_path)
     # use station=None to pick all stations, otherwise pick one...
     if stations is not None:
         if isinstance(stations, str):
@@ -754,15 +776,18 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
         df = df.loc[stations, :]
         print('selected only {} stations'.format(stations))
     else:
-        print('selected all israeli stations.')
+        print('selected all {} stations.'.format(network))
     # prepare lats and lons of gnss sites:
     gps_lats = np.linspace(df.lat.min(), df.lat.max(), df.lat.values.shape[0])
     gps_lons = np.linspace(df.lon.min(), df.lon.max(), df.lon.values.shape[0])
     gps_lons_lats_as_cols = np.column_stack([gps_lons, gps_lats])
     # load IMS temp data:
-    glob_str = 'IMS_TD_israeli_10mins*.nc'
-    file = path_glob(ims_path, glob_str=glob_str)[0]
-    ds = xr.open_dataset(file)
+    if ds_td is None:
+        glob_str = 'IMS_TD_israeli_10mins*.nc'
+        file = path_glob(ims_path, glob_str=glob_str)[0]
+        ds = xr.open_dataset(file)
+    else:
+        ds = ds_td
     time_dim = list(set(ds.dims))[0]
     # slice to a starting year(1996?):
     ds = ds.sel({time_dim: slice(start_year, None)})
@@ -786,7 +811,8 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
         dt_col = dt.strftime('%Y-%m-%d %H:%M')
 #        t0 = time.time()
         # prepare the ims coords and temp df(Tloc_df) and the lapse rate:
-        ts_vs_alt, lapse_rate = choose_dt_and_lapse_rate(tdf, dt, T_alts, lapse_rate)
+        ts_vs_alt, lapse_rate = choose_dt_and_lapse_rate(
+            tdf, dt, T_alts, lapse_rate)
         if plot:
             fig, ax_lapse = plt.subplots(figsize=(10, 6))
             sns.regplot(x=ts_vs_alt.index, y=ts_vs_alt.values, color='r',
@@ -810,7 +836,8 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
         # fit the model:
         model.fit(X, y)
         # predict at the GNSS stations coords:
-        interpolated = model.predict(gps_lons_lats_as_cols).reshape((gps_lats.shape))
+        interpolated = model.predict(
+            gps_lons_lats_as_cols).reshape((gps_lats.shape))
         # add prediction to df:
         df[dt_col] = interpolated
         # fix for lapse rate:
@@ -820,7 +847,7 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
         Tloc_df.columns = ['lat']
         Tloc_df['lon'] = T_lons
         Tloc_df['alt'] = T_alts
-        all_df = pd.concat([df, Tloc_df],axis=0)
+        all_df = pd.concat([df, Tloc_df], axis=0)
         # fname = gis_path / 'ne_10m_admin_0_sovereignty.shp'
         # fname = gis_path / 'gadm36_ISR_0.shp'
         # ax = plt.axes(projection=ccrs.PlateCarree())
@@ -833,7 +860,7 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
             isr.crs = {'init': 'epsg:4326'}
             time_snap = gpd.GeoDataFrame(all_df, geometry=gpd.points_from_xy(all_df.lon,
                                                                              all_df.lat),
-                                        crs=isr.crs)
+                                         crs=isr.crs)
             time_snap = gpd.sjoin(time_snap, isr, op='within')
             isr.plot(ax=ax)
             cmap = plt.get_cmap('rainbow', 10)
@@ -850,11 +877,14 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
         for year in years:
             dts = tdf.index[tdf.index.year == year]
             # read Israeli GNSS sites coords again:
-            df = pd.read_csv(
+            if network == 'soi-apn':
+                df = pd.read_csv(
                     cwd /
                     'israeli_gnss_coords.txt',
                     delim_whitespace=True,
                     header=0)
+            elif network == 'axis':
+                df = read_axis_stations(path=axis_path)
             cnt = 1
             dt_col_list = []
             inter_list = []
@@ -876,7 +906,8 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
                     # t0 = time.time()
                 # prepare the ims coords and temp df(Tloc_df) and
                 # the lapse rate:
-                ts_vs_alt, lapse_rate = choose_dt_and_lapse_rate(tdf, dt, T_alts, lapse_rate)
+                ts_vs_alt, lapse_rate = choose_dt_and_lapse_rate(
+                    tdf, dt, T_alts, lapse_rate)
 #                if np.mod(cnt, 144) == 0:
 #                    t2 = time.time()
 #                    print('time2: {:.4f}'.format((t2-t1)*144))
@@ -902,7 +933,8 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
 #                    t6 = time.time()
 #                    print('time6: {:.4f}'.format((t6-t5)*144))
                 # predict at the GNSS stations coords:
-                interpolated = model.predict(gps_lons_lats_as_cols).reshape((gps_lats.shape))
+                interpolated = model.predict(
+                    gps_lons_lats_as_cols).reshape((gps_lats.shape))
 #                if np.mod(cnt, 144) == 0:
 #                    t7 = time.time()
 #                    print('time7: {:.4f}'.format((t7-t6)*144))
@@ -924,17 +956,19 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
             ds = da.to_dataset(dim='station')
             for da in ds:
                 ds[da].attrs['units'] = 'degC'
-            filename = 'GNSS_TD_{}.nc'.format(year)
-            ds.to_netcdf(savepath / filename, 'w')
-            print('saved {} to {}'.format(filename, savepath))
+            if savepath is not None:
+                filename = 'GNSS_TD_{}.nc'.format(year)
+                ds.to_netcdf(savepath / filename, 'w')
+                print('saved {} to {}'.format(filename, savepath))
             # return
-        print('concatenating all TD years...')
-        concat_GNSS_TD(savepath)
+        if savepath is not None:
+            print('concatenating all TD years...')
+            concat_GNSS_TD(savepath)
 #    t1 = time.time()
     # geo_snap = geo_pandas_time_snapshot(var='TD', datetime=dt, plot=False)
 #    total = t1-t0
 #    print(total)
-    return
+    return ds
 
 
 def resample_GNSS_TD(path=ims_path):
@@ -945,7 +979,8 @@ def resample_GNSS_TD(path=ims_path):
     def resample_GNSS_TD(ds, path, sample, sample_rate='1H'):
         # station = da.name
         ds = get_unique_index(ds)
-        print('resampaling all GNSS stations to {}'.format(sample[sample_rate]))
+        print('resampaling all GNSS stations to {}'.format(
+            sample[sample_rate]))
         years = [str(x)
                  for x in sorted(list(set(ds[time_dim].dt.year.values)))]
         ymin = ds[time_dim].min().dt.year.item()
@@ -956,7 +991,7 @@ def resample_GNSS_TD(path=ims_path):
             for year in years:
                 print('resampling {} of year {}'.format(sample_rate, year))
                 dsr = ds.sel({time_dim: year}).resample(
-                         {time_dim: sample_rate}, keep_attrs=True, skipna=True).mean(keep_attrs=True)
+                    {time_dim: sample_rate}, keep_attrs=True, skipna=True).mean(keep_attrs=True)
                 dsr_list.append(dsr)
             print('concatenating...')
             dsr = xr.concat(dsr_list, time_dim)
@@ -1116,11 +1151,12 @@ def Interpolating_models_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
     vals = ~np.isnan(da.values)
     if lapse_rate is None:
         Xrr, Ycc, Z = pyproj.transform(
-                lla, ecef, rr[vals], cc[vals], np.array(alts), radians=False)
+            lla, ecef, rr[vals], cc[vals], np.array(alts), radians=False)
         X = np.column_stack([Xrr, Ycc, Z])
         XX, YY, ZZ = pyproj.transform(lla, ecef, rr, cc, awd.values,
                                       radians=False)
-        rr_cc_as_cols = np.column_stack([XX.flatten(), YY.flatten(), ZZ.flatten()])
+        rr_cc_as_cols = np.column_stack(
+            [XX.flatten(), YY.flatten(), ZZ.flatten()])
     else:
         X = np.column_stack([rr[vals], cc[vals]])
         rr_cc_as_cols = np.column_stack([rr.flatten(), cc.flatten()])
@@ -1222,9 +1258,9 @@ def Interpolating_models_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
 #        for train_idx, test_idx in cv.split(X):
 #            X_train, X_test = X[train_idx], X[test_idx]  # requires arrays
 #            y_train, y_test = y[train_idx], y[test_idx]
-##            model = UniversalKriging(X_train[:, 0], X_train[:, 1], y_train,
-##                                     variogram_model='linear', verbose=False,
-##                                     enable_plotting=False)
+# model = UniversalKriging(X_train[:, 0], X_train[:, 1], y_train,
+# variogram_model='linear', verbose=False,
+# enable_plotting=False)
 #            model.X_ORIG = X_train[:, 0]
 #            model.X_ADJUSTED = model.X_ORIG
 #            model.Y_ORIG = X_train[:, 1]
@@ -1314,7 +1350,8 @@ def Interpolating_models_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
         dl = DataLevels(geo_snap[var], levels=sm.levels)
         dl.set_cmap(sm.cmap)
         x, y = sm.grid.transform(geo_snap.lon.values, geo_snap.lat.values)
-        ax.scatter(x, y, color=dl.to_rgb(), s=20, edgecolors='k', linewidths=0.5)
+        ax.scatter(x, y, color=dl.to_rgb(), s=20,
+                   edgecolors='k', linewidths=0.5)
         suptitle = time.replace('T', ' ')
         f.suptitle(suptitle, fontsize=14, fontweight='bold')
         if (rms is not None or cv is not None) and (not gridsearch):
@@ -1342,7 +1379,7 @@ def Interpolating_models_ims(time='2013-10-19T22:00:00', var='TD', plot=True,
         # ax.add_geometries(adm1_shapes, ccrs.PlateCarree(),
         #                  edgecolor='black', facecolor='gray', alpha=0.5)
         # da_inter.plot.pcolormesh('lon', 'lat', ax=ax)
-        #geo_snap.plot(ax=ax, column=var, cmap='viridis', edgecolor='black',
+        # geo_snap.plot(ax=ax, column=var, cmap='viridis', edgecolor='black',
         #              legend=False)
     return da_inter
 
@@ -1360,7 +1397,7 @@ def create_lat_lon_mesh(lats=[29.5, 33.5], lons=[34, 36],
     return da
 
 
-#def read_save_ims_10mins(path=ims_10mins_path, var='TD'):
+# def read_save_ims_10mins(path=ims_10mins_path, var='TD'):
 #    import xarray as xr
 #    search_str = '*' + var + '_10mins.nc'
 #    da_list = []
@@ -1398,7 +1435,7 @@ def analyse_10mins_ims_field(path=ims_10mins_path, var='TD',
     meta.sort_index(inplace=True)
     # there are some stations with the same altitude, i'm mapping them:
     duplicate_alts = [item for item, count in collections.Counter(
-                        meta['alt']).items() if count > 1]
+        meta['alt']).items() if count > 1]
     print(duplicate_alts)
     # then replacing them with a 1-meter seperations:
     for dup in duplicate_alts:
@@ -1406,10 +1443,10 @@ def analyse_10mins_ims_field(path=ims_10mins_path, var='TD',
         start_value = meta.loc[meta['alt'] == dup, 'alt'].values[0]
         replace_values = np.arange(start_value, start_value + dup_size)
         print(
-                'duplicate {} has {} values, replacing with {}'.format(
-                        dup,
-                        dup_size,
-                        replace_values))
+            'duplicate {} has {} values, replacing with {}'.format(
+                dup,
+                dup_size,
+                replace_values))
         meta.loc[meta['alt'] == dup, 'alt'] = replace_values
     for da in ds.data_vars.keys():
         id_ = ds[da].attrs['station_id']
@@ -1423,9 +1460,11 @@ def analyse_10mins_ims_field(path=ims_10mins_path, var='TD',
             print('station {} keyerror.'.format(da))
             alt = 'None'
         try:
-            alt = awd.sel(x=float(lon), y=float(lat), method='nearest').values.item()
+            alt = awd.sel(x=float(lon), y=float(lat),
+                          method='nearest').values.item()
         except ValueError:
-            print('station {} has not known lat or lon...'.format(ds[da].attrs['station_name']))
+            print('station {} has not known lat or lon...'.format(
+                ds[da].attrs['station_name']))
         ds[da].attrs['station_lat'] = lat
         ds[da].attrs['station_lon'] = lon
         ds[da].attrs['station_alt'] = alt
@@ -1558,11 +1597,11 @@ def read_one_ims_hourly_station_csv(file):
         'tas': {
             'long_name': 'surface_temperature', 'units': 'degC'},
         'rh': {
-                'long_name': 'relative_humidity', 'units': '%'},
+            'long_name': 'relative_humidity', 'units': '%'},
         'wind_dir': {
-                    'long_name': 'wind_direction', 'units': 'deg'},
+            'long_name': 'wind_direction', 'units': 'deg'},
         'wind_spd': {
-                        'long_name': 'wind_speed', 'units': 'm/s'}}
+            'long_name': 'wind_speed', 'units': 'm/s'}}
     to_drop = []
     for da in ds:
         # add var names and units:
@@ -1581,7 +1620,8 @@ def read_one_ims_hourly_station_csv(file):
 #        if ds[da].size == ds[da].isnull().sum().item():
 #            to_drop.append(da)
     ds = ds[[x for x in ds if x not in to_drop]]
-    ds = rename_data_vars(ds, suffix=None, prefix=array_name + '_', verbose=False)
+    ds = rename_data_vars(
+        ds, suffix=None, prefix=array_name + '_', verbose=False)
     ds = ds.sortby('time')
 #    ds = xr_reindex_with_date_range(ds, freq=freq)
     return ds
@@ -1716,7 +1756,7 @@ def ims_api_get_meta(active_only=True, channel_name='TD'):
     return stations_10mins
 
 
-#def download_ims_data(geo_df, path, end_date='2019-04-15'):
+# def download_ims_data(geo_df, path, end_date='2019-04-15'):
 #    import requests
 #    import glob
 #    import pandas as pd
@@ -1826,9 +1866,10 @@ def fill_fix_all_10mins_IMS_stations(path=ims_10mins_path,
     cnt = 1
     da_list = []
     for file_and_path in files:
-        name = file_and_path.as_posix().split('/')[-1].split('.')[0].split('_')[0]
+        name = file_and_path.as_posix().split(
+            '/')[-1].split('.')[0].split('_')[0]
         print('post-proccessing {} data for {} station, ({}/{})'.format(field,
-              name, cnt, len(files)))
+                                                                        name, cnt, len(files)))
         da = xr.open_dataarray(file_and_path)
         sid = da.attrs['station_id']
         row = meta[meta.ID == sid]
@@ -1945,7 +1986,7 @@ def fill_fix_all_10mins_IMS_stations(path=ims_10mins_path,
     return ds
 
 
-#def produce_T_dataset(path=ims_10mins_path, savepath=None, unique_index=True,
+# def produce_T_dataset(path=ims_10mins_path, savepath=None, unique_index=True,
 #                      clim_period='dayofyear'):
 #    import xarray as xr
 #    from aux_gps import path_glob
