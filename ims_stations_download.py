@@ -1,13 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Sat May  1 15:46:46 2021
-
-@author: shlomi
-"""
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
 Created on Tue Jun 25 14:29:10 2019
 This script needs more work, mainly on updating new data
 @author: ziskin
@@ -17,31 +10,12 @@ snapshot of all the stations togather and saves it to disk
 write another script with click!
 """
 
-
-# def load_saved_station(path, station_id, channel):
-#    from aux_gps import path_glob
-#    import xarray as xr
-#    files = path_glob(path, '*_{}_{}_10mins.nc'.format(station_id, channel))
-#    if len(files) == 0:
-#        return False
-#    elif len(files) == 1:
-#        return xr.load_dataset(files[0])
-#    elif len(files) > 1:
-#        raise ValueError('too many files with the same glob str')
-#
-#
-# def parse_filename(file_path):
-##    filename = file_path.as_posix().split('/')[-1].split('.')[0]
-##    station_name = filename.split('_')[0]
-##    station_id = filename.split('_')[1]
-##    channel = filename.split('_')[2]
-# return station_name, station_id, channel
-#
-#
-
-
 import click
 from loguru import logger
+from PW_paths import work_yuval
+gis_path = work_yuval / 'gis'
+awd_path = work_yuval / 'AW3D30'
+axis_path = work_yuval / 'axis'
 channels = ['BP', 'DiffR', 'Grad', 'NIP', 'Rain', 'RH', 'STDwd', 'TD',
             'TDmax', 'TDmin', 'TG', 'Time', 'WD', 'WDmax', 'WS', 'WS10mm',
             'WS1mm', 'WSmax']
@@ -50,7 +24,7 @@ ch_units = ['hPa', 'W/m^2', 'W/m^2', 'W/m^2', 'mm', '%', 'deg', 'degC', 'degC',
 ch_desc = ['surface pressure', 'diffuse radiation', 'global radiation',
            'direct radiation', 'rain', 'relative humidity', 'wind direction std',
            'dry temperature', 'maximum temperature', 'minimum temperature',
-           'ground temperature', 'maximum end of 10 mins', 'wind direction', 
+           'ground temperature', 'maximum end of 10 mins', 'wind direction',
            'maximum wind direction', 'wind speed', 'maximum 10 mins wind speed',
            'maximum 1 mins wind speed', 'maximum wind speed']
 ch_units_dict = dict(zip(channels, ch_units))
@@ -64,7 +38,8 @@ def parse_single_station(data):
     for i, dt in enumerate(datetimes):
         # get all channels into dataframe for each datetime:
         df = pd.DataFrame(data[i]['channels'])
-        df = df[df['valid'] == True]
+        df = df[df['valid']]
+        df = df[df['status'] == 1]
         df = df[['name', 'value']]
         df = df.T
         df.columns = df.loc['name'].tolist()
@@ -90,12 +65,24 @@ def parse_single_station(data):
 @click.option('--window', '-w', nargs=1, default=30,
               help='how many hours before now to get the data',
               type=click.IntRange(min=1, max=120))
+@click.option('--gis_path', help='a full path to gis folder',
+              type=click.Path(exists=True), default=gis_path)
+@click.option('--awd_path', help='a full path to dem folder',
+              type=click.Path(exists=True), default=awd_path)
+@click.option('--axis_path', help='a full path to dem folder',
+              type=click.Path(exists=True), default=axis_path)
+
 def main_program(*args, **kwargs):
     from pathlib import Path
     window = kwargs['window']
     savepath = Path(kwargs['savepath'])
+    gis_path = Path(kwargs['gis_path'])
+    awd_path = Path(kwargs['awd_path'])
+    axis_path = Path(kwargs['axis_path'])
     ims_download(savepath, window)
-    process_ims_stations(savepath, window, var='TD')
+    ds = process_ims_stations(savepath, window, var='TD')
+    post_process_ims_stations(ds, window, savepath / 'TD', gis_path,
+                              awd_path, axis_path)
     return
 
 
@@ -115,6 +102,7 @@ def ims_download(savepath, window):
     import pandas as pd
     import requests
     from requests.exceptions import SSLError
+    from requests.exceptions import ConnectionError
     from aux_gps import save_ncfile
     now_dt = pd.Timestamp.now().floor('H')
     start_dt = now_dt - pd.Timedelta('{} hour'.format(window))
@@ -148,6 +136,9 @@ def ims_download(savepath, window):
             r = requests.get(dl_command, headers=headers)
         except SSLError:
             logger.warning('SSLError')
+            r = requests.get(dl_command, headers=headers)
+        except ConnectionError:
+            logger.warning('ConnectionError')
             r = requests.get(dl_command, headers=headers)
         if r.status_code == 204:  # i.e., no content:
             logger.warning('no content for this search, skipping...')
@@ -201,7 +192,36 @@ def process_ims_stations(mainpath, window, var='TD'):
     end_str = names[-1][4:8]
     filename = 'IMS_{}_{}-{}.nc'.format(var, st_str, end_str)
     save_ncfile(ds, savepath, filename)
+    # finally delete all nc files:
+    [x.unlink() for x in files]
     return ds
+
+
+def post_process_ims_stations(ds, window, savepath, gis_path, dem_path,
+                              axis_path):
+    """fill TD with hourly mean if NaN and smooth, then fill in station_lat
+    and lon and alt from DEM, finally interpolate to AXIS coords and save"""
+    from aux_gps import fill_na_xarray_time_series_with_its_group
+    from ims_procedures import analyse_10mins_ims_field
+    from axis_process import produce_rinex_filenames_at_time_window
+    from ims_procedures import IMS_interpolating_to_GNSS_stations_israel
+    from aux_gps import save_ncfile
+    import pandas as pd
+    now_dt = pd.Timestamp.utcnow().floor('H')
+    ds = fill_na_xarray_time_series_with_its_group(ds, grp='hour')
+    ds = analyse_10mins_ims_field(ds=ds, var='TD', gis_path=gis_path,
+                                  dem_path=dem_path)
+    ds_axis = IMS_interpolating_to_GNSS_stations_israel(
+            dt=None, start_year=str(now_dt.year), verbose=True, savepath=None,
+            network='axis', ds_td=ds, cut_days_ago=None, axis_path=axis_path)
+    now_dt = pd.Timestamp.utcnow().floor('H')
+    names = produce_rinex_filenames_at_time_window(end_dt=now_dt,
+                                                   window=window)
+    st_str = names[0][4:8]
+    end_str = names[-1][4:8]
+    filename = 'AXIS_TD_{}-{}.nc'.format(st_str, end_str)
+    save_ncfile(ds_axis, savepath, filename)
+    return
 
 # def check_ds_last_datetime(ds, fmt=None):
 #     """return the last datetime of the ds"""
