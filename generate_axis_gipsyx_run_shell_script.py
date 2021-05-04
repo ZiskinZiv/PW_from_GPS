@@ -179,7 +179,7 @@ def generate_rinex_reader(station, dates):
 
 
 def generate_gipsyx_run(rinexpath, station, task, tree, staDb, accuracy, mode,
-                        add_python_path=True):
+                        add_python_path=True, gde_tree=None):
     """add_python_path is neccessary so crontab -e will run conda python and not system python"""
     from pathlib import Path
     lines = []
@@ -206,10 +206,10 @@ def generate_gipsyx_run(rinexpath, station, task, tree, staDb, accuracy, mode,
         if task == 'run':
             if add_python_path:
                 line = 'nohup /home/ziskin/anaconda3/bin/python -u {}/axis_gipsyx_run.py '.format(pwpath)\
-                        + '--station {} --rinexpath {} --staDb {} --mode {} --accuracy {}'.format(curr_sta, rinexpath, staDb, mode, accuracy)
+                        + '--station {} --rinexpath {} --staDb {} --mode {} --accuracy {} --gde_tree {}'.format(curr_sta, rinexpath, staDb, mode, accuracy, gde_tree)
             else:
                 line = 'nohup python -u {}/axis_gipsyx_run.py '.format(pwpath)\
-                        + '--station {} --rinexpath {} --staDb {} --mode {} --accuracy {}'.format(curr_sta, rinexpath, staDb, mode, accuracy)
+                        + '--station {} --rinexpath {} --staDb {} --mode {} --accuracy {} --gde_tree {}'.format(curr_sta, rinexpath, staDb, mode, accuracy, gde_tree)
             if tree is not None:
                 line += ' --tree {}'.format(tree)
             # if dates is not None:
@@ -277,7 +277,7 @@ def task_switcher(args):
     #     generate_gipsyx_post(args.station, args.iqr_k)
     if args.task == 'run':
         generate_gipsyx_run(axis_path, args.station, args.task, args.tree, args.staDb,
-                            args.accuracy, args.mode)
+                            args.accuracy, args.mode, gde_tree=args.gde_tree)
     return
 
 
@@ -331,6 +331,8 @@ if __name__ == '__main__':
         help='add a station DB file for antennas and receivers in rinexpath',
         type=str)
     optional.add_argument('--tree', help='gipsyX tree directory.',
+                          type=str)
+    optional.add_argument('--gde_tree', help='rnxEditGde tree file.',
                           type=str)
     optional.add_argument('--mode', help='daily_prep, real-time, etc..',
                           type=str)
