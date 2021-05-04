@@ -222,10 +222,11 @@ def teqc_concat_rinex(path_dir, rfn=None, glob='*.14o', cmd_path=None):
         rfn = files[0].as_posix().split('/')[-1]
         rfn = replace_char_at_string_position(rfn, char='0', pos=7)
         print('rfn is : {}'.format(rfn))
+    # -R -S -C -E keep only GPS data and not GLONASS, BAIDU, GALILEO
     if cmd_path is not None:
-        cmd = '{}/teqc -phc {} > {}'.format(cmd_path.as_posix(), glob, rfn)
+        cmd = '{}/teqc -phc -R -S -C -E {} > {}'.format(cmd_path.as_posix(), glob, rfn)
     else:
-        cmd = 'teqc -phc {} > {}'.format(glob, rfn)
+        cmd = 'teqc -phc -R -S -C -E {} > {}'.format(glob, rfn)
     try:
         subprocess.run(cmd, shell=True, check=True, cwd=path_dir)
     except CalledProcessError:
