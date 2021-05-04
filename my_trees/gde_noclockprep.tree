@@ -1,0 +1,83 @@
+# Basic Editing for  station data
+
+# Only these variables need be defined to edit in nominal mode
+# Currently geared to 30-sec rinex data with 300-sec output, ground arcs
+
+DATAFILE == Alon1150.21o.dr.gz
+FORMAT_IN == datarecord
+FORMAT_OUT == datarecord
+OUTPUT    == Alon1150_edited.21o.dr.gz
+STATION_NAME == ALON
+RECEIVER_TYPE == 2
+LATITUDE      == 33.043071593700446
+GLOBAL_DATA_RATE == 300
+
+
+Self
+  Metadata Off     # Use "On" to output originating file and line number
+  # make output station specific for parallel processing users
+  File `echo $STATION_NAME | awk '{print $1".gde.debug.tree"}'`
+
+Stations
+    $STATION_NAME
+      ReceiverType $RECEIVER_TYPE
+      Latitude $LATITUDE
+
+Global
+     Mode PostProcess
+     Input
+        Type File            
+         Format $FORMAT_IN
+         Name $DATAFILE
+         Receiver $STATION_NAME # only applies if Format rinex
+     Output
+       Type File
+         Format $FORMAT_OUT 
+         Name $OUTPUT
+         OutputLCPC Yes
+
+     ClockPrep  Off
+
+     P1-C1 On   # Correct bias between C1C and C1[PW] if possible write an
+                # additional C1P = C1C + Bias
+       Strict No
+
+     Statistics
+       Interval 30
+       Output `echo $STATION_NAME | awk '{print $1".gde.stats 2"}'`
+       ArcMinLength 20
+     Debug
+       PostProcess `echo $STATION_NAME | awk '{print $1".gde.debug 0"}'`
+
+PostProcess
+    CodeType ALL
+    ShortArc
+       MinPnts On
+           Value 3
+       MinSpan On
+           Value 1200.0
+
+    PreEdit
+       MaxPhase On
+           Value 1.5e16
+       PreRange On
+           Min 1.5e7
+           Max 6.0e7  # 60,000 km for GEO/IGSO
+
+    TurboEdit On
+       WideLaneNinja On
+       NwSigma       4
+       IonoMaxGap    1800
+       IonoNPerOrder 100
+       IonoMaxPoly   10
+       IonoResJump   15
+
+    SanityCheck On
+       SanNinja      On
+       SanOutage     300
+       SanMinPt      10                        
+       SanRMS        -0.12
+
+    DecimateSmooth On
+       Interval      $GLOBAL_DATA_RATE
+       Tolerance     1e-11
