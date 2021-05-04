@@ -59,6 +59,13 @@ def check_file_in_cwd(filename):
                 filename, cwd))
     return file_and_path
 
+def check_file(file):
+    if not file.is_file():
+        raise argparse.ArgumentTypeError(
+            '{} does not exist. {}'.format(
+                file))
+    return file
+
 
 # def record_dump_and_merge(args):
 #     # import os
@@ -229,7 +236,7 @@ def check_file_in_cwd(filename):
 
 
 def daily_prep_all_steps(path, staDb, new_filename=False,
-                         delete_last_rinex=False):
+                         delete_last_rinex=False, gde_tree=None):
     from aux_gps import path_glob
     from aux_gps import replace_char_at_string_position
     try:
@@ -248,7 +255,8 @@ def daily_prep_all_steps(path, staDb, new_filename=False,
     dataRecordDump_single_file(path/'dr', rfn_dfile + '.gz')
     # 3) rinex edit:
     rnxEditGde_single_file(path/'dr', rfn_dfile + '.dr.gz', staDb,
-                           new_filename=rfn_dr_file, delete_dr_after=True)
+                           new_filename=rfn_dr_file, delete_dr_after=True,
+                           gde_tree=gde_tree)
     if delete_last_rinex:
         #) finally, delete first rinex file (earliest):
         files[0].unlink()
@@ -256,7 +264,7 @@ def daily_prep_all_steps(path, staDb, new_filename=False,
     return
 
 
-def daily_prep_drdump_and_rnxedit(path, staDb):
+def daily_prep_drdump_and_rnxedit(path, staDb, gde_tree=None):
     from aux_gps import path_glob
     from aux_gps import replace_char_at_string_position
     import shutil
@@ -278,7 +286,8 @@ def daily_prep_drdump_and_rnxedit(path, staDb):
     # 1) dataRecordDump:
     dataRecordDump_single_file(dr_path, rfn_dfile + suff)
     # 3) rinex edit:
-    rnxEditGde_single_file(dr_path, rfn_dfile + '.dr.gz', staDb)
+    rnxEditGde_single_file(dr_path, rfn_dfile + '.dr.gz', staDb,
+                           gde_tree=gde_tree)
     return
 
 
@@ -351,7 +360,7 @@ def dataRecordDump_single_file(path_dir, filename):
 
 
 def rnxEditGde_single_file(path_dir, filename, staDb, new_filename=None,
-                           delete_dr_after=True):
+                           delete_dr_after=True, gde_tree=None):
     from aux_gps import get_var
     import subprocess
     import logging
@@ -366,7 +375,11 @@ def rnxEditGde_single_file(path_dir, filename, staDb, new_filename=None,
     else:
         rfn_edited = new_filename + '_edited' + '.' + rfn.split('.')[-1] + '.dr.gz'
     station = rfn[0:4].upper()
-    cmd = 'rnxEditGde.py -type datarecord -recNm {} -data {} -out {} -staDb {}'.format(station, filename, rfn_edited, staDb)
+    if gde_tree is None:
+        cmd = 'rnxEditGde.py -type datarecord -recNm {} -data {} -out {} -staDb {}'.format(station, filename, rfn_edited, staDb)
+    else:
+        cmd = 'rnxEditGde.py -type datarecord -recNm {} -data {} -out {} -staDb {} -gdeTree {}'.format(station, filename, rfn_edited, staDb, gde_tree)
+        logger.info('using {} as gde tree.'.format(gde_tree))
     try:
         subprocess.run(cmd, shell=True, check=True, cwd=path_dir)
     except CalledProcessError:
@@ -405,13 +418,14 @@ def main_program(args):
         doys = sorted(path_glob(args.rinexpath / str(year), '*/'))
         for doypath in doys:
             logger.info('preping {}:'.format(doypath))
-            daily_prep_all_steps(doypath, args.staDb)
+            daily_prep_all_steps(doypath, args.staDb, gde_tree=args.gde_tree)
         logger.info('Done preping all doys in {}.'.format(year))
     elif mode == 'daily_prep_drdump_rnxedit':
         doys = sorted(path_glob(args.rinexpath / str(year), '*/'))
         for doypath in doys:
             logger.info('preping {}:'.format(doypath))
-            daily_prep_drdump_and_rnxedit(doypath, args.staDb)
+            daily_prep_drdump_and_rnxedit(doypath, args.staDb,
+                                          gde_tree=args.gde_tree)
         logger.info('Done preping all doys in {}.'.format(year))
     elif mode == 'daily_run':
         doys = sorted(path_glob(args.rinexpath / str(year), '*/'))
@@ -672,6 +686,9 @@ if __name__ == '__main__':
     #     type=str, choices=['daily', 'hourly'])
     optional.add_argument('--tree', help='gipsyX tree directory.',
                           type=check_path)
+    optional.add_argument('--gde_tree', help='gde tree file for rnxEditGde.',
+                          type=check_path)
+
     # optional.add_argument('--mode', help='which mode to run', type=str,
     #                       choices=['last_doy', 'whole'])
     optional.add_argument('--year', help='year of rinex files', type=check_year)
@@ -692,6 +709,8 @@ if __name__ == '__main__':
         sys.exit()
     if args.staDb is None:
         args.staDb = '$GOA_VAR/sta_info/sta_db_qlflinn'
+    if args.gde_tree is None:
+        args.gde_tree = Path().cwd() /'my_trees/gde_noclockprep.tree'
     main_program(args)
     # if args.drmerger is None:
     #     run_gd2e_single_dr_path(args.rinexpath, args.staDb, args.tree,
