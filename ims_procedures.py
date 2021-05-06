@@ -1429,7 +1429,7 @@ def analyse_10mins_ims_field(path=ims_10mins_path, var='TD',
         filename = 'ims_' + var + '_10mins.nc'
         ds = xr.open_dataset(path / filename)
     meta = read_ims_metadata_from_files(path=gis_path,
-                                        freq='10mins')
+                                        freq='10mins_csv')
     meta.index = meta.ID.astype('int')
     meta.drop('ID', axis=1, inplace=True)
     meta.sort_index(inplace=True)
@@ -1667,6 +1667,25 @@ def read_ims_metadata_from_files(path=gis_path, freq='10mins'):
         filename = 'IMS_10mins_meta_data.xlsx'
         ims = pd.read_excel(path / filename,
                             sheet_name='מטה-דטה', skiprows=1)
+        # drop two last cols and two last rows:
+        ims = ims.drop(ims.columns[[-1, -2]], axis=1)
+        ims = ims.drop(ims.tail(2).index)
+        cols = ['#', 'ID', 'name_hebrew', 'name_english', 'east', 'west',
+                'lon', 'lat', 'alt', 'starting_date', 'variables', 'model',
+                'eq_position', 'wind_meter_height', 'notes']
+        ims.columns = cols
+        ims.index = ims['#'].astype(int)
+        ims = ims.drop('#', axis=1)
+        # fix lat, lon cols:
+        ims['lat'] = ims['lat'].str.replace(u'\xba', '').astype(float)
+        ims['lon'] = ims['lon'].str.replace(u'\xba', '').astype(float)
+        # fix alt col:
+        ims['alt'] = ims['alt'].replace('~', '', regex=True).astype(float)
+        # fix starting date col:
+        ims['starting_date'] = pd.to_datetime(ims['starting_date'])
+    elif freq == '10mins_csv':
+        filename = 'IMS_10mins_meta_data.csv'
+        ims = pd.read_csv(path / filename, skiprows=1)
         # drop two last cols and two last rows:
         ims = ims.drop(ims.columns[[-1, -2]], axis=1)
         ims = ims.drop(ims.tail(2).index)
