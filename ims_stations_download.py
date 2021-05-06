@@ -16,6 +16,7 @@ from PW_paths import work_yuval
 gis_path = work_yuval / 'gis'
 awd_path = work_yuval / 'AW3D30'
 axis_path = work_yuval / 'axis'
+save_path = work_yuval / 'IMS_T/10mins/real-time'
 channels = ['BP', 'DiffR', 'Grad', 'NIP', 'Rain', 'RH', 'STDwd', 'TD',
             'TDmax', 'TDmin', 'TG', 'Time', 'WD', 'WDmax', 'WS', 'WS10mm',
             'WS1mm', 'WSmax']
@@ -61,7 +62,7 @@ def parse_single_station(data):
 
 @click.command()
 @click.option('--savepath', '-s', help='a full path to download the files, e.g., /home/ziskin/Work_Files/PW_yuval/IMS_T/10mins.',
-              type=click.Path(exists=True))
+              type=click.Path(exists=True), default=save_path)
 @click.option('--window', '-w', nargs=1, default=30,
               help='how many hours before now to get the data',
               type=click.IntRange(min=1, max=120))
@@ -248,14 +249,16 @@ def produce_pw_all_stations(ds, axis_path, mda_path):
     st_dirs = [x for x in st_dirs if x.is_dir()]
     st_dirs = [x for x in st_dirs if not x.as_posix().split('/')[-1].isnumeric()]
     assert len(st_dirs) == 27
+    pwv_list = []
     for st_dir in st_dirs:
         station = st_dir.as_posix().split('/')[-1]
         last_file = sorted(path_glob(st_dir/'dr/ultra', '*.nc'))[-1]
         last_file_str = last_file.as_posix().split('/')[-1][4:13]
-        wet = xr.load_dataset(last_file)['WetZ']
-        wet_error = xr.load_dataset(last_file)['WetZ_error']
+        wet = xr.load_dataset(last_file)['WetZ'].squeeze(drop=True)
+        logger.info('loaded {}.'.format(last_file))
+        wet_error = xr.load_dataset(last_file)['WetZ_error'].squeeze(drop=True)
         wet.name = station
-        wet_error = station
+        wet_error.name = station
         # resample temp to 5 mins and reindex to wet delay time:
         t = ds[station].resample(time='5T').ffill().reindex_like(wet.time)
         # fill in NaNs with mean hourly signal:
@@ -268,6 +271,10 @@ def produce_pw_all_stations(ds, axis_path, mda_path):
         pwv_ds = xr.merge([pwv, pwv_error])
         filename = '{}{}_PWV.nc'.format(station, last_file_str)
         save_ncfile(pwv_ds, st_dir/'dr/ultra', filename)
+        pwv_list.append(pwv_ds)
+    dss = xr.merge(pwv_list)
+    filename = 'AXIS_{}_PWV_ultra.nc'.format(last_file_str)
+    save_ncfile(dss, axis_path, filename)
 
 # def check_ds_last_datetime(ds, fmt=None):
 #     """return the last datetime of the ds"""
