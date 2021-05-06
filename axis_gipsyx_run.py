@@ -440,7 +440,8 @@ def main_program(args):
         copy_rinex_to_station_dir(args.rinexpath, fns)
         # # 2) then, concat them, and drdump and rnxedit to dr path inside station dir:
         daily_prep_all_steps(args.rinexpath / args.station, args.staDb,
-                             new_filename=True, delete_last_rinex=True)
+                             new_filename=True, delete_last_rinex=True,
+                             gde_tree=args.gde_tree)
         # # 3) run gd2e.py
         daily_gd2e(args.rinexpath / args.station, args.staDb, args.tree, args.accuracy,
                    extended_rfn=True)
