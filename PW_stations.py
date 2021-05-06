@@ -42,8 +42,8 @@ jslm_ims = ims_path / '10mins/JERUSALEM-CENTRE_23_TD_10mins_filled.nc'
 station_on_geo = geo_path / 'Work_Files/PW_yuval/GNSS_stations'
 era5_path = work_yuval / 'ERA5'
 PW_stations_path = work_yuval / '1minute'
-stations = pd.read_csv('All_gps_stations.txt', header=0, delim_whitespace=True,
-                       index_col='name')
+# stations = pd.read_csv('All_gps_stations.txt', header=0, delim_whitespace=True,
+#                        index_col='name')
 logs_path = geo_path / 'Python_Projects/PW_from_GPS/log_files'
 GNSS = work_yuval / 'GNSS_stations'
 cwd = Path().cwd()
@@ -708,8 +708,10 @@ def mean_ZWD_over_sound_time_and_fit_tstm(path=work_yuval,
                                           ims_path=ims_path,
                                           gps_station='tela',
                                           times=['2007', '2019'], plot=False,
-                                          cats=None):
+                                          cats=None,
+                                          savepath=None):
     import xarray as xr
+    import joblib
     from aux_gps import multi_time_coord_slice
     from aux_gps import path_glob
     from aux_gps import xr_reindex_with_date_range
@@ -734,7 +736,7 @@ def mean_ZWD_over_sound_time_and_fit_tstm(path=work_yuval,
     freq = pd.infer_freq(zwd.time.values)
     if not freq:
         zwd = xr_reindex_with_date_range(zwd)
-        zwd_error = xr_reindex_with_date_range(zwd_error)
+        zwd_error = xr_reindsave_GNSS_PW_israeli_stationsex_with_date_range(zwd_error)
         freq = pd.infer_freq(zwd.time.values)
     min_time = zwd.time.sel(time=min_time, method='nearest').values
     max_time = zwd.time.sel(time=max_time, method='nearest').values
@@ -786,8 +788,25 @@ def mean_ZWD_over_sound_time_and_fit_tstm(path=work_yuval,
     # divide by kappa calculated from bet_dagan ts to get bet_dagan zwd:
     k = kappa(tm, Tm_input=True)
     # ds['zwd_bet_dagan'] = ds['tpw_bet_dagan'] / k
+    if savepath is not None:
+        m = mda.to_dataset('name')
+        for model in m:
+            joblib.dump(m[model].item(), savepath/'ts_tm_{}.pkl'.format(model))
+            print('{} saved to {}.'.format(model, savepath))
     return ds, mda
 
+
+def load_mda(path=work_yuval):
+    import joblib
+    from aux_gps import path_glob
+    import xarray as xr
+    files = path_glob(path, 'ts_tm_*.pkl')
+    names = [x.as_posix().split('/')[-1].split('.')[0].split('_')[-1] for x in files]
+    dsl = [joblib.load(x) for x in files]
+    dsl = [xr.DataArray(x) for x in dsl]
+    mda = xr.concat(dsl, 'name')
+    mda['name'] = names
+    return mda
 
 #def align_physical_bet_dagan_soundings_pw_to_gps_station_zwd(
 #        phys_sound_file, ims_path=ims_path, gps_station='tela',
