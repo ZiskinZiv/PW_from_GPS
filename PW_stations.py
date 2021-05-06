@@ -806,6 +806,8 @@ def load_mda(path=work_yuval):
     dsl = [xr.DataArray(x) for x in dsl]
     mda = xr.concat(dsl, 'name')
     mda['name'] = names
+    mda.attrs['time_dim'] = 'time'
+    mda.attrs['LR_whole_stderr_slope'] = 0.006420637318868484
     return mda
 
 #def align_physical_bet_dagan_soundings_pw_to_gps_station_zwd(
