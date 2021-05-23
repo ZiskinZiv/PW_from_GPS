@@ -5132,8 +5132,22 @@ def scorer_function(scorer_label, y_true, y_pred):
         return tss_score(y_true, y_pred)
     elif scorer_label == 'hss':
         return hss_score(y_true, y_pred)
+    elif scorer_label == 'fpr':
+        return fpr_score(y_true, y_pred)
     else:
         raise('{} is not implemented yet'.format(scorer_label))
+
+
+def fpr_score(y, y_pred):
+    from sklearn.metrics import confusion_matrix
+    tn, fp, fn, tp = confusion_matrix(y, y_pred).ravel()
+    # print('TN: {}'.format(tn))
+    # print('FP: {}'.format(fp))
+    # print('FN: {}'.format(fn))
+    # print('TP: {}'.format(tp))
+    fpr = fp / (fp + tn)
+    # print('TSS: {}'.format(tss))
+    return fpr
 
 
 def acc_score(y_true, y_pred):
