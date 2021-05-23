@@ -13,7 +13,8 @@ dsea_gipsy_path = work_yuval / 'dsea_gipsyx'
 dem_path = work_yuval / 'AW3D30'
 axis_path = work_yuval/'axis'
 
-dsea_points = {'SEDOM': [31.0306, 35.3919], 'OPERA': [35.3725, 31.3177],
+# note: [lat, lon]
+dsea_points = {'SEDOM': [31.0306, 35.3919], 'OPERA': [31.3177, 35.3725],
                'SOI-GNSS': [31.03691605029973, 35.36882566157563],
                'AXIS-GNSS': [31.153660742415386, 35.36488575585163]}
 
