@@ -38,6 +38,60 @@ best_hp_models_dict = {'SVC': {'kernel': 'rbf', 'C': 1.0, 'gamma': 0.02,
                        'solver': 'lbfgs'}}
 
 scorer_order = ['precision', 'recall', 'f1', 'accuracy', 'tss', 'hss']
+
+tsafit_dict = {'lat': 30.985556, 'lon': 35.263056,
+               'alt': -35.75, 'dt_utc': '2018-04-26T10:15:00'}
+
+
+def interpolate_pwv_to_tsafit_event(path=work_yuval, savepath=work_yuval):
+    import pandas as pd
+    import xarray as xr
+    from PW_stations import produce_geo_gnss_solved_stations
+    from interpolation_routines import interpolate_var_ds_at_multiple_dts
+    from aux_gps import save_ncfile
+    # get gnss soi-apn pwv data and geo-meta data:
+    geo_df = produce_geo_gnss_solved_stations(plot=False)
+    pw = xr.load_dataset(work_yuval/'GNSS_PW_thresh_50.nc')
+    pw = pw[[x for x in pw if '_error' not in x]]
+    pw = pw.sel(time=slice('2018-04-25', '2018-04-26'))
+    pw = pw.drop_vars(['elat', 'elro', 'csar', 'slom'])
+    # get tsafit data:
+    predict_df = pd.DataFrame(tsafit_dict, index=['tsafit'])
+    df_inter = interpolate_var_ds_at_multiple_dts(pw, geo_df, predict_df)
+    da=df_inter['interpolated_lr_fixed'].to_xarray()
+    da.name = 'pwv'
+    da.attrs['operation'] = 'interploated from SOI-APN PWV data'
+    da.attrs['WV scale height'] = 'variable from SOI-APN data'
+    da.attrs.update(**tsafit_dict)
+    if savepath is not None:
+        filename = 'Tsafit_PWV_event.nc'
+        save_ncfile(da, savepath, filename)
+    return da
+
+
+def plot_tsafit_event(path=work_yuval):
+    import xarray as xr
+    import pandas as pd
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    sns.set_theme(style='ticks', font_scale=1.5)
+    da = xr.load_dataarray(path / 'Tsafit_PWV_event.nc')
+    fig, ax = plt.subplots(figsize=(11, 8))
+    da_sliced = da.sel(time=slice('2018-04-26T00:00:00', '2018-04-26T12:00:00'))
+    # da_sliced.name = 'PWV [mm]'
+    da_sliced = da_sliced.rename({'time': 'Time [UTC]'})
+    da_sliced.to_dataframe().plot(ax=ax, ylabel='PWV [mm]', linewidth=2, marker='o', legend=False)
+    dt = pd.to_datetime(da.attrs['dt_utc'])
+    ax.axvline(dt, color='r', linestyle='--', linewidth=2, label='T')
+    handles, labels = ax.get_legend_handles_labels()
+    plt.legend(handles=handles, labels=['PWV', 'Tsafit Flood Event'])
+    ax.grid(True)
+    # ax.set_xlabel('Time [UTC]')
+    fig.tight_layout()
+    fig.suptitle('PWV from SOI-APN over Tsafit area on 2018-04-26')
+    fig.subplots_adjust(top=0.941)
+    return fig
+
 # TODO: treat all pwv from events as follows:
 #    For each station:
 #    0) rolling mean to all pwv 1 hour
