@@ -3184,6 +3184,15 @@ def get_nearest_lat_lon_for_xy(lat_da, lon_da, points):
     return yx
 
 
+def get_altitude_of_point_using_dem(lat, lon, dem_path=work_yuval / 'AW3D30'):
+    import xarray as xr
+    file = sorted(path_glob(dem_path, 'israel_dem*.nc'))[0]
+    awd = xr.load_dataarray(file)
+    alt = awd.sel(lon=float(lon), lat=float(lat),
+                          method='nearest').values.item()
+    return alt
+
+
 def coarse_dem(data, dem_path=work_yuval / 'AW3D30'):
     """coarsen to data coords"""
     # data is lower resolution than awd
