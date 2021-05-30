@@ -11,6 +11,36 @@ gis_path = work_yuval / 'gis'
 awd_path = work_yuval/'AW3D30'
 
 
+def interpolate_var_ds_at_multiple_dts(var_ds, geo_var_df, predict_df,
+                                       time_dim='time', dem_path=awd_path,
+                                       H_constant=None):
+    import pandas as pd
+    times_df = var_ds[time_dim].to_pandas()
+    df = pd.DataFrame()
+    for dt in times_df:
+        print('interpolating on datetime: {}.'.format(dt))
+        hdf = slice_var_ds_at_dt_and_convert_to_dataframe(var_ds, geo_var_df,
+                                                          dt=dt.strftime('%Y-%m-%dT%H:%M:%S'))
+        # if H is None:
+        #     # estimate scale height H by using all stations' data:
+        if H_constant is not None:
+            H = H_constant
+        else:
+            H = get_var_lapse_rate(hdf, model='LR', plot=False)
+        print('scale height is: {} meters.'.format(H))
+        new_hdf = apply_lapse_rate_change(hdf, H)
+        df_inter = interpolate_at_one_dt(new_hdf, H, predict_df=predict_df,
+                                         dem_path=dem_path, ppd=50)
+        df_inter['datetime'] = dt
+        df_inter['H'] = H
+        df = df.append(df_inter)
+    df['name'] = df.index
+    df['datetime'] = pd.to_datetime(df['datetime'])
+    df.set_index('datetime', inplace=True)
+    df.index.name = 'time'
+    return df
+
+        
 def slice_var_ds_at_dt_and_convert_to_dataframe(var_ds, df, dt='2018-04-15T22:00:00'):
     """
     slice the var dataset (PWV) with specific datetime and add lat, lon and alt from df
@@ -109,10 +139,14 @@ def apply_lapse_rate_change(hdf, H):
     return new_hdf
 
 
-def interpolate_at_one_dt(new_hdf, H, dem_path=awd_path, ppd=50):
+def interpolate_at_one_dt(new_hdf, H, predict_df=None, dem_path=awd_path,
+                          ppd=50):
     from aux_gps import coarse_dem
     import numpy as np
     from pykrige.rk import Krige
+    """ interpolate to Israel grid the values in new_hdf (already removed the lapse rate)
+    with ppd being the map resolution. if predict_df is not None,
+    interpolate only to df's locations and altitudes. predict_df should have lat, lon and alt columns"""
     # create mesh and load DEM:
     da = create_lat_lon_mesh(points_per_degree=ppd)  # 500?
     # populate the empty mesh grid with stations data:
@@ -132,12 +166,29 @@ def interpolate_at_one_dt(new_hdf, H, dem_path=awd_path, ppd=50):
     model = Krige(method='ordinary', variogram_model='spherical',
                   verbose=True)
     model.fit(X, y)
-    interpolated = model.predict(rr_cc_as_cols).reshape(da.values.shape)
-    da_inter = da.copy(data=interpolated)
-    awd = coarse_dem(da, dem_path=dem_path)
-    assert H > 0
-    da_inter *= np.exp(-1.0 * awd / H)
-    return da_inter
+    if predict_df is None:
+        # i.e., interpolate to all map coords:
+        interpolated = model.predict(rr_cc_as_cols).reshape(da.values.shape)
+        da_inter = da.copy(data=interpolated)
+        awd = coarse_dem(da, dem_path=dem_path)
+        assert H > 0
+        da_inter *= np.exp(-1.0 * awd / H)
+        return da_inter
+    else:
+        predict_lats = np.linspace(predict_df.lat.min(
+        ), predict_df.lat.max(), predict_df.lat.values.shape[0])
+        predict_lons = np.linspace(predict_df.lon.min(
+        ), predict_df.lon.max(), predict_df.lon.values.shape[0])
+        predict_lons_lats_as_cols = np.column_stack(
+            [predict_lons, predict_lats])
+        interpolated = model.predict(
+            predict_lons_lats_as_cols).reshape((predict_lats.shape))
+        df_inter = predict_df.copy()
+        df_inter['interpolated'] = interpolated
+        # fix for lapse rate:
+        assert H > 0
+        df_inter['interpolated_lr_fixed'] = df_inter['interpolated'] * np.exp(-1.0 * df_inter['alt'] / H)
+    return df_inter
 
 
 def create_lat_lon_mesh(lats=[29.5, 33.5], lons=[34, 36],
