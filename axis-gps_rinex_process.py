@@ -63,6 +63,11 @@ def check_for_missing_rinex_in_axis_path(args):
     month_abr = calendar.month_abbr[now.month]
     month_path = 'Month.{}'.format(month_abr)
     T02_path = Path('/home/axis-gps/{}'.format(month_path))
+    # in month transition:
+    if not T02_path.is_dir():
+        month_abr = calendar.month_abbr[now.month - 1]
+        month_path = 'Month.{}'.format(month_abr)
+        T02_path = Path('/home/axis-gps/{}'.format(month_path))
     days = sorted(path_glob(T02_path, '*/'))
     last_day = int(days[-1].as_posix().split('.')[-1])
     day_diff = now.day - last_day
