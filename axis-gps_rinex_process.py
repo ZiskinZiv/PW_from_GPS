@@ -54,6 +54,29 @@ def check_year(year):
     return year
 
 
+def check_for_missing_rinex_in_axis_path(args):
+    import calendar
+    import datetime
+    from aux_gps import path_glob
+    from pathlib import Path
+    now = datetime.datetime.now()
+    month_abr = calendar.month_abbr[now.month]
+    month_path = 'Month.{}'.format(month_abr)
+    T02_path = Path('/home/axis-gps/{}'.format(month_path))
+    days = sorted(path_glob(T02_path, '*/'))
+    last_day = int(days[-1].as_posix().split('.')[-1])
+    day_diff = now.day - last_day
+    if day_diff <= 1:
+        print('Last day is {}th in {}, no rinex gaps above 1 days.'.format(
+            last_day, month_abr))
+        return args
+    else:
+        print('Found rinex gaps of {} days, recovering last rinex day {}.'.format(
+            day_diff, last_day))
+        args.T02_path = days[-1]
+        return args
+
+
 def process_single_T02_file(T02_fileobj, year, savepath, verbose=False):
     """checks if file already exists in savepath, if not process it and save it there"""
     import logging
@@ -130,7 +153,7 @@ def process_single_T02_file(T02_fileobj, year, savepath, verbose=False):
     except CalledProcessError:
         return CalledProcessError
     # delete d:
-    try:        
+    try:
         (to_copy_path / d_filename).unlink()
     except FileNotFoundError:
         logger.warning('{} not found so no delete done.'.format(d_filename))
@@ -265,4 +288,5 @@ if __name__ == '__main__':
 #    elif args.field is None:
 #        print('field is a required argument, run with -h...')
 #        sys.exit()
+    args = check_for_missing_rinex_in_axis_path(args)
     process_T02(args)
