@@ -232,7 +232,7 @@ def process_T02(args):
             # also get doy+1 and check if any files exist:
             last_doyp1 = str(int(last_doy) + 1)
             month_abrp1, day_of_monthp1 = doy_to_datetime(last_doyp1, year)
-            month = [x for x in months if month_abrp1 in x.as_posix()][0]
+            month = [x for x in months if month_abr in x.as_posix()][0]
             days = path_glob(month, 'Day.*')
             try:
                 day = [x for x in days if day_of_monthp1 in x.as_posix()][0]
