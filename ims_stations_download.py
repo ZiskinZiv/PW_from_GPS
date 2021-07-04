@@ -263,15 +263,19 @@ def produce_pw_all_stations(ds, axis_path, mda_path):
         t = ds[station].resample(time='5T').ffill().reindex_like(wet.time)
         # fill in NaNs with mean hourly signal:
         t_new = fill_na_xarray_time_series_with_its_group(t, grp='hour')
-        pwv = produce_GNSS_station_PW(wet, t_new, mda=mda,
-                                      model_name='LR', plot=False)
-        pwv_error = produce_GNSS_station_PW(wet_error, t_new, mda=mda,
-                                            model_name='LR', plot=False)
-        pwv_error.name = '{}_error'.format(pwv.name)
-        pwv_ds = xr.merge([pwv, pwv_error])
-        filename = '{}{}_PWV.nc'.format(station, last_file_str)
-        save_ncfile(pwv_ds, st_dir/'dr/ultra', filename)
-        pwv_list.append(pwv_ds)
+        try:
+            pwv = produce_GNSS_station_PW(wet, t_new, mda=mda,
+                                          model_name='LR', plot=False)
+            pwv_error = produce_GNSS_station_PW(wet_error, t_new, mda=mda,
+                                                model_name='LR', plot=False)
+            pwv_error.name = '{}_error'.format(pwv.name)
+            pwv_ds = xr.merge([pwv, pwv_error])
+            filename = '{}{}_PWV.nc'.format(station, last_file_str)
+            save_ncfile(pwv_ds, st_dir/'dr/ultra', filename)
+            pwv_list.append(pwv_ds)
+        except ValueError as e:
+            logger.warning('encountered error: {}, skipping {}'.format(e, last_file))
+            continue
     dss = xr.merge(pwv_list)
     filename = 'AXIS_{}_PWV_ultra.nc'.format(last_file_str)
     save_ncfile(dss, axis_path, filename)
