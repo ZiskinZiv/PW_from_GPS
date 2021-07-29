@@ -1,0 +1,7 @@
+27 6 * * * source /home/ziskin/GipsyX-1.1/rc_GipsyX.sh; $GCORE/bin/update_GipsyX_files.py -u
+12 * * * * nohup /home/ziskin/anaconda3/bin/python3 -u /home/ziskin/Python_Projects/PW_from_GPS/axis-gps_rinex_process.py --savepath /home/ziskin/Work_Files/PW_yuval/axis/ --mode last_doy &>nohup_axis_rinex_last_doy.txt&
+14 * * * * source /home/ziskin/GipsyX-1.1/rc_GipsyX.sh; source /home/ziskin/Python_Projects/PW_from_GPS/gipsyx_axis_script_1_of_3.sh
+18 * * * * source /home/ziskin/GipsyX-1.1/rc_GipsyX.sh; source /home/ziskin/Python_Projects/PW_from_GPS/gipsyx_axis_script_2_of_3.sh
+22 * * * * source /home/ziskin/GipsyX-1.1/rc_GipsyX.sh; source /home/ziskin/Python_Projects/PW_from_GPS/gipsyx_axis_script_3_of_3.sh
+25 * * * * nohup /home/ziskin/anaconda3/bin/python3 -u /home/ziskin/Python_Projects/PW_from_GPS/ims_stations_download.py --savepath /home/ziskin/Work_Files/PW_yuval/IMS_T/10mins/real-time/ --window 30 &>nohup_ims_download_real_time.txt&
+
