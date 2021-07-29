@@ -380,3 +380,55 @@ def read_multi_station_tdp_file(file, stations, savepath=None):
         # filename = file.as_posix().split('/')[-1].split()
         save_ncfile(ds, savepath, 'smoothFinal.nc')
     return ds
+
+
+def count_rinex_files_all_years(main_folder, suffix='*.gz', savepath=None):
+    from aux_gps import path_glob
+    import pandas as pd
+    years = path_glob(main_folder, '*/')
+    years = [x for x in years if x.as_posix().split('/')[-1].isdigit()]
+    dfs = []
+    for year in years:
+        df = count_rinex_files_on_year_folder(year, suffix)
+        dfs.append(df)
+    df = pd.concat(dfs, axis=0)
+    df = df.sort_index()
+    if savepath is not None:
+        filename = 'Axis_RINEX_count_datetimes.csv'
+        df.to_csv(savepath/filename, na_rep='None', index=True)
+        print('{} was saved to {}.'.format(filename, savepath))
+    return df
+
+
+def count_rinex_files_on_year_folder(year_folder, suffix='*.gz'):
+    from aux_gps import path_glob
+    import pandas as pd
+    doys = path_glob(year_folder, '*/')
+    doys = [x for x in doys if x.as_posix().split('/')[-1].isdigit()]
+    print('counting folder {} with {} doys.'.format(year_folder, len(doys)))
+    dfs = []
+    for doy in doys:
+        df = count_rinex_files_on_doy_folder(doy, suffix)
+        dfs.append(df)
+    df = pd.concat(dfs, axis=0)
+    return df
+
+
+def count_rinex_files_on_doy_folder(doy_folder, suffix='*.gz'):
+    from aux_gps import path_glob
+    from aux_gps import get_timedate_and_station_code_from_rinex
+    import pandas as pd
+    files = path_glob(doy_folder, suffix)
+    print('counting {} folder, {} files found.'.format(doy_folder, len(files)))
+    names = [x.as_posix().split('/')[-1][0:12] for x in files]
+    ser = []
+    for name in names:
+        result = get_timedate_and_station_code_from_rinex(name, st_upper=False)
+        ser.append(pd.Series(result))
+    df = pd.DataFrame(ser)
+    df.columns = ['datetime', 'station']
+    df['values'] = 1
+    df = df.pivot(index='datetime', columns='station')
+    df.columns = df.columns.droplevel(0)
+    df.index.name = 'time'
+    return df
