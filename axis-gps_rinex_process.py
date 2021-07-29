@@ -193,6 +193,10 @@ def process_T02(args):
     from aux_gps import path_glob
     from subprocess import CalledProcessError
     logger = logging.getLogger('axis_rinex_processer')
+    if args.is_T02_path_year is None:
+        path_year = True
+    else:
+        path_year = args.is_T02_path_year
     if args.mode is None:
         mode = 'whole'
     else:
@@ -211,7 +215,7 @@ def process_T02(args):
         logger.info('folder for year {} not found, creating folder.'.format(year))
         os.mkdir(savepath / str(year))
     # scan for files in T02_path:
-    if args.T02_path is None:
+    if path_year:
         months = path_glob(T02_path, 'Month.*')
         if mode == 'last_doy':
             # check for doy folders in savepath and flag last_doy:
@@ -283,6 +287,7 @@ if __name__ == '__main__':
     optional.add_argument('--year', help='year of rinex files', type=check_year)
     optional.add_argument('--mode', help='which mode to run', type=str, choices=['last_doy', 'whole', 'single_file'])
     optional.add_argument('--T02_path', help='where the T02 files are', type=check_path)
+    optional.add_argument('--is_T02_path_year', help='are the T02 files in T02_path in year/month structure', type=bool)
     parser._action_groups.append(optional)  # added this line
     args = parser.parse_args()
     # print(parser.format_help())
