@@ -8,6 +8,13 @@ gd2e.py -drEditedFile merged.dr.gz -GNSSproducts ultra -staDb ~/Python_Projects/
 create folders in axis/2021/103 like final, rapid and ultra with solutions and extra files every hour for all stations
 first do datarecorddump for all hourly files and then merge them together
 use this func to do it seperately from main gipsyx run
+strategy for final solutions of hourly axis network year/doy folders:
+1) gunzip all rinex files and crx2rnx.
+2) for each station name teqc_concat to daily file
+4) rnx2crx all files and gzip
+5) drMerge to multistation daily file
+6) rnxEdit and merge to midday 30 hr file
+7) gd2e
 @author: ziskin
 """
 
