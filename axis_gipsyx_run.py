@@ -9,12 +9,13 @@ create folders in axis/2021/103 like final, rapid and ultra with solutions and e
 first do datarecorddump for all hourly files and then merge them together
 use this func to do it seperately from main gipsyx run
 strategy for final solutions of hourly axis network year/doy folders:
-1) gunzip all rinex files and crx2rnx.
-2) for each station name teqc_concat to daily file
-4) rnx2crx all files and gzip
-5) drMerge to multistation daily file
-6) rnxEdit and merge to midday 30 hr file
-7) gd2e
+0) run count_organize_rinex to get all 30-hr with 6-h window per stations rindex hourly files:
+1) for each station copy to axis_final folder under station name.
+2) gunzip each rinex group files and crx2rnx.
+2) for each station name teqc_concat to group file (30hr max)
+4) delete all remaining files
+5) rnxEdit with gde tree
+6) gd2e
 @author: ziskin
 """
 
@@ -242,6 +243,69 @@ def check_file(file):
 #     return
 
 
+def daily_prep_axis_final_solutions(doy_path, year=14):
+    from axis_process import copy_rinex_files_to_folder
+    from axis_process import run_rinex_compression_on_folder
+    from axis_process import get_unique_rfns_from_folder
+    from axis_process import teqc_concat_rinex
+    from aux_gps import path_glob
+    dr_path = doy_path / 'dr'
+    # copy gz RINEX to dr_path:
+    copy_rinex_files_to_folder(doy_path, dr_path)
+    # unzip and uncompress:
+    run_rinex_compression_on_folder(dr_path, command='gunzip', glob='*.gz')
+    run_rinex_compression_on_folder(dr_path, command='crx2rnx', glob='*.{}d'.format(year))
+    # delete d files:
+    files = path_glob(dr_path, '*.{}d'.format(year))
+    [x.unlink() for x in files]
+    # teqc concat for daily o per station:
+    fns = get_unique_rfns_from_folder(dr_path,'*.{}o'.format(year))
+    for fn in fns:
+        filename = '{}0.{}o'.format(fn, year)
+        teqc_concat_rinex(dr_path, rfn=filename,
+                          glob='{}*.{}o'.format(fn,year),
+                          delete_after_concat=True)
+        dataRecordDump_single_file(dr_path, filename)
+        file = dr_path / filename
+        file.unlink()
+    # dataRecordDump to daily station file:
+    
+
+
+
+# def run_drMerge(filenames, in_path, duration):
+#     import subprocess
+#     from subprocess import CalledProcessError
+#     from subprocess import TimeoutExpired
+#     from aux_gps import get_timedate_and_station_code_from_rinex
+#     rfns = [x[0:12] for x in filenames]
+#     dts = [get_timedate_and_station_code_from_rinex(x, True) for x in rfns]
+#     if duration == '30hr':
+#         start = dts[0].strftime('%Y-%m-%d') + ' 21:00:00'
+#         end = dts[2].strftime('%Y-%m-%d') + ' 03:00:00'
+#     dr_merged_file = Path().cwd() / '{}_merged.dr.gz'.format(rfns[1])
+#     logger.info('merging {}, {} and {} to {}'.format(*rfns,rfns[1] + '_merged.dr.gz'))
+#     f_and_paths = [in_path / x for x in filenames]
+#     files_to_move = [rfn + x for x in ['_drmerge.log', '_drmerge.err']]
+#     command = 'drMerge.py -inFiles {} {} {} -outFile {} -start {} -end {} > {}.log 2>{}.err'.format(
+#             f_and_paths[0].as_posix(), f_and_paths[1].as_posix(),
+#             f_and_paths[2].as_posix(), dr_merged_file.as_posix(),
+#             start, end, rfn + '_drmerge', rfn + '_drmerge')
+#     try:
+#         subprocess.run(command, shell=True, check=True, timeout=60)
+#     except CalledProcessError:
+#         logger.error('drMerge.py failed on {}...'.format(filenames))
+#     except TimeoutExpired:
+#         logger.error('drMerge.py timed out on {}, copying log files.'.format(filenames))
+#         # next(failed)
+#         cnt['failed'] += 1
+#         with open(Path().cwd() / files_to_move[1], 'a') as f:
+#             f.write('drMerge.py run has Timed out !')
+#         return None
+#     move_files(Path().cwd(), Path().cwd(), files_to_move)
+#     return rfns[1] + '_merged.dr.gz'
+
+
 def daily_prep_all_steps(path, staDb, new_filename=False,
                          delete_last_rinex=False, gde_tree=None):
     from aux_gps import path_glob
@@ -404,6 +468,7 @@ def main_program(args):
     from axis_process import copy_rinex_to_station_dir
     from axis_process import produce_rinex_filenames_at_time_window
     import pandas as pd
+    import numpy as np
     logger = logging.getLogger('axis-gipsyx')
     if args.year is None:
         year = 2021
@@ -452,6 +517,44 @@ def main_program(args):
         # # 3) run gd2e.py
         daily_gd2e(args.rinexpath / args.station, args.staDb, args.tree, args.accuracy,
                    extended_rfn=True)
+    # elif mode == 'daily_prep_final':
+    #     year_path = args.rinexpath / str(year)
+    #     year = year_path.name
+    #     yr = year[2:]
+    #     logger.info('preping for final solution year {}'.format(year))
+    #     doy_paths = path_glob(year_path, '*/')
+    #     doy_paths = np.array(sorted([x for x in doy_paths if x.name.isdigit()]))
+    #     if args.end_dt is None:
+    #         logger.warning('All year final perp selected.')
+    #     else:
+    #         end_doy = pd.to_datetime(end_dt).dayofyear
+    #         logger.info('Final preping year {} until doy {}.'.format(year, end_doy))
+    #         doys = np.array([int(x.name) for x in doy_paths])
+    #         doy_paths = doy_paths[doys <= end_doy]
+    #     for doy_path in doy_paths:
+    #         doy = doy_path.name
+    #         logger.info('preping for final solution doy {} in {}'.format(doy,year))
+    #         daily_prep_axis_final_solutions(doy_path, year=yr)
+    #     logger.info('Done prepring {} final solutions'.format(year))
+
+
+def create_windowed_chuck_rinex(rinex_df, station='Alon', doy=117, year=2021):
+    """take the year, doy and station and return a list of rinex files to concat
+    the center is 12:00 UTC (M letter)"""
+    import pandas as pd
+    import numpy as np
+    yr = str(year)[2:]
+    st_df = rinex_df[station].to_frame()
+    st_df['rfn'] = st_df[station].apply(lambda x: np.nan if pd.isnull(x) else x.name[0:12])
+    center_ind = st_df[st_df['rfn']=='{}{}M.{}d'.format(station, doy, yr)].index
+    if not center_ind.empty:
+        ind = center_ind[0]
+    else:
+        return None
+    start = ind - pd.Timedelta(15, unit='H')
+    end = ind + pd.Timedelta(15, unit='H')
+    sliced = st_df.loc[start:end]
+    return sliced[station].dropna().values
 
 
 def daily_gd2e(path, staDb, tree, acc='Final', extended_rfn=False):
@@ -657,7 +760,8 @@ if __name__ == '__main__':
     required.add_argument(
         '--mode',
         help="mode type",
-        choices=['daily_run', 'daily_prep_all', 'daily_prep_drdump_rnxedit', 'real-time'])
+        choices=['daily_run', 'daily_prep_all', 'daily_prep_drdump_rnxedit', 'real-time',
+                 'daily_prep_final'])
     required.add_argument(
         '--station',
         help="GNSS 4 letter station code",
