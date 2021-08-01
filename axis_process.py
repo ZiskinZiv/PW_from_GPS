@@ -24,6 +24,27 @@ def process_ims_TD_to_axis_coords(savepath):
     return
 
 
+def get_unique_rfns_from_folder(path, glob_str='*.gz', rfn_cut=7):
+    from aux_gps import path_glob
+    import numpy as np
+    files = path_glob(path, glob_str)
+    fns = [x.as_posix().split('/')[-1].split('.')[0][0:rfn_cut] for x in files]
+    ufns = np.unique(fns)
+    return ufns
+
+
+def copy_rinex_files_to_folder(orig_file_paths, dest_path):
+    import shutil
+    import os
+    if not dest_path.is_dir():
+        os.mkdir(dest_path)
+    fns = [x.name for x in orig_file_paths]
+    dest_files = [dest_path/x for x in fns]
+    [shutil.copy(orig, dest) for (orig, dest) in zip(orig_file_paths, dest_files)]
+    print('Done copying {} rinex files to {}.'.format(len(fns), dest_path))
+    return
+
+
 def copy_rinex_to_station_dir(main_rinexpath, filenames, suffix='.gz'):
     import shutil
     import os
@@ -209,13 +230,15 @@ def run_rinex_compression_on_folder(path_dir, command='gunzip', glob='*.14d', cm
         raise ValueError('{} not known! '.format(command))
 
 
-def teqc_concat_rinex(path_dir, rfn=None, glob='*.14o', cmd_path=None):
+def teqc_concat_rinex(path_dir, rfn=None, glob='*.14o', cmd_path=None,
+                      delete_after_concat=False):
     import subprocess
     from subprocess import CalledProcessError
     from aux_gps import path_glob
     from aux_gps import replace_char_at_string_position
     if not path_dir.is_dir():
         raise ValueError('{} is not a directory!'.format(path_dir))
+    orig_files = path_glob(path_dir, glob)
     # subprocess.call("ls", cwd=path_dir)
     if rfn is None:
         files = sorted(path_glob(path_dir, glob))
@@ -231,6 +254,10 @@ def teqc_concat_rinex(path_dir, rfn=None, glob='*.14o', cmd_path=None):
         subprocess.run(cmd, shell=True, check=True, cwd=path_dir)
     except CalledProcessError:
         print('{} failed !'.format(cmd))
+        return
+    if delete_after_concat:
+        print('deleting files after teqc concat.')
+        [x.unlink() for x in orig_files]
         return
 
 
@@ -382,7 +409,9 @@ def read_multi_station_tdp_file(file, stations, savepath=None):
     return ds
 
 
-def count_rinex_files_all_years(main_folder, suffix='*.gz', savepath=None):
+def count_rinex_files_all_years(main_folder, suffix='*.gz',
+                                savepath=None,
+                                reindex_with_hourly_freq=True):
     from aux_gps import path_glob
     import pandas as pd
     years = path_glob(main_folder, '*/')
@@ -393,6 +422,14 @@ def count_rinex_files_all_years(main_folder, suffix='*.gz', savepath=None):
         dfs.append(df)
     df = pd.concat(dfs, axis=0)
     df = df.sort_index()
+    if reindex_with_hourly_freq:
+        full_time = pd.date_range(df.index[0], df.index[-1], freq='1H')
+        df = df.reindex(full_time)
+        # now cutoff with 3 weeks before current time:
+        now = pd.Timestamp.utcnow().floor('H')
+        end_dt = now - pd.Timedelta(21, unit='D')
+        end_dt = end_dt.tz_localize(None)
+        df = df.loc[:end_dt]
     if savepath is not None:
         filename = 'Axis_RINEX_count_datetimes.csv'
         df.to_csv(savepath/filename, na_rep='None', index=True)
@@ -411,6 +448,7 @@ def count_rinex_files_on_year_folder(year_folder, suffix='*.gz'):
         df = count_rinex_files_on_doy_folder(doy, suffix)
         dfs.append(df)
     df = pd.concat(dfs, axis=0)
+    df = df.sort_index()
     return df
 
 
@@ -418,17 +456,19 @@ def count_rinex_files_on_doy_folder(doy_folder, suffix='*.gz'):
     from aux_gps import path_glob
     from aux_gps import get_timedate_and_station_code_from_rinex
     import pandas as pd
-    files = path_glob(doy_folder, suffix)
+    files = sorted(path_glob(doy_folder, suffix))
     print('counting {} folder, {} files found.'.format(doy_folder, len(files)))
-    names = [x.as_posix().split('/')[-1][0:12] for x in files]
+    # names = [x.as_posix().split('/')[-1][0:12] for x in files]
     ser = []
-    for name in names:
-        result = get_timedate_and_station_code_from_rinex(name, st_upper=False)
-        ser.append(pd.Series(result))
+    for file in files:
+        name = file.name[0:12]
+        dt, st = get_timedate_and_station_code_from_rinex(name, st_upper=False)
+        ser.append(pd.Series([dt, st, file]))
     df = pd.DataFrame(ser)
-    df.columns = ['datetime', 'station']
-    df['values'] = 1
-    df = df.pivot(index='datetime', columns='station')
-    df.columns = df.columns.droplevel(0)
+    df.columns = ['datetime', 'station', 'filepath']
+    # df['values'] = 1
+    df = df.pivot(index='datetime', columns='station', values='filepath')
+    # df.columns = df.columns.droplevel(0)
     df.index.name = 'time'
+    df = df.sort_index()
     return df
