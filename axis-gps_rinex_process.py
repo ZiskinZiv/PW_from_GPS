@@ -36,6 +36,18 @@ Bisa103V.21d.Z
 @author: shlomi
 """
 
+
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
+
 def check_path(path):
     import os
     from pathlib import Path
@@ -287,7 +299,10 @@ if __name__ == '__main__':
     optional.add_argument('--year', help='year of rinex files', type=check_year)
     optional.add_argument('--mode', help='which mode to run', type=str, choices=['last_doy', 'whole', 'single_file'])
     optional.add_argument('--T02_path', help='where the T02 files are', type=check_path)
-    optional.add_argument('--is_T02_path_year', help='are the T02 files in T02_path in year/month structure', type=bool)
+    # optional.add_argument('--is_T02_path_year', help='are the T02 files in T02_path in year/month structure', type=bool)
+    optional.add_argument("--is_T02_path_year", type=str2bool, nargs='?',
+                          const=True, default=True,
+                          help="are the T02 files in T02_path in year/month structure")
     parser._action_groups.append(optional)  # added this line
     args = parser.parse_args()
     # print(parser.format_help())
@@ -299,4 +314,5 @@ if __name__ == '__main__':
 #        print('field is a required argument, run with -h...')
 #        sys.exit()
     args = check_for_missing_rinex_in_axis_path(args)
+    print(args)
     process_T02(args)
