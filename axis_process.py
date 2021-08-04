@@ -409,6 +409,60 @@ def read_multi_station_tdp_file(file, stations, savepath=None):
     return ds
 
 
+def count_rinex_files_x_months_before_now(main_folder, months=2, suffix='*.gz', reindex_with_hourly_freq=True):
+    from aux_gps import path_glob
+    import pandas as pd
+    print('Counting RINEX between {} months prior to now and 3 weeks before now.'.format(months))
+    now = pd.Timestamp.utcnow().floor('D')
+    then = now - pd.Timedelta(months*30, unit='D')
+    then = then.tz_localize(None)
+    now = now - pd.Timedelta(21, unit='D')
+    now = now.tz_localize(None)
+    ind = pd.date_range(start=then, end=now, freq='D')
+    ind_df = pd.DataFrame([ind.year, ind.dayofyear]).T
+    ind_df.columns = ['year', 'doy']
+    years = path_glob(main_folder, '*/')
+    years = [x for x in years if x.as_posix().split('/')[-1].isdigit()]
+    rel_years = [x for x in years if x.name in [str(y) for y in ind_df['year'].unique()]]
+    dfs = []
+    for rel_year in rel_years:
+        doys = path_glob(rel_year, '*/')
+        doys = [x for x in doys if x.as_posix().split('/')[-1].isdigit()]
+        doy_df = ind_df[ind_df['year']==int(rel_year.name)]
+        # return doy_df, doys
+        # doys = [rel_year / str(x) for x in doy_df['doy'].values]
+        rel_doys = [x for x in doys if x.name in [str(y) for y in doy_df['doy'].unique()]]
+        # print(rel_doys)
+        for doy in rel_doys:
+            df = count_rinex_files_on_doy_folder(doy, suffix)
+            dfs.append(df)
+    try:
+        df = pd.concat(dfs, axis=0)
+        df = df.sort_index()
+    except ValueError:
+        print('No RINEX in the time requested were found ({} months)'.format(months))
+        return pd.DataFrame()
+    if reindex_with_hourly_freq:
+        full_time = pd.date_range(df.index[0], df.index[-1], freq='1H')
+        df = df.reindex(full_time)
+        # now cutoff with 3 weeks before current time:
+        now = pd.Timestamp.utcnow().floor('H')
+        end_dt = now - pd.Timedelta(21, unit='D')
+        end_dt = end_dt.tz_localize(None)
+        df = df.loc[:end_dt]
+    return df
+
+
+def read_rinex_count_file(path=work_yuval, filename='Axis_RINEX_count_datetimes_historic.csv'):
+    import pandas as pd
+    from pathlib import Path
+    df = pd.read_csv(path/filename, na_values='None', index_col='time', parse_dates=['time'])
+    for col in df.copy().columns:
+        inds = df[~df[col].isnull()][col].index
+        df.loc[inds, col] = df.loc[inds, col].map(Path)
+    return df
+
+
 def count_rinex_files_all_years(main_folder, suffix='*.gz',
                                 savepath=None,
                                 reindex_with_hourly_freq=True):
@@ -430,8 +484,9 @@ def count_rinex_files_all_years(main_folder, suffix='*.gz',
         end_dt = now - pd.Timedelta(21, unit='D')
         end_dt = end_dt.tz_localize(None)
         df = df.loc[:end_dt]
+    df.index.name = 'time'
     if savepath is not None:
-        filename = 'Axis_RINEX_count_datetimes.csv'
+        filename = 'Axis_RINEX_count_datetimes_historic.csv'
         df.to_csv(savepath/filename, na_rep='None', index=True)
         print('{} was saved to {}.'.format(filename, savepath))
     return df
