@@ -81,6 +81,7 @@ def check_file(file):
 
 
 def create_rinex_df_per_station(rinex_df, station='Alon'):
+    """produces input to create_windowed_chunk_rinex"""
     import numpy as np
     import pandas as pd
     st_df = rinex_df[station].to_frame()
@@ -91,7 +92,7 @@ def create_rinex_df_per_station(rinex_df, station='Alon'):
     return st_df
 
 
-def create_station_windowed_chuck_rinex(station_df, station='Alon', doy=117, year=2021):
+def create_station_windowed_chunk_rinex(station_df, station='Alon', doy=117, year=2021):
     """take the year, doy and station and return a list of rinex files to concat
     the center is 12:00 UTC (M letter)"""
     import pandas as pd
@@ -100,7 +101,11 @@ def create_station_windowed_chuck_rinex(station_df, station='Alon', doy=117, yea
     if not center_ind.empty:
         ind = center_ind[0]
     else:
-        return None
+        # assume either no rinex at M (midday) or only part of rinex day exist
+        # in this case, just get all daily rinex:
+        daily = station_df.loc[(station_df['year']==year)&(station_df['doy']==doy)]
+        logger.warning('No midday file found for {} in {} of {}, total hours ={}.'.format(station, doy, year, len(daily)))
+        return daily[station].dropna().values
     start = ind - pd.Timedelta(15, unit='H')
     end = ind + pd.Timedelta(15, unit='H')
     sliced = station_df.loc[start:end]
@@ -275,31 +280,31 @@ def create_station_windowed_chuck_rinex(station_df, station='Alon', doy=117, yea
 #     return
 
 
-def daily_prep_axis_final_solutions(doy_path, year=14):
-    from axis_process import copy_rinex_files_to_folder
-    from axis_process import run_rinex_compression_on_folder
-    from axis_process import get_unique_rfns_from_folder
-    from axis_process import teqc_concat_rinex
-    from aux_gps import path_glob
-    dr_path = doy_path / 'dr'
-    # copy gz RINEX to dr_path:
-    copy_rinex_files_to_folder(doy_path, dr_path)
-    # unzip and uncompress:
-    run_rinex_compression_on_folder(dr_path, command='gunzip', glob='*.gz')
-    run_rinex_compression_on_folder(dr_path, command='crx2rnx', glob='*.{}d'.format(year))
-    # delete d files:
-    files = path_glob(dr_path, '*.{}d'.format(year))
-    [x.unlink() for x in files]
-    # teqc concat for daily o per station:
-    fns = get_unique_rfns_from_folder(dr_path,'*.{}o'.format(year))
-    for fn in fns:
-        filename = '{}0.{}o'.format(fn, year)
-        teqc_concat_rinex(dr_path, rfn=filename,
-                          glob='{}*.{}o'.format(fn,year),
-                          delete_after_concat=True)
-        dataRecordDump_single_file(dr_path, filename)
-        file = dr_path / filename
-        file.unlink()
+# def daily_prep_axis_final_solutions(doy_path, year=14):
+#     from axis_process import copy_rinex_files_to_folder
+#     from axis_process import run_rinex_compression_on_folder
+#     from axis_process import get_unique_rfns_from_folder
+#     from axis_process import teqc_concat_rinex
+#     from aux_gps import path_glob
+#     dr_path = doy_path / 'dr'
+#     # copy gz RINEX to dr_path:
+#     copy_rinex_files_to_folder(doy_path, dr_path)
+#     # unzip and uncompress:
+#     run_rinex_compression_on_folder(dr_path, command='gunzip', glob='*.gz')
+#     run_rinex_compression_on_folder(dr_path, command='crx2rnx', glob='*.{}d'.format(year))
+#     # delete d files:
+#     files = path_glob(dr_path, '*.{}d'.format(year))
+#     [x.unlink() for x in files]
+#     # teqc concat for daily o per station:
+#     fns = get_unique_rfns_from_folder(dr_path,'*.{}o'.format(year))
+#     for fn in fns:
+#         filename = '{}0.{}o'.format(fn, year)
+#         teqc_concat_rinex(dr_path, rfn=filename,
+#                           glob='{}*.{}o'.format(fn,year),
+#                           delete_after_concat=True)
+#         dataRecordDump_single_file(dr_path, filename)
+#         file = dr_path / filename
+#         file.unlink()
     # dataRecordDump to daily station file:
 
 
@@ -337,7 +342,83 @@ def daily_prep_axis_final_solutions(doy_path, year=14):
 #     move_files(Path().cwd(), Path().cwd(), files_to_move)
 #     return rfns[1] + '_merged.dr.gz'
 
-def prep_30hr_all_steps(path, staDb, gde_tree=None,):
+def parse_hourly_range_rfn(hourly_rfn, return_mid_doy=True):
+    station = hourly_rfn[:4]
+    yr = int(hourly_rfn.split('.')[1][:2])
+    if yr >= 0 and yr <= 79:
+        year = int('20'+str(yr))
+    elif yr <=99 and yr >=80:
+        year = int('19'+str(yr))
+    doy_start = int(hourly_rfn.split('-')[0][4:7])
+    doy_end = int(hourly_rfn.split('-')[1][:3])
+    mid_doy = int((doy_start + doy_end)/2)
+    if return_mid_doy:
+        return station, year, mid_doy
+
+def final_historic_perp(rinexpath, rinexfinal_path, staDb, rinex_df, station='Alon', gde_tree=None):
+    import os
+    from aux_gps import path_glob
+    st_df = create_rinex_df_per_station(rinex_df, station=station)
+    mindex = st_df.groupby(['year','doy'])['rfn'].count()
+    station_path = rinexfinal_path / station
+    if not station_path.is_dir():
+        logger.warning('{} is missing, creating it.'.format(station_path))
+        os.mkdir(station_path)
+    already_edited = sorted(path_glob(station_path, '{}*_edited.*.dr.gz'.format(station), return_empty_list=True))
+    if already_edited:
+        last_hourly_rfn = already_edited[-1].name
+        _, last_year, last_doy  = parse_hourly_range_rfn(last_hourly_rfn)
+        mindex = mindex.loc[slice(last_year, None), slice(last_doy, None), :]
+        logger.info('found last RINEX: {}, year={}, doy={}.'.format(already_edited[-1].name, last_year, last_doy))
+    for year, doy in mindex.index:
+        files = create_station_windowed_chunk_rinex(st_df, station=station,
+                                                    doy=int(doy), year=int(year))
+        prep_30hr_all_steps(station_path, files, staDb, station=station, gde_tree=gde_tree)
+    logger.info('Done prepring final {}.'.format(station))
+    
+        
+def prep_30hr_all_steps(station_path, files, staDb, station='Alon',
+                        gde_tree=None):
+    import numpy as np
+    from axis_process import copy_rinex_files_to_folder
+    from axis_process import run_rinex_compression_on_folder
+    from axis_process import teqc_concat_rinex
+    from aux_gps import path_glob
+    import os
+    # first get station name from files and assert it is like station:
+    station_from_files = np.unique([x.name.split('.')[0][:4] for x in files]).item()
+    assert station_from_files == station
+    # also get year:
+    yrs = np.unique([x.name.split('.')[1][:2] for x in files]).astype(int)
+    # now copy files to station path in rinexfinal_path:
+    copy_rinex_files_to_folder(files, station_path)
+    # unzip them and crx2rnx and delete d files:
+    for yr in yrs:   # if there are more than one year (only in DEC-JAN):
+        run_rinex_compression_on_folder(station_path, command='gunzip', glob='*.{}d.gz'.format(yr))
+        run_rinex_compression_on_folder(station_path, command='crx2rnx', glob='*.{}d'.format(yr))
+        dfiles = path_glob(station_path, '*.{}d'.format(yr))
+        [x.unlink() for x in dfiles]
+    # use new filename for concated rinex:
+    yr = yrs[0]
+    doy_hour_start = files[0].name[4:8]
+    doy_hour_end = files[-1].name[4:8]
+    filename = '{}{}-{}.{}o'.format(station, doy_hour_start, doy_hour_end, yr)
+    if len(yrs) > 1 and (np.abs(np.diff(yrs))==1).item():
+        teqc_concat_rinex(station_path, rfn=filename, glob='*.*o', cmd_path=None,
+                          delete_after_concat=True)
+    else:
+        teqc_concat_rinex(station_path, rfn=filename, glob='*.{}o'.format(yr), cmd_path=None,
+                          delete_after_concat=True)
+    # now, dataRecordDump and delete o file:
+    dataRecordDump_single_file(station_path, filename, rfn=filename[:17])
+    file = station_path / filename
+    file.unlink()
+    # now rnxEditGde:
+    dr_filename = filename[:17] + '.dr.gz'
+    # new_filename = filename[:13] + '_edited' + filename[13:17] + '.dr.gz'
+    rnxEditGde_single_file(station_path, dr_filename, staDb,
+                           new_filename=filename[:13],
+                           delete_dr_after=True, gde_tree=gde_tree)
     return
 
 def daily_prep_all_steps(path, staDb, new_filename=False,
@@ -447,7 +528,7 @@ def daily_prep_and_concat_rinex(path):
     return
 
 
-def dataRecordDump_single_file(path_dir, filename):
+def dataRecordDump_single_file(path_dir, filename, rfn=None):
     import subprocess
     import logging
     logger = logging.getLogger('axis-gipsyx')
@@ -455,7 +536,8 @@ def dataRecordDump_single_file(path_dir, filename):
     if not (path_dir/filename).is_file():
         raise FileNotFoundError
     logger.info('dataRecordDump on {}'.format(filename))
-    rfn = filename[0:12]
+    if rfn is None:
+        rfn = filename[0:12]
     cmd = 'dataRecordDump -rnx {} -drFileNmOut {}.dr.gz'.format(filename, rfn)
     try:
         subprocess.run(cmd, shell=True, check=True, cwd=path_dir)
@@ -474,7 +556,10 @@ def rnxEditGde_single_file(path_dir, filename, staDb, new_filename=None,
     if not (path_dir/filename).is_file():
         raise FileNotFoundError
     logger.info('rnxEditGde on {} with {}.'.format(filename, staDb))
-    rfn = filename[0:12]
+    if len(filename.split('.')[0]) == 13:
+        rfn = filename[:17]
+    elif len(filename.split('.')[0]) == 8:
+        rfn = filename[0:12]
     if new_filename is None:
         rfn_edited = rfn.split('.')[0] + '_edited' + '.' + rfn.split('.')[-1] + '.dr.gz'
     else:
@@ -501,6 +586,7 @@ def main_program(args):
     from aux_gps import path_glob
     from axis_process import copy_rinex_to_station_dir
     from axis_process import produce_rinex_filenames_at_time_window
+    from axis_process import read_rinex_count_file
     import pandas as pd
     import numpy as np
     logger = logging.getLogger('axis-gipsyx')
@@ -551,6 +637,18 @@ def main_program(args):
         # # 3) run gd2e.py
         daily_gd2e(args.rinexpath / args.station, args.staDb, args.tree, args.accuracy,
                    extended_rfn=True)
+    elif mode == 'final_prep_historic':
+        # first read rinex_df file, it should be in rinexpath:
+        rinex_df = read_rinex_count_file(args.rinexpath)
+        final_historic_perp(args.rinexpath, args.rinexfinal_path,
+                            args.staDb, rinex_df, args.station, args.gde_tree)
+    elif mode == 'final_run_historic':
+        files = path_glob(args.rinexfinal_path/args.station, '*.gz')
+        for file in sorted(files):
+            run_gd2e_on_single_file(args.rinexfinal_path/args.station,
+                                    file, args.staDb, args.tree,
+                                    extended_rfn=True)
+        logger.info('Finished running gd2e on {}.'.format(args.station))
     # elif mode == 'daily_prep_final':
     #     year_path = args.rinexpath / str(year)
     #     year = year_path.name
@@ -630,10 +728,60 @@ def daily_gd2e(path, staDb, tree, acc='Final', extended_rfn=False):
     return
 
 
-def run_gd2e(args):
-    import subprocess
+def run_gd2e_on_single_file(path, filename, staDb, tree, acc='Final', extended_rfn=False):
     import logging
+    import subprocess
+    import os
+    from subprocess import CalledProcessError
+    from subprocess import TimeoutExpired
+    from axis_process import move_files
+    from axis_process import read_multi_station_tdp_file
     logger = logging.getLogger('axis-gipsyx')
+    res_path = path / acc
+    if not res_path.is_dir():
+        os.mkdir(res_path)
+    file = path / filename
+    if not file.is_file():
+        raise FileNotFoundError
+    logger.info('started gd2e on {}'.format(filename))
+    station = filename.name[:4].upper()
+    rfn = filename.name[0:8]
+    if extended_rfn:
+        rfn = filename.name[0:13]
+    if acc == 'Final':
+        cmd = 'gd2e.py -drEditedFile {} -recList {} -staDb {} -treeS {}  > {}.log 2>{}.err'.format(
+                filename.as_posix(), station, staDb.as_posix(), tree, rfn, rfn)
+    elif acc == 'ql' or acc == 'ultra':
+        cmd = 'gd2e.py -drEditedFile {} -recList {} -staDb {} -treeS {} -GNSSproducts {} > {}.log 2>{}.err'.format(
+                filename.as_posix(), station, staDb.as_posix(), tree, acc, rfn, rfn)
+    files_to_move = ['{}{}'.format(rfn, x)
+                     for x in ['.log', '.err']]
+    more_files = ['finalResiduals.out', 'smoothFinal.tdp']
+    more_files_new_name = ['{}_{}'.format(rfn, x) for x in more_files]
+    try:
+        subprocess.run(cmd, shell=True, check=True, timeout=300, cwd=path)
+        ds = read_multi_station_tdp_file(path/'smoothFinal.tdp',
+                                         [station], savepath=res_path)
+        move_files(res_path, res_path, 'smoothFinal.nc',
+                   '{}_smoothFinal.nc'.format(rfn))
+        move_files(path, res_path, more_files,
+                   more_files_new_name)
+        move_files(path, res_path, 'Summary',
+                   '{}_Summary.txt'.format(rfn))
+        # next(succ)
+        # cnt['succ'] += 1
+    except CalledProcessError:
+        logger.error('gipsyx failed on {}, copying log files.'.format(rfn))
+        # next(failed)
+        # cnt['failed'] += 1
+    except TimeoutExpired:
+        logger.error('gipsyx timed out on {}, copying log files.'.format(rfn))
+        # next(failed)
+        # cnt['failed'] += 1
+        # with open(Path().cwd() / files_to_move[1], 'a') as f:
+        #     f.write('GipsyX run has Timed out !')
+    move_files(path, res_path, files_to_move)
+    move_files(path, res_path, 'debug.tree', '{}_debug.tree'.format(rfn))
     return
 
 
@@ -776,11 +924,15 @@ if __name__ == '__main__':
         '--mode',
         help="mode type",
         choices=['daily_run', 'daily_prep_all', 'daily_prep_drdump_rnxedit', 'real-time',
-                 'final_prep_historic', 'final_prep'])
+                 'final_prep_historic', 'final_prep', 'final_run_historic'])
     required.add_argument(
         '--station',
         help="GNSS 4 letter station code",
         type=check_station)
+    required.add_argument(
+        '--rinexfinal_path',
+        help="a full path to the rinex path of the station for final solutions, /home/ziskin/Work_Files/PW_yuval/rinex/TELA",
+        type=check_path)
     optional.add_argument(
         '--staDb',
         help='add a station DB file for antennas and receivers in rinexpath',
