@@ -112,6 +112,22 @@ def read_and_concat_smoothFinals(rinexpath, solution='Final'):
     return ds
 
 
+def read_and_concat_smoothFinals_final_station(rinexfinal_path, station='Alon'):
+    import xarray as xr
+    # from aux_gps import save_ncfile
+    from aux_gps import path_glob
+    dsl = []
+    for file in path_glob(rinexfinal_path/station/'Final', '*.nc'):
+        if file.is_file():
+            dsl.append(xr.load_dataset(file))
+            # print('found smoothFinal.nc in {}'.format(doypath))
+    # if dsl:
+    #     ds = xr.concat(dsl, 'time')
+    #     ds = ds.sortby('time')
+    #     save_ncfile(ds, rinexpath, 'smoothFinal_{}.nc'.format(year))
+    return dsl
+
+
 def move_files(path_orig, path_dest, files, out_files=None, verbose=False):
     """move files (a list containing the file names) and move them from
     path_orig to path_dest"""
