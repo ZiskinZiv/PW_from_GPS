@@ -16,6 +16,11 @@ strategy for final solutions of hourly axis network year/doy folders:
 4) delete all remaining files
 5) rnxEdit with gde tree
 6) gd2e
+    two main modes for final solutions, the strategey is per station:
+        1) historic - loop over all rinex upuntil 3 weeks time from now and solve
+    with 30hr window centered on midday of doy.
+    2) recent, solve the last day after 3 weeks from now, a 30 hr window.
+    solve it daily for all station
 @author: ziskin
 """
 
@@ -73,6 +78,33 @@ def check_file(file):
             '{} does not exist. {}'.format(
                 file))
     return file
+
+
+def create_rinex_df_per_station(rinex_df, station='Alon'):
+    import numpy as np
+    import pandas as pd
+    st_df = rinex_df[station].to_frame()
+    st_df['rfn'] = st_df[station].apply(lambda x: np.nan if pd.isnull(x) else x.name[0:12])
+    inds = st_df[~st_df[station].isnull()].index
+    st_df.loc[inds, 'year'] = st_df.loc[inds].index.year
+    st_df.loc[inds, 'doy'] = st_df.loc[inds].index.dayofyear
+    return st_df
+
+
+def create_station_windowed_chuck_rinex(station_df, station='Alon', doy=117, year=2021):
+    """take the year, doy and station and return a list of rinex files to concat
+    the center is 12:00 UTC (M letter)"""
+    import pandas as pd
+    yr = str(year)[2:]
+    center_ind = station_df[station_df['rfn']=='{}{}M.{}d'.format(station, doy, yr)].index
+    if not center_ind.empty:
+        ind = center_ind[0]
+    else:
+        return None
+    start = ind - pd.Timedelta(15, unit='H')
+    end = ind + pd.Timedelta(15, unit='H')
+    sliced = station_df.loc[start:end]
+    return sliced[station].dropna().values
 
 
 # def record_dump_and_merge(args):
@@ -269,7 +301,7 @@ def daily_prep_axis_final_solutions(doy_path, year=14):
         file = dr_path / filename
         file.unlink()
     # dataRecordDump to daily station file:
-    
+
 
 
 
@@ -305,6 +337,8 @@ def daily_prep_axis_final_solutions(doy_path, year=14):
 #     move_files(Path().cwd(), Path().cwd(), files_to_move)
 #     return rfns[1] + '_merged.dr.gz'
 
+def prep_30hr_all_steps(path, staDb, gde_tree=None,):
+    return
 
 def daily_prep_all_steps(path, staDb, new_filename=False,
                          delete_last_rinex=False, gde_tree=None):
@@ -538,25 +572,6 @@ def main_program(args):
     #     logger.info('Done prepring {} final solutions'.format(year))
 
 
-def create_windowed_chuck_rinex(rinex_df, station='Alon', doy=117, year=2021):
-    """take the year, doy and station and return a list of rinex files to concat
-    the center is 12:00 UTC (M letter)"""
-    import pandas as pd
-    import numpy as np
-    yr = str(year)[2:]
-    st_df = rinex_df[station].to_frame()
-    st_df['rfn'] = st_df[station].apply(lambda x: np.nan if pd.isnull(x) else x.name[0:12])
-    center_ind = st_df[st_df['rfn']=='{}{}M.{}d'.format(station, doy, yr)].index
-    if not center_ind.empty:
-        ind = center_ind[0]
-    else:
-        return None
-    start = ind - pd.Timedelta(15, unit='H')
-    end = ind + pd.Timedelta(15, unit='H')
-    sliced = st_df.loc[start:end]
-    return sliced[station].dropna().values
-
-
 def daily_gd2e(path, staDb, tree, acc='Final', extended_rfn=False):
     import logging
     from aux_gps import path_glob
@@ -761,7 +776,7 @@ if __name__ == '__main__':
         '--mode',
         help="mode type",
         choices=['daily_run', 'daily_prep_all', 'daily_prep_drdump_rnxedit', 'real-time',
-                 'daily_prep_final'])
+                 'final_prep_historic', 'final_prep'])
     required.add_argument(
         '--station',
         help="GNSS 4 letter station code",
