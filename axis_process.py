@@ -10,7 +10,7 @@ from PW_paths import work_yuval
 axis_path = work_yuval / 'axis'
 gis_path = work_yuval / 'gis'
 
-
+axis_duplicate_stations_name_dict = {'DSea': 'Ddse', 'Gsho': 'Gshr', 'KShm': 'kshm', 'Kshm': 'kshm', 'Rhat': 'Raha'}
 def process_ims_TD_to_axis_coords(savepath):
     from aux_gps import fill_na_xarray_time_series_with_its_group
     from aux_gps import path_glob
@@ -469,13 +469,16 @@ def count_rinex_files_x_months_before_now(main_folder, months=2, suffix='*.gz', 
     return df
 
 
-def read_rinex_count_file(path=work_yuval, filename='Axis_RINEX_count_datetimes_historic.csv'):
+def read_rinex_count_file(path=work_yuval/'axis', filename='Axis_RINEX_count_datetimes_historic.csv'):
     import pandas as pd
     from pathlib import Path
-    df = pd.read_csv(path/filename, na_values='None', index_col='time', parse_dates=['time'])
-    for col in df.copy().columns:
+    # import numpy as np
+    df = pd.read_csv(path/filename, sep=',', index_col='time', parse_dates=['time'], na_values='None')
+    for col in df.columns:
         inds = df[~df[col].isnull()][col].index
         df.loc[inds, col] = df.loc[inds, col].map(Path)
+    cols_sorted = sorted(df.columns)
+    df = df[cols_sorted]
     return df
 
 
