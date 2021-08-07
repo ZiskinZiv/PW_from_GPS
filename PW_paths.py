@@ -13,6 +13,7 @@ if platform.system() == 'Linux':
         work_path = Path('/home/ziskin/Work_Files/')
         work_yuval = work_path / 'PW_yuval'
         work_chaim = work_path / 'Chaim_Stratosphere_Data'
+        home_path = Path('/home/ziskin')
         cwd = Path().cwd()
         geo_path = Path('/home/ziskin/geo_ariel_home/')
         adams_path = Path('/home/ziskin/adams_home/')
@@ -23,6 +24,7 @@ if platform.system() == 'Linux':
         work_yuval = work_path / 'PW_yuval'
         work_chaim = work_path / 'Chaim_Stratosphere_Data'
         cwd = Path().cwd()
+        home_path = Path('/home/shlomi')
         geo_path = Path('/home/shlomi/geo_ariel_home/')
         adams_path = Path('/home/shlomi/adams_home/')
         data11_path = Path('/home/shlomi/data11/')
@@ -57,6 +59,7 @@ elif platform.system() == 'Darwin':
         work_yuval = work_path / 'PW_yuval'
         work_chaim = work_path / 'Chaim_Stratosphere_Data'
         cwd = Path().cwd()
+        home_path = Path('/Users/shlomi')
         geo_path = Path('/Users/shlomi/geo_ariel_home/')
         adams_path = Path('/Users/shlomi/adams_home/')
         data11_path = Path('/Users/shlomi/data11/')
