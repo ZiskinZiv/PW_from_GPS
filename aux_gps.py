@@ -142,6 +142,13 @@ def replace_time_series_with_its_group(da_ts, grp='month'):
     return da
 
 
+def read_ims_api_token():
+    from PW_paths import home_path
+    with open(home_path / '.imsapi') as fp:
+        token = fp.readlines()[0].strip('\n')
+    return token
+
+
 def calculate_gradient(f, lat_dim='latitude', lon_dim='longitude',
                        level_dim='level', time_dim='time', savepath=None):
     from metpy.calc import lat_lon_grid_deltas
