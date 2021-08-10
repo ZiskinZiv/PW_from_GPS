@@ -1169,12 +1169,26 @@ def loess_curve(da_ts, time_dim='time', season=None, plot=True):
     return da_lowess
 
 
-def detrend_ts(da_ts, verbose=False):
-    trend = loess_curve(da_ts, plot=False)
+def detrend_ts(da_ts, method='scipy', verbose=False,
+               time_dim='time'):
+    from scipy.signal import detrend
+    import xarray as xr
+    import pandas as pd
     if verbose:
-        print('detrending using loess.')
-    detrended = da_ts - trend['mean']
-    detrended.name = da_ts.name
+        print('detrending using {}.'.format(method))
+    if method == 'loess':
+        trend = loess_curve(da_ts, plot=False)
+        detrended = da_ts - trend['mean']
+        detrended.name = da_ts.name
+    elif method == 'scipy':
+        freq = xr.infer_freq(da_ts[time_dim])
+        y = da_ts.dropna(time_dim)
+        y_detrended = y.copy(data=detrend(y))
+        detrended = y_detrended
+        start = pd.to_datetime(y_detrended[time_dim].isel({time_dim: 0}).item())
+        end = pd.to_datetime(y_detrended[time_dim].isel({time_dim: -1}).item())
+        new_time = pd.date_range(start, end, freq=freq)
+        detrended = detrended.reindex({time_dim:new_time})
     return detrended
 
 
