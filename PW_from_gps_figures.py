@@ -6219,6 +6219,7 @@ def plot_typical_tide_event_with_PWV(work_path=work_yuval,
     # possible dates: 2014-11-16T13:50, 2018-04-26T18:55
     # best to show 2018-04-24-27,
     # TODO: x-axis time hours, ylabels in color
+    # TODO: change flow to bars instead of lineplot
     import xarray as xr
     import pandas as pd
     from hydro_procedures import hydro_pw_dict
@@ -6238,7 +6239,7 @@ def plot_typical_tide_event_with_PWV(work_path=work_yuval,
     register_matplotlib_converters()
     colors = sns.color_palette('tab10', n_colors=2)
     # sns.set_style('whitegrid')
-    sns.set_style('ticks')
+    sns.set_theme(style='ticks', font_scale=1.8)
     # load hydro graphs:
     hgs = xr.open_dataset(hydro_path/'hydro_graphs.nc')
     # select times:
@@ -6246,12 +6247,14 @@ def plot_typical_tide_event_with_PWV(work_path=work_yuval,
     dt_end = pd.to_datetime(date) + pd.Timedelta(days_after, unit='d')
     hs_id = hydro_pw_dict.get(station)
     hg_da = hgs['HS_{}_flow'.format(hs_id)].sel(time=slice(dt_start, dt_end)).dropna('time')
-    hg_da = hg_da.resample(time='15T').mean().interpolate_na('time', method='spline', max_gap='12H')
+    # hg_da = hg_da.resample(time='15T').mean().interpolate_na('time', method='spline', max_gap='12H')
+    hg_da = hg_da.resample(time='15T').mean()
     # load pwv:
     pw = xr.open_dataset(work_path / 'GNSS_PW_thresh_0_for_hydro_analysis.nc')[station]
     pw = pw.sel(time=slice(dt_start, dt_end))
     df = pw.to_dataframe(name='pwv')
     df['flow'] = hg_da.to_dataframe()
+    df['flow'] = df['flow'].fillna(0)
     if smoothed:
         df = smooth_df(df)
     fig, ax = plt.subplots(figsize=(15, 4))
@@ -6261,18 +6264,20 @@ def plot_typical_tide_event_with_PWV(work_path=work_yuval,
     # twin = ax.twinx()
     # sns.lineplot(data=df, y='pwv', x=df.index, ax=twin, label='DRAG', lw=2, color=colors[1])
     df.index.name=''
-    ax = df['flow'].plot(color=colors[0], ax=ax, lw=2)
+    sns.lineplot(data = df, y='pwv', x=df.index, lw=2,color=colors[1], marker=None, sort = False, ax=ax)
     twin = ax.twinx()
-    df['pwv'].plot(color=colors[1], ax=twin, lw=2)
-    ax.set_ylim(0, 100)
-    ax.set_ylabel(flow_label, fontsize=fontsize, color=colors[0])
-    twin.set_ylabel('PWV [mm]', fontsize=fontsize, color=colors[1])
-    ax.tick_params(axis='y', labelsize=fontsize, labelcolor=colors[0])
+    twin.bar(x=df.index,height=df['flow'].values, width=0.05, linewidth=0, color=colors[0], alpha=0.5)
+    # ax = df['flow'].plot(color=colors[0], ax=ax, lw=2)
+    # df['pwv'].plot(color=colors[1], ax=twin, lw=2)
+    twin.set_ylim(0, 100)
+    twin.set_ylabel(flow_label, color=colors[0])
+    ax.set_ylabel('PWV [mm]', color=colors[1])
+    twin.tick_params(axis='y', labelcolor=colors[0])
     # ax.tick_params(axis='x', labelsize=fontsize, bottom=True, which='both')
-    twin.tick_params(axis='y', labelsize=fontsize, labelcolor=colors[1])
-    twin.yaxis.set_ticks(np.arange(10, 35, 5))
+    ax.tick_params(axis='y', labelcolor=colors[1])
+    ax.yaxis.set_ticks(np.arange(10, 35, 5))
     # twin.yaxis.set_major_locator(ticker.FixedLocator(locs=np.arange(0,35,5)))
-    twin.yaxis.set_major_formatter(FormatStrFormatter('%.0f'))
+    ax.yaxis.set_major_formatter(FormatStrFormatter('%.0f'))
     # align_yaxis_np(ax, twin)
     # alignYaxes([ax, twin], [0, 10])
     # lim = ax.get_ylim()
@@ -6305,8 +6310,8 @@ def plot_typical_tide_event_with_PWV(work_path=work_yuval,
     # ax.xaxis.set_minor_locator(mdates.HourLocator(interval=3))
     ax.grid(True, which='major', axis='y',color='k', ls='--')
     # ax.set_xticklabels([x.strftime("%d-%H") for x in df.index], rotation=45)
-    ax.grid(True, which='minor', axis='x')
-
+    # ax.grid(True, which='minor', axis='x')
+    ax.grid(True, which='major', axis='x',color='k', ls='--')
     # twin.yaxis.set_major_locator(ticker.FixedLocator(ticks))
     # twin.grid(True, axis='y',color='k', ls='--')
     # twin.xaxis.set_major_locator(mdates.DayLocator())
