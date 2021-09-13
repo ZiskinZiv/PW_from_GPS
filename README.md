@@ -1,6 +1,6 @@
 GNSS derived Precipitable Water Vapor (PWV) analysis tools.
 This repository is used mainly to extract and analyze the PWV that is derived from the Global Navigation Satellite System (GNSS) radio signals received at ground stations.
-Three major works have come to fruition from using this repository:
+Three major works have come to fruition from using this repository (so far:-):
 
 1) Using binary classification on GPS derived PWV data to predict flash floods in the Eastern Mediteranean:
 >Flash floods prediction using precipitable water vapor derived from tropospheric path delays over the Eastern Mediterranean - to be published soon"
