@@ -1,10 +1,11 @@
 GNSS derived Precipitable Water Vapor (PWV) analysis tools.
 This repository is used mainly to extract and analyze the PWV that is derived from the Global Navigation Satellite System (GNSS) radio signals received at ground stations.
 Three major works have come to fruition from using this repository:
-1)
+
+1) Using binary classification on GPS derived PWV data to predict flash floods in the Eastern Mediteranean:
 >Flash floods prediction using precipitable water vapor derived from tropospheric path delays over the Eastern Mediterranean - to be published soon"
 
-This code was used to derive the PWV for GNSS ground station in the Eastern Mediteranean and is referenced in the following work:
+2) Diurnal climatology analysis on GPS derived PWV data to predict flash floods in the Eastern Mediteranean:
 >Ziv, S. Z., Yair, Y., Alpert, P., Uzan, L., & Reuveni, Y. (2021). The diurnal variability of precipitable water vapor derived from GPS tropospheric path delays over the Eastern Mediterranean. Atmospheric Research, 249, 105307.
 
 BibTex entry:
@@ -19,4 +20,17 @@ BibTex entry:
   publisher={Elsevier}
 }
 ```
-The code is free for use under the MIT license and if it helps you in an academic publication, i'd be happy if you cite the aforementioned work in your paper.
+
+3) Long-term climatology analysis on GPS derived PWV in the Eastern Mediteranean:
+>S.  Ziskin  Ziv,  P.  Alpert,  and  Y.  Reuveni,  “Long  term  variability  and trends of precipitable water vapor derived from GPS tropospheric path delays over the Eastern Mediterranean, International Journal of Climatology.
+
+BiBTex entry:
+```
+@article{ziskinlong,
+  title={Long term variability and trends of precipitable water vapor derived from GPS tropospheric path delays over the Eastern Mediterranean},
+  author={Ziskin Ziv, Shlomi and Alpert, Pinhas and Reuveni, Yuval},
+  journal={International Journal of Climatology},
+  publisher={Wiley Online Library}
+}
+```
+The code is free for use under the MIT license and if it helps you in an academic publication, i'd be happy if you cite the relevant aforementioned works in your paper.
