@@ -65,7 +65,7 @@ def plot_mean_abs_shap_values_features(SV, fix_xticklabels=True):
         dsf = sv.sel(feature=fe).reset_coords(drop=True).to_dataframe()
         title = '{}'.format(f.upper())
         dsf.plot.bar(ax=axes[i], title=title, rot=0, legend=False, zorder=20,
-                     width=.8)
+                     width=.8, color='k', alpha=0.8)
         axes[i].set_title(title)
         dsf_sum = dsf.sum().tolist()
         handles, labels = axes[i].get_legend_handles_labels()
