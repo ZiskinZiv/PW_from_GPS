@@ -43,6 +43,80 @@ tsafit_dict = {'lat': 30.985556, 'lon': 35.263056,
                'alt': -35.75, 'dt_utc': '2018-04-26T10:15:00'}
 
 
+def plot_mean_abs_shap_values_features(SV, fix_xticklabels=True):
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import seaborn as sns
+    from natsort import natsorted
+    features = ['pwv', 'pressure', 'DOY']
+    # sns.set_palette('Dark2', 6)
+    sns.set_theme(style='ticks', font_scale=1.5)
+    # sns.set_style('whitegrid')
+    # sns.set_style('ticks')
+    sv = np.abs(SV).mean('sample').sel(clas=0).reset_coords(drop=True)
+    gr_spec = [20, 20, 1]
+    fig, axes = plt.subplots(1, 3, sharey=True, figsize=(17, 5), gridspec_kw={'width_ratios': gr_spec})
+    try:
+        axes.flatten()
+    except AttributeError:
+        axes = [axes]
+    for i, f in enumerate(features):
+        fe = [x for x in sv['feature'].values if f in x]
+        dsf = sv.sel(feature=fe).reset_coords(drop=True).to_dataframe()
+        title = '{}'.format(f.upper())
+        dsf.plot.bar(ax=axes[i], title=title, rot=0, legend=False, zorder=20,
+                     width=.8)
+        axes[i].set_title(title)
+        dsf_sum = dsf.sum().tolist()
+        handles, labels = axes[i].get_legend_handles_labels()
+        labels = [
+            '{} ({:.1f} %)'.format(
+                x, y) for x, y in zip(
+                labels, dsf_sum)]
+        # axes[i].legend(handles=handles, labels=labels, prop={'size': fontsize-3}, loc='upper center')
+        axes[i].set_ylabel('mean(|SHAP value|)\n(average impact\non model output magnitude)')
+        axes[i].grid(axis='y', zorder=1)
+    if fix_xticklabels:
+        # n = sum(['pwv' in x for x in sv.feature.values])
+        axes[2].xaxis.set_ticklabels('')
+        axes[2].set_xlabel('')
+        hrs = np.arange(-1, -25, -1)
+        axes[0].set_xticklabels(hrs, rotation=30, ha="center", fontsize=12)
+        axes[1].set_xticklabels(hrs, rotation=30, ha="center", fontsize=12)
+        axes[2].tick_params()
+        axes[0].set_xlabel('Hours prior to flood')
+        axes[1].set_xlabel('Hours prior to flood')
+        fig.tight_layout()
+        filename = 'RF_shap_values_{}.png'.format('+'.join(features))
+        plt.savefig(savefig_path / filename, bbox_inches='tight')
+    return fig
+
+
+def read_binary_classification_shap_values_to_pandas(shap_values, X):
+    import xarray as xr
+    SV0 = X.copy(data=shap_values[0])
+    SV1 = X.copy(data=shap_values[1])
+    SV = xr.concat([SV0, SV1], dim='clas')
+    SV['clas'] = [0, 1]
+    return SV
+
+
+def get_shap_values_RF_classifier(plot=True):
+    import shap
+    X, y = combine_pos_neg_from_nc_file()
+    ml = ML_Classifier_Switcher()
+    rf = ml.pick_model('RF')
+    rf.set_params(**best_hp_models_dict['RF'])
+    X = select_doy_from_feature_list(X, features=['pwv', 'pressure', 'doy'])
+    rf.fit(X, y)
+    explainer = shap.TreeExplainer(rf)
+    shap_values = explainer.shap_values(X.values)
+    if plot:
+        shap.summary_plot(shap_values, X, feature_names=[
+                          x for x in X.feature.values], max_display=49, sort=False)
+    return shap_values
+
+
 def interpolate_pwv_to_tsafit_event(path=work_yuval, savepath=work_yuval):
     import pandas as pd
     import xarray as xr
@@ -2485,8 +2559,9 @@ def plot_feature_importances_from_dss(
     import seaborn as sns
     from natsort import natsorted
     sns.set_palette('Dark2', 6)
-    sns.set_style('whitegrid')
-    sns.set_style('ticks')
+    # sns.set_style('whitegrid')
+    # sns.set_style('ticks')
+    sns.set_theme(style='ticks', font_scale=1.5)
     # use dss.sel(model='RF') first as input
     dss['feature'] = dss['feature'].str.replace('DOY', 'doy')
     dss = dss.sel({feat_dim: features})
@@ -2503,14 +2578,14 @@ def plot_feature_importances_from_dss(
     elif fn == 2:
         gr_spec = [1, 1]
     elif fn == 3:
-        gr_spec = [2, 5, 5]
+        gr_spec = [5, 5, 2]
     if axes is None:
         fig, axes = plt.subplots(1, fn, sharey=True, figsize=(17, 5), gridspec_kw={'width_ratios': gr_spec})
         try:
             axes.flatten()
         except AttributeError:
             axes = [axes]
-    for i, f in enumerate(sorted(feats)):
+    for i, f in enumerate(feats):
         fe = [x for x in dss['feature'].values if f in x]
         dsf = dss['feature_importances'].sel(
             feature=fe).reset_coords(
@@ -2534,20 +2609,20 @@ def plot_feature_importances_from_dss(
             '{} ({:.1f} %)'.format(
                 x, y) for x, y in zip(
                 labels, dsf_sum)]
-        axes[i].legend(handles=handles, labels=labels, prop={'size': fontsize-3}, loc='upper center')
-        axes[i].set_ylabel('Feature importance [%]', fontsize=fontsize)
+        axes[i].legend(handles=handles, labels=labels, prop={'size': 12}, loc='upper center')
+        axes[i].set_ylabel('Feature importances [%]')
         axes[i].grid(axis='y', zorder=1)
     if ylim is not None:
         [ax.set_ylim(*ylim) for ax in axes]
     if fix_xticklabels:
         n = sum(['pwv' in x for x in dss.feature.values])
-        axes[0].xaxis.set_ticklabels('')
-        hrs = np.arange(-24, -24+n)
-        axes[1].set_xticklabels(hrs, rotation=30, ha="center", fontsize=fontsize-2)
-        axes[2].set_xticklabels(hrs, rotation=30, ha="center", fontsize=fontsize-2)
-        axes[0].tick_params(labelsize=fontsize)
-        axes[1].set_xlabel('Hours prior to flood', fontsize=fontsize)
-        axes[2].set_xlabel('Hours prior to flood', fontsize=fontsize)
+        axes[2].xaxis.set_ticklabels('')
+        hrs = np.arange(-1, -25, -1)
+        axes[0].set_xticklabels(hrs, rotation=30, ha="center", fontsize=14)
+        axes[1].set_xticklabels(hrs, rotation=30, ha="center", fontsize=14)
+        axes[2].tick_params(labelsize=fontsize)
+        axes[0].set_xlabel('Hours prior to flood')
+        axes[1].set_xlabel('Hours prior to flood')
         fig.tight_layout()
     if save:
         filename = 'RF_feature_importances_all_scorers_{}.png'.format(features)
