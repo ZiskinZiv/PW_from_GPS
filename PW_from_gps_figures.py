@@ -6364,13 +6364,13 @@ def plot_hydro_pressure_anomalies(hydro_path=hydro_path, std=False,
     else:
         label = 'Pressure mean anomalies [hPa]'
     ax.set_ylabel(label, fontsize=fontsize-2)
-    ax.set_xlabel('Days before/after a tide event', fontsize=fontsize-2)
-    ax.axvline(0, color='r', ls='--')
+    ax.set_xlabel('Days before/after a flood event', fontsize=fontsize-2)
+    ax.axvline(0, color='k', ls='--')
     ax.grid(True)
     fig.tight_layout()
     fig.subplots_adjust(right=0.946)
     if save:
-        filename = 'Pressure_anoms_3_prior_tides.png'
+        filename = 'Pressure_anoms_3_prior_flood.png'
         plt.savefig(savefig_path / filename, bbox_inches='tight', pad_inches=0.1)
     return df
 
@@ -6470,7 +6470,7 @@ def plot_hydro_pwv_anomalies_with_station_mean(work_path=work_yuval,
     ax_group.set_xlim(ts.index.min(), ts.index.max())  #+
                       # pd.Timedelta(15, unit='D'))
     ax_group.set_ylabel(r'{} mean anomalies [{}]'.format(wv_label, units), fontsize=fontsize-2)
-    ax_group.set_xlabel('Days before/after a tide event', fontsize=fontsize-2)
+    ax_group.set_xlabel('Days before/after a flood event', fontsize=fontsize-2)
     # set ticks and align with heatmap axis (move by 0.5):
     # ax_group.xaxis.set_major_locator(ticker.MultipleLocator(0.25))
     # ax_group.set_xticks(np.arange(-3, 1, 0.25))
@@ -6495,7 +6495,7 @@ def plot_hydro_pwv_anomalies_with_station_mean(work_path=work_yuval,
     fig.tight_layout()
     fig.subplots_adjust(right=0.946)
     if save:
-        filename = 'PWV_anoms_{}_prior_tides.png'.format(days_prior)
+        filename = 'PWV_anoms_{}_prior_flood.png'.format(days_prior)
         plt.savefig(savefig_path / filename, bbox_inches='tight', pad_inches=0.1)
     return ax_group
 
@@ -6562,7 +6562,7 @@ def plot_hydro_events_climatology(hydro_path=hydro_path, fontsize=16, save=True)
     add.columns = ['positive_sample']
     df = df.append(add).sort_index()
     fig, ax = plt.subplots(figsize=(8, 6))
-    sns.barplot(data=df, x=df.index, y='positive_sample', ax=ax, color='tab:blue')
+    sns.barplot(data=df, x=df.index, y='positive_sample', ax=ax, color='k', alpha=0.8)
     ax.grid(True)
     ax.set_ylabel('Number of unique flood events [#]', fontsize=fontsize)
     ax.set_xlabel('month', fontsize=fontsize)
