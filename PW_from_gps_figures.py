@@ -6096,6 +6096,65 @@ def plot_ERA5_wind_speed_direction_profiles_at_bet_dagan(ear5_path=era5_path,
     return fig
 
 
+def plot_PWV_anomalies_groups_maps_with_mean(work_path=work_yuval, station='drag',
+                                             fontsize=16, save=True):
+    import xarray as xr
+    import seaborn as sns
+    import numpy as np
+    import matplotlib.colors as mcolors
+    import matplotlib.pyplot as plt
+    from scipy.ndimage.filters import gaussian_filter
+    from PW_stations import produce_geo_gnss_solved_stations
+    sns.set_theme(style='ticks', font_scale=1.5)
+    cmap = 'jet' # sns.color_palette('terrain', as_cmap=True)
+    df = produce_geo_gnss_solved_stations(plot=False)
+    file = work_path/'GNSS_PW_thresh_0_hour_dayofyear_rest.nc'
+    pw = xr.open_dataset(file)
+    if isinstance(station, str):
+        st_mean = pw[station].mean('rest').expand_dims('station')
+        st_mean['station'] = [station.upper()]
+        data = gaussian_filter(st_mean, 5)
+        st_mean = st_mean.copy(data=data)
+    elif isinstance(station, list):
+        pws = [pw[x].mean('rest') for x in pw if x in station]
+        pws = [x.copy(data=gaussian_filter(x, 5)) for x in pws]
+        st_mean = xr.merge(pws)
+        st_mean = st_mean[station].to_array('station')
+        st_mean['station'] = [x.upper() for x in st_mean['station'].values]
+        alts = df.loc[station,'alt'].values
+    # drag = pw['drag'].mean('rest')
+    # elat = pw['elat'].mean('rest')
+    # dsea = pw['dsea'].mean('rest')
+    # da = xr.concat([drag, dsea, elat], 'station')
+    # da['station'] = ['DRAG', 'DSEA', 'ELAT']
+    n = st_mean['station'].size
+    st_mean = st_mean.transpose('dayofyear', 'hour', 'station')
+    norm = mcolors.Normalize(vmin=st_mean.min().item(), vmax=st_mean.max().item(),
+                             clip=True)
+    fig = plt.figure(constrained_layout=False, figsize=(7, 13))
+    ratio = 1.0 / len(station)
+    bots = [1 - ratio*(x+1) for x in range(len(station))]
+    tops = [1 - x - 0.05 for x in reversed(bots)]
+    bots[-1] = 0.05
+    for i, st in enumerate(station):
+        gs = fig.add_gridspec(nrows=2, ncols=1, hspace=0, height_ratios=[3,1],
+                              bottom=bots[i], top=tops[i])
+        ax_heat = fig.add_subplot(gs[0])
+        ax_bottom = fig.add_subplot(gs[1])
+        cf = st_mean.sel(station=st.upper()).plot.contourf(levels=41,
+                                                           add_colorbar=False,
+                                                           cmap=cmap, ax=ax_heat,
+                                                           norm=norm)
+        st_mean.sel(station=st.upper()).mean('dayofyear').plot(ax=ax_bottom)
+        ax_bottom.set_title('')
+        ax_heat.set_xlabel('')
+        ax_heat.set_yticks(np.arange(50, 400, 50))
+    cbar_ax = fig.add_axes([0.85, 0.074, 0.025, 0.905])
+    fig.colorbar(cf, cax=cbar_ax)
+
+    return fig
+
+
 def plot_PWV_anomalies_groups_maps(work_path=work_yuval, station='drag',
                                    fontsize=16, save=True):
     import xarray as xr
@@ -6128,27 +6187,28 @@ def plot_PWV_anomalies_groups_maps(work_path=work_yuval, station='drag',
     # da = xr.concat([drag, dsea, elat], 'station')
     # da['station'] = ['DRAG', 'DSEA', 'ELAT']
     n = st_mean['station'].size
+    st_mean = st_mean.transpose('dayofyear', 'hour', 'station')
     fg = st_mean.plot.contourf(levels=41, row='station', add_colorbar=False,
-                               figsize=(6.5, 13), cmap=cmap)
+                               figsize=(7, 13), cmap=cmap)
     for i, ax in enumerate(fg.fig.axes):
-        ax.set_xticks(np.arange(50, 400, 50))
+        ax.set_yticks(np.arange(50, 400, 50))
         ax.tick_params(labelsize=fontsize)
-        ax.set_ylabel('Hour of day [UTC]', fontsize=fontsize)
+        ax.set_ylabel('Day of Year', fontsize=fontsize)
         title = ax.get_title()
         title = title + ' ({:.0f} m a.s.l)'.format(alts[i])
         ax.set_title(title, fontsize=fontsize)
-    fg.fig.axes[-1].set_xlabel('Day of Year', fontsize=fontsize)
-    cbar_ax = fg.fig.add_axes([0.87, 0.05, 0.025, 0.917])
+    fg.fig.axes[-1].set_xlabel('Hour of day [UTC]', fontsize=fontsize)
+    cbar_ax = fg.fig.add_axes([0.85, 0.074, 0.025, 0.905])
     fg.add_colorbar(cax=cbar_ax)
     cb = fg.cbar
     cb.ax.tick_params(labelsize=fontsize-2)
     cb.set_label('PWV [mm]', size=fontsize-2)
     fg.fig.subplots_adjust(top=0.967,
-                           bottom=0.05,
-                           left=0.125,
-                           right=0.85,
-                           hspace=0.105,
-                           wspace=0.2)
+                           bottom=0.075,
+                           left=0.13,
+                           right=0.83,
+                           hspace=0.135,
+                           wspace=0.195)
     if save:
         filename = 'PWV_climatology_{}_stacked_groups.png'.format('_'.join(station))
         plt.savefig(savefig_path / filename, orientation='potrait')
