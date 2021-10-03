@@ -6103,6 +6103,7 @@ def plot_PWV_anomalies_groups_maps_with_mean(work_path=work_yuval, station='drag
     import numpy as np
     import matplotlib.colors as mcolors
     import matplotlib.pyplot as plt
+    import matplotlib.ticker as tck
     from scipy.ndimage.filters import gaussian_filter
     from PW_stations import produce_geo_gnss_solved_stations
     sns.set_theme(style='ticks', font_scale=1.5)
@@ -6133,25 +6134,48 @@ def plot_PWV_anomalies_groups_maps_with_mean(work_path=work_yuval, station='drag
                              clip=True)
     fig = plt.figure(constrained_layout=False, figsize=(7, 13))
     ratio = 1.0 / len(station)
-    bots = [1 - ratio*(x+1) for x in range(len(station))]
+    bots = [1.0 - ratio*(x+1) for x in range(len(station))]
     tops = [1 - x - 0.05 for x in reversed(bots)]
     bots[-1] = 0.05
+    # custom tops and bots for 3 figures:
+    tops = [0.95, 0.6333333333339999, 0.3166666666673999]
+    bots = [0.6833333333339999, 0.3666666666673999, 0.05]
     for i, st in enumerate(station):
         gs = fig.add_gridspec(nrows=2, ncols=1, hspace=0, height_ratios=[3,1],
-                              bottom=bots[i], top=tops[i])
+                              bottom=bots[i], top=tops[i], right=0.7)
         ax_heat = fig.add_subplot(gs[0])
         ax_bottom = fig.add_subplot(gs[1])
         cf = st_mean.sel(station=st.upper()).plot.contourf(levels=41,
                                                            add_colorbar=False,
                                                            cmap=cmap, ax=ax_heat,
                                                            norm=norm)
-        st_mean.sel(station=st.upper()).mean('dayofyear').plot(ax=ax_bottom)
+        
+        st_mean.sel(station=st.upper()).mean('dayofyear').plot(ax=ax_bottom,
+                                                               color='k', linewidth=2)
+        bottom_limit = ax_heat.get_xlim()
+        ax_bottom.set_xlim(bottom_limit)
         ax_bottom.set_title('')
+        ax_bottom.yaxis.set_major_locator(tck.MaxNLocator(3))
+        ax_bottom.set_xlabel('')
+        ax_bottom.grid(True)
         ax_heat.set_xlabel('')
+        ax_heat.tick_params(labelbottom=False)
+        ax_bottom.tick_params(top='on', labelsize=fontsize)
+        ax_bottom.set_ylabel('PWV [mm]', fontsize=fontsize)
         ax_heat.set_yticks(np.arange(50, 400, 50))
-    cbar_ax = fig.add_axes([0.85, 0.074, 0.025, 0.905])
-    fig.colorbar(cf, cax=cbar_ax)
-
+        title = ax_heat.get_title()
+        title = title + ' ({:.0f} m a.s.l)'.format(alts[i])
+        ax_heat.set_title(title)
+    ax_bottom.set_xlabel('Hour of Day [UTC]')
+    cbar_ax = fig.add_axes([0.80, 0.049, 0.05, 0.900])
+    cb = fig.colorbar(cf, cax=cbar_ax)
+    cb.set_ticks(np.arange(7, 31+2, 2))
+    # cb.ax.set_yticklabels(['{:.0f}'.format(x) for x in np.arange(9, 31+1, 1)], fontsize=16, weight='bold')
+    # cb.ax.tick_params()# labelsize=fontsize-2)
+    cb.set_label('PWV [mm]')#, size=fontsize-2)
+    if save:
+        filename = 'PWV_climatology_{}_stacked_groups_with_mean.png'.format('_'.join(station))
+        plt.savefig(savefig_path / filename, orientation='potrait')
     return fig
 
 
