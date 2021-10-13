@@ -30,7 +30,110 @@ write another script with click!
 ##    channel = filename.split('_')[2]
 ##    return station_name, station_id, channel
 #
-#
+
+
+def ims_api_get_meta(active_only=True, channel_name='TD'):
+    import requests
+    import pandas as pd
+    """get meta data on 10mins ims stations"""
+    myToken = 'f058958a-d8bd-47cc-95d7-7ecf98610e47'
+    headers = {'Authorization': 'ApiToken ' + myToken}
+    r = requests.get('https://api.ims.gov.il/v1/envista/stations/',
+                     headers=headers)
+    stations_10mins = pd.DataFrame(r.json())
+    # filter inactive stations:
+    if active_only:
+        stations_10mins = stations_10mins[stations_10mins.active]
+    # arrange lat lon nicely and add channel num for dry temp:
+    lat_ = []
+    lon_ = []
+    channelId_list = []
+    for index, row in stations_10mins.iterrows():
+        lat_.append(row['location']['latitude'])
+        lon_.append(row['location']['longitude'])
+        channel = [x['channelId'] for x in row.monitors if x['name'] ==
+                   channel_name]
+        if channel:
+            channelId_list.append(channel[0])
+        else:
+            channelId_list.append(None)
+    stations_10mins['lat'] = lat_
+    stations_10mins['lon'] = lon_
+    stations_10mins[channel_name + '_channel'] = channelId_list
+    stations_10mins.drop(['location', 'StationTarget', 'stationsTag'],
+                         axis=1, inplace=True)
+    return stations_10mins
+
+
+def configure_logger(name='general', filename=None):
+    import logging
+    import sys
+    stdout_handler = logging.StreamHandler(sys.stdout)
+    if filename is not None:
+        file_handler = logging.FileHandler(filename=filename, mode='a')
+        handlers = [file_handler, stdout_handler]
+    else:
+        handlers = [stdout_handler]
+
+    logging.basicConfig(
+            level=logging.INFO,
+            format='[%(asctime)s] {%(filename)s:%(lineno)d} %(levelname)s - %(message)s',
+            handlers=handlers
+            )
+    logger = logging.getLogger(name=name)
+    return logger
+
+
+def query_yes_no(question, default="no"):
+    """Ask a yes/no question via raw_input() and return their answer.
+
+    "question" is a string that is presented to the user.
+    "default" is the presumed answer if the user just hits <Enter>.
+        It must be "yes" (the default), "no" or None (meaning
+        an answer is required of the user).
+
+    The "answer" return value is True for "yes" or False for "no".
+    """
+    import sys
+    valid = {"yes": True, "y": True, "ye": True,
+             "no": False, "n": False}
+    if default is None:
+        prompt = " [y/n] "
+    elif default == "yes":
+        prompt = " [Y/n] "
+    elif default == "no":
+        prompt = " [y/N] "
+    else:
+        raise ValueError("invalid default answer: '%s'" % default)
+
+    while True:
+        sys.stdout.write(question + prompt)
+        choice = input().lower()
+        if default is not None and choice == '':
+            return valid[default]
+        elif choice in valid:
+            return valid[choice]
+        else:
+            sys.stdout.write("Please respond with 'yes' or 'no' "
+                             "(or 'y' or 'n').\n")
+
+def path_glob(path, glob_str='*.Z', return_empty_list=False):
+    """returns all the files with full path(pathlib3 objs) if files exist in
+    path, if not, returns FilenotFoundErro"""
+    from pathlib import Path
+#    if not isinstance(path, Path):
+#        raise Exception('{} must be a pathlib object'.format(path))
+    path = Path(path)
+    files_with_path = [file for file in path.glob(glob_str) if file.is_file]
+    if not files_with_path and not return_empty_list:
+        raise FileNotFoundError('{} search in {} found no files.'.format(glob_str,
+                                path))
+    elif not files_with_path and return_empty_list:
+        return files_with_path
+    else:
+        return files_with_path
+
+
 def check_ds_last_datetime(ds, fmt=None):
     """return the last datetime of the ds"""
     import pandas as pd
@@ -61,8 +164,8 @@ def check_path(path):
 
 
 def generate_delete(savepath, channel_name):
-    from aux_gps import query_yes_no
-    from aux_gps import path_glob
+    # from aux_gps import query_yes_no
+    # from aux_gps import path_glob
     try:
         glob = '*_{}_10mins.nc'.format(channel_name)
         files_to_delete = path_glob(savepath, glob)
@@ -130,7 +233,7 @@ def download_ims_single_station(stationid, savepath=None,
         da.attrs['channel_name'] = channel_name
         da.attrs['station_name'] = meta['name']
         da.attrs['station_id'] = meta['id']
-        da.attrs['active'] = meta['active']
+        da.attrs['active'] = str(meta['active'])
         da.attrs['station_lat'] = str(meta['loc']['latitude'])
         da.attrs['station_lon'] = str(meta['loc']['longitude'])
         for key, value in da.attrs.items():
@@ -274,7 +377,7 @@ def download_ims_single_station(stationid, savepath=None,
 def download_all_10mins_ims(savepath, channel_name='TD'):
     """download all 10mins stations per specified channel, updateing fields is
     automatic"""
-    from aux_gps import path_glob
+    # from aux_gps import path_glob
     import xarray as xr
     import logging
     logger = logging.getLogger('ims_downloader')
@@ -322,9 +425,9 @@ def download_all_10mins_ims(savepath, channel_name='TD'):
 if __name__ == '__main__':
     import argparse
     import sys
-    from ims_procedures import ims_api_get_meta
+    # from ims_procedures import ims_api_get_meta
     from pathlib import Path
-    from aux_gps import configure_logger
+    # from aux_gps import configure_logger
     logger = configure_logger('ims_downloader')
     channels = ['BP', 'DiffR', 'Grad', 'NIP', 'Rain', 'RH', 'STDwd', 'TD',
                 'TDmax', 'TDmin', 'TG', 'Time', 'WD', 'WDmax', 'WS', 'WS10mm',
