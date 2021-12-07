@@ -793,12 +793,22 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
     ds = ds.sel({time_dim: slice(start_year, None)})
     years = sorted(list(set(ds[time_dim].dt.year.values)))
     # get coords and alts of IMS stations:
-    T_alts = np.array([ds[x].attrs['station_alt'] for x in ds])
-    T_lats = np.array([ds[x].attrs['station_lat'] for x in ds])
-    T_lons = np.array([ds[x].attrs['station_lon'] for x in ds])
+    index = [x for x in ds]
+    T_geo = pd.DataFrame([ds[x].attrs['station_alt'] for x in ds], index=index)
+    T_geo.columns = ['station_alt']
+    T_geo['station_lat'] = [ds[x].attrs['station_lat'] for x in ds]
+    T_geo['station_lon'] = [ds[x].attrs['station_lon'] for x in ds]
+    T_geo['station_lat'] = pd.to_numeric(T_geo['station_lat'], errors='coerce')
+    T_geo['station_alt'] = pd.to_numeric(T_geo['station_alt'], errors='coerce')
+    T_geo['station_lon'] = pd.to_numeric(T_geo['station_lon'], errors='coerce')
+    T_geo = T_geo.dropna()
+    T_alts = T_geo['station_alt'].values
+    T_lons = T_geo['station_lon'].values
+    T_lats = T_geo['station_lat'].values
+    
     print('loading IMS_TD of israeli stations 10mins freq..')
     # transform to dataframe and add coords data to df:
-    tdf = ds.to_dataframe()
+    tdf = ds.to_dataframe()[[x for x in T_geo.index]]
     if cut_days_ago is not None:
         # use cut_days_ago to drop last x days of data:
         # this is vital bc towards the newest data, TD becomes scarce bc not
@@ -1469,6 +1479,8 @@ def analyse_10mins_ims_field(path=ims_10mins_path, var='TD',
         except ValueError:
             print('station {} has not known lat or lon...'.format(
                 ds[da].attrs['station_name']))
+        except TypeError:
+            print('no lat or lon')
         ds[da].attrs['station_lat'] = lat
         ds[da].attrs['station_lon'] = lon
         ds[da].attrs['station_alt'] = alt
