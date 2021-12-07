@@ -1455,9 +1455,13 @@ def analyse_10mins_ims_field(path=ims_10mins_path, var='TD',
             lon = meta.loc[id_, 'lon']
             alt = meta.loc[id_, 'alt']
         except KeyError:
-            lat = ds[da].attrs['station_lat']
-            lon = ds[da].attrs['station_lon']
-            print('station {} keyerror.'.format(da))
+            try:
+                lat = ds[da].attrs['station_lat']
+                lon = ds[da].attrs['station_lon']
+                print('station {} keyerror.'.format(da))
+            except KeyError:
+                lat = None
+                lon = None
             alt = 'None'
         try:
             alt = awd.sel(x=float(lon), y=float(lat),
