@@ -23,7 +23,7 @@ def generate_download_shell_script(station_list,
     return
 
 
-def all_orbitals_download(save_dir, minimum_year=None, hr_only=None):
+def all_orbitals_download(save_dir, minimum_dt=None, hr_only=None):
     import htmllistparse
     import requests
     import os
@@ -43,11 +43,11 @@ def all_orbitals_download(save_dir, minimum_year=None, hr_only=None):
     command = 'https://sideshow.jpl.nasa.gov/pub/JPL_GPS_Products/Final/'
     cwd, listing = htmllistparse.fetch_listing(command, timeout=30)
     dirs = [f.name for f in listing if '/' in f.name]
-    if minimum_year is not None:
+    if minimum_dt is not None:
         years = [int(x.split('/')[0]) for x in dirs]
-        years = [x for x in years if x >= minimum_year]
+        years = [x for x in years if x >= minimum_dt.year]
         dirs = [str(x) + '/' for x in years]
-        logger.info('starting search from year {}'.format(minimum_year))
+        logger.info('starting search from year {}'.format(minimum_dt.year))
     for year in dirs:
         logger.info(year)
         cwd, listing = htmllistparse.fetch_listing(command + year, timeout=30)
@@ -83,7 +83,7 @@ def all_orbitals_download(save_dir, minimum_year=None, hr_only=None):
     return
 
 
-def single_station_rinex_garner_download(save_dir, minimum_year=None,
+def single_station_rinex_garner_download(save_dir, minimum_dt=None,
                                          station='tela'):
     import htmllistparse
     import requests
@@ -104,11 +104,11 @@ def single_station_rinex_garner_download(save_dir, minimum_year=None,
     command = 'http://anonymous:shlomiziskin%40gmail.com@garner.ucsd.edu/pub/rinex/'
     cwd, listing = htmllistparse.fetch_listing(command, timeout=30)
     dirs = [f.name for f in listing if '/' in f.name]
-    if minimum_year is not None:
+    if minimum_dt is not None:
         years = [int(x.split('/')[0]) for x in dirs]
-        years = [x for x in years if x >= minimum_year]
+        years = [x for x in years if x >= minimum_dt.year]
         dirs = [str(x) + '/' for x in years]
-        logger.info('starting search from year {}'.format(minimum_year))
+        logger.info('starting search from year {}'.format(minimum_dt.year))
     for year in dirs:
         logger.info(year)
         cwd, listing = htmllistparse.fetch_listing(command + year, timeout=30)
@@ -134,7 +134,7 @@ def single_station_rinex_garner_download(save_dir, minimum_year=None,
     return
 
 
-def single_station_rinex_using_wget(save_dir, minimum_year=None,
+def single_station_rinex_using_wget(save_dir, minimum_mdt=None,
                                     station='tela', db='garner'):
     import subprocess
     from subprocess import CalledProcessError
@@ -159,14 +159,15 @@ def single_station_rinex_using_wget(save_dir, minimum_year=None,
     savepath.mkdir(parents=True, exist_ok=True)
 #    else:
 #        logger.warning('Folder {} already exists.'.format(savepath))
-    if minimum_year is not None:
-        logger.info('starting search from year {}'.format(minimum_year))
-        dts = pd.date_range('{}-01-01'.format(minimum_year), today,
+    if minimum_mdt is not None:
+        logger.info('starting search from year-month {}'.format(minimum_mdt))
+        dts = pd.date_range('{}-{}-01'.format(minimum_mdt.year, minimum_mdt.month), today,
                             freq='1D')
     else:
         today = pd.Timestamp.utcnow().strftime('%Y-%m-%d')
         dts = pd.date_range('1988-01-01', today, freq='1D')
-    rfns = [get_rinex_filename_from_datetime(station, x) for x in dts.to_list()]
+    dts = [x.strftime('%Y-%m-%d') for x in dts]
+    rfns = [get_rinex_filename_from_datetime(station, x) for x in dts]
     for rfn in rfns:
         filename = rfn + '.Z'
         if (savepath / filename).is_file():
@@ -233,9 +234,13 @@ def check_station_name(name):
         return name
 
 
-def check_year(year):
+def check_dt(dt):
     from datetime import datetime
-    year = int(year)
+    import pandas as pd
+    dt = pd.to_datetime(dt, format='%Y-%m')
+    year = dt.year
+    # month = dt.month
+    doy = dt.dayofyear
     this_year = datetime.today().year
     if year < 1988:
         raise argparse.ArgumentTypeError('{} should be >= 1988'.format(year))
@@ -243,7 +248,7 @@ def check_year(year):
         raise argparse.ArgumentTypeError(
             '{} should be <= {}'.format(
                 year, this_year))
-    return year
+    return dt
 
 
 if __name__ == '__main__':
@@ -251,6 +256,7 @@ if __name__ == '__main__':
     import sys
     from pathlib import Path
     from aux_gps import configure_logger
+    import pandas as pd
     logger = configure_logger(name='rinex_garner')
     check_python_version(min_major=3, min_minor=6)
     parser = argparse.ArgumentParser(description='a command line tool for ' +
@@ -266,8 +272,8 @@ if __name__ == '__main__':
                           choices=['rinex', 'orbital'])
     optional.add_argument('--station', help="GPS station name four lowercase letters,",
                           type=check_station_name)
-    optional.add_argument('--myear', help='minimum year to begin search in garner site.',
-                          type=check_year)
+    optional.add_argument('--mdt', help='minimum datetime (just year-month) to begin search in garner site.',
+                          type=check_dt)
     optional.add_argument('--db', help='database to download rinex files from.',
                           choices=['garner', 'cddis'])
     optional.add_argument('--hr_only', help='download only _hr files...',
@@ -286,32 +292,31 @@ if __name__ == '__main__':
 #    elif args.field is None:
 #        print('field is a required argument, run with -h...')
 #        sys.exit()
+    if args.db is None:
+        args.db = 'garner'
+
+    if args.mdt is None:
+        # define default year-month, a month earlier than today
+        today = pd.Timestamp.today()
+        args.mdt = today - pd.Timedelta(30,unit='day')
+
     if args.mode == 'rinex':
         if args.station is not None:
             path = Path(args.path)
-            if args.myear is not None:
-                single_station_rinex_using_wget(path,
-                                                minimum_year=args.myear,
-                                                station=args.station,
-                                                db=args.db)
-            else:
-                single_station_rinex_using_wget(path,
-                                                station=args.station,
-                                                db=args.db)
+            single_station_rinex_using_wget(path,
+                                            minimum_mdt=args.mdt,
+                                            station=args.station,
+                                            db=args.db)
+
         else:
             raise ValueError('need to specify station!')
     elif args.mode == 'orbital':
         path = Path(args.path)
-        if args.myear is not None:
-            if args.hr_only is not None:
-                all_orbitals_download(path, minimum_year=args.myear,
-                                      hr_only=True)
-            else:
-                all_orbitals_download(path, minimum_year=args.myear)
+        if args.hr_only is not None:
+            all_orbitals_download(path, minimum_dt=args.mdt,
+                                  hr_only=True)
         else:
-            if args.hr_only is not None:
-                all_orbitals_download(path, hr_only=True)
-            else:
-                all_orbitals_download(path)
+            all_orbitals_download(path, minimum_dt=args.mdt)
+
     else:
         raise ValueError('must choose mode!')
