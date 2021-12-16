@@ -262,7 +262,11 @@ def produce_pw_all_stations(ds, axis_path, mda_path):
         # resample temp to 5 mins and reindex to wet delay time:
         t = ds[station].resample(time='5T').ffill().reindex_like(wet.time)
         # fill in NaNs with mean hourly signal:
-        t_new = fill_na_xarray_time_series_with_its_group(t, grp='hour')
+        try:
+            t_new = fill_na_xarray_time_series_with_its_group(t, grp='hour')
+        except ValueError as e:
+            logger.warning('encountered error: {}, skipping {}'.format(e, last_file))
+            continue
         try:
             pwv = produce_GNSS_station_PW(wet, t_new, mda=mda,
                                           model_name='LR', plot=False)
