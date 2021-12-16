@@ -6,6 +6,8 @@ Created on Mon Jun 10 14:33:19 2019
 @author: ziskin
 """
 from PW_paths import work_yuval
+from pathlib import Path
+cwd = Path().cwd()
 # TODO: build curve fit tool with various function model: power, sum of sin ...
 # TODO: no need to build it, use lmfit instead:
 # TODO: check if lmfit accepts- datetimeindex, xarrays and NaNs.
@@ -29,6 +31,12 @@ def replace_char_at_string_position(string, char='s', pos=3):
     else:
         string = string[:pos] + char
     return string
+
+
+def read_converted_G0_stations(path=cwd):
+    import pandas as pd
+    df = pd.read_excel(path/'G0-converted.xlsx', skiprows=11)
+    return df
 
 
 def fill_na_xarray_time_series_with_its_group(xarray, grp='month', time_dim='time',
