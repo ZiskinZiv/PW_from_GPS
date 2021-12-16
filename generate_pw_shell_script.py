@@ -141,7 +141,7 @@ def generate_rinex_reader(station, dates):
     return
 
 
-def generate_rinex_download(station, myear, db):
+def generate_rinex_download(station, mdt, db):
     from pathlib import Path
     lines = []
     cwd = Path().cwd()
@@ -154,21 +154,22 @@ def generate_rinex_download(station, myear, db):
         lines.append('cd {}'.format(station_path))
         if db is None:
             db = 'garner'
-            db_year = 1988
-        elif db == 'cddis':
-            db_year = 1992
+        #     db_year = 1988
+        # elif db == 'cddis':
+        #     db_year = 1992
         line = 'nohup python -u {}/single_rinex_station_download_from_garner.py'.format(pwpath)\
                 + ' --path {} --mode rinex --station {} --db {}'.format(savepath, curr_sta, db)\
-                + ' --myear {}'.format(db_year)
-        if myear is not None:
+                + '&>{}/nohup_{}_download.txt&'.format(pwpath, curr_sta)
+                # + ' --mdt {}'.format(db_year)
+        if mdt is not None:
             line = 'nohup python -u {}/single_rinex_station_download_from_garner.py'.format(pwpath)\
                 + ' --path {} --mode rinex --station {} --db {}'.format(savepath, curr_sta, db)\
-                + ' --myear {} &>{}/nohup_{}_download.txt&'.format(myear, pwpath, curr_sta)
+                + ' --mdt {} &>{}/nohup_{}_download.txt&'.format(mdt, pwpath, curr_sta)
         lines.append(line)
         lines.append('cd {}'.format(pwpath))
         print('station: {}, savepath: {}'.format(curr_sta, savepath))
-        if myear is not None:
-            print('station: {}, myear: {}'.format(curr_sta, myear))
+        if mdt is not None:
+            print('station: {}, datetime: {}'.format(curr_sta, mdt))
         if db is not None:
             print('station: {}, db: {}'.format(curr_sta, db))
     with open(cwd / script_file, 'w') as file:
@@ -257,7 +258,7 @@ def task_switcher(args):
         generate_backup(args.station, args.task, args.daterange)
     else:
         if args.task == 'rinex_download':
-            generate_rinex_download(args.station, args.myear, args.db)
+            generate_rinex_download(args.station, args.mdt, args.db)
         elif args.task == 'rinex_reader':
             generate_rinex_reader(args.station, args.daterange)
         elif args.task == 'drdump' or args.task == 'edit30hr' or args.task == 'run':
@@ -308,7 +309,7 @@ if __name__ == '__main__':
                                      'drdump', 'edit30hr', 'run', 'post'])
     required.add_argument('--station', help="GPS station name four lowercase letters,",
                           nargs='+', type=check_station_name)
-    optional.add_argument('--myear', help='minimum year to begin search in garner site.',
+    optional.add_argument('--mdt', help='minimum year-month to begin search in garner site.',
                           type=check_year)
     optional.add_argument('--daterange', help='add specific date range, can be one day',
                           type=str, nargs=2)
@@ -338,9 +339,8 @@ if __name__ == '__main__':
     if pwpath is None:
         raise ValueError('Put source code folder at $PWCORE')
     # get all the names of israeli gnss stations:
-    isr_stations = pd.read_csv(pwpath / 'stations_approx_loc.txt',
-                               delim_whitespace=True)
-    isr_stations = isr_stations.index.tolist()
+    isr_stations = pd.read_fwf(pwpath / 'stations_approx_loc.txt')
+    isr_stations = isr_stations.iloc[:,0].tolist()
     if workpath is None:
         raise ValueError('Put source code folder at $PWORK')
     # get the names of the stations in workpath:
@@ -352,9 +352,9 @@ if __name__ == '__main__':
     if args.station is None:
         print('station is a required argument, run with -h...')
         sys.exit()
-    if args.station == ['isr1']:
+    if args.station == ['soin']:
         args.station = isr_stations
-    # use ISR stations db for israeli stations and ocean loading also:
+    # use soin (survey of israel network) stations db for israeli stations and ocean loading also:
     if all(a in isr_stations for a in args.station) and args.tree is None and args.staDb is None:
         args.tree = pwpath / 'my_trees/ISROcnld'
         args.staDb = pwpath / 'ALL.staDb'
@@ -368,6 +368,8 @@ if __name__ == '__main__':
     if (get_var('GCORE') is None and not args.delete or get_var('GCORE')
             is None and not args.backup):
         raise ValueError('Run source ~/GipsyX-1.1/rc_GipsyX.sh first !')
+
+
     task_switcher(args)
     # print(parser.format_help())
 #    # print(vars(args))
