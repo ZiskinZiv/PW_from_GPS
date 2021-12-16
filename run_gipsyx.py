@@ -61,7 +61,10 @@ def read_organize_rinex(path, glob_str='*.Z', date_range=None):
         files = slice_task_date_range(files, date_range, 'read_organize_rinex')
     for file_and_path in files:
         filename = file_and_path.as_posix().split('/')[-1][0:12]
-        dt, station = get_timedate_and_station_code_from_rinex(filename)
+        try:
+            dt, station = get_timedate_and_station_code_from_rinex(filename)
+        except ValueError as e:
+            print(filename)
         stations.append(station)
         dts.append(dt)
         rfns.append(filename)
