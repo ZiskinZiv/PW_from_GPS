@@ -392,6 +392,12 @@ def build_df_lat_lon_alt_gnss_stations(gnss_path=GNSS, savepath=None):
     stations_approx = stations_approx.set_index('index')
     df['name'] = stations_approx['name']
     df.sort_index(inplace=True)
+    # add new g0 soi-apn:
+    g0 = pd.read_csv(cwd/'SOI-APN_stations_2020-02-12.csv')
+    g0 = g0[['name', 'lat', 'lon', 'alt', 'X', 'Y', 'Z']]
+    g0 = g0.set_index('name')
+    df = pd.concat([df, g0], axis=0)
+    df = df[~df.index.duplicated(keep='first')]
     if savepath is not None:
         filename = 'israeli_gnss_coords.txt'
         df.to_csv(savepath/filename, sep=' ')
