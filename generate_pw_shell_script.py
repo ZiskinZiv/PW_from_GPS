@@ -269,9 +269,13 @@ def task_switcher(args):
     return
 
 
-def check_year(year):
+def check_dt(dt):
     from datetime import datetime
-    year = int(year)
+    import pandas as pd
+    dt = pd.to_datetime(dt, format='%Y-%m')
+    year = dt.year
+    # month = dt.month
+    doy = dt.dayofyear
     this_year = datetime.today().year
     if year < 1988:
         raise argparse.ArgumentTypeError('{} should be >= 1988'.format(year))
@@ -279,7 +283,8 @@ def check_year(year):
         raise argparse.ArgumentTypeError(
             '{} should be <= {}'.format(
                 year, this_year))
-    return year
+    return dt.strftime('%Y-%m')
+
 
 
 if __name__ == '__main__':
@@ -310,7 +315,7 @@ if __name__ == '__main__':
     required.add_argument('--station', help="GPS station name four lowercase letters,",
                           nargs='+', type=check_station_name)
     optional.add_argument('--mdt', help='minimum year-month to begin search in garner site.',
-                          type=check_year)
+                          type=check_dt)
     optional.add_argument('--daterange', help='add specific date range, can be one day',
                           type=str, nargs=2)
     optional.add_argument(
@@ -338,9 +343,12 @@ if __name__ == '__main__':
     workpath = Path(get_var('PWORK'))
     if pwpath is None:
         raise ValueError('Put source code folder at $PWCORE')
-    # get all the names of israeli gnss stations:
-    isr_stations = pd.read_fwf(pwpath / 'stations_approx_loc.txt')
-    isr_stations = isr_stations.iloc[:,0].tolist()
+    # get all the names of israeli gnss stations (updated):
+    soi_stations_file = path_glob(pwpath, 'SOI-APN_stations*.csv')[-1]
+    df = pd.read_csv(soi_stations_file)
+    #isr_stations = pd.read_fwf(pwpath / 'stations_approx_loc.txt')
+    #isr_stations = isr_stations.iloc[:,0].tolist()
+    isr_stations = df['name'].tolist()
     if workpath is None:
         raise ValueError('Put source code folder at $PWORK')
     # get the names of the stations in workpath:
