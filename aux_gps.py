@@ -33,9 +33,35 @@ def replace_char_at_string_position(string, char='s', pos=3):
     return string
 
 
-def read_converted_G0_stations(path=cwd):
+def read_converted_G0_stations(path=cwd, save=True):
     import pandas as pd
+    import pyproj
+    from pyproj import Transformer
     df = pd.read_excel(path/'G0-converted.xlsx', skiprows=11)
+    cols = ['name', 'lat_d', 'lat_m', 'lat_s', 'lon_d', 'lon_m', 'lon_s', 'alt',
+            'IGI_Y', 'IGI_X', 'ele', 'ant_type', 'ant_dome', 'bpa', 'receiver']
+    df.columns = cols
+    df.drop(df.tail(1).index, inplace=True, axis=0)
+    df['name'] = df['name'].str.lower()
+    # first convert lat, lon in DMS to decimal:
+    # Formula: DEC = (DEG + (MIN * 1/60) + (SEC * 1/60 * 1/60))
+    df['lat'] = df['lat_d'] + df['lat_m']/60 + df['lat_s']/3600
+    df['lon'] = df['lon_d'] + df['lon_m']/60 + df['lon_s']/3600
+    # get coords in X,Y,Z:
+    ecef = pyproj.Proj(proj='geocent', ellps='WGS84', datum='WGS84')
+    lla = pyproj.Proj(proj='latlong', ellps='WGS84', datum='WGS84')
+    transformer = Transformer.from_proj(lla, ecef)
+    X, Y, Z = transformer.transform(df['lon'],df['lat'], df['alt'])
+    df['X'] = X
+    df['Y'] = Y
+    df['Z'] = Z
+    df = df.drop(['IGI_Y','IGI_X','ele', 'lat_m', 'lat_d', 'lat_m',
+                  'lat_s', 'lon_d', 'lon_m', 'lon_s'], axis=1)
+    df = df[['name', 'lat', 'lon','alt', 'X', 'Y', 'Z', 'ant_type', 'ant_dome', 'bpa', 'receiver']]
+    df=df.set_index('name')
+    df.index.name = 'name'
+    if save:
+        df.to_csv(path/'SOI-APN_stations_2020-02-12.csv')
     return df
 
 
