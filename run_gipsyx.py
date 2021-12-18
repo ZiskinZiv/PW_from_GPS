@@ -64,7 +64,8 @@ def read_organize_rinex(path, glob_str='*.Z', date_range=None):
         try:
             dt, station = get_timedate_and_station_code_from_rinex(filename)
         except ValueError as e:
-            print(filename)
+            logger.error('filename {} has a non standard rinex name.'.format(filename))
+            continue
         stations.append(station)
         dts.append(dt)
         rfns.append(filename)
@@ -415,7 +416,11 @@ def run_gd2e_for_one_station(dr_path, staDb, tree, rewrite, date_range=None):
     logger.info('check again in {}'.format(pd.Timestamp.now() + dtt))
     for file_and_path in files:
         rfn = file_and_path.as_posix().split('/')[-1][0:12]
-        dt, station = get_timedate_and_station_code_from_rinex(rfn)
+        try:
+            dt, station = get_timedate_and_station_code_from_rinex(rfn)
+        except ValueError:
+            logger.error('filename {} has a non standard rinex name, skipping.'.format(rfn))
+            continue
         final_tdp = '{}_smoothFinal.tdp'.format(rfn)
         logger.info(
             'processing {} ({}, {}/{})'.format(
