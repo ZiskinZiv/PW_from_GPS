@@ -334,7 +334,10 @@ if __name__ == '__main__':
 #    optional.add_argument('--half', help='a spescific six months to download,\
 #                          e.g, 1 or 2', type=int, choices=[1, 2],
 #                          metavar='1 or 2')
+    optional.add_argument('--last_n_weeks', help='last n weeks for setting date-range, i.e., how many weeks back from today',
+                          type=int)
     parser._action_groups.append(optional)  # added this line
+    # add flag argument for just proccsing the last 2 weeks:
     args = parser.parse_args()
 #    for arg in vars(args):
 #        print(arg, getattr(args, arg))
@@ -377,7 +380,10 @@ if __name__ == '__main__':
             is None and not args.backup):
         raise ValueError('Run source ~/GipsyX-1.1/rc_GipsyX.sh first !')
 
-
+    if args.last_n_weeks is not None:
+        today = pd.Timestamp.today().round('1D')
+        before = today - pd.Timedelta(args.last_n_weeks, unit='w')
+        args.daterange = [before.strftime('%Y-%m-%d'), today.strftime('%Y-%m-%d')]
     task_switcher(args)
     # print(parser.format_help())
 #    # print(vars(args))
