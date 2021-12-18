@@ -2856,43 +2856,56 @@ def smooth_xr(da, dim='time', weights=[0.25, 0.5, 0.25]):
     return da_roll
 
 
-def keep_iqr(da, dim='time', qlow=0.25, qhigh=0.75, k=1.5, drop_with_freq=None,
+def keep_iqr(xarray, dim='time', qlow=0.25, qhigh=0.75, k=1.5, drop_with_freq=None,
              verbose=False):
     """return the data in a dataarray only in the k times the
     Interquartile Range (low, high), drop"""
     from aux_gps import add_attr_to_xr
     from aux_gps import xr_reindex_with_date_range
-    try:
-        quan = da.quantile([qlow, qhigh], dim).values
-    except TypeError:
-        # support for datetime64 dtypes:
-        if da.dtype == '<M8[ns]':
-            quan = da.astype(int).quantile(
-                    [qlow, qhigh], dim).astype('datetime64[ns]').values
-        # support for timedelta64 dtypes:
-        elif da.dtype == '<m8[ns]':
-            quan = da.astype(int).quantile(
-                    [qlow, qhigh], dim).astype('timedelta64[ns]').values
-    low = quan[0]
-    high = quan[1]
-    iqr = high - low
-    lower = low - (iqr * k)
-    higher = high + (iqr * k)
-    before = da.size
-    da = da.where((da < higher) & (da > lower)).dropna(dim)
-    after = da.size
-    if verbose:
-        print('dropped {} outliers from {}.'.format(before-after, da.name))
-    if 'action' in da.attrs:
-        append = True
-    else:
-        append = False
-    add_attr_to_xr(
-        da, 'action', ', kept IQR ({}, {}, {})'.format(
-            qlow, qhigh, k), append)
-    if drop_with_freq is not None:
-        da = xr_reindex_with_date_range(da, freq=drop_with_freq)
-    return da
+    import xarray as xr
+
+    def keep_iqr_da(da, dim=dim, qlow=qlow, qhigh=qhigh, k=k, drop_with_freq=drop_with_freq, verbose=verbose):
+        try:
+            quan = da.quantile([qlow, qhigh], dim).values
+        except TypeError:
+            # support for datetime64 dtypes:
+            if da.dtype == '<M8[ns]':
+                quan = da.astype(int).quantile(
+                        [qlow, qhigh], dim).astype('datetime64[ns]').values
+            # support for timedelta64 dtypes:
+            elif da.dtype == '<m8[ns]':
+                quan = da.astype(int).quantile(
+                        [qlow, qhigh], dim).astype('timedelta64[ns]').values
+        low = quan[0]
+        high = quan[1]
+        iqr = high - low
+        lower = low - (iqr * k)
+        higher = high + (iqr * k)
+        before = da.size
+        da = da.where((da < higher) & (da > lower)).dropna(dim)
+        after = da.size
+        if verbose:
+            print('dropped {} outliers from {}.'.format(before-after, da.name))
+        if 'action' in da.attrs:
+            append = True
+        else:
+            append = False
+        add_attr_to_xr(
+            da, 'action', ', kept IQR ({}, {}, {})'.format(
+                qlow, qhigh, k), append)
+        if drop_with_freq is not None:
+            da = xr_reindex_with_date_range(da, freq=drop_with_freq)
+        return da
+
+    if isinstance(xarray, xr.DataArray):
+        ds = keep_iqr_da(xarray)
+    elif isinstance(xarray, xr.Dataset):
+        dvars = [x for x in xarray]
+        ds = xr.Dataset()
+        ds.attrs = xarray.attrs
+        for dvar in dvars:
+            ds[dvar] = keep_iqr_da(xarray[dvar])
+    return ds
 
 
 def transform_ds_to_lat_lon_alt(ds, coords_name=['X', 'Y', 'Z'],
