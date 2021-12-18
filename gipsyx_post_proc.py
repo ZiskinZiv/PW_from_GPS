@@ -111,7 +111,7 @@ def save_resampled_versions_gispyx_results(load_path, sample,
     path = path_glob(load_path, '*.nc')[0]
     station = path.as_posix().split('/')[-1].split('_')[0]
     # path = GNSS / station / 'gipsyx_solutions'
-    glob = '{}_PPP*.nc'.format(station.upper())
+    glob = '{}_PPP_all_years.nc'.format(station.upper())
     try:
         file = path_glob(load_path, glob_str=glob)[0]
     except FileNotFoundError:
@@ -119,7 +119,7 @@ def save_resampled_versions_gispyx_results(load_path, sample,
             'did not find {} in gipsyx_solutions dir, skipping...'.format(station))
         return
     filename = file.as_posix().split('/')[-1].split('.')[0]
-    years_str = filename.split('_')[-1]
+    years_str = 'all_years'
     ds = xr.open_dataset(file)
     time_dim = list(set(ds.dims))[0]
     logger.info('resampaling {} to {}'.format(station, sample[sample_rate]))
@@ -129,12 +129,11 @@ def save_resampled_versions_gispyx_results(load_path, sample,
         for year in years:
             logger.info('resampling {} of year {}'.format(sample_rate, year))
             dsr = ds.sel({time_dim: year}).resample(
-                {time_dim: sample_rate}, keep_attrs=True, skipna=True).mean(keep_attrs=True)
+                {time_dim: sample_rate}, skipna=True).mean(keep_attrs=True)
             dsr_list.append(dsr)
         dsr = xr.concat(dsr_list, time_dim)
     else:
         dsr = ds.resample({time_dim: sample_rate},
-                          keep_attrs=True,
                           skipna=True).mean(keep_attrs=True)
     new_filename = '_'.join([station.upper(), sample[sample_rate], 'PPP',
                              years_str])
@@ -245,16 +244,16 @@ def read_gipsyx_all_yearly_files(load_path, savepath=None, iqr_k=3.0,
     logger.info('transforming X, Y, Z coords to lat, lon and alt...')
     ds = transform_ds_to_lat_lon_alt(ds, ['X', 'Y', 'Z'], '_error', 'time')
     logger.info('reindexing fields with 5 mins frequency(i.e., inserting NaNs)')
-    ds = xr_reindex_with_date_range(ds, 'time', '5min')
+    ds = xr_reindex_with_date_range(ds, time_dim='time', freq='5min', drop=False)
     ds.attrs['station'] = station
     if plot:
         plot_gipsy_field(ds, None)
     if savepath is not None:
         comp = dict(zlib=True, complevel=9)  # best compression
         encoding = {var: comp for var in ds.data_vars}
-        ymin = ds.time.min().dt.year.item()
-        ymax = ds.time.max().dt.year.item()
-        new_filename = '{}_PPP_{}-{}.nc'.format(station, ymin, ymax)
+        # ymin = ds.time.min().dt.year.item()
+        # ymax = ds.time.max().dt.year.item()
+        new_filename = '{}_PPP_all_years.nc'.format(station)
         ds.to_netcdf(savepath / new_filename, 'w', encoding=encoding)
         logger.info('{} was saved to {}'.format(new_filename, savepath))
     logger.info('Done!')
