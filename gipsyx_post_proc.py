@@ -264,18 +264,22 @@ def post_procces_gipsyx_all_years(load_save_path, plot=False):
     from aux_gps import path_glob
     import logging
     logger = logging.getLogger('gipsyx_post_proccesser')
-    files = sorted(path_glob(load_save_path, '*.nc'))
-    for file in files:
+    files = sorted(path_glob(load_save_path, '*_ppp_raw_*.nc'))
+    for i, file in enumerate(sorted(files)):
         filename = file.as_posix().split('/')[-1]
-        station = file.as_posix().split('/')[-1].split('_')[0]
-        year = file.as_posix().split('/')[-1].split('_')[-1].split('.')[0]
-        if 'raw' not in filename:
-            continue
+        station = filename.split('_')[0]
+        year = filename.split('_')[-1].split('.')[0]
+        # if 'raw' not in filename:
+        #     continue
         new_filename = '{}_ppp_post_{}.nc'.format(station, year)
-        if (load_save_path / new_filename).is_file():
+        dont_skip = (i == len(files)-1) or (i == len(files) -2)
+        if (load_save_path / new_filename).is_file() and not dont_skip:
             logger.warning('{} already exists in {}, skipping...'.format(new_filename,
                                                                          load_save_path))
             continue
+        if dont_skip:
+            logger.info('{} already exists in {}, re-doing it...'.format(new_filename,
+                                                                            load_save_path))
         _ = post_procces_gipsyx_yearly_file(file, savepath=load_save_path,
                                             plot=False)
     return
@@ -655,16 +659,24 @@ def save_yearly_gipsyx_results(path, savepath):
     logger.info('estimated time to completion of run: {}'.format(dtt))
     logger.info('check again in {}'.format(pd.Timestamp.now() + dtt))
     rfns = [x.as_posix().split('/')[-1][0:12] for x in files]
-    dts = [get_timedate_and_station_code_from_rinex(rfn, just_dt=True) for
-           rfn in rfns]
-    _, station = get_timedate_and_station_code_from_rinex(rfns[0])
+    dts = []
+    for rfn in rfns:
+        try:
+            dts.append(get_timedate_and_station_code_from_rinex(rfn, just_dt=True))
+        except ValueError:
+            print(rfn)
+            continue
+    station = rfns[-1][:4]
     years = list(set([dt.year for dt in dts]))
     cnt = {'succ': 0, 'failed': 0}
-    for year in sorted(years):
+    for i, year in enumerate(sorted(years)):
         filename = '{}_ppp_raw_{}.nc'.format(station, year)
-        if (savepath / filename).is_file():
+        dont_skip = (i == len(years)-1) or (i == len(years) -2)
+        if (savepath / filename).is_file() and not dont_skip:
             logger.warning('{} already in {}, skipping...'.format(filename, savepath))
             continue
+        if dont_skip:
+            logger.info('{} already in {}, re-doing it...'.format(filename, savepath))
         _, _ = read_one_station_gipsyx_results(path, savepath, year)
     total = cnt['failed'] + cnt['succ']
     logger.info('Total files: {}, success: {}, failed: {}'.format(
@@ -690,7 +702,11 @@ def read_one_station_gipsyx_results(path, savepath=None,
     files = path_glob(path, '*.tdp')
     for tdp_file in files:
         rfn = tdp_file.as_posix().split('/')[-1][0:12]
-        dt, station = get_timedate_and_station_code_from_rinex(rfn)
+        try:
+            dt, station = get_timedate_and_station_code_from_rinex(rfn)
+        except ValueError:
+            print(rfn)
+            continue
         if year is not None:
             if dt.year != year:
                 continue
@@ -901,7 +917,9 @@ if __name__ == '__main__':
     else:
         iqr_k = args.iqr_k
     read_gipsyx_all_yearly_files(args.savepath, args.savepath, iqr_k, False)
-    sample = {'1H': 'hourly', '3H': '3hourly', 'D': 'Daily', 'W': 'weekly',
-              'MS': 'monthly'}
-    save_all_resampled_versions_gipsyx(args.savepath, sample)
+    # i've removed the resampling procces since it takes a lot of time,
+    # better that the user downloads the PPP with 5min and resample it on his machine
+    # sample = {'1H': 'hourly', '3H': '3hourly', 'D': 'Daily', 'W': 'weekly',
+    #           'MS': 'monthly'}
+    # save_all_resampled_versions_gipsyx(args.savepath, sample)
     logger.info('Done post proccessing station {}.'.format(station))
