@@ -672,7 +672,8 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
                                               savepath=ims_path,
                                               network='soi-apn',
                                               axis_path=axis_path,
-                                              ds_td=None):
+                                              ds_td=None,
+                                              concat_all_TD=True):
     """interpolate the IMS 10 mins field(e.g., TD) to the location
     of the GNSS sites in ISRAEL(use dt=None for this). other dt is treated
     as datetime str and will give the "snapshot" for the field for just this
@@ -693,10 +694,10 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
         if method == 'okrig':
             if variogram is not None:
                 model = Krige(method='ordinary', variogram_model=variogram,
-                              verbose=verbose)
+                              verbose=False)
             else:
                 model = Krige(method='ordinary', variogram_model='linear',
-                              verbose=verbose)
+                              verbose=False)
         elif method == 'knn':
             if n_neighbors is None:
                 model = KNeighborsRegressor(n_neighbors=5, weights='distance')
@@ -769,6 +770,8 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
             header=0)
     elif network == 'axis':
         df = read_axis_stations(path=axis_path)
+    if verbose:
+        print('{} network selected.'.format(network))
     # use station=None to pick all stations, otherwise pick one...
     if stations is not None:
         if isinstance(stations, str):
@@ -861,6 +864,14 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
         # fname = gis_path / 'ne_10m_admin_0_sovereignty.shp'
         # fname = gis_path / 'gadm36_ISR_0.shp'
         # ax = plt.axes(projection=ccrs.PlateCarree())
+        da = xr.DataArray(interpolated, dims='station')
+        da['station'] = df.index
+        # da = da.expand_dims('time')
+        da['time'] = pd.to_datetime(dt)
+        # da = da.sortby('time')
+        ds = da.to_dataset(dim='station')
+        for da in ds:
+            ds[da].attrs['units'] = 'degC'
         if plot:
             fig, ax = plt.subplots(figsize=(6, 10))
             # shdf = salem.read_shapefile(salem.get_demo_file('world_borders.shp'))
@@ -967,11 +978,16 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
             for da in ds:
                 ds[da].attrs['units'] = 'degC'
             if savepath is not None:
-                filename = 'GNSS_TD_{}.nc'.format(year)
+                if network == 'axis':
+                    filename = 'AXIS_TD_{}.nc'.format(year)
+                elif network == 'soi-apn':
+                    filename = 'SOI_TD_{}.nc'.format(year)
+                else:
+                    filename = 'GNSS_TD_{}.nc'.format(year)
                 ds.to_netcdf(savepath / filename, 'w')
                 print('saved {} to {}'.format(filename, savepath))
             # return
-        if savepath is not None:
+        if concat_all_TD and savepath is not None:
             print('concatenating all TD years...')
             concat_GNSS_TD(savepath)
 #    t1 = time.time()
