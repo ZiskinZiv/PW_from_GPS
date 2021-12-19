@@ -208,7 +208,7 @@ if __name__ == '__main__':
     if args.station is None:
         print('station is a required argument, run with -h...')
         sys.exit()
-    if args.station == ['isr1']:
+    if args.station == ['soin']:
         args.station = isr_stations
     # use ISR stations db for israeli stations and ocean loading also:
 #    if all(a in isr_stations for a in args.station):
