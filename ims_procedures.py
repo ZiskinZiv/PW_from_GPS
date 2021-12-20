@@ -45,6 +45,27 @@ ims_units_dict = {
     'G': ''}
 
 
+def save_IMS_long_term_time_series_station_stats(path=ims_10mins_path,
+                                                 channel_name='TD', time_dim='time'):
+    from aux_gps import path_glob
+    import xarray as xr
+    from aux_gps import save_ncfile
+    files = path_glob(path, '*_{}_10mins.nc'.format(channel_name))
+    dsl = [xr.open_dataarray(x) for x in files]
+    das = []
+    for ds in dsl:
+        df = ds.to_dataframe()
+        station = ds.name
+        df['month'] = df.index.month
+        df['hour'] = df.index.hour
+        da = df.groupby(['month', 'hour']).mean().to_xarray()
+        da[station].attrs = ds.attrs
+        das.append(da)
+    ds = xr.merge(das)
+    save_ncfile(ds, path, 'IMS_{}_month_hour_stats.nc'.format(channel_name))
+    return ds
+
+
 def save_daily_IMS_params_at_GNSS_loc(ims_path=ims_path,
                                       param_name='WS', stations=[x for x in gnss_ims_dict.keys()]):
     import xarray as xr
@@ -808,7 +829,7 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
     T_alts = T_geo['station_alt'].values
     T_lons = T_geo['station_lon'].values
     T_lats = T_geo['station_lat'].values
-    
+
     print('loading IMS_TD of israeli stations 10mins freq..')
     # transform to dataframe and add coords data to df:
     tdf = ds.to_dataframe()[[x for x in T_geo.index]]
