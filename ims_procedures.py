@@ -58,19 +58,18 @@ def save_IMS_long_term_time_series_station_stats(path=ims_10mins_path, min_year=
         station = ds.name
         df['month'] = df.index.month
         df['hour'] = df.index.hour
-        dff = df.groupby(['month', 'hour']).transform('mean')
-        dff = dff.loc[min_year:]
-        if dff.empty:
-            continue
-        da = dff.to_xarray()
+        da = df.groupby(['month', 'hour']).mean().to_xarray()
+        # dff = df.groupby(['month', 'hour']).transform('mean')
+        # dff = dff.loc[min_year:]
+        # if dff.empty:
+        #     continue
+        # da = dff.to_xarray()
         da[station].attrs = ds.attrs
         das.append(da)
     ds = xr.merge(das)
     save_ncfile(ds, path, 'IMS_{}_month_hour_stats.nc'.format(channel_name))
     return ds
 
-def fillna_IMS_time_series_using_long_term_stats(path=ims_10mins_path, channel_name='TD', time_dim='time'):
-    return
 
 def save_daily_IMS_params_at_GNSS_loc(ims_path=ims_path,
                                       param_name='WS', stations=[x for x in gnss_ims_dict.keys()]):
