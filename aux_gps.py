@@ -33,6 +33,31 @@ def replace_char_at_string_position(string, char='s', pos=3):
     return string
 
 
+def fillna_xarray_da_time_series_with_long_term_stats(da, da_stats, time_dim='time'):
+    """da is a time series xarray - only dataarray for now, and 
+    da_stats is a two or more dimensional time series of statistics,
+    e.g., (month, hour)"""
+    df_s = da_stats.to_dataframe()
+    # extract groups from df_s and get them from datetime index in df:
+    groups = [x for x in df_s.index.names]
+    # also copy attrs from old da to new:
+    attrs = da.attrs
+    name = da.name
+    df = da.to_dataframe()
+    for group in groups:
+        df[group] = getattr(df.index, group)
+    # the key part is to reset the index and set the new index
+    # as the same multiindex of df_s (e.g., hour-month):
+    df = df.reset_index()
+    df = df.set_index(groups)
+    df['stats'] = df_s[name]
+    df = df.set_index(time_dim)
+    df[name] = df[name].fillna(df['stats'])
+    da_filled = df[name].to_xarray()
+    da_filled.attrs = attrs
+    return da_filled
+
+
 def read_converted_G0_stations(path=cwd, save=True):
     import pandas as pd
     import pyproj
