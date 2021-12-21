@@ -641,9 +641,9 @@ if __name__ == '__main__':
                           choices=channels)
     required.add_argument('--delete', action='store_true')  # its False
     # don't need to specify folder unless files were moved:
-    required.add_argument('--dem_path', help="a full path to DEM data", const=dem_path)
-    required.add_argument('--gis_path', help="a full path to GIS data", const=dem_path)
-    required.add_argument('--mda_path', help="a full path to mda model (ts-tm)", const=work_yuval)
+    required.add_argument('--dem_path', help="a full path to DEM data", const=dem_path, nargs='?', type=check_path)
+    required.add_argument('--gis_path', help="a full path to GIS data", const=gis_path, nargs='?', type=check_path)
+    required.add_argument('--mda_path', help="a full path to mda model (ts-tm)", const=work_yuval, nargs='?', type=check_path)
 
     #optional.add_argument('--station', nargs='+',
     #                      help='GPS station name, 4 UPPERCASE letters',
@@ -658,6 +658,7 @@ if __name__ == '__main__':
                           nargs='+')
     parser._action_groups.append(optional)  # added this line
     args = parser.parse_args()
+    print(args)
     # print(parser.format_help())
 #    # print(vars(args))
     if args.savepath is None:
