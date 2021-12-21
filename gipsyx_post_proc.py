@@ -271,7 +271,7 @@ def post_procces_gipsyx_all_years(load_save_path, plot=False):
         year = filename.split('_')[-1].split('.')[0]
         # if 'raw' not in filename:
         #     continue
-        new_filename = '{}_ppp_post_{}.nc'.format(station, year)
+        new_filename = '{}_ppp_post_{}.nc'.format(station.upper(), year)
         dont_skip = (i == len(files)-1) or (i == len(files) -2)
         if (load_save_path / new_filename).is_file() and not dont_skip:
             logger.warning('{} already exists in {}, skipping...'.format(new_filename,
@@ -363,7 +363,7 @@ def post_procces_gipsyx_yearly_file(path_file, savepath=None, plot=False,
     if savepath is not None:
         comp = dict(zlib=True, complevel=9)  # best compression
         encoding = {var: comp for var in ds.data_vars}
-        new_filename = '{}_ppp_post_{}.nc'.format(station, year)
+        new_filename = '{}_ppp_post_{}.nc'.format(station.upper(), year)
         ds.to_netcdf(savepath / new_filename, 'w', encoding=encoding)
         logger.info('{} was saved to {}'.format(new_filename, savepath))
     return ds
@@ -668,14 +668,15 @@ def save_yearly_gipsyx_results(path, savepath):
             continue
     station = rfns[-1][:4]
     years = list(set([dt.year for dt in dts]))
+    logger.info('Found years of solved PPP: {}.'.format(years))
     cnt = {'succ': 0, 'failed': 0}
     for i, year in enumerate(sorted(years)):
-        filename = '{}_ppp_raw_{}.nc'.format(station, year)
-        dont_skip = (i == len(years)-1) or (i == len(years) -2)
-        if (savepath / filename).is_file() and not dont_skip:
+        filename = '{}_ppp_raw_{}.nc'.format(station.upper(), year)
+        skip_year = i <= len(years)-3
+        if (savepath / filename).is_file() and skip_year:
             logger.warning('{} already in {}, skipping...'.format(filename, savepath))
             continue
-        if dont_skip:
+        if not skip_year:
             logger.info('{} already in {}, re-doing it...'.format(filename, savepath))
         _, _ = read_one_station_gipsyx_results(path, savepath, year)
     total = cnt['failed'] + cnt['succ']
@@ -758,7 +759,7 @@ def read_one_station_gipsyx_results(path, savepath=None,
     if savepath is not None:
         comp = dict(zlib=True, complevel=9)  # best compression
         encoding = {var: comp for var in ds.data_vars}
-        filename = '{}_ppp_raw_{}.nc'.format(station, year)
+        filename = '{}_ppp_raw_{}.nc'.format(station.upper(), year)
         ds.to_netcdf(savepath / filename, 'w', encoding=encoding)
         logger.info('{} was saved to {}'.format(filename, savepath))
     return ds, errors
