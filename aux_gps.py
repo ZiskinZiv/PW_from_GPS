@@ -34,9 +34,12 @@ def replace_char_at_string_position(string, char='s', pos=3):
 
 
 def fillna_xarray_da_time_series_with_long_term_stats(da, da_stats, time_dim='time'):
-    """da is a time series xarray - only dataarray for now, and 
+    """da is a time series xarray - only dataarray for now, and
     da_stats is a two or more dimensional time series of statistics,
     e.g., (month, hour)"""
+    if da.name not in da_stats:
+        print('{} not in stats'.format(da.name))
+        return None
     df_s = da_stats.to_dataframe()
     # extract groups from df_s and get them from datetime index in df:
     groups = [x for x in df_s.index.names]
