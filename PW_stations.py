@@ -45,7 +45,7 @@ PW_stations_path = work_yuval / '1minute'
 # stations = pd.read_csv('All_gps_stations.txt', header=0, delim_whitespace=True,
 #                        index_col='name')
 logs_path = geo_path / 'Python_Projects/PW_from_GPS/log_files'
-GNSS = work_yuval / 'GNSS_stations'
+GNSS_path = work_yuval / 'GNSS_stations'
 cwd = Path().cwd()
 gnss_sound_stations_dict = {'acor': '08001', 'mall': '08302'}
 
@@ -352,7 +352,7 @@ def plug_in_approx_loc_gnss_stations(log_path=logs_path, file_path=cwd):
     return
 
 
-def build_df_lat_lon_alt_gnss_stations(gnss_path=GNSS, savepath=None):
+def build_df_lat_lon_alt_gnss_stations(gnss_path=GNSS_path, savepath=None):
     from aux_gps import path_glob
     import pandas as pd
     import pyproj
@@ -1725,15 +1725,19 @@ def produce_GNSS_station_PW(zwd_thresh, Ts, mda=None,
         PW.name = zwd_name
         PW.attrs.update(zwd_thresh.attrs)
         PW.attrs['units'] = 'mm'
-        PW.attrs['long_name'] = 'Precipitable water error'
+        PW.attrs['long_name'] = 'Precipitable water vapor error'
+        PW.attrs['short_name'] = 'PWV error'
     else:
         PW = k * zwd_thresh
         PW.name = zwd_name
         PW.attrs.update(zwd_thresh.attrs)
         PW.attrs['units'] = 'mm'
-        PW.attrs['long_name'] = 'Precipitable water'
+        PW.attrs['long_name'] = 'Precipitable water vapor'
+        PW.attrs['short_name'] = 'PWV'
     PW = PW.sortby('time')
     PW = xr_reindex_with_date_range(PW, freq='5T')
+    if 'full_name' in PW.attrs:
+        PW.attrs.pop('full_name')
     if plot:
         PW.plot()
     return PW
@@ -4022,10 +4026,34 @@ def combine_PPP_stations(zwd, name, stations, thresh=None,
     return combined_station
 
 
-def load_gipsyx_results(station='tela', sample_rate=None,
+def load_gipsyx_PWV_time_series(station='tela', gnss_path=GNSS_path):
+    from aux_gps import path_glob
+    import xarray as xr
+    if station is not None:
+        path = gnss_path / station / 'gipsyx_solutions'
+        pwv_file = path / '{}_PWV_all_years.nc'.format(station.upper())
+        ds = xr.load_dataset(pwv_file)
+    else:
+        st_paths = path_glob(gnss_path, '*/')
+        dsl = []
+        for st_path in st_paths:
+            station = st_path.as_posix().split('/')[-1]
+            pwv_file = st_path /'gipsyx_solutions/{}_PWV_all_years.nc'.format(station.upper())
+            try:
+                ds = xr.open_dataset(pwv_file)
+                dsl.append(ds)
+                print('Loading PWV for {} station.'.format(station))
+            except FileNotFoundError:
+                print('No PWV in {} was found for {} station.'.format(st_path, station))
+                pass
+        ds = xr.merge(dsl)
+    return ds
+
+
+
+def load_gipsyx_results(station='tela', gnss_path=GNSS_path, sample_rate=None,
                         plot_fields=['WetZ'], field_all=None):
-    """load and plot gipsyx solutions for station, to choose sample rate
-    different than 5 mins choose: 'H', 'W' or 'MS', use field_all to select
+    """load and plot gipsyx solutions for station, sample_rate is disabled for now, use field_all to select
     one field (e.g., WetZ) and get a dataset with all stations with
     the one field."""
     from aux_gps import path_glob
@@ -4035,8 +4063,50 @@ def load_gipsyx_results(station='tela', sample_rate=None,
     from pathlib import Path
     import matplotlib.pyplot as plt
 
-    def load_one_results_ds(station, sample_rate, plot_fields=None):
-        path = GNSS / station / 'gipsyx_solutions'
+    # def load_one_results_ds(station, sample_rate=None, plot_fields=None, kind='ppp+pwv'):
+    #     path = GNSS / station / 'gipsyx_solutions'
+    #     ppp_file = path / '{}_PPP_all_years.nc'.format(station.upper())
+    #     pwv_file = path / '{}_PWV_all_years.nc'.format(station.upper())
+    #     ppp_found = True
+    #     pwv_found = True
+    #     if not ppp_file.is_file():
+    #         ppp_found = False
+    #     if not pwv_file.is_file():
+    #         pwv_found = False
+    #     if kind == 'ppp':
+    #         if not ppp_found:
+    #             print('{} not found.'.format(ppp_file))
+    #             return None
+    #         ds = xr.open_dataset(ppp_file)
+    #         print('loaded PPP from {} station.'.format(station))
+    #     elif kind == 'pwv':
+    #         if not pwv_found:
+    #             print('{} not found.'.format(pwv_file))
+    #             return None
+    #         ds = xr.open_dataset(pwv_file)
+    #         print('loaded PWV from {} station.'.format(station))
+    #     elif kind == 'ppp+pwv':
+    #         dsl = []
+    #         try:
+    #             ds_pwv = xr.open_dataset(pwv_file)
+    #             dsl.append(ds_pwv)
+    #             print('loaded PWV from {} station.'.format(station))
+    #         except FileNotFoundError:
+    #             print('{} not found.'.format(pwv_file))
+    #             pass
+    #         try:
+    #             ds_ppp = xr.open_dataset(ppp_file)
+    #             dsl.append(ds_ppp)
+    #             print('loaded PPP from {} station.'.format(station))
+    #         except FileNotFoundError:
+    #             print('{} not found.'.format(ppp_file))
+    #             pass
+    #         ds = xr.merge(dsl)
+    #         print('loaded PWV from {} station.'.format(station))
+    #     return ds
+
+    def load_one_results_ds(station, sample_rate, plot_fields=None, gnss_path=GNSS_path):
+        path = gnss_path / station / 'gipsyx_solutions'
         if sample_rate is None:
             glob = '{}_PPP*.nc'.format(station.upper())
             try:
@@ -4054,7 +4124,7 @@ def load_gipsyx_results(station='tela', sample_rate=None,
                 return None
         ds = xr.open_dataset(file)
         print('loaded {} station with a {} sample rate'.format(station,
-                                                               sample_rate))
+                                                                sample_rate))
         if plot_fields is not None and plot_fields != 'all':
             fg = plot_tmseries_xarray(ds, plot_fields, points=points)
             try:
@@ -4073,7 +4143,7 @@ def load_gipsyx_results(station='tela', sample_rate=None,
                 fg.fig.subplots_adjust(top=0.93)
         elif plot_fields == 'all':
             fg = plot_tmseries_xarray(ds, ['GradNorth', 'GradEast', 'WetZ',
-                                           'lat', 'lon', 'alt'], points=points)
+                                            'lat', 'lon', 'alt'], points=points)
             fg.fig.suptitle(
                 'Station: {}'.format(
                     ds.attrs['station']),
@@ -4088,7 +4158,7 @@ def load_gipsyx_results(station='tela', sample_rate=None,
     else:
         points = True
     if field_all is None:
-        ds = load_one_results_ds(station, sample_rate, plot_fields)
+        ds = load_one_results_ds(station, sample_rate, plot_fields=None)
     else:
         print('Loading field {} for all stations'.format(field_all))
         cwd = Path().cwd()
@@ -4098,7 +4168,7 @@ def load_gipsyx_results(station='tela', sample_rate=None,
         da_list = []
         stations_to_put = []
         for sta in stations:
-            da = load_one_results_ds(sta, sample_rate, plot_fields=None)
+            da = load_one_results_ds(sta, sample_rate=None, plot_fields=None)
             if da is not None:
                 da = da[field_all]
                 da.name = sta
