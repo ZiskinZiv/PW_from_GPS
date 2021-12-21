@@ -2,13 +2,145 @@
 # -*- coding: utf-8 -*-
 """
 Created on Fri Dec 18 10:12:42 2020
-
+This is the main module for kriging interpolation of PWV maps
+1)
 @author: shlomi
 """
 from PW_paths import work_yuval
+from pathlib import Path
 ims_path = work_yuval / 'IMS_T'
 gis_path = work_yuval / 'gis'
 awd_path = work_yuval/'AW3D30'
+gnss_path = work_yuval/'GNSS_stations'
+cwd = Path().cwd()
+
+def load_PWV_for_all_stations(gnss_path=gnss_path):
+    from PW_stations import load_gipsyx_PWV_time_series
+    pwv_ds = load_gipsyx_PWV_time_series(station=None, gnss_path=gnss_path)
+    pwv_ds = pwv_ds[[x for x in pwv_ds if '_error' not in x]]
+    return pwv_ds
+
+
+def load_geo_stations_dataframe(path=cwd, filename='israeli_gnss_coords.txt'):
+    import pandas as pd
+    geo_df = pd.read_csv(path/filename, delim_whitespace=True)
+    return geo_df
+
+
+def produce_2D_PWV_map(pwv_ds, geo_df, dt='2018-02-12T12:00:00', dem_path=awd_path, H_constant=None, ppd=50):
+    """
+
+
+    Parameters
+    ----------
+    pwv_ds : TYPE
+        DESCRIPTION.
+    geo_df : TYPE
+        DESCRIPTION.
+    dt : Str, optional
+        Datetime in str, The default is '2018-02-12T12:00:00'.
+    dem_path : TYPE, optional
+        DESCRIPTION. The default is awd_path.
+    H_constant : Float, optional
+        PWV scale height in meters. The default is None is determined by the current state of the PWV stations.
+    ppd : Int (range of 50-500 is acceptable) optional
+        Points per degree (lat/lon) The default is 50.
+
+    Returns
+    -------
+    df_inter : TYPE
+        DESCRIPTION.
+
+    """
+    import pandas as pd
+    dt = pd.to_datetime(dt)
+    print('interpolating on datetime: {}.'.format(dt))
+    hdf = slice_var_ds_at_dt_and_convert_to_dataframe(pwv_ds, geo_df,
+                                                      dt=dt.strftime('%Y-%m-%dT%H:%M:%S'))
+    if H_constant is not None:
+        H = H_constant
+    else:
+        H = get_var_lapse_rate(hdf, model='LR', plot=False)
+    print('scale height is: {} meters.'.format(H))
+    new_hdf = apply_lapse_rate_change(hdf, H)
+    df_inter = interpolate_at_one_dt(new_hdf, H, predict_df=None,
+                                     dem_path=dem_path, ppd=ppd)
+    df_inter.name = 'PWV'
+    df_inter.attrs['datetime'] = dt
+    df_inter.attrs['scale_height'] = H.round(1)
+    df_inter.attrs['scale_height_units'] = 'meters'
+    df_inter.attrs['formula'] = 'PWV@surface * exp(-Height/H)'
+    df_inter.attrs['units'] = 'mm'
+    df_inter.attrs['long_name'] = 'Precipitable Water Vapor'
+    df, rmse = compare_stations_PWV_to_interpolated_map(df_inter, hdf)
+    df_inter.attrs['RMSE'] = rmse
+    return df_inter, df
+
+
+def compare_stations_PWV_to_interpolated_map(df_inter, hdf, verbose=False):
+    import numpy as np
+    # import pandas as pd
+    from sklearn.metrics import mean_squared_error
+    df = hdf.copy()
+    df.loc[:, 'datetime'] = [hdf.columns[0] for x in range(len(df))]
+    trues = []
+    preds = []
+    df.columns = ['pwv', 'lat', 'lon', 'datetime']
+    for ind, row in df.iterrows():
+        true_pwv = row['pwv']
+        pred_pwv = df_inter.sel(lat=row['lat'], lon=row['lon'], method='nearest').values
+        trues.append(true_pwv)
+        preds.append(pred_pwv)
+    df['pred'] = preds
+    rmse = np.sqrt(mean_squared_error(trues, preds))
+    if verbose:
+        print('RMSE: ',rmse)
+    df = df[['pwv', 'pred', 'lat', 'lon', 'datetime']]
+    return df, rmse
+
+
+def plot_2D_PWV_map(df_inter, gis_path=gis_path, fontsize=16, cmap='jet_r'):
+    from aux_gps import geo_annotate
+    from PW_from_gps_figures import plot_israel_map
+    import cartopy.crs as ccrs
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    sns.set_style('whitegrid')
+    sns.set_style('ticks')
+    fig = plt.figure(figsize=(7, 20))
+    ax_map = fig.add_subplot(projection=ccrs.PlateCarree())  # plt.subplot(122)
+    extent = [34, 36.0, 29.5, 33.5]
+    ax_map.set_extent(extent)
+    # ax_map = plot_israel_map(
+        # gis_path=gis_path, ax=ax_map, ticklabelsize=fontsize)
+    # overlay with dem data:
+    cmap = plt.get_cmap(cmap, 41)
+    df_inter = df_inter.sel(lat=slice(29.5, 33.5), lon=slice(34, 36.0))
+    fg = df_inter.plot.imshow(ax=ax_map, alpha=0.5, cmap=cmap,
+                              vmin=df_inter.min(), vmax=df_inter.max(), add_colorbar=False)
+#    scale_bar(ax_map, 50)
+    cbar_kwargs = {'fraction': 0.1, 'aspect': 50, 'pad': 0.03}
+    cb = plt.colorbar(fg, **cbar_kwargs)
+    cb.set_label(label='PWV [mm]',
+                 size=fontsize, weight='normal')
+    cb.ax.tick_params(labelsize=fontsize)
+    ax_map.set_xlabel('')
+    ax_map.set_ylabel('')
+    # ax_map.xaxis.set_major_locator(ticker.MaxNLocator(2))
+    # ax_map.yaxis.set_major_locator(ticker.MaxNLocator(5))
+    # ax_map.yaxis.set_major_formatter(lat_formatter)
+    # ax_map.xaxis.set_major_formatter(lon_formatter)
+    # ax_map.gridlines(draw_labels=True, dms=False, x_inline=False,
+    #                  y_inline=False, xformatter=lon_formatter, yformatter=lat_formatter,
+    #                  xlocs=ticker.MaxNLocator(2), ylocs=ticker.MaxNLocator(5))
+    # fig.canvas.draw()
+    ax_map.set_xticks([34, 35, 36])
+    ax_map.set_yticks([29.5, 30, 30.5, 31, 31.5, 32, 32.5, 33.0, 33.5])
+    ax_map.tick_params(top=True, bottom=True, left=True, right=True,
+                       direction='out', labelsize=fontsize)
+    ax_map.set_title(df_inter.attrs['datetime'], fontsize=fontsize)
+    fg.figure.tight_layout()
+    return fg
 
 
 def interpolate_var_ds_at_multiple_dts(var_ds, geo_var_df, predict_df,
@@ -40,7 +172,7 @@ def interpolate_var_ds_at_multiple_dts(var_ds, geo_var_df, predict_df,
     df.index.name = 'time'
     return df
 
-        
+
 def slice_var_ds_at_dt_and_convert_to_dataframe(var_ds, df, dt='2018-04-15T22:00:00'):
     """
     slice the var dataset (PWV) with specific datetime and add lat, lon and alt from df
