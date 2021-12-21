@@ -3,7 +3,7 @@
 """
 Created on Tue Jun 25 14:29:10 2019
 UPDATING is working well.
-Will add a post-proccessing procedures for dividing for years, NaN filling and 
+Will add a post-proccessing procedures for dividing for years, NaN filling and
 PWV production.
 @author: ziskin
 Another script is ims_stations_download and is for real-time e.g., AXIS
@@ -423,23 +423,23 @@ def download_all_10mins_ims(savepath, channel_name='TD'):
                                                                              savepath))
     return
 
-def merge_stations_and_divide_to_yearly_files(savepath, channel_name='TD',
-                                              years=None):
+def merge_stations_and_divide_to_yearly_monthly_files(savepath, channel_name='TD',
+                                                      year_months=None):
     import xarray as xr
     import logging
-    import numpy as np
+    # import numpy as np
     import os
     from aux_gps import get_unique_index
-    
-    def save_yearly_file(ds_year, year_savepath, filename):
+
+    def save_yearly_monthly_file(ds_ym, month_savepath, filename):
         comp = dict(zlib=True, complevel=9)  # best compression
-        encoding = {var: comp for var in ds_year.data_vars}
-        logger.info('saving to {} to {}'.format(filename, year_savepath))
+        encoding = {var: comp for var in ds_ym.data_vars}
+        logger.info('saving to {} to {}'.format(filename, month_savepath))
         try:
-            ds_year.to_netcdf(year_savepath / filename, 'w', encoding=encoding)
+            ds_ym.to_netcdf(month_savepath / filename, 'w', encoding=encoding)
         except PermissionError:
-            (year_savepath / filename).unlink()
-            ds_year.to_netcdf(year_savepath / filename, 'w', encoding=encoding)
+            (month_savepath / filename).unlink()
+            ds_ym.to_netcdf(month_savepath / filename, 'w', encoding=encoding)
 
     logger = logging.getLogger('ims_downloader')
     glob = '*_{}_10mins.nc'.format(channel_name)
@@ -447,92 +447,109 @@ def merge_stations_and_divide_to_yearly_files(savepath, channel_name='TD',
     files = [x for x in files if x.is_file()]
     if files:
         time_dim = list(set(xr.open_dataarray(files[0]).dims))[0]
-    logger.info('Reading all {} stations, merging them and saving as yearly files.'.format(len(files)))
+    logger.info('Reading all {} stations, merging them and saving as monthly files.'.format(len(files)))
     # create year savepath:
-    year_savepath = savepath / 'yearly'
-    if not year_savepath.is_dir():
-        os.mkdir(year_savepath)
-        logger.info('created {}.'.format(year_savepath))
+    month_savepath = savepath / 'monthly'
+    if not month_savepath.is_dir():
+        os.mkdir(month_savepath)
+        logger.info('created {}.'.format(month_savepath))
     else:
-        logger.info('{} already exist.'.format(year_savepath))
+        logger.info('{} already exist.'.format(month_savepath))
     # load stations list:
     dsl = [xr.open_dataset(x) for x in files]
     dsl = [x.sortby(time_dim) for x in dsl]
-    if years is None:
+    if year_months is None:
         # this merge over the years is very slow, run it only once:
         # ds = xr.merge(dsl)
         yr_min = min([x[time_dim].min().dt.year.item() for x in dsl])
+        mnth_min = min([x[time_dim].min().dt.month.item() for x in dsl])
         yr_max = max([x[time_dim].max().dt.year.item() for x in dsl])
-        years = np.arange(yr_min, yr_max + 1)
+        mnth_max = max([x[time_dim].max().dt.month.item() for x in dsl])
+        start = pd.to_datetime('{}-{}'.format(yr_min, mnth_min), format='%Y-%m')
+        end = pd.to_datetime('{}-{}'.format(yr_max, mnth_max), format='%Y-%m')
+        # years = np.arange(yr_min, yr_max + 1)
+        dts = pd.date_range(start=start, end=end, freq='m')
+        dts=[x.strftime('%Y-%m') for x in dts]
         logger.info('Found {}-{} as years.'.format(yr_min, yr_max))
-        for year in years:
-            ds_year_list = []
+        for dt in dts:
+            ds_dt_list = []
             for ds in dsl:
                 try:
-                    ds_year = ds.sel({time_dim: str(year)})
-                    ds_year.load()
-                    ds_year = get_unique_index(ds_year, dim=time_dim)
+                    ds_ym = ds.sel({time_dim: dt})
+                    ds_ym = get_unique_index(ds_ym, dim=time_dim)
                 except KeyError:
                     continue
-                ds_year_list.append(ds_year)
+                ds_dt_list.append(ds_ym)
             # ds_year = [x.load() for x in ds_year]
-            ds_year = xr.merge(ds_year_list)
+            ds_yms = xr.merge(ds_dt_list)
             # ds_year = ds.sel({time_dim: str(year)})
-            filename = 'IMS_ALL_{}_{}.nc'.format(channel_name, year)
-            save_yearly_file(ds_year, year_savepath, filename)
+            filename = 'IMS_ALL_{}_{}.nc'.format(channel_name, dt)
+            save_yearly_monthly_file(ds_yms, month_savepath, filename)
     else:
-        logger.info('Using user supplied years {}.'.format(years))
-        for year in years:
-            ds_year_list = []
+        logger.info('Using user supplied dts {}.'.format(year_months))
+        for dt in year_months:
+            ds_dt_list = []
             for ds in dsl:
                 try:
-                    ds_year = ds.sel({time_dim: str(year)})
-                    ds_year.load()
-                    ds_year = get_unique_index(ds_year, dim=time_dim)
+                    ds_ym = ds.sel({time_dim: dt})
+                    ds_ym = get_unique_index(ds_ym, dim=time_dim)
                 except KeyError:
                     continue
-                ds_year_list.append(ds_year)
+                ds_dt_list.append(ds_ym)
             # ds_year = [x.load() for x in ds_year]
-            ds_year = xr.merge(ds_year_list)
+            ds_yms = xr.merge(ds_dt_list)
             # ds_year = ds.sel({time_dim: str(year)})
-            filename = 'IMS_ALL_{}_{}.nc'.format(channel_name, year)
-            save_yearly_file(ds_year, year_savepath, filename)
+            filename = 'IMS_ALL_{}_{}.nc'.format(channel_name, dt)
+            save_yearly_monthly_file(ds_yms, month_savepath, filename)
     logger.info('Done saving IMS yearly {} files.'.format(channel_name))
 
 
-def post_process_ims_stations(year_savepath, gis_path, dem_path,
-                              axis_path, years=None):
+def post_process_ims_stations(month_savepath, gis_path, dem_path,
+                              stats_path, year_months=None):
     """fill TD with hourly mean if NaN and smooth, then fill in station_lat
     and lon and alt from DEM, finally interpolate to SOI coords and save"""
-    from aux_gps import fill_na_xarray_time_series_with_its_group
+    # from aux_gps import fill_na_xarray_time_series_with_its_group
+    from aux_gps import fillna_xarray_da_time_series_with_long_term_stats
     from ims_procedures import analyse_10mins_ims_field
     # from axis_process import produce_rinex_filenames_at_time_window
     from ims_procedures import IMS_interpolating_to_GNSS_stations_israel
-    # from aux_gps import save_ncfile
+    from aux_gps import save_ncfile
     from aux_gps import path_glob
     # import pandas as pd
     import xarray as xr
-    # first select all or some years of IMS data from year_savepath
-    files = sorted(path_glob(year_savepath, 'IMS_ALL_TD_*.nc'))
-    if years is not None:
+    # load IMS stats data for the stations:
+    ds_stats = xr.load_dataset(stats_path/'IMS_TD_month_hour_stats.nc')
+    # first select all or some years of IMS data from month_savepath
+    files = sorted(path_glob(month_savepath, 'IMS_ALL_TD_*.nc'))
+    if year_months is not None:
         new_files = []
         for file in files:
-            year = file.as_posix().split('/')[-1].split('.')[0].split('_')[-1]
-            if year in years:
+            year_month = file.as_posix().split('/')[-1].split('.')[0].split('_')[-1]
+            if year_month in year_months:
                 new_files.append(file)
         files = new_files
     for file in files:
-        year = file.as_posix().split('/')[-1].split('.')[0].split('_')[-1]
-        logger.info('Performing post proccess on IMS TD for {}.'.format(year))
+        year_month = file.as_posix().split('/')[-1].split('.')[0].split('_')[-1]
+        year = int(year_month.split('-')[0])
+        logger.info('Performing post proccess on IMS TD for {}.'.format(year_month))
         ds = xr.load_dataset(file)
-        ds = fill_na_xarray_time_series_with_its_group(ds, grp='hour')
+        das = []
+        for da in ds:
+            da_filled = fillna_xarray_da_time_series_with_long_term_stats(ds[da], ds_stats)
+            if da_filled is None:
+                logger.warning('could not find {} station in stats, skipping...'.format(da))
+                continue
+            das.append(da_filled)
+        ds = xr.merge(das)
         ds = analyse_10mins_ims_field(ds=ds, var='TD', gis_path=gis_path,
                                       dem_path=dem_path)
         if int(year) >= 1996:
             ds_soi = IMS_interpolating_to_GNSS_stations_israel(
                         dt=None, start_year=str(year), verbose=True,
-                        savepath=year_savepath, network='soi-apn', ds_td=ds,
+                        savepath=None, network='soi-apn', ds_td=ds,
                         cut_days_ago=None, axis_path=None, concat_all_TD=False)
+            filename = 'SOI_TD_{}.nc'.format(year_month)
+            save_ncfile(ds_soi, month_savepath, filename)
         # now_dt = pd.Timestamp.utcnow().floor('H')
         # names = produce_rinex_filenames_at_time_window(end_dt=now_dt,
         #                                                window=window)
@@ -542,7 +559,8 @@ def post_process_ims_stations(year_savepath, gis_path, dem_path,
         # save_ncfile(ds_axis, savepath, filename)
     return ds
 
-def produce_pw_all_stations(ds, axis_path, mda_path):
+
+def produce_pwv_all_stations(td_month_path, rinex_path, mda_path):
     from PW_stations import load_mda
     from PW_stations import produce_GNSS_station_PW
     from aux_gps import fill_na_xarray_time_series_with_its_group
@@ -551,28 +569,38 @@ def produce_pw_all_stations(ds, axis_path, mda_path):
     import xarray as xr
     # first load mda:
     mda = load_mda(mda_path)
-    # now loop over each station, produce pwv and save:
-    st_dirs = path_glob(axis_path, '*/')
+    # now load and concat all TD with GNSS - SOI stations:
+    td_files = sorted(path_glob(td_month_path, 'SOI_TD_*.nc'))
+    td_list = [xr.load_dataset(x) for x in td_files]
+    td = xr.concat(td_list, 'time')
+    td = td.sortby('time')
+    # now loop over each station path, produce pwv and save:
+    st_dirs = path_glob(rinex_path, '*/')
     st_dirs = [x for x in st_dirs if x.is_dir()]
-    st_dirs = [x for x in st_dirs if not x.as_posix().split('/')[-1].isnumeric()]
-    assert len(st_dirs) == 27
+    # st_dirs = [x for x in st_dirs if not x.as_posix().split('/')[-1].isnumeric()]
+    # assert len(st_dirs) == 27
     pwv_list = []
     for st_dir in st_dirs:
         station = st_dir.as_posix().split('/')[-1]
-        last_file = sorted(path_glob(st_dir/'dr/ultra', '*.nc'))[-1]
-        last_file_str = last_file.as_posix().split('/')[-1][4:13]
-        wet = xr.load_dataset(last_file)['WetZ'].squeeze(drop=True)
-        logger.info('loaded {}.'.format(last_file))
-        wet_error = xr.load_dataset(last_file)['WetZ_error'].squeeze(drop=True)
+        if station not in td:
+            logger.error('{} not found in temperature database, skipping...'.format(station))
+            continue
+        file = st_dir/'gipsyx_solutions/{}_PPP_all_years.nc'.format(station.upper())
+        if not file.is_file():
+            logger.error('{} not found in PPP gipsyx solutions, skipping...'.format(station))
+            continue
+        wet = xr.open_dataset(file)['WetZ'].squeeze(drop=True)
+        logger.info('loaded {}.'.format(file))
+        wet_error = xr.open_dataset(file)['WetZ_error'].squeeze(drop=True)
         wet.name = station
         wet_error.name = station
         # resample temp to 5 mins and reindex to wet delay time:
-        t = ds[station].resample(time='5T').ffill().reindex_like(wet.time)
+        t = td[station].resample(time='5T').ffill().reindex_like(wet.time)
         # fill in NaNs with mean hourly signal:
         try:
             t_new = fill_na_xarray_time_series_with_its_group(t, grp='hour')
         except ValueError as e:
-            logger.warning('encountered error: {}, skipping {}'.format(e, last_file))
+            logger.warning('encountered error: {}, skipping {}'.format(e, file))
             continue
         try:
             pwv = produce_GNSS_station_PW(wet, t_new, mda=mda,
@@ -581,15 +609,13 @@ def produce_pw_all_stations(ds, axis_path, mda_path):
                                                 model_name='LR', plot=False)
             pwv_error.name = '{}_error'.format(pwv.name)
             pwv_ds = xr.merge([pwv, pwv_error])
-            filename = '{}{}_PWV.nc'.format(station, last_file_str)
-            save_ncfile(pwv_ds, st_dir/'dr/ultra', filename)
+            filename = '{}_PWV_all_years.nc'.format(station.upper())
+            save_ncfile(pwv_ds, st_dir/'gipsyx_solutions', filename)
             pwv_list.append(pwv_ds)
         except ValueError as e:
-            logger.warning('encountered error: {}, skipping {}'.format(e, last_file))
+            logger.warning('encountered error: {}, skipping {}'.format(e, file))
             continue
-    dss = xr.merge(pwv_list)
-    filename = 'AXIS_{}_PWV_ultra.nc'.format(last_file_str)
-    save_ncfile(dss, axis_path, filename)
+
 
 if __name__ == '__main__':
     import argparse
@@ -603,6 +629,9 @@ if __name__ == '__main__':
                 'TDmax', 'TDmin', 'TG', 'Time', 'WD', 'WDmax', 'WS', 'WS10mm',
                 'WS1mm', 'WSmax']
     savepath = Path('/home/ziskin/Work_Files/PW_yuval/IMS_T/10mins')
+    dem_path = Path('/home/ziskin/Work_Files/PW_yuval/AW3D30')
+    gis_path = Path('/home/ziskin/Work_Files/PW_yuval/gis')
+    work_yuval = Path('/home/ziskin/Work_Files/PW_yuval/')
     parser = argparse.ArgumentParser(description='a command line tool for downloading all 10mins stations from the IMS with specific variable')
     optional = parser._action_groups.pop()
     required = parser.add_argument_group('required arguments')
@@ -611,6 +640,11 @@ if __name__ == '__main__':
     required.add_argument('--channel', help="10 mins channel name , e.g., TD, BP or RH",
                           choices=channels)
     required.add_argument('--delete', action='store_true')  # its False
+    # don't need to specify folder unless files were moved:
+    required.add_argument('--dem_path', help="a full path to DEM data", const=dem_path)
+    required.add_argument('--gis_path', help="a full path to GIS data", const=dem_path)
+    required.add_argument('--mda_path', help="a full path to mda model (ts-tm)", const=work_yuval)
+
     #optional.add_argument('--station', nargs='+',
     #                      help='GPS station name, 4 UPPERCASE letters',
     #                      type=check_station_name)
@@ -618,7 +652,8 @@ if __name__ == '__main__':
 #    optional.add_argument('--half', help='a spescific six months to download,\
 #                          e.g, 1 or 2', type=int, choices=[1, 2],
 #                          metavar='1 or 2')
-    optional.add_argument('--divide_to_years', help="select the years that the IMS stations are saved as yearly files",
+    required.add_argument('--last_2_months', action='store_true')
+    optional.add_argument('--datetimes', help="select the year-months that the IMS stations are saved as yearly files",
                           type=str,
                           nargs='+')
     parser._action_groups.append(optional)  # added this line
@@ -633,12 +668,21 @@ if __name__ == '__main__':
 #        sys.exit()
     if args.channel is not None and not args.delete:
         download_all_10mins_ims(args.savepath, channel_name=args.channel)
-        if args.divide_to_years == 'last_year':
+        if args.last_2_months:
             yr = pd.Timestamp.today().year
-            args.divide_to_years = [yr-1, yr]
-        merge_stations_and_divide_to_yearly_files(args.savepath,
-                                                  channel_name=args.channel,
-                                                  years=args.divide_to_years)
+            month = pd.Timestamp.today().month
+            last_month = (pd.Timestamp.today() - pd.Timedelta(30, unit='d')).month
+            last_year = (pd.Timestamp.today() - pd.Timedelta(30, unit='d')).year
+            args.datetimes = ['{}-{}'.format(last_year, last_month), '{}-{}'.format(yr, month)]
+        # first merge all IMS TD stations and divide into year-monthly files:
+        merge_stations_and_divide_to_yearly_monthly_files(args.savepath,
+                                                          channel_name=args.channel,
+                                                          year_months=args.datetimes)
+        # then, post-process them and produce temperature at GNSS stations coords:
+        post_process_ims_stations(args.savepath/'monthly', args.gis_path, args.dem_path,
+                                  args.savepath, year_months=args.datetimes)
+        # now use ts-tm model to convert WetZ into PWV and save:
+        produce_pwv_all_stations(args.savepath/'monthly', work_yuval/'GNSS_stations', args.mda_path)
         logger.info('Done!')
     elif args.delete:
         generate_delete(args.savepath, args.channel)
