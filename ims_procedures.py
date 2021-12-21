@@ -66,7 +66,7 @@ def save_IMS_long_term_time_series_station_stats(path=ims_10mins_path, min_year=
         # da = dff.to_xarray()
         da[station].attrs = ds.attrs
         das.append(da)
-    ds = xr.merge(das)
+    ds = xr.merge(das, compat='override')
     save_ncfile(ds, path, 'IMS_{}_month_hour_stats.nc'.format(channel_name))
     return ds
 
