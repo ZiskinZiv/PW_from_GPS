@@ -66,14 +66,22 @@ def parse_single_station(data):
 @click.option('--window', '-w', nargs=1, default=30,
               help='how many hours before now to get the data',
               type=click.IntRange(min=1, max=120))
+@click.option('--ppd', '-ppd', nargs=1, default=100,
+              help='points per degree (lat/lon) for the pwv map',
+              type=click.Choice([50, 100, 150, 200, 250, 500]))
+@click.option('--map_freq', '-mf', nargs=1, default='1H',
+              help='how many maps within the 30 hours axis pwv data to make',
+              type=click.Choice(['15min', '30min', '1H', '3H', '6H']))
 @click.option('--gis_path', help='a full path to gis folder',
               type=click.Path(exists=True), default=gis_path)
 @click.option('--awd_path', help='a full path to dem folder',
               type=click.Path(exists=True), default=awd_path)
-@click.option('--axis_path', help='a full path to dem folder',
+@click.option('--axis_path', help='a full path to where axis PWV solutions are saved',
               type=click.Path(exists=True), default=axis_path)
 @click.option('--mda_path', help='a full path to where the ts-tm model files are',
               type=click.Path(exists=True), default=work_yuval)
+
+
 def main_program(*args, **kwargs):
     from pathlib import Path
     window = kwargs['window']
@@ -86,7 +94,8 @@ def main_program(*args, **kwargs):
     ds = process_ims_stations(savepath, window, var='TD', ds=dsl)
     ds_axis = post_process_ims_stations(ds, window, savepath / 'TD', gis_path,
                                         awd_path, axis_path)
-    produce_pw_all_stations(ds_axis, axis_path, mda_path)
+    pwv_axis, fn = produce_pw_all_stations(ds_axis, axis_path, mda_path)
+    produce_pwv_map_all_stations(pwv_axis, fn, axis_path, awd_path, map_freq='1H', ppd=100)
     return
 
 
@@ -283,6 +292,53 @@ def produce_pw_all_stations(ds, axis_path, mda_path):
     dss = xr.merge(pwv_list)
     filename = 'AXIS_{}_PWV_ultra.nc'.format(last_file_str)
     save_ncfile(dss, axis_path, filename)
+    return dss, filename
+
+
+def produce_pwv_map_all_stations(pwv_axis, filename, axis_path, awd_path, map_freq='1H', ppd=100):
+    from axis_process import read_axis_stations
+    from interpolation_routines import produce_2D_PWV_map
+    import xarray as xr
+    from aux_gps import save_ncfile
+
+    # first work without error fields in pwv:
+    pwv_axis = pwv_axis[[x for x in pwv_axis if 'error' not in x]]
+    # now read axis stations data:
+    df = read_axis_stations(axis_path)
+    # now set the frequenct of maps (1H) recommended
+    pwv_axis = pwv_axis.resample(time=map_freq).mean()
+    logger.info('Producing AXIS-PWV maps with {} frequency.'.format(map_freq))
+    maps = []
+    sclh = []
+    rmses = []
+    total = pwv_axis['time'].size
+    for i, dtime in enumerate(pwv_axis['time']):
+        dt = dtime.dt.strftime('%Y-%m-%dT%H:%M:%S').item()
+        logger.info('Interpolating PWV record ({}/{})'.format(i+1, total))
+        pwv_map, _ = produce_2D_PWV_map(pwv_axis, df, dt=dt,
+                                        dem_path=awd_path, H_constant=None, ppd=ppd,
+                                        expand_time=True, verbose=False)
+        sclh.append(pwv_map.attrs['scale_height'])
+        rmses.append(pwv_map.attrs['RMSE'])
+        maps.append(pwv_map)
+    pwv_map_da = xr.concat(maps,'time')
+    pwv_map_all = pwv_map_da.to_dataset()
+    pwv_map_all['scale_height'] = xr.DataArray(sclh, dims=['time'])
+    pwv_map_all['scale_height'].attrs['long_name'] = 'PWV scale height'
+    pwv_map_all['scale_height'].attrs['units'] = 'meters'
+    pwv_map_all['scale_height'].attrs['formula'] = 'PWV@surface * exp(-Height/H)'
+    pwv_map_all['RMSE'] = xr.DataArray(rmses, dims=['time'])
+    pwv_map_all['RMSE'].attrs['long_name'] = 'root mean squared error'
+    pwv_map_all['PWV'].attrs = {}
+    pwv_map_all['PWV'].attrs['long_name'] = 'Precipitable Water Vapor'
+    pwv_map_all['PWV'].attrs['units'] = 'mm'
+    pwv_map_all['PWV'].attrs['points_per_degree'] = ppd
+    pwv_map_all = pwv_map_all.sortby('time')
+    # save each filename:
+    filename = filename.split('.')[0] + '_map_{}_{}.nc'.format(map_freq, ppd)
+    save_ncfile(pwv_map_all, axis_path, filename)
+    logger.info('Done producing AXIS-PWV maps.')
+    return pwv_map_all
 
 # def check_ds_last_datetime(ds, fmt=None):
 #     """return the last datetime of the ds"""
