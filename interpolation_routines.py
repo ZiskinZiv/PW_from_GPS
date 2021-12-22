@@ -27,10 +27,10 @@ def load_geo_stations_dataframe(path=cwd, filename='israeli_gnss_coords.txt'):
     return geo_df
 
 
-def produce_2D_PWV_map(pwv_ds, geo_df, dt='2018-02-12T12:00:00', dem_path=awd_path, H_constant=None, ppd=50):
+def produce_2D_PWV_map(pwv_ds, geo_df, dt='2018-02-12T12:00:00',
+                       dem_path=awd_path, H_constant=None, ppd=250,
+                       plot=True):
     """
-
-
     Parameters
     ----------
     pwv_ds : TYPE
@@ -50,13 +50,15 @@ def produce_2D_PWV_map(pwv_ds, geo_df, dt='2018-02-12T12:00:00', dem_path=awd_pa
     -------
     df_inter : TYPE
         DESCRIPTION.
+    df
 
     """
     import pandas as pd
-    dt = pd.to_datetime(dt)
-    print('interpolating on datetime: {}.'.format(dt))
+    import matplotlib.pyplot as plt
+    dtime = pd.to_datetime(dt)
+    print('interpolating on datetime: {}.'.format(dtime))
     hdf = slice_var_ds_at_dt_and_convert_to_dataframe(pwv_ds, geo_df,
-                                                      dt=dt.strftime('%Y-%m-%dT%H:%M:%S'))
+                                                      dt=dtime.strftime('%Y-%m-%dT%H:%M:%S'))
     if H_constant is not None:
         H = H_constant
     else:
@@ -73,7 +75,9 @@ def produce_2D_PWV_map(pwv_ds, geo_df, dt='2018-02-12T12:00:00', dem_path=awd_pa
     df_inter.attrs['units'] = 'mm'
     df_inter.attrs['long_name'] = 'Precipitable Water Vapor'
     df, rmse = compare_stations_PWV_to_interpolated_map(df_inter, hdf)
-    df_inter.attrs['RMSE'] = rmse
+    df_inter.attrs['RMSE'] = round(rmse, 2)
+    if plot:
+        fig = plot_2D_PWV_map(df_inter, cmap='jet', save=True)
     return df_inter, df
 
 
@@ -101,10 +105,13 @@ def compare_stations_PWV_to_interpolated_map(df_inter, hdf, verbose=False):
 
 def plot_2D_PWV_map(df_inter, gis_path=gis_path, fontsize=16, cmap='jet_r'):
     from aux_gps import geo_annotate
-    from PW_from_gps_figures import plot_israel_map
+    from PW_from_gps_figures import plot_israel_map_from_shape_file
     import cartopy.crs as ccrs
     import matplotlib.pyplot as plt
     import seaborn as sns
+    import shapely.vectorized
+    import numpy as np
+    import contextily as cx
     sns.set_style('whitegrid')
     sns.set_style('ticks')
     fig = plt.figure(figsize=(7, 20))
@@ -113,13 +120,21 @@ def plot_2D_PWV_map(df_inter, gis_path=gis_path, fontsize=16, cmap='jet_r'):
     ax_map.set_extent(extent)
     # ax_map = plot_israel_map(
         # gis_path=gis_path, ax=ax_map, ticklabelsize=fontsize)
+    # get ISRAEL shape file and create a masked array:
+    isr = plot_israel_map_from_shape_file(gis_path)
+    # add background map:
+    cx.add_basemap(ax=ax_map, source=cx.providers.Stamen.TerrainBackground,
+                   crs=isr.crs)
+    israel_shape = isr.geometry[0]
+    X, Y = np.meshgrid(df_inter.lon.values, df_inter.lat.values)
+    ISR_mask = shapely.vectorized.contains(israel_shape, X, Y)
     # overlay with dem data:
     cmap = plt.get_cmap(cmap, 41)
     df_inter = df_inter.sel(lat=slice(29.5, 33.5), lon=slice(34, 36.0))
-    fg = df_inter.plot.imshow(ax=ax_map, alpha=0.5, cmap=cmap,
+    fg = df_inter.where(ISR_mask).plot.imshow(ax=ax_map, alpha=0.5, cmap=cmap,
                               vmin=df_inter.min(), vmax=df_inter.max(), add_colorbar=False)
 #    scale_bar(ax_map, 50)
-    cbar_kwargs = {'fraction': 0.1, 'aspect': 50, 'pad': 0.03}
+    cbar_kwargs = {'fraction': 0.05, 'aspect': 37, 'pad': 0.03}
     cb = plt.colorbar(fg, **cbar_kwargs)
     cb.set_label(label='PWV [mm]',
                  size=fontsize, weight='normal')
@@ -138,9 +153,12 @@ def plot_2D_PWV_map(df_inter, gis_path=gis_path, fontsize=16, cmap='jet_r'):
     ax_map.set_yticks([29.5, 30, 30.5, 31, 31.5, 32, 32.5, 33.0, 33.5])
     ax_map.tick_params(top=True, bottom=True, left=True, right=True,
                        direction='out', labelsize=fontsize)
-    ax_map.set_title(df_inter.attrs['datetime'], fontsize=fontsize)
-    fg.figure.tight_layout()
-    return fg
+    datetime = df_inter.attrs['datetime'].replace('T', ' ')
+    ax_map.set_title(datetime, fontsize=fontsize)
+    # fg.figure.tight_layout()
+    filename = 'PWV_SOI_{}.png'.format(df_inter.attrs['datetime'])
+    plt.savefig(cwd / filename, bbox_inches='tight')
+    return fig
 
 
 def interpolate_var_ds_at_multiple_dts(var_ds, geo_var_df, predict_df,
