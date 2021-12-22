@@ -29,7 +29,7 @@ def load_geo_stations_dataframe(path=cwd, filename='israeli_gnss_coords.txt'):
 
 def produce_2D_PWV_map(pwv_ds, geo_df, dt='2018-02-12T12:00:00',
                        dem_path=awd_path, H_constant=None, ppd=250,
-                       plot=True):
+                       expand_time=False, verbose=True):
     """
     Parameters
     ----------
@@ -66,7 +66,8 @@ def produce_2D_PWV_map(pwv_ds, geo_df, dt='2018-02-12T12:00:00',
     print('scale height is: {} meters.'.format(H))
     new_hdf = apply_lapse_rate_change(hdf, H)
     df_inter = interpolate_at_one_dt(new_hdf, H, predict_df=None,
-                                     dem_path=dem_path, ppd=ppd)
+                                     dem_path=dem_path, ppd=ppd,
+                                     verbose=verbose)
     df_inter.name = 'PWV'
     df_inter.attrs['datetime'] = dt
     df_inter.attrs['scale_height'] = H.round(1)
@@ -76,8 +77,11 @@ def produce_2D_PWV_map(pwv_ds, geo_df, dt='2018-02-12T12:00:00',
     df_inter.attrs['long_name'] = 'Precipitable Water Vapor'
     df, rmse = compare_stations_PWV_to_interpolated_map(df_inter, hdf)
     df_inter.attrs['RMSE'] = round(rmse, 2)
-    if plot:
-        fig = plot_2D_PWV_map(df_inter, cmap='jet', save=True)
+    df_inter.attrs['points_per_degree'] = ppd
+    if expand_time:
+        df_inter = df_inter.expand_dims('time')
+        df_inter['time'] = [dtime]
+        df_inter.attrs.pop('datetime')
     return df_inter, df
 
 
@@ -103,7 +107,7 @@ def compare_stations_PWV_to_interpolated_map(df_inter, hdf, verbose=False):
     return df, rmse
 
 
-def plot_2D_PWV_map(df_inter, gis_path=gis_path, fontsize=16, cmap='jet_r'):
+def plot_2D_PWV_map(df_inter, gis_path=gis_path, fontsize=16, cmap='jet_r', save=False):
     from aux_gps import geo_annotate
     from PW_from_gps_figures import plot_israel_map_from_shape_file
     import cartopy.crs as ccrs
@@ -131,6 +135,9 @@ def plot_2D_PWV_map(df_inter, gis_path=gis_path, fontsize=16, cmap='jet_r'):
     # overlay with dem data:
     cmap = plt.get_cmap(cmap, 41)
     df_inter = df_inter.sel(lat=slice(29.5, 33.5), lon=slice(34, 36.0))
+    if 'time' in df_inter.dims:
+        df_inter.attrs['datetime'] = df_inter['time'].to_pandas().item().strftime('%Y-%m-%dT%H:%M:%S')
+        df_inter = df_inter.squeeze()
     fg = df_inter.where(ISR_mask).plot.imshow(ax=ax_map, alpha=0.5, cmap=cmap,
                               vmin=df_inter.min(), vmax=df_inter.max(), add_colorbar=False)
 #    scale_bar(ax_map, 50)
@@ -156,14 +163,15 @@ def plot_2D_PWV_map(df_inter, gis_path=gis_path, fontsize=16, cmap='jet_r'):
     datetime = df_inter.attrs['datetime'].replace('T', ' ')
     ax_map.set_title(datetime, fontsize=fontsize)
     # fg.figure.tight_layout()
-    filename = 'PWV_SOI_{}.png'.format(df_inter.attrs['datetime'])
-    plt.savefig(cwd / filename, bbox_inches='tight')
+    if save:
+        filename = 'PWV_SOI_{}.png'.format(df_inter.attrs['datetime'])
+        plt.savefig(cwd / filename, bbox_inches='tight')
     return fig
 
 
 def interpolate_var_ds_at_multiple_dts(var_ds, geo_var_df, predict_df,
                                        time_dim='time', dem_path=awd_path,
-                                       H_constant=None):
+                                       H_constant=None, verbose=True):
     import pandas as pd
     times_df = var_ds[time_dim].to_pandas()
     df = pd.DataFrame()
@@ -180,7 +188,7 @@ def interpolate_var_ds_at_multiple_dts(var_ds, geo_var_df, predict_df,
         print('scale height is: {} meters.'.format(H))
         new_hdf = apply_lapse_rate_change(hdf, H)
         df_inter = interpolate_at_one_dt(new_hdf, H, predict_df=predict_df,
-                                         dem_path=dem_path, ppd=50)
+                                         dem_path=dem_path, ppd=50, verbose=verbose)
         df_inter['datetime'] = dt
         df_inter['H'] = H
         df = df.append(df_inter)
@@ -290,7 +298,7 @@ def apply_lapse_rate_change(hdf, H):
 
 
 def interpolate_at_one_dt(new_hdf, H, predict_df=None, dem_path=awd_path,
-                          ppd=50):
+                          ppd=50, verbose=True):
     from aux_gps import coarse_dem
     import numpy as np
     from pykrige.rk import Krige
@@ -314,7 +322,7 @@ def interpolate_at_one_dt(new_hdf, H, predict_df=None, dem_path=awd_path,
     # y = da_scaled.values[vals]
     y = da.values[vals]
     model = Krige(method='ordinary', variogram_model='spherical',
-                  verbose=True)
+                  verbose=verbose, coordinates_type='geographic')
     model.fit(X, y)
     if predict_df is None:
         # i.e., interpolate to all map coords:
