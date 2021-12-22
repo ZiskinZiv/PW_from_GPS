@@ -2018,6 +2018,15 @@ def plot_tela_bet_dagan_comparison(path=work_yuval, sound_path=sound_path,
     return df
 
 
+def plot_israel_map_from_shape_file(gis_path=gis_path):
+    import geopandas as gpd
+    agr = gpd.read_file(gis_path/'ISR_agriculture_districts.shp')
+    isr = gpd.GeoSeries(agr.geometry.unary_union)
+    isr.crs = agr.crs
+    isr = isr.to_crs(epsg=4326)
+    return isr
+
+
 def plot_israel_map(gis_path=gis_path, rc=rc, ticklabelsize=12, ax=None):
     """general nice map for israel, need that to plot stations,
     and temperature field on top of it"""
@@ -2043,7 +2052,7 @@ def plot_israel_map(gis_path=gis_path, rc=rc, ticklabelsize=12, ax=None):
         isr_with_yosh.plot(alpha=0.0, ax=ax)
     ctx.add_basemap(
         ax,
-        url=ctx.sources.ST_TERRAIN_BACKGROUND,
+        source=ctx.providers.Stamen.TerrainBackground,
         crs='epsg:4326')
     ax.xaxis.set_major_locator(ticker.MaxNLocator(2))
     ax.yaxis.set_major_locator(ticker.MaxNLocator(5))
@@ -6149,7 +6158,7 @@ def plot_PWV_anomalies_groups_maps_with_mean(work_path=work_yuval, station='drag
                                                            add_colorbar=False,
                                                            cmap=cmap, ax=ax_heat,
                                                            norm=norm)
-        
+
         st_mean.sel(station=st.upper()).mean('dayofyear').plot(ax=ax_bottom,
                                                                color='k', linewidth=2)
         bottom_limit = ax_heat.get_xlim()
