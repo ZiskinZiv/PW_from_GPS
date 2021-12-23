@@ -17,6 +17,7 @@ gis_path = work_yuval / 'gis'
 awd_path = work_yuval / 'AW3D30'
 axis_path = work_yuval / 'axis'
 save_path = work_yuval / 'IMS_T/10mins/real-time'
+hydro_path = work_yuval / 'hydro'
 channels = ['BP', 'DiffR', 'Grad', 'NIP', 'Rain', 'RH', 'STDwd', 'TD',
             'TDmax', 'TDmin', 'TG', 'Time', 'WD', 'WDmax', 'WS', 'WS10mm',
             'WS1mm', 'WSmax']
@@ -80,6 +81,9 @@ def parse_single_station(data):
               type=click.Path(exists=True), default=axis_path)
 @click.option('--mda_path', help='a full path to where the ts-tm model files are',
               type=click.Path(exists=True), default=work_yuval)
+@click.option('--hydro_path', help='a full path to where the hydro_ml data and models are',
+              type=click.Path(exists=True), default=hydro_path)
+
 
 
 def main_program(*args, **kwargs):
@@ -90,11 +94,12 @@ def main_program(*args, **kwargs):
     awd_path = Path(kwargs['awd_path'])
     axis_path = Path(kwargs['axis_path'])
     mda_path = Path(kwargs['mda_path'])
+    hydro_path = Path(kwargs['hydro_path'])
     dsl = ims_download(savepath, window, save=False)
     ds = process_ims_stations(savepath, window, var='TD', ds=dsl)
     ds_axis = post_process_ims_stations(ds, window, savepath / 'TD', gis_path,
                                         awd_path, axis_path)
-    pwv_axis, fn = produce_pw_all_stations(ds_axis, axis_path, mda_path)
+    pwv_axis, fn = produce_pw_all_stations(ds_axis, axis_path, mda_path, hydro_path)
     produce_pwv_map_all_stations(pwv_axis, fn, axis_path, awd_path, map_freq='1H', ppd=100)
     return
 
@@ -244,12 +249,19 @@ def post_process_ims_stations(ds, window, savepath, gis_path, dem_path,
     return ds_axis
 
 
-def produce_pw_all_stations(ds, axis_path, mda_path):
+def produce_pw_all_stations(ds, axis_path, mda_path, hydro_path):
     from PW_stations import load_mda
     from PW_stations import produce_GNSS_station_PW
     from aux_gps import fill_na_xarray_time_series_with_its_group
     from aux_gps import path_glob
     from aux_gps import save_ncfile
+    import pandas as pd
+    import numpy as np
+    from hydro_procedures import standertize_pwv_using_long_term_stat
+    from hydro_procedures import prepare_X_y_for_holdout_test
+    # from hydro_procedures import axis_southern_stations
+    from hydro_procedures import best_hp_models_dict
+    from sklearn.ensemble import RandomForestClassifier
     import xarray as xr
     # first load mda:
     mda = load_mda(mda_path)
@@ -259,11 +271,15 @@ def produce_pw_all_stations(ds, axis_path, mda_path):
     st_dirs = [x for x in st_dirs if not x.as_posix().split('/')[-1].isnumeric()]
     assert len(st_dirs) == 27
     pwv_list = []
+    ppp_list = []
     for st_dir in st_dirs:
         station = st_dir.as_posix().split('/')[-1]
         last_file = sorted(path_glob(st_dir/'dr/ultra', '*.nc'))[-1]
         last_file_str = last_file.as_posix().split('/')[-1][4:13]
         wet = xr.load_dataset(last_file)['WetZ'].squeeze(drop=True)
+        # also get ppp for the same price:
+        ppp = xr.load_dataset(last_file)
+        ppp_list.append(ppp)
         logger.info('loaded {}.'.format(last_file))
         wet_error = xr.load_dataset(last_file)['WetZ_error'].squeeze(drop=True)
         wet.name = station
@@ -290,8 +306,43 @@ def produce_pw_all_stations(ds, axis_path, mda_path):
             logger.warning('encountered error: {}, skipping {}'.format(e, last_file))
             continue
     dss = xr.merge(pwv_list)
+    ppp_all = xr.concat(ppp_list, 'station')
     filename = 'AXIS_{}_PWV_ultra.nc'.format(last_file_str)
     save_ncfile(dss, axis_path, filename)
+    ppp_filename = 'AXIS_{}_PPP_ultra.nc'.format(last_file_str)
+    save_ncfile(ppp_all, axis_path, ppp_filename)
+    # now use pipeline to predict floods in southern axis stations:
+    ds = standertize_pwv_using_long_term_stat(dss.resample(time='1H').mean())
+    # load X, y and train RFC:
+    X, y = prepare_X_y_for_holdout_test(features='pwv+DOY', model_name='RF',path=hydro_path)
+    rfc = RandomForestClassifier(**best_hp_models_dict['RF'])
+    rfc.set_params(n_jobs=4)
+    rfc.fit(X, y)
+    # iterate over ds, add DOY and select 24 windows, and predict:
+    Xs = []
+    ys = []
+    for da in ds:
+        end = ds[da]['time'].max() - pd.Timedelta(1, unit='H')
+        start = end - pd.Timedelta(23, unit='H')
+        sliced = ds[da].sel(time=slice(start, end))
+        doy = ds[da].time.dt.dayofyear[-1].item()
+        X_da = np.append(sliced.values, doy)
+        X_da = xr.DataArray(X_da, dims='feature')
+        X_da['feature'] = ['pwv_{}'.format(x+1) for x in range(24)] + ['DOY']
+        flood = rfc.predict(X_da.values.reshape(1,-1))
+        y = xr.DataArray(flood, dims='time')
+        y['time'] = [ds[da]['time'].max().values]
+        y.name = 'Flood'
+        Xs.append(X_da)
+        ys.append(y)
+    pred = xr.Dataset()
+    pred['features'] = xr.concat(Xs, 'station')
+    pred['flood'] = xr.concat(ys, 'station')
+    pred['station'] = [x for x in ds]
+    df_pred = pred['flood'].squeeze().to_dataframe()
+    df_pred = df_pred['flood'].astype(int)
+    pred_filename = filename.split('.')[0] + '_flood_prediction.csv'
+    df_pred.to_csv(axis_path/pred_filename)
     return dss, filename
 
 
