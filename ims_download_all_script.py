@@ -509,7 +509,7 @@ def post_process_ims_stations(month_savepath, gis_path, dem_path,
     """fill TD with hourly mean if NaN and smooth, then fill in station_lat
     and lon and alt from DEM, finally interpolate to SOI coords and save"""
     # from aux_gps import fill_na_xarray_time_series_with_its_group
-    from aux_gps import fillna_xarray_da_time_series_with_long_term_stats
+    from aux_gps import transform_time_series_groups_agg_to_time_series
     from ims_procedures import analyse_10mins_ims_field
     # from axis_process import produce_rinex_filenames_at_time_window
     from ims_procedures import IMS_interpolating_to_GNSS_stations_israel
@@ -535,7 +535,10 @@ def post_process_ims_stations(month_savepath, gis_path, dem_path,
         ds = xr.load_dataset(file)
         das = []
         for da in ds:
-            da_filled = fillna_xarray_da_time_series_with_long_term_stats(ds[da], ds_stats)
+            df_trans = transform_time_series_groups_agg_to_time_series(ds[da], ds_stats, stat='mean')
+            df_trans[da] = df_trans[da].fillna(df_trans['mean'])
+            da_filled = df_trans[da].to_xarray()
+            da_filled.attrs = ds[da].attrs
             if da_filled is None:
                 logger.warning('could not find {} station in stats, skipping...'.format(da))
                 continue
