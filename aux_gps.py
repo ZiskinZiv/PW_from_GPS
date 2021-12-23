@@ -33,18 +33,17 @@ def replace_char_at_string_position(string, char='s', pos=3):
     return string
 
 
-def fillna_xarray_da_time_series_with_long_term_stats(da, da_stats, time_dim='time'):
+def transform_time_series_groups_agg_to_time_series(da, da_stats, time_dim='time', stat='mean'):
     """da is a time series xarray - only dataarray for now, and
     da_stats is a two or more dimensional time series of statistics,
-    e.g., (month, hour)"""
+    e.g., (month, hour), mean or std"""
     if da.name not in da_stats:
         print('{} not in stats'.format(da.name))
         return None
-    df_s = da_stats.to_dataframe()
+    df_s = da_stats.sel(agg=stat).reset_coords(drop=True).to_dataframe()
     # extract groups from df_s and get them from datetime index in df:
     groups = [x for x in df_s.index.names]
     # also copy attrs from old da to new:
-    attrs = da.attrs
     name = da.name
     df = da.to_dataframe()
     for group in groups:
@@ -53,12 +52,9 @@ def fillna_xarray_da_time_series_with_long_term_stats(da, da_stats, time_dim='ti
     # as the same multiindex of df_s (e.g., hour-month):
     df = df.reset_index()
     df = df.set_index(groups)
-    df['stats'] = df_s[name]
+    df[stat] = df_s[name]
     df = df.set_index(time_dim)
-    df[name] = df[name].fillna(df['stats'])
-    da_filled = df[name].to_xarray()
-    da_filled.attrs = attrs
-    return da_filled
+    return df
 
 
 def read_converted_G0_stations(path=cwd, save=True):
