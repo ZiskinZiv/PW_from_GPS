@@ -107,7 +107,9 @@ def compare_stations_PWV_to_interpolated_map(df_inter, hdf, verbose=False):
     return df, rmse
 
 
-def plot_2D_PWV_map(df_inter, gis_path=gis_path, fontsize=16, cmap='jet_r', save=False):
+def plot_2D_PWV_map(df_inter, gis_path=gis_path, fontsize=16, cmap='jet_r', panel_plot=False, save=False):
+    """Plots a 2D pwv map of xarray.
+    panel_plot is experimental, could improve on that..."""
     from aux_gps import geo_annotate
     from PW_from_gps_figures import plot_israel_map_from_shape_file
     import cartopy.crs as ccrs
@@ -135,36 +137,35 @@ def plot_2D_PWV_map(df_inter, gis_path=gis_path, fontsize=16, cmap='jet_r', save
     # overlay with dem data:
     cmap = plt.get_cmap(cmap, 41)
     df_inter = df_inter.sel(lat=slice(29.5, 33.5), lon=slice(34, 36.0))
-    if 'time' in df_inter.dims:
+    if 'time' in df_inter.dims and not panel_plot:
         df_inter.attrs['datetime'] = df_inter['time'].to_pandas().item().strftime('%Y-%m-%dT%H:%M:%S')
         df_inter = df_inter.squeeze()
-    fg = df_inter.where(ISR_mask).plot.imshow(ax=ax_map, alpha=0.5, cmap=cmap,
-                              vmin=df_inter.min(), vmax=df_inter.max(), add_colorbar=False)
-#    scale_bar(ax_map, 50)
-    cbar_kwargs = {'fraction': 0.05, 'aspect': 37, 'pad': 0.03}
-    cb = plt.colorbar(fg, **cbar_kwargs)
-    cb.set_label(label='PWV [mm]',
-                 size=fontsize, weight='normal')
-    cb.ax.tick_params(labelsize=fontsize)
-    ax_map.set_xlabel('')
-    ax_map.set_ylabel('')
-    # ax_map.xaxis.set_major_locator(ticker.MaxNLocator(2))
-    # ax_map.yaxis.set_major_locator(ticker.MaxNLocator(5))
-    # ax_map.yaxis.set_major_formatter(lat_formatter)
-    # ax_map.xaxis.set_major_formatter(lon_formatter)
-    # ax_map.gridlines(draw_labels=True, dms=False, x_inline=False,
-    #                  y_inline=False, xformatter=lon_formatter, yformatter=lat_formatter,
-    #                  xlocs=ticker.MaxNLocator(2), ylocs=ticker.MaxNLocator(5))
-    # fig.canvas.draw()
-    ax_map.set_xticks([34, 35, 36])
-    ax_map.set_yticks([29.5, 30, 30.5, 31, 31.5, 32, 32.5, 33.0, 33.5])
-    ax_map.tick_params(top=True, bottom=True, left=True, right=True,
-                       direction='out', labelsize=fontsize)
-    datetime = df_inter.attrs['datetime'].replace('T', ' ')
-    ax_map.set_title(datetime, fontsize=fontsize)
+    if not panel_plot:
+        fg = df_inter.where(ISR_mask).plot.imshow(ax=ax_map, alpha=0.5, cmap=cmap,
+                                                  vmin=df_inter.min(), vmax=df_inter.max(), add_colorbar=False)
+        cbar_kwargs = {'fraction': 0.05, 'aspect': 37, 'pad': 0.03}
+        cb = plt.colorbar(fg, **cbar_kwargs)
+        cb.set_label(label='PWV [mm]',
+                     size=fontsize, weight='normal')
+        cb.ax.tick_params(labelsize=fontsize)
+        ax_map.set_xlabel('')
+        ax_map.set_ylabel('')
+        ax_map.set_xticks([34, 35, 36])
+        ax_map.set_yticks([29.5, 30, 30.5, 31, 31.5, 32, 32.5, 33.0, 33.5])
+        ax_map.tick_params(top=True, bottom=True, left=True, right=True,
+                           direction='out', labelsize=fontsize)
+        try:
+            datetime = df_inter.attrs['datetime'].replace('T', ' ')
+            ax_map.set_title(datetime, fontsize=fontsize)
+        except KeyError:
+            datetime = df_inter['time'].dt.strftime('%Y-%m-%dT%H:%M:%S').item()
+            pass
+    else:
+        fg = df_inter.where(ISR_mask).plot.imshow(alpha=0.5, cmap=cmap,col='time',
+                                                  vmin=df_inter.min(), vmax=df_inter.max(), add_colorbar=False)
     # fg.figure.tight_layout()
     if save:
-        filename = 'PWV_SOI_{}.png'.format(df_inter.attrs['datetime'])
+        filename = 'PWV_SOI_{}.png'.format(datetime)
         plt.savefig(cwd / filename, bbox_inches='tight')
     return fig
 
@@ -263,7 +264,10 @@ def get_var_lapse_rate(hdf, model='LR', plot=False):
     import matplotlib.pyplot as plt
     import numpy as np
     hda = hdf.iloc[:, 0].to_xarray()
-    dt = hda.name.strftime('%Y-%m-%d %H:%M')
+    try:
+        dt = hda.name.strftime('%Y-%m-%d %H:%M')
+    except AttributeError:
+        dt = 'no time found'
     hda.name = ''
     log_hda = np.log(hda)
     # assume pwv = pwv0*exp(-h/H)
