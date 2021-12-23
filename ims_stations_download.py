@@ -83,9 +83,6 @@ def parse_single_station(data):
               type=click.Path(exists=True), default=work_yuval)
 @click.option('--hydro_path', help='a full path to where the hydro_ml data and models are',
               type=click.Path(exists=True), default=hydro_path)
-
-
-
 def main_program(*args, **kwargs):
     from pathlib import Path
     window = kwargs['window']
@@ -99,8 +96,10 @@ def main_program(*args, **kwargs):
     ds = process_ims_stations(savepath, window, var='TD', ds=dsl)
     ds_axis = post_process_ims_stations(ds, window, savepath / 'TD', gis_path,
                                         awd_path, axis_path)
-    pwv_axis, fn = produce_pw_all_stations(ds_axis, axis_path, mda_path, hydro_path)
-    produce_pwv_map_all_stations(pwv_axis, fn, axis_path, awd_path, map_freq='1H', ppd=100)
+    pwv_axis, fn = produce_pw_all_stations(
+        ds_axis, axis_path, mda_path, hydro_path)
+    produce_pwv_map_all_stations(
+        pwv_axis, fn, axis_path, awd_path, map_freq='1H', ppd=100)
     return
 
 
@@ -268,7 +267,8 @@ def produce_pw_all_stations(ds, axis_path, mda_path, hydro_path):
     # now loop over each station, produce pwv and save:
     st_dirs = path_glob(axis_path, '*/')
     st_dirs = [x for x in st_dirs if x.is_dir()]
-    st_dirs = [x for x in st_dirs if not x.as_posix().split('/')[-1].isnumeric()]
+    st_dirs = [x for x in st_dirs if not x.as_posix().split('/')
+               [-1].isnumeric()]
     assert len(st_dirs) == 27
     pwv_list = []
     ppp_list = []
@@ -290,7 +290,8 @@ def produce_pw_all_stations(ds, axis_path, mda_path, hydro_path):
         try:
             t_new = fill_na_xarray_time_series_with_its_group(t, grp='hour')
         except ValueError as e:
-            logger.warning('encountered error: {}, skipping {}'.format(e, last_file))
+            logger.warning(
+                'encountered error: {}, skipping {}'.format(e, last_file))
             continue
         try:
             pwv = produce_GNSS_station_PW(wet, t_new, mda=mda,
@@ -303,7 +304,8 @@ def produce_pw_all_stations(ds, axis_path, mda_path, hydro_path):
             save_ncfile(pwv_ds, st_dir/'dr/ultra', filename)
             pwv_list.append(pwv_ds)
         except ValueError as e:
-            logger.warning('encountered error: {}, skipping {}'.format(e, last_file))
+            logger.warning(
+                'encountered error: {}, skipping {}'.format(e, last_file))
             continue
     dss = xr.merge(pwv_list)
     ppp_all = xr.concat(ppp_list, 'station')
@@ -314,7 +316,8 @@ def produce_pw_all_stations(ds, axis_path, mda_path, hydro_path):
     # now use pipeline to predict floods in southern axis stations:
     ds = standertize_pwv_using_long_term_stat(dss.resample(time='1H').mean())
     # load X, y and train RFC:
-    X, y = prepare_X_y_for_holdout_test(features='pwv+DOY', model_name='RF',path=hydro_path)
+    X, y = prepare_X_y_for_holdout_test(
+        features='pwv+DOY', model_name='RF', path=hydro_path)
     rfc = RandomForestClassifier(**best_hp_models_dict['RF'])
     rfc.set_params(n_jobs=4)
     rfc.fit(X, y)
@@ -329,7 +332,7 @@ def produce_pw_all_stations(ds, axis_path, mda_path, hydro_path):
         X_da = np.append(sliced.values, doy)
         X_da = xr.DataArray(X_da, dims='feature')
         X_da['feature'] = ['pwv_{}'.format(x+1) for x in range(24)] + ['DOY']
-        flood = rfc.predict(X_da.values.reshape(1,-1))
+        flood = rfc.predict(X_da.values.reshape(1, -1))
         y = xr.DataArray(flood, dims='time')
         y['time'] = [ds[da]['time'].max().values]
         y.name = 'Flood'
@@ -339,10 +342,11 @@ def produce_pw_all_stations(ds, axis_path, mda_path, hydro_path):
     pred['features'] = xr.concat(Xs, 'station')
     pred['flood'] = xr.concat(ys, 'station')
     pred['station'] = [x for x in ds]
-    df_pred = pred['flood'].squeeze().to_dataframe()
+    df_pred = pred['flood'].to_dataframe()
+    df_pred['time'] = pred['flood']['time'].values[0]
     df_pred = df_pred['flood'].astype(int)
     pred_filename = filename.split('.')[0] + '_flood_prediction.csv'
-    df_pred.to_csv(axis_path/pred_filename)
+    df_pred.to_csv(axis_path/pred_filename, sep=',')
     return dss, filename
 
 
@@ -372,7 +376,7 @@ def produce_pwv_map_all_stations(pwv_axis, filename, axis_path, awd_path, map_fr
         sclh.append(pwv_map.attrs['scale_height'])
         rmses.append(pwv_map.attrs['RMSE'])
         maps.append(pwv_map)
-    pwv_map_da = xr.concat(maps,'time')
+    pwv_map_da = xr.concat(maps, 'time')
     pwv_map_all = pwv_map_da.to_dataset()
     pwv_map_all['scale_height'] = xr.DataArray(sclh, dims=['time'])
     pwv_map_all['scale_height'].attrs['long_name'] = 'PWV scale height'
