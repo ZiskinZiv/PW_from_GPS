@@ -67,6 +67,8 @@ def save_IMS_long_term_time_series_station_stats(path=ims_10mins_path, min_year=
         da[station].attrs = ds.attrs
         das.append(da)
     ds = xr.merge(das, compat='override')
+    ds = ds.expand_dims('agg')
+    ds['agg'] = ['mean']
     save_ncfile(ds, path, 'IMS_{}_month_hour_stats.nc'.format(channel_name))
     return ds
 
