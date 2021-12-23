@@ -112,23 +112,43 @@ def copy_with_progress(src, dst, *, follow_symlinks=True):
     return
 
 
-def copy_post_from_geo(remote_path, station):
+def copy_post_from_geo(remote_path, station, days):
     from aux_gps import path_glob
-    for curr_sta in station:
-        src_rigid_path = remote_path / curr_sta / 'gipsyx_solutions'
-        try:
-            filepaths = path_glob(src_rigid_path, '*PPP*.nc')
-        except FileNotFoundError:
-            print('{} final solution not found in {}'.format(curr_sta,
-                  src_rigid_path))
-            continue
-        for filepath in filepaths:
-            filename = filepath.as_posix().split('/')[-1]
-            print(filename)
-            src_path = src_rigid_path / filename
-            dst_path = workpath / curr_sta / 'gipsyx_solutions'
+    from aux_gps import get_datetimes_of_files
+    if station is not None:
+        for curr_sta in station:
+            src_rigid_path = remote_path / curr_sta / 'gipsyx_solutions'
+            try:
+                filepaths = path_glob(src_rigid_path, '*PPP*.nc')
+            except FileNotFoundError:
+                print('{} final solution not found in {}'.format(curr_sta,
+                      src_rigid_path))
+                continue
+            for filepath in filepaths:
+                filename = filepath.as_posix().split('/')[-1]
+                print(filename)
+                src_path = src_rigid_path / filename
+                dst_path = workpath / curr_sta / 'gipsyx_solutions'
+                dst_path.mkdir(parents=True, exist_ok=True)
+                copy_with_progress(src_path, dst_path)
+    else:
+        df = get_datetimes_of_files(remote_path, '*.nc', col_name='files')
+        df_pred = get_datetimes_of_files(remote_path, '*_flood_prediction*.csv', col_name='files')
+        df = pd.concat([df, df_pred])
+        df = df.sort_index(ascending=False)
+        start = df.index[0] - pd.Timedelta(days, unit='d')
+        end = df.index[0]
+        df = df.loc[end:start]
+        for dt, row in df.iterrows():
+            src_path = row['files']
+            filename = src_path.as_posix().split('/')[-1]
+            dst_path = workpath
             dst_path.mkdir(parents=True, exist_ok=True)
+            if (dst_path / filename).is_file():
+                print('{} already exists, skipping...'.format(filename))
+                continue
             copy_with_progress(src_path, dst_path)
+
     print('Done Copying GipsyX results!')
     return
 
@@ -174,6 +194,7 @@ if __name__ == '__main__':
     from aux_gps import path_glob
     import pandas as pd
     from PW_paths import geo_path
+    from PW_paths import work_yuval
     global pwpath
     global workpath
     import os
@@ -190,6 +211,7 @@ if __name__ == '__main__':
     # remove this line: optional = parser...
     required.add_argument('--station', help="GPS station name four lowercase letters,",
                           nargs='+', type=check_station_name)
+    optional.add_argument('--axis_days', help='number of last days of axis real time products', type=int)
     parser._action_groups.append(optional)  # added this line
     args = parser.parse_args()
     pwpath = Path(get_var('PWCORE'))
@@ -210,7 +232,15 @@ if __name__ == '__main__':
         sys.exit()
     if args.station == ['soin']:
         args.station = isr_stations
+        remote_path = geo_path / 'Work_Files/PW_yuval/GNSS_stations'
+    elif args.station == ['axis']:
+        args.station = None
+        remote_path = geo_path / 'Work_Files/PW_yuval/axis'
+        workpath = work_yuval / 'axis'
+        if args.axis_days is None:
+            args.axis_days = 1
+    else:
+        remote_path = geo_path / 'Work_Files/PW_yuval/GNSS_stations'
     # use ISR stations db for israeli stations and ocean loading also:
 #    if all(a in isr_stations for a in args.station):
-    remote_path = geo_path / 'Work_Files/PW_yuval/GNSS_stations'
-    copy_post_from_geo(remote_path, args.station)
+    copy_post_from_geo(remote_path, args.station, args.axis_days)
