@@ -2,16 +2,21 @@
 # -*- coding: utf-8 -*-
 """
 Created on Thu Nov 21 14:08:43 2019
-
+to produce X and y use combine_pos_neg_from_nc_file or
+prepare_X_y_for_holdout_test
 @author: ziskin
 """
 
 from PW_paths import savefig_path
 from PW_paths import work_yuval
+from pathlib import Path
+cwd = Path().cwd()
 hydro_path = work_yuval / 'hydro'
+axis_path = work_yuval/'axis'
 gis_path = work_yuval / 'gis'
 ims_path = work_yuval / 'IMS_T'
 hydro_ml_path = hydro_path / 'hydro_ML'
+gnss_path = work_yuval / 'GNSS_stations'
 # 'tela': 17135
 hydro_pw_dict = {'nizn': 25191, 'klhv': 21105, 'yrcm': 55165,
                  'ramo': 56140, 'drag': 48125, 'dsea': 48192,
@@ -41,6 +46,15 @@ scorer_order = ['precision', 'recall', 'f1', 'accuracy', 'tss', 'hss']
 
 tsafit_dict = {'lat': 30.985556, 'lon': 35.263056,
                'alt': -35.75, 'dt_utc': '2018-04-26T10:15:00'}
+
+axis_southern_stations = ['Dimo', 'Ohad', 'Ddse', 'Yotv', 'Elat', 'Raha', 'Yaha']
+soi_axis_dict = {'yrcm': 'Dimo',
+                 'slom': 'Ohad',
+                 'dsea': 'Ddse',
+                 'nrif': 'Yotv',
+                 'elat': 'Elat',
+                 'klhv': 'Raha',
+                 'spir': 'Yaha'}
 
 
 def plot_mean_abs_shap_values_features(SV, fix_xticklabels=True):
@@ -5236,6 +5250,139 @@ def check_if_tide_events_from_stations_are_within_time_window(df_list, rounding=
         return df_list
     else:
         return df
+
+
+def standertize_pwv_using_long_term_stat(axis_ds, hydro_path=hydro_path, filename='axis_southern_stations_stats.nc'):
+    from aux_gps import transform_time_series_groups_agg_to_time_series
+    import xarray as xr
+    import pandas as pd
+    stats = xr.load_dataset(hydro_path/filename)
+    da_list = []
+    for da in axis_ds:
+        df_mean = transform_time_series_groups_agg_to_time_series(axis_ds[da], stats, stat='mean')
+        df_std = transform_time_series_groups_agg_to_time_series(axis_ds[da], stats, stat='std')
+        if df_mean is None or df_std is None:
+            print('No stats for {}, skipping...'.format(da))
+            continue
+        df = pd.concat([df_mean, df_std], axis=1)
+        df = df.loc[:, ~df.columns.duplicated()]
+        df['anomalies'] = (df[da] - df['mean'])/df['std']
+        da_anom = df['anomalies'].to_xarray()
+        da_anom.name = da
+        da_anom.attrs = axis_ds[da].attrs
+        da_anom.attrs['action'] = 'standertized by hour and day of year'
+        da_list.append(da_anom)
+    ds = xr.merge(da_list)
+    return ds
+
+
+def get_closest_southern_axis_station_to_SOI_and_produce_long_term_stats(axis_path=axis_path, soi_path=cwd,
+                                                                         gnss_path=gnss_path, savepath=hydro_path):
+    from axis_process import read_axis_stations
+    from PW_stations import load_gipsyx_PWV_time_series
+    import geopandas as gpd
+    import pandas as pd
+    import xarray as xr
+    from aux_gps import save_ncfile
+
+    def min_dist(point, gpd2):
+        gpd2['Dist'] = gpd2.apply(
+            lambda row: point.distance(
+                row.geometry), axis=1)
+        geoseries = gpd2.iloc[gpd2['Dist'].values.argmin()]
+        geoseries.loc['distance'] = gpd2['Dist'].values.min()
+        return geoseries
+
+    # read axis stations:
+    df = read_axis_stations(axis_path)
+    axis = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df['lon'], df['lat']))
+    axis.crs = {'init': 'epsg:4326'}
+    # select only southern stations:
+    axis = axis.loc[axis_southern_stations]
+    # convert to Israeli grid (meters):
+    axis = axis.to_crs(epsg='2039')
+    # read soi stations:
+    soi = pd.read_csv(soi_path/'israeli_gnss_coords.txt', delim_whitespace=True)
+    soi.drop(soi.tail(4).index,axis=0, inplace=True)
+    soi.drop(['lhav', 'gilb'],axis=0, inplace=True)
+    soi = gpd.GeoDataFrame(soi, geometry=gpd.points_from_xy(soi['lon'], soi['lat']))
+    soi.crs = {'init': 'epsg:4326'}
+    # convert to Israeli grid (meters):
+    soi = soi.to_crs(epsg='2039')
+    # now, iterate over axis (8 southern stations) and find the min distance to each soi station:
+    min_list = []
+    for gps_rows in axis.iterrows():
+        ims_min_series = min_dist(gps_rows[1]['geometry'], soi)
+        min_list.append(ims_min_series)
+    soi_df = pd.concat(min_list, axis=1).T
+    axis_sub = axis.reset_index()[['station','alt']].set_index(soi_df.index)
+    axis_sub.columns = ['axis_station', 'axis_alt']
+    soi_df = pd.concat([soi_df, axis_sub], axis=1)
+    # now find the bias between two sets of stations, using lapse_rate:
+    height = soi_df[['axis_station', 'axis_alt']]
+    Hdf = find_pwv_at_surface_and_scale_height_soi_and_fix_with_height(height_df=height)
+    soi_df['bias'] = Hdf['bias'].dropna()
+    # now, iterate over soi_df stations and produce stats:
+    das = []
+    for i, soi_sta in enumerate(soi_df.index):
+        # load soi station:
+        sta = load_gipsyx_PWV_time_series(station=soi_sta, gnss_path=gnss_path)
+        # take only PWV and add the bias:
+        bias = soi_df.iloc[i]['bias']
+        sta = sta[soi_sta] + bias
+        print('fixed {} station by {} mm.'.format(soi_sta, bias))
+        df = sta.to_dataframe()
+        # df['month'] = df.index.month
+        df['dayofyear'] = df.index.dayofyear
+        df['hour'] = df.index.hour
+        da_mean = df.groupby(['dayofyear', 'hour']).mean().to_xarray()
+        da_mean[soi_sta].attrs = sta.attrs
+        da_std = df.groupby(['dayofyear', 'hour']).std().to_xarray()
+        da_std[soi_sta].attrs = sta.attrs
+        da = xr.concat([da_mean, da_std], 'agg')
+        da['agg'] = ['mean', 'std']
+        das.append(da)
+    soi_stats = xr.merge(das)
+    soi_stats = soi_stats.rename(soi_df['axis_station'].to_dict())
+    if savepath is not None:
+        filename = 'axis_southern_stations_stats.nc'
+        save_ncfile(soi_stats, savepath, filename)
+    return soi_df, soi_stats
+
+
+def find_pwv_at_surface_and_scale_height_soi_and_fix_with_height(path=cwd,
+                                                                 gnss_path=gnss_path,
+                                                                 height_df=None):
+    import pandas as pd
+    from PW_stations import load_gipsyx_PWV_time_series
+    from interpolation_routines import get_var_lapse_rate
+    from interpolation_routines import apply_lapse_rate_change
+    import numpy as np
+    soi = pd.read_csv(path/'israeli_gnss_coords.txt', delim_whitespace=True)
+    soi.drop(soi.tail(4).index,axis=0, inplace=True)
+    soi.drop(['lhav', 'gilb', 'hrmn'],axis=0, inplace=True)
+    ds = load_gipsyx_PWV_time_series(station=None, gnss_path=gnss_path)
+    hdf=ds.mean('time').expand_dims('time').to_dataframe().T
+    hdf = hdf.join(soi[['lat', 'lon', 'alt']])
+    hdf = hdf.reset_index()
+    hdf = hdf.set_index('alt')
+    hdf = hdf.sort_index().dropna()
+    hdf.columns = ['name', 'pwv', 'lat', 'lon']
+    hdf = hdf[['pwv', 'lat', 'lon', 'name']]
+    H = get_var_lapse_rate(hdf, plot=True)
+    hdf_at_surface = apply_lapse_rate_change(hdf, H)
+    hdf['pwv_sur'] = hdf_at_surface['pwv']
+    df = hdf.reset_index()
+    df = df.set_index('name')
+    if height_df is not None:
+        df = pd.concat([df, height_df], axis=1)
+        df['fixed_pwv_at_axis_height'] = df['pwv_sur'] * np.exp(-df['axis_alt']/H)
+        # fixed_pwv_at_axis_height - pwv (mean of each soi time series):
+        df['bias'] = df['fixed_pwv_at_axis_height'] - df['pwv']
+        return df
+    else:
+        return hdf, H
+
 
 
 def scorers(scorer_str):
