@@ -2974,6 +2974,17 @@ def get_latlonalt_error_from_geocent_error(X, Y, Z, xe=None, ye=None, ze=None):
         return lon, lat, alt
 
 
+def get_datetimes_of_files(path, glob_str='*.nc', col_name='files'):
+    import os
+    import pandas as pd
+    files = path_glob(path, glob_str)
+    dts = [pd.to_datetime(os.path.getmtime(file), unit='s', origin='unix') for file in files]
+    df = pd.DataFrame(files, index=dts)
+    df.columns = [col_name]
+    df = df.sort_index(ascending=False)
+    return df
+
+
 def path_glob(path, glob_str='*.Z', return_empty_list=False):
     """returns all the files with full path(pathlib3 objs) if files exist in
     path, if not, returns FilenotFoundErro"""
