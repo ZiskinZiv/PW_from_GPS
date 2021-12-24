@@ -701,6 +701,7 @@ def read_one_station_gipsyx_results(path, savepath=None,
     dts = []
     # logger.info('reading folder:{}'.format(path))
     files = path_glob(path, '*.tdp')
+    year_tot = len(files)
     for tdp_file in files:
         rfn = tdp_file.as_posix().split('/')[-1][0:12]
         try:
@@ -715,7 +716,7 @@ def read_one_station_gipsyx_results(path, savepath=None,
                 logger.info(
                         'processing {} ({}, {}/{})'.format(
                                 rfn,
-                                dt.strftime('%Y-%m-%d'), cnt['succ'] + cnt['failed'], tot))
+                                dt.strftime('%Y-%m-%d'), cnt['succ'] + cnt['failed'], year_tot))
                 try:
                     df, meta = process_one_day_gipsyx_output(tdp_file)
                     dts.append(df.index[0])
