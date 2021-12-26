@@ -35,6 +35,67 @@ Bisa - four letter gnss station
 Bisa103V.21d.Z
 @author: shlomi
 """
+from pathlib import Path
+home_axis_path = Path('/home/axis-gps')
+cwd = Path().cwd()
+
+
+def analyse_T02_files(main_path=home_axis_path, start_date=None, savepath=cwd):
+    """this will run every hour and write a csv file with dataframe containing the
+    recent T02 file count"""
+    import pandas as pd
+    import calendar
+    from aux_gps import path_glob
+    from aux_gps import get_timedate_and_station_code_from_rinex
+    today_date = pd.Timestamp.today()
+    if start_date is not None:
+        yesterday_date = pd.to_datetime(start_date)
+    else:
+        yesterday_date = today_date - pd.Timedelta(1, unit='d')
+    dates = pd.date_range(yesterday_date, today_date, freq='1D')
+    ddf = pd.DataFrame([x for x in dates.day], index=dates)
+    ddf.columns = ['day']
+    ddf['day'] = ddf['day'].astype(str).str.zfill(2)
+    ddf['month'] = ddf.index.month
+    ddf['month_name'] = ddf['month'].apply(lambda x: calendar.month_abbr[x])
+    ddf['year'] = ddf.index.year
+    dfs = []
+    for day_dt, row in ddf.iterrows():
+        month = row['month_name']
+        day = row['day']
+        file_path = main_path / 'Month.{}'.format(month) / 'Day.{}'.format(day)
+        hourly_files = path_glob(file_path, '*.T02', return_empty_list=True)
+        if not hourly_files:
+            continue
+        records = []
+        for i, hour_file in enumerate(hourly_files):
+            records.append(parse_T02_file(hour_file))
+        df = pd.DataFrame(records, columns=['station_name', 'doy', 'hour_letter'])
+        df['rfn'] = df['station_name'] + df['doy'].astype(str) + df['hour_letter'] + '.{}d'.format(str(row['year'])[2:])
+        df['dt'] = df['rfn'].apply(get_timedate_and_station_code_from_rinex, just_dt=True)
+        df.to_csv('axis_try.csv')
+        dfs.append(df)
+    dff = pd.concat(dfs, axis=0)
+    dff = dff.groupby('dt')['station_name'].count()
+    dff.index=pd.to_datetime(dff.index)
+    dff = dff.to_frame('total_files')
+    full_dts = pd.date_range(dff.index[0],dff.index[-1], freq='1H')
+    dff = dff.reindex(full_dts)
+    dff = dff.fillna(0)
+    dff['no_files'] = dff['total_files']==0
+    dff.index.name = 'dt'
+    dff.to_csv(savepath / 'T02_file_count.csv', index=True)
+    return dff
+    
+
+def email_alert_when_no_T02_files(path=cwd):
+    """run this file daily and check last 6 hours of 'T02_file_count.csv',
+    if all empty (0) then send an email to Yuval"""
+    import pandas as pd
+    df = pd.read_csv(cwd / 'T02_file_count.csv', index_col='dt')
+    if df.iloc[-6:]['no_files'].all():
+        print('No files for the last 6 hours')
+    return
 
 
 def str2bool(v):
@@ -191,6 +252,8 @@ def doy_to_datetime(doy, year, return_day_and_month=True):
 
 def parse_T02_file(T02_fileobj):
     """input is T02_fileobj (path), output is station, doy and hour_letter"""
+    if not T02_fileobj.is_file():
+        return [None, None, None]
     T02 = T02_fileobj.as_posix().split('/')[-1]
     station = T02[:4]
     hour_letter = T02.split('.')[0][-1]
@@ -205,6 +268,8 @@ def process_T02(args):
     from aux_gps import path_glob
     from subprocess import CalledProcessError
     logger = logging.getLogger('axis_rinex_processer')
+    # run analyse each hour:
+    analyse_T02_files()
     if args.is_T02_path_year is None:
         path_year = True
     else:
