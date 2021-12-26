@@ -1,7 +1,13 @@
 27 6 * * * source /home/ziskin/GipsyX-1.1/rc_GipsyX.sh; $GCORE/bin/update_GipsyX_files.py -u
-12 * * * * nohup /home/ziskin/anaconda3/bin/python3 -u /home/ziskin/Python_Projects/PW_from_GPS/axis-gps_rinex_process.py --savepath /home/ziskin/Work_Files/PW_yuval/axis/ --mode last_doy &>nohup_axis_rinex_last_doy.txt&
-14 * * * * source /home/ziskin/GipsyX-1.1/rc_GipsyX.sh; source /home/ziskin/Python_Projects/PW_from_GPS/gipsyx_axis_script_1_of_3.sh
-18 * * * * source /home/ziskin/GipsyX-1.1/rc_GipsyX.sh; source /home/ziskin/Python_Projects/PW_from_GPS/gipsyx_axis_script_2_of_3.sh
-22 * * * * source /home/ziskin/GipsyX-1.1/rc_GipsyX.sh; source /home/ziskin/Python_Projects/PW_from_GPS/gipsyx_axis_script_3_of_3.sh
-25 * * * * nohup /home/ziskin/anaconda3/bin/python3 -u /home/ziskin/Python_Projects/PW_from_GPS/ims_stations_download.py --savepath /home/ziskin/Work_Files/PW_yuval/IMS_T/10mins/real-time/ --window 30 &>nohup_ims_download_real_time.txt&
+7 * * * * nohup /home/ziskin/anaconda3/bin/python3 -u /home/ziskin/Python_Projects/PW_from_GPS/axis_gps_rinex_process.py --savepath /home/ziskin/Work_Files/PW_yuval/axis/ --mode last_doy &>nohup_axis_rinex_last_doy.txt&
+9 * * * * source /home/ziskin/GipsyX-1.1/rc_GipsyX.sh; source /home/ziskin/Python_Projects/PW_from_GPS/gipsyx_axis_script_1_of_3.sh
+13 * * * * source /home/ziskin/GipsyX-1.1/rc_GipsyX.sh; source /home/ziskin/Python_Projects/PW_from_GPS/gipsyx_axis_script_2_of_3.sh
+17 * * * * source /home/ziskin/GipsyX-1.1/rc_GipsyX.sh; source /home/ziskin/Python_Projects/PW_from_GPS/gipsyx_axis_script_3_of_3.sh
+20 * * * * nohup /home/ziskin/anaconda3/bin/python3 -u /home/ziskin/Python_Projects/PW_from_GPS/ims_stations_download.py --savepath /home/ziskin/Work_Files/PW_yuval/IMS_T/10mins/real-time/ --window 30 &>nohup_ims_download_real_time.txt&
+25 1 1,15 * * /home/ziskin/anaconda3/bin/python3 /home/ziskin/Python_Projects/PW_from_GPS/generate_pw_shell_script.py --task rinex_download --station soin; source /home/ziskin/Python_Projects/PW_from_GPS/gipsyx_pw_script.sh
+28 1 1,15 * * /home/ziskin/anaconda3/bin/python3 /home/ziskin/Python_Projects/PW_from_GPS/generate_pw_shell_script.py --task drdump --station soin; source /home/ziskin/Python_Projects/PW_from_GPS/gipsyx_pw_script.sh
+34 1 1,15 * * /home/ziskin/anaconda3/bin/python3 /home/ziskin/Python_Projects/PW_from_GPS/generate_pw_shell_script.py --task edit30hr --station soin --last_n_weeks 5; source /home/ziskin/Python_Projects/PW_from_GPS/gipsyx_pw_script.sh
+37 1 1,15 * * /home/ziskin/anaconda3/bin/python3 /home/ziskin/Python_Projects/PW_from_GPS/generate_pw_shell_script.py --task run --station soin --last_n_weeks 5; source /home/ziskin/Python_Projects/PW_from_GPS/gipsyx_pw_script.sh
+45 1 1,15 * * /home/ziskin/anaconda3/bin/python3 /home/ziskin/Python_Projects/PW_from_GPS/generate_pw_shell_script.py --task post --station soin; source /home/ziskin/Python_Projects/PW_from_GPS/gipsyx_pw_script.sh
+54 1 1,15 * * nohup /home/ziskin/anaconda3/bin/python3 -u ims_download_all_script.py --savepath /home/ziskin/Work_Files/PW_yuval/IMS_T/10mins --channel TD --last_2_months --dem_path --mda_path --gis_path &>nohup_ims_download_pwv_soi.txt&
 
