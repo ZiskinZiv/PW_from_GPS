@@ -73,7 +73,7 @@ def analyse_T02_files(main_path=home_axis_path, start_date=None, savepath=cwd):
         df = pd.DataFrame(records, columns=['station_name', 'doy', 'hour_letter'])
         df['rfn'] = df['station_name'] + df['doy'].astype(str) + df['hour_letter'] + '.{}d'.format(str(row['year'])[2:])
         df['dt'] = df['rfn'].apply(get_timedate_and_station_code_from_rinex, just_dt=True)
-        df.to_csv('axis_try.csv')
+        # df.to_csv('axis_try.csv')
         dfs.append(df)
     dff = pd.concat(dfs, axis=0)
     dff = dff.groupby('dt')['station_name'].count()
@@ -86,16 +86,6 @@ def analyse_T02_files(main_path=home_axis_path, start_date=None, savepath=cwd):
     dff.index.name = 'dt'
     dff.to_csv(savepath / 'T02_file_count.csv', index=True)
     return dff
-    
-
-def email_alert_when_no_T02_files(path=cwd):
-    """run this file daily and check last 6 hours of 'T02_file_count.csv',
-    if all empty (0) then send an email to Yuval"""
-    import pandas as pd
-    df = pd.read_csv(cwd / 'T02_file_count.csv', index_col='dt')
-    if df.iloc[-6:]['no_files'].all():
-        print('No files for the last 6 hours')
-    return
 
 
 def str2bool(v):
