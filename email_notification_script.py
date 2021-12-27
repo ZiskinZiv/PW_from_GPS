@@ -41,18 +41,19 @@ def email_alert_when_no_T02_files(path=cwd):
     if all empty (0) then send an email to Yuval"""
     import pandas as pd
     df = pd.read_csv(path / 'T02_file_count.csv', index_col='dt')
-    if df.iloc[-6:]['no_files'].all():
-        logger.warning('No files for the last 6 hours!')
-        big_str = format_df_to_string_with_breaks(df)
-        msg = 'No T02 files for the last 6 hours from AXIS, see report below!'
-        msg ='\n'.join([msg,big_str])
-        sender_email, passwd = read_gmail_creds(path)
-        rec_mails = ['shlomiziskin@gmail.com', 'yuvalr@ariel.ac.il', 'vlf.gps@gmail.com']
-        subject = 'Geophysics1: AXIS TO2 lack of data'
-        for rec_mail in rec_mails:
-            send_gmail(sender_email, rec_mail, passwd, subject, msg)
-    else:
-        logger.info('No total lack of AXIS T02 files detected in the last 6 hours.')
+    # if df.iloc[-6:]['no_files'].all():
+    logger.warning('No files for the last 6 hours!')
+    big_str = format_df_to_string_with_breaks(df)
+    msg = 'No T02 files for the last 6 hours from AXIS, see report below!'
+    msg ='\n'.join([msg,big_str])
+    sender_email, passwd = read_gmail_creds(path)
+    # rec_mails = ['shlomiziskin@gmail.com', 'yuvalr@ariel.ac.il', 'vlf.gps@gmail.com']
+    rec_mails = ['shlomiziskin@gmail.com']
+    subject = 'Geophysics1: AXIS TO2 lack of data'
+    for rec_mail in rec_mails:
+        send_gmail(sender_email, rec_mail, passwd, subject, msg)
+# else:
+#     logger.info('No total lack of AXIS T02 files detected in the last 6 hours.')
     return df
 
 
