@@ -62,6 +62,7 @@ def read_gmail_creds(path=cwd, filename='.ariel.geophysics1.txt'):
         mylist = f.read().splitlines()[0]
     email = mylist.split(',')[0]
     passwd = mylist.split(',')[1]
+    # print(email, passwd)
     return email, passwd
 
 
@@ -69,7 +70,8 @@ def send_gmail(sender_email, receiver_email, passwd, subject='', msg=''):
     import smtplib, ssl
     from email.mime.text import MIMEText
     from email.mime.multipart import MIMEMultipart
-    port = 465  # For SSL
+    # port = 465  # For SSL
+    port = 587
     smtp_server = "smtp.gmail.com"
     # sender_email = sender_mail  # Enter your address
     # receiver_email = rec_email  # Enter receiver address
@@ -86,6 +88,9 @@ def send_gmail(sender_email, receiver_email, passwd, subject='', msg=''):
     message.attach(part1)
     context = ssl.create_default_context()
     with smtplib.SMTP_SSL(smtp_server, port, context=context) as server:
+        server.ehlo()  # Can be omitted
+        server.starttls(context=context)
+        server.ehlo()  # Can be omitted
         server.login(sender_email, passwd)
         server.sendmail(sender_email, receiver_email, message.as_string())
     logger.info('email sent to {} from {}.'.format(receiver_email, sender_email))
