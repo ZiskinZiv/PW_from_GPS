@@ -358,7 +358,7 @@ def build_df_lat_lon_alt_gnss_stations(gnss_path=GNSS_path, savepath=None):
     import pyproj
     from pathlib import Path
     stations_in_gnss = [x.as_posix().split('/')[-1]
-                        for x in path_glob(GNSS, '*')]
+                        for x in path_glob(GNSS_path, '*')]
     dss = [
         load_gipsyx_results(
             x,
@@ -742,7 +742,7 @@ def mean_ZWD_over_sound_time_and_fit_tstm(path=work_yuval,
     freq = pd.infer_freq(zwd.time.values)
     if not freq:
         zwd = xr_reindex_with_date_range(zwd)
-        zwd_error = xr_reindsave_GNSS_PW_israeli_stationsex_with_date_range(zwd_error)
+        zwd_error = xr_reindex_with_date_range(zwd_error)
         freq = pd.infer_freq(zwd.time.values)
     min_time = zwd.time.sel(time=min_time, method='nearest').values
     max_time = zwd.time.sel(time=max_time, method='nearest').values
