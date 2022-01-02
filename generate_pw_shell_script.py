@@ -324,7 +324,7 @@ if __name__ == '__main__':
         type=str)
     optional.add_argument('--tree', help='gipsyX tree directory.',
                           type=str)
-    optional.add_argument('--iqr_k', help='iqr k data filter criterion',
+    optional.add_argument('--iqr_k', help='iqr k data filter criterion (only for post task)',
                           type=float)
     optional.add_argument('--db', help='database to download rinex files from.',
                           choices=['garner', 'cddis'])
