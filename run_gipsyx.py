@@ -433,6 +433,7 @@ def run_gd2e_for_one_station(dr_path, staDb, tree, rewrite, date_range=None):
                         final_tdp, results_path))
                 cnt['succ'] += 1
                 continue
+        # logger.info(file_and_path)
         command = 'gd2e.py -drEditedFile {} -recList {} -staDb {} -treeS {} \
         > {}.log 2>{}.err'.format(
             file_and_path.as_posix(), station, staDb.as_posix(), tree, rfn,
