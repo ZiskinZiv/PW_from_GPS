@@ -15,8 +15,8 @@ Commands for processing T02 from ftp axis-gps:
 # for each step delete last file keep only Z file
 # naming convension:
 Bisa - four letter gnss station
-103V - 13 of the month, V = 21-22 pm (hour) UTC
-104H - 14 of the month, H = 07-08 am (hour) UTC
+103V - day of year 103, V = 21-22 pm (hour) UTC
+104H - day of year 104, H = 07-08 am (hour) UTC
 # Directory structure:
     Month.Apr
     Day.13
