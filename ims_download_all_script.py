@@ -505,7 +505,7 @@ def merge_stations_and_divide_to_yearly_monthly_files(savepath, channel_name='TD
 
 
 def post_process_ims_stations(month_savepath, gis_path, dem_path,
-                              stats_path, year_months=None):
+                              stats_path, pw_path, year_months=None):
     """fill TD with hourly mean if NaN and smooth, then fill in station_lat
     and lon and alt from DEM, finally interpolate to SOI coords and save"""
     # from aux_gps import fill_na_xarray_time_series_with_its_group
@@ -550,7 +550,7 @@ def post_process_ims_stations(month_savepath, gis_path, dem_path,
             ds_soi = IMS_interpolating_to_GNSS_stations_israel(
                         dt=None, start_year=str(year), verbose=True,
                         savepath=None, network='soi-apn', ds_td=ds,
-                        cut_days_ago=None, axis_path=None, concat_all_TD=False)
+                        cut_days_ago=None, axis_path=None, concat_all_TD=False, soi_path=pw_path)
             filename = 'SOI_TD_{}.nc'.format(year_month)
             save_ncfile(ds_soi, month_savepath, filename)
         # now_dt = pd.Timestamp.utcnow().floor('H')
@@ -635,6 +635,7 @@ if __name__ == '__main__':
     dem_path = Path('/home/ziskin/Work_Files/PW_yuval/AW3D30')
     gis_path = Path('/home/ziskin/Work_Files/PW_yuval/gis')
     work_yuval = Path('/home/ziskin/Work_Files/PW_yuval/')
+    pw_path = Path('/home/ziskin/Python_Projects/PW_from_GPS')
     parser = argparse.ArgumentParser(description='a command line tool for downloading all 10mins stations from the IMS with specific variable')
     optional = parser._action_groups.pop()
     required = parser.add_argument_group('required arguments')
@@ -647,6 +648,7 @@ if __name__ == '__main__':
     required.add_argument('--dem_path', help="a full path to DEM data", const=dem_path, nargs='?', type=check_path)
     required.add_argument('--gis_path', help="a full path to GIS data", const=gis_path, nargs='?', type=check_path)
     required.add_argument('--mda_path', help="a full path to mda model (ts-tm)", const=work_yuval, nargs='?', type=check_path)
+    required.add_argument('--pw_path', help="a full path to where israeli_gnss_coords.txt is", const=pw_path, nargs='?', type=check_path)
 
     #optional.add_argument('--station', nargs='+',
     #                      help='GPS station name, 4 UPPERCASE letters',
@@ -684,7 +686,7 @@ if __name__ == '__main__':
                                                           year_months=args.datetimes)
         # then, post-process them and produce temperature at GNSS stations coords:
         post_process_ims_stations(args.savepath/'monthly', args.gis_path, args.dem_path,
-                                  args.savepath, year_months=args.datetimes)
+                                  args.savepath, args.pw_path, year_months=args.datetimes)
         # now use ts-tm model to convert WetZ into PWV and save:
         produce_pwv_all_stations(args.savepath/'monthly', work_yuval/'GNSS_stations', args.mda_path)
         logger.info('Done!')
