@@ -1726,7 +1726,7 @@ def normalize_xr(data, time_dim='time', norm=1, down_bound=-1.,
 def slice_task_date_range(files, date_range, task='non-specific'):
     from aux_gps import get_timedate_and_station_code_from_rinex
     import pandas as pd
-    from pathlib import Path
+    # from pathlib import Path
     import logging
     """ return a slice files object (list of rfn Paths) with the correct
     within the desired date range"""
@@ -1739,15 +1739,19 @@ def slice_task_date_range(files, date_range, task='non-specific'):
                                                                 date_range[1].strftime('%Y-%m-%d')))
     if not files:
         return files
-    path = Path(files[0].as_posix().split('/')[0])
+    # path = Path(files[0].as_posix().split('/')[0])
+    # print(path)
     rfns = [x.as_posix().split('/')[-1][0:12] for x in files]
-    dts = get_timedate_and_station_code_from_rinex(rfns)
+    dts = get_timedate_and_station_code_from_rinex(rfns, just_dt=True)
     rfn_series = pd.Series(rfns, index=dts)
-    rfn_series = rfn_series.sort_index()
-    mask = (rfn_series.index >= date_range[0]) & (
-            rfn_series.index <= date_range[1])
-    files = [path / x for x in rfn_series.loc[mask].values]
-    return files
+    df = rfn_series.to_frame('rfn')
+    df['files'] = files
+    df = df.sort_index()
+    mask = (df.index >= date_range[0]) & (
+            df.index <= date_range[1])
+    # files = [path / x for x in rfn_series.loc[mask].values]
+    df_masked = df.loc[mask]
+    return df_masked['files'].tolist()
 
 
 def geo_annotate(ax, lons, lats, labels, xytext=(3, 3), fmt=None, c='k',
