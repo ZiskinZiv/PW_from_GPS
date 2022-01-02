@@ -701,7 +701,8 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
                                               network='soi-apn',
                                               axis_path=axis_path,
                                               ds_td=None,
-                                              concat_all_TD=True):
+                                              concat_all_TD=True,
+                                              soi_path=cwd):
     """interpolate the IMS 10 mins field(e.g., TD) to the location
     of the GNSS sites in ISRAEL(use dt=None for this). other dt is treated
     as datetime str and will give the "snapshot" for the field for just this
@@ -754,7 +755,7 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
         vals = ~np.isnan(ts_lr_neutral)
         X = np.column_stack([rr[vals, vals], cc[vals, vals]])
         # rr_cc_as_cols = np.column_stack([rr.flatten(), cc.flatten()])
-        # y = da_scaled.values[vals]
+        # y = da_scaled/home/shlomi/geo_ariel_home/Python_Projects/PW_from_GPS/*.*.values[vals]
         y = ts_lr_neutral[vals]
         return X, y
 
@@ -792,7 +793,7 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
     # read Israeli GNSS sites coords:
     if network == 'soi-apn':
         df = pd.read_csv(
-            cwd /
+            soi_path /
             'israeli_gnss_coords.txt',
             delim_whitespace=True,
             header=0)
@@ -928,7 +929,7 @@ def IMS_interpolating_to_GNSS_stations_israel(dt='2013-10-19T22:00:00',
             # read Israeli GNSS sites coords again:
             if network == 'soi-apn':
                 df = pd.read_csv(
-                    cwd /
+                    soi_path /
                     'israeli_gnss_coords.txt',
                     delim_whitespace=True,
                     header=0)
