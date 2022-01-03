@@ -11,12 +11,12 @@ from loguru import logger
 from pathlib import Path
 
 cwd=Path().cwd()
-
+main_path = Path('/home/ziskin')
 
 
 @click.command()
 @click.option('--path', '-s', help='a full path to where the credential file is and the T02 report',
-              type=click.Path(exists=True), default=cwd)
+              type=click.Path(exists=True), default=main_path)
 
 
 def main_program(*args, **kwargs):
@@ -40,18 +40,24 @@ def email_alert_when_no_T02_files(path=cwd):
     """run this file daily and check last 6 hours of 'T02_file_count.csv',
     if all empty (0) then send an email to Yuval"""
     import pandas as pd
-    df = pd.read_csv(path / 'T02_file_count.csv', index_col='dt')
-    # if df.iloc[-6:]['no_files'].all():
-    logger.warning('No files for the last 6 hours!')
-    big_str = format_df_to_string_with_breaks(df)
-    msg = 'No T02 files for the last 6 hours from AXIS, see report below!'
-    msg ='\n'.join([msg,big_str])
-    sender_email, passwd = read_gmail_creds(path)
+    df = pd.read_csv(path / 'T02_file_count.csv')
+    if df.empty:
+        logger.warning('No files for at least the last 24 hours!')
+        msg = 'No T02 files for at least the last 24 hours from AXIS'
+    else:
+        df.set_index('dt', inplace=True)
+        if df.iloc[-6:]['no_files'].all():
+            logger.warning('No files for the last 6 hours!')
+            big_str = format_df_to_string_with_breaks(df)
+            msg = 'No T02 files for the last 6 hours from AXIS, see report below!'
+            msg ='\n'.join([msg,big_str])
+    # sender_email, passwd = read_gmail_creds(path)
     # rec_mails = ['shlomiziskin@gmail.com', 'yuvalr@ariel.ac.il', 'vlf.gps@gmail.com']
-    rec_mails = ['shlomiziskin@gmail.com']
+    rec_mails = ['shlomiziskin@gmail.com', 'yuvalr@ariel.ac.il']
+    # rec_mails = ['shlomiziskin@gmail.com']
     subject = 'Geophysics1: AXIS TO2 lack of data'
     for rec_mail in rec_mails:
-        send_gmail(sender_email, rec_mail, passwd, subject, msg)
+        send_gmail_using_shell(rec_mail, subject, msg)
 # else:
 #     logger.info('No total lack of AXIS T02 files detected in the last 6 hours.')
     return df
@@ -66,36 +72,43 @@ def read_gmail_creds(path=cwd, filename='.ariel.geophysics1.txt'):
     return email, passwd
 
 
-def send_gmail(sender_email, receiver_email, passwd, subject='', msg=''):
-    import smtplib, ssl
-    from email.mime.text import MIMEText
-    from email.mime.multipart import MIMEMultipart
-    # port = 465  # For SSL
-    port = 587
-    smtp_server = "smtp.gmail.com"
-    # sender_email = sender_mail  # Enter your address
-    # receiver_email = rec_email  # Enter receiver address
-    # password = input("Type your password and press enter: ")
-    # message = """\
-    # Subject: Hi there
-    #
-    # This message is sent from Python."""
-    message = MIMEMultipart("alternative")
-    message["Subject"] = subject
-    message["From"] = sender_email
-    message["To"] = receiver_email
-    part1 = MIMEText(msg, "plain")
-    message.attach(part1)
-    context = ssl.create_default_context()
-    with smtplib.SMTP_SSL(smtp_server, port, context=context) as server:
-        server.ehlo()  # Can be omitted
-        server.starttls(context=context)
-        server.ehlo()  # Can be omitted
-        server.login(sender_email, passwd)
-        server.sendmail(sender_email, receiver_email, message.as_string())
-    logger.info('email sent to {} from {}.'.format(receiver_email, sender_email))
-    return
+# def send_gmail(sender_email, receiver_email, passwd, subject='', msg=''):
+#     import smtplib, ssl
+#     from email.mime.text import MIMEText
+#     from email.mime.multipart import MIMEMultipart
+#     # port = 465  # For SSL
+#     port = 465
+#     smtp_server = "smtp.gmail.com"
+#     # sender_email = sender_mail  # Enter your address
+#     # receiver_email = rec_email  # Enter receiver address
+#     # password = input("Type your password and press enter: ")
+#     # message = """\
+#     # Subject: Hi there
+#     #
+#     # This message is sent from Python."""
+#     message = MIMEMultipart("alternative")
+#     message["Subject"] = subject
+#     message["From"] = sender_email
+#     message["To"] = receiver_email
+#     part1 = MIMEText(msg, "plain")
+#     message.attach(part1)
+#     context = ssl.create_default_context()
+#     with smtplib.SMTP_SSL(smtp_server, port, context=context) as server:
+#         # server.ehlo()  # Can be omitted
+#         # server.starttls(context=context)
+#         # server.ehlo()  # Can be omitted
+#         server.login(sender_email, passwd)
+#         server.sendmail(sender_email, receiver_email, message.as_string())
+#     logger.info('email sent to {} from {}.'.format(receiver_email, sender_email))
+#     return
 
+
+def send_gmail_using_shell(receiver_email, subject='', msg=''):
+    import subprocess
+    command = 'echo "{}" | mail -s "{}" {}'.format(msg, subject, receiver_email)
+    subprocess.call(command, shell=True)
+    logger.info('email sent to {}.'.format(receiver_email))
+    return
 
 if __name__ == '__main__':
     main_program()
