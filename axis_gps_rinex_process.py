@@ -38,15 +38,18 @@ Bisa103V.21d.Z
 from pathlib import Path
 home_axis_path = Path('/home/axis-gps')
 cwd = Path().cwd()
+pw_path = Path('/home/ziskin')
 
 
 def analyse_T02_files(main_path=home_axis_path, start_date=None, savepath=cwd):
     """this will run every hour and write a csv file with dataframe containing the
     recent T02 file count"""
+    import logging
     import pandas as pd
     import calendar
     from aux_gps import path_glob
     from aux_gps import get_timedate_and_station_code_from_rinex
+    logger = logging.getLogger('axis_rinex_processer')
     today_date = pd.Timestamp.today()
     if start_date is not None:
         yesterday_date = pd.to_datetime(start_date)
@@ -66,6 +69,7 @@ def analyse_T02_files(main_path=home_axis_path, start_date=None, savepath=cwd):
         file_path = main_path / 'Month.{}'.format(month) / 'Day.{}'.format(day)
         hourly_files = path_glob(file_path, '*.T02', return_empty_list=True)
         if not hourly_files:
+            dfs.append(pd.DataFrame())
             continue
         records = []
         for i, hour_file in enumerate(hourly_files):
@@ -76,6 +80,11 @@ def analyse_T02_files(main_path=home_axis_path, start_date=None, savepath=cwd):
         # df.to_csv('axis_try.csv')
         dfs.append(df)
     dff = pd.concat(dfs, axis=0)
+    if dff.empty:
+        logger.warning('No T02 found at least in the last 24 hours!')
+        dff = pd.DataFrame(list())
+        dff.to_csv(savepath / 'T02_file_count.csv')
+        return
     dff = dff.groupby('dt')['station_name'].count()
     dff.index=pd.to_datetime(dff.index)
     dff = dff.to_frame('total_files')
@@ -258,8 +267,6 @@ def process_T02(args):
     from aux_gps import path_glob
     from subprocess import CalledProcessError
     logger = logging.getLogger('axis_rinex_processer')
-    # run analyse each hour:
-    analyse_T02_files()
     if args.is_T02_path_year is None:
         path_year = True
     else:
@@ -269,7 +276,7 @@ def process_T02(args):
     else:
         mode = args.mode
     if args.year is None:
-        year = 2021
+        year = 2022
     else:
         year = args.year
     savepath = args.savepath
@@ -368,6 +375,8 @@ if __name__ == '__main__':
 #    elif args.field is None:
 #        print('field is a required argument, run with -h...')
 #        sys.exit()
+    # run analyse each hour:
+    analyse_T02_files(savepath=pw_path)
     args = check_for_missing_rinex_in_axis_path(args)
     print(args)
     process_T02(args)
