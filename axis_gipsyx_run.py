@@ -14,8 +14,8 @@ strategy for final solutions of hourly axis network year/doy folders:
 2) gunzip each rinex group files and crx2rnx.
 2) for each station name teqc_concat to group file (30hr max)
 4) delete all remaining files
-5) rnxEdit with gde tree
-6) gd2e
+5) rnxEditGde.py with gde tree
+6) gd2e.py
     two main modes for final solutions, the strategey is per station:
         1) historic - loop over all rinex upuntil 3 weeks time from now and solve
     with 30hr window centered on midday of doy.
@@ -375,8 +375,8 @@ def final_historic_perp(rinexpath, rinexfinal_path, staDb, rinex_df, station='Al
                                                     doy=int(doy), year=int(year))
         prep_30hr_all_steps(station_path, files, staDb, station=station, gde_tree=gde_tree)
     logger.info('Done prepring final {}.'.format(station))
-    
-        
+
+
 def prep_30hr_all_steps(station_path, files, staDb, station='Alon',
                         gde_tree=None):
     import numpy as np
