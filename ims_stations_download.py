@@ -254,6 +254,7 @@ def produce_pw_all_stations(ds, axis_path, mda_path, hydro_path):
     from aux_gps import fill_na_xarray_time_series_with_its_group
     from aux_gps import path_glob
     from aux_gps import save_ncfile
+    from axis_process import read_axis_stations
     import pandas as pd
     import numpy as np
     from hydro_procedures import standertize_pwv_using_long_term_stat
@@ -269,7 +270,12 @@ def produce_pw_all_stations(ds, axis_path, mda_path, hydro_path):
     st_dirs = [x for x in st_dirs if x.is_dir()]
     st_dirs = [x for x in st_dirs if not x.as_posix().split('/')
                [-1].isnumeric()]
-    assert len(st_dirs) == 27
+    # check that all stations are the folders:
+    st_dirs_list = [x.as_posix().split('/')[-1] for x in st_dirs]
+    axis_db = read_axis_stations(axis_path)
+    axis_db_list = axis_db.index.tolist()
+    assert set(st_dirs_list) == set(axis_db_list)
+    # assert len(st_dirs) == 27
     pwv_list = []
     ppp_list = []
     for st_dir in st_dirs:
