@@ -5257,6 +5257,8 @@ def standertize_pwv_using_long_term_stat(axis_ds, hydro_path=hydro_path, filenam
     import xarray as xr
     import pandas as pd
     stats = xr.load_dataset(hydro_path/filename)
+    # makes sure that axis_ds has only pwv and not error
+    axis_ds = axis_ds[[x for x in axis_ds if '_error' not in x]]
     da_list = []
     for da in axis_ds:
         df_mean = transform_time_series_groups_agg_to_time_series(axis_ds[da], stats, stat='mean')
