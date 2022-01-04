@@ -56,6 +56,9 @@ def transform_time_series_groups_agg_to_time_series(da, da_stats, time_dim='time
     df = df.set_index(time_dim)
     return df
 
+def convert_lat_lon_deg_to_decimal(d=32,m=3,s=5):
+    # Formula: DEC = (DEG + (MIN * 1/60) + (SEC * 1/60 * 1/60))
+    return d + m/60 + s/3600
 
 def read_converted_G0_stations(path=cwd, save=True):
     import pandas as pd
