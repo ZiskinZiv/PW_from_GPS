@@ -685,7 +685,9 @@ def daily_gd2e(path, staDb, tree, acc='Final', extended_rfn=False):
     if not res_path.is_dir():
         os.mkdir(res_path)
     files = path_glob(dr_path, '*.gz')
-    edited = sorted([x for x in files if 'edited' in x.as_posix()])[-1]
+    edited_list = sorted([x for x in files if 'edited' in x.as_posix()])
+    # get the latest file:
+    edited = max(edited_list, key=os.path.getctime)
     logger.info('started gd2e on {}'.format(edited))
     station = edited.as_posix().split('/')[-1][0:4].upper()
     rfn = edited.as_posix().split('/')[-1][0:8]
