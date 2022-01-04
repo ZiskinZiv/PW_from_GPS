@@ -263,6 +263,7 @@ def produce_pw_all_stations(ds, axis_path, mda_path, hydro_path):
     from hydro_procedures import best_hp_models_dict
     from sklearn.ensemble import RandomForestClassifier
     import xarray as xr
+    import os
     # first load mda:
     mda = load_mda(mda_path)
     # now loop over each station, produce pwv and save:
@@ -280,7 +281,9 @@ def produce_pw_all_stations(ds, axis_path, mda_path, hydro_path):
     ppp_list = []
     for st_dir in st_dirs:
         station = st_dir.as_posix().split('/')[-1]
-        last_file = sorted(path_glob(st_dir/'dr/ultra', '*.nc'))[-1]
+        all_nc_files = path_glob(st_dir/'dr/ultra', '*.nc')
+        # get the latest file:
+        last_file = max(all_nc_files, key=os.path.getctime)
         last_file_str = last_file.as_posix().split('/')[-1][4:13]
         wet = xr.load_dataset(last_file)['WetZ'].squeeze(drop=True)
         # also get ppp for the same price:
@@ -319,40 +322,45 @@ def produce_pw_all_stations(ds, axis_path, mda_path, hydro_path):
     save_ncfile(dss, axis_path, filename)
     ppp_filename = 'AXIS_{}_PPP_ultra.nc'.format(last_file_str)
     save_ncfile(ppp_all, axis_path, ppp_filename)
+
+
     # now use pipeline to predict floods in southern axis stations:
     ds = standertize_pwv_using_long_term_stat(dss.resample(time='1H').mean())
-    # load X, y and train RFC:
-    X, y = prepare_X_y_for_holdout_test(
-        features='pwv+DOY', model_name='RF', path=hydro_path)
-    rfc = RandomForestClassifier(**best_hp_models_dict['RF'])
-    rfc.set_params(n_jobs=4)
-    rfc.fit(X, y)
-    # iterate over ds, add DOY and select 24 windows, and predict:
-    Xs = []
-    ys = []
-    for da in ds:
-        end = ds[da]['time'].max() - pd.Timedelta(1, unit='H')
-        start = end - pd.Timedelta(23, unit='H')
-        sliced = ds[da].sel(time=slice(start, end))
-        doy = ds[da].time.dt.dayofyear[-1].item()
-        X_da = np.append(sliced.values, doy)
-        X_da = xr.DataArray(X_da, dims='feature')
-        X_da['feature'] = ['pwv_{}'.format(x+1) for x in range(24)] + ['DOY']
-        flood = rfc.predict(X_da.values.reshape(1, -1))
-        y = xr.DataArray(flood, dims='time')
-        y['time'] = [ds[da]['time'].max().values]
-        y.name = 'Flood'
-        Xs.append(X_da)
-        ys.append(y)
-    pred = xr.Dataset()
-    pred['features'] = xr.concat(Xs, 'station')
-    pred['flood'] = xr.concat(ys, 'station')
-    pred['station'] = [x for x in ds]
-    df_pred = pred['flood'].to_dataframe()
-    df_pred['time'] = pred['flood']['time'].values[0]
-    df_pred = df_pred['flood'].astype(int)
-    pred_filename = filename.split('.')[0] + '_flood_prediction.csv'
-    df_pred.to_csv(axis_path/pred_filename, sep=',')
+    if ds['time'].size != 24:
+        logger.warning('Could not make prediction since there are only {} hours of data.'.format(ds['time'].size))
+    else:
+        # load X, y and train RFC:
+        X, y = prepare_X_y_for_holdout_test(
+            features='pwv+DOY', model_name='RF', path=hydro_path)
+        rfc = RandomForestClassifier(**best_hp_models_dict['RF'])
+        rfc.set_params(n_jobs=4)
+        rfc.fit(X, y)
+        # iterate over ds, add DOY and select 24 windows, and predict:
+        Xs = []
+        ys = []
+        for da in ds:
+            end = ds[da]['time'].max() - pd.Timedelta(1, unit='H')
+            start = end - pd.Timedelta(23, unit='H')
+            sliced = ds[da].sel(time=slice(start, end))
+            doy = ds[da].time.dt.dayofyear[-1].item()
+            X_da = np.append(sliced.values, doy)
+            X_da = xr.DataArray(X_da, dims='feature')
+            X_da['feature'] = ['pwv_{}'.format(x+1) for x in range(24)] + ['DOY']
+            flood = rfc.predict(X_da.values.reshape(1, -1))
+            y = xr.DataArray(flood, dims='time')
+            y['time'] = [ds[da]['time'].max().values]
+            y.name = 'Flood'
+            Xs.append(X_da)
+            ys.append(y)
+        pred = xr.Dataset()
+        pred['features'] = xr.concat(Xs, 'station')
+        pred['flood'] = xr.concat(ys, 'station')
+        pred['station'] = [x for x in ds]
+        df_pred = pred['flood'].to_dataframe()
+        df_pred['time'] = pred['flood']['time'].values[0]
+        df_pred = df_pred['flood'].astype(int)
+        pred_filename = filename.split('.')[0] + '_flood_prediction.csv'
+        df_pred.to_csv(axis_path/pred_filename, sep=',')
     return dss, filename
 
 
