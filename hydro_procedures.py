@@ -5258,7 +5258,7 @@ def standertize_pwv_using_long_term_stat(axis_ds, hydro_path=hydro_path, filenam
     import pandas as pd
     stats = xr.load_dataset(hydro_path/filename)
     # makes sure that axis_ds has only pwv and not error
-    axis_ds = axis_ds[[x for x in axis_ds if '_error' not in x]]
+    axis_ds = axis_ds[[x for x in axis_ds if 'error' not in x]]
     da_list = []
     for da in axis_ds:
         df_mean = transform_time_series_groups_agg_to_time_series(axis_ds[da], stats, stat='mean')
@@ -5266,6 +5266,8 @@ def standertize_pwv_using_long_term_stat(axis_ds, hydro_path=hydro_path, filenam
         if df_mean is None or df_std is None:
             print('No stats for {}, skipping...'.format(da))
             continue
+        else:
+            print('Standertizing for {} station.'.format(da))
         df = pd.concat([df_mean, df_std], axis=1)
         df = df.loc[:, ~df.columns.duplicated()]
         df['anomalies'] = (df[da] - df['mean'])/df['std']
