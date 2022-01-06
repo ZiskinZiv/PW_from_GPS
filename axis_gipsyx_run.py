@@ -591,7 +591,7 @@ def main_program(args):
     import numpy as np
     logger = logging.getLogger('axis-gipsyx')
     if args.year is None:
-        year = 2021
+        year = 2022
     else:
         year = args.year
     if args.window is None:
