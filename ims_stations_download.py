@@ -365,6 +365,7 @@ def produce_pw_all_stations(ds, axis_path, mda_path, hydro_path):
         df_pred = df_pred['flood'].astype(int)
         pred_filename = filename.split('.')[0] + '_flood_prediction.csv'
         df_pred.to_csv(axis_path/pred_filename, sep=',')
+        logger.info('{} was written to {}.'.format(pred_filename, axis_path))
     return dss, filename
 
 
