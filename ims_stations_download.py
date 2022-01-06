@@ -281,15 +281,19 @@ def produce_pw_all_stations(ds, axis_path, mda_path, hydro_path):
     ppp_list = []
     for st_dir in st_dirs:
         station = st_dir.as_posix().split('/')[-1]
-        all_nc_files = path_glob(st_dir/'dr/ultra', '*.nc')
+        all_nc_files = path_glob(st_dir/'dr/ultra', '*_smoothFinal.nc')
         # get the latest file:
         last_file = max(all_nc_files, key=os.path.getctime)
         last_file_str = last_file.as_posix().split('/')[-1][4:13]
-        wet = xr.load_dataset(last_file)['WetZ'].squeeze(drop=True)
+        logger.info('loading {}.'.format(last_file))
+        try:
+            wet = xr.load_dataset(last_file)['WetZ'].squeeze(drop=True)
+        except KeyError:
+            logger.warning('bad keyerror in {}, skipping...'.format(last_file))
+            continue
         # also get ppp for the same price:
         ppp = xr.load_dataset(last_file)
         ppp_list.append(ppp)
-        logger.info('loaded {}.'.format(last_file))
         wet_error = xr.load_dataset(last_file)['WetZ_error'].squeeze(drop=True)
         wet.name = station
         wet_error.name = station
@@ -326,7 +330,7 @@ def produce_pw_all_stations(ds, axis_path, mda_path, hydro_path):
 
     # now use pipeline to predict floods in southern axis stations:
     ds = standertize_pwv_using_long_term_stat(dss.resample(time='1H').mean())
-    if ds['time'].size != 24:
+    if ds['time'].size < 24:
         logger.warning('Could not make prediction since there are only {} hours of data.'.format(ds['time'].size))
     else:
         # load X, y and train RFC:
