@@ -872,16 +872,17 @@ if __name__ == '__main__':
     proccessed results will be saved."""
     import argparse
     import sys
-    from PW_paths import work_yuval
-    from PW_paths import work_path
-    from PW_paths import geo_path
-    from PW_paths import cwd
+    # from pathlib import Path
+    # from PW_paths import work_yuval
+    # from PW_paths import work_path
+    # from PW_paths import geo_path
+    # from PW_paths import cwd
     from aux_gps import configure_logger
-    garner_path = work_yuval / 'garner'
-    ims_path = work_yuval / 'IMS_T'
-    gis_path = work_yuval / 'gis'
-    sound_path = work_yuval / 'sounding'
-    rinex_on_geo = geo_path / 'Work_Files/PW_yuval/rinex'
+    # garner_path = work_yuval / 'garner'
+    # ims_path = work_yuval / 'IMS_T'
+    # gis_path = work_yuval / 'gis'
+    # sound_path = work_yuval / 'sounding'
+    # rinex_on_geo = geo_path / 'Work_Files/PW_yuval/rinex'
     logger = configure_logger('gipsyx_post_proccesser')
     parser = argparse.ArgumentParser(
         description='a command line tool for post proccessing PPP gipsyX results.')
