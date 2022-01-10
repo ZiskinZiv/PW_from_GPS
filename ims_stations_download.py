@@ -345,7 +345,8 @@ def produce_pw_all_stations(ds, axis_path, mda_path, hydro_path):
         for da in ds:
             end = ds[da]['time'].max() - pd.Timedelta(1, unit='H')
             start = end - pd.Timedelta(23, unit='H')
-            sliced = ds[da].sel(time=slice(start, end))
+            mean = ds[da].sel(time=slice(start, end)).mean('time')
+            sliced = ds[da].sel(time=slice(start, end)).fillna(mean)
             doy = ds[da].time.dt.dayofyear[-1].item()
             X_da = np.append(sliced.values, doy)
             X_da = xr.DataArray(X_da, dims='feature')
