@@ -51,6 +51,8 @@ def email_alert_when_no_T02_files(path=cwd):
             big_str = format_df_to_string_with_breaks(df)
             msg = 'No T02 files for the last 6 hours from AXIS, see report below!'
             msg ='\n'.join([msg,big_str])
+        else:
+            return df
     # sender_email, passwd = read_gmail_creds(path)
     # rec_mails = ['shlomiziskin@gmail.com', 'yuvalr@ariel.ac.il', 'vlf.gps@gmail.com']
     rec_mails = ['shlomiziskin@gmail.com', 'yuvalr@ariel.ac.il']
