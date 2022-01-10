@@ -1745,10 +1745,22 @@ def slice_task_date_range(files, date_range, task='non-specific'):
     # path = Path(files[0].as_posix().split('/')[0])
     # print(path)
     rfns = [x.as_posix().split('/')[-1][0:12] for x in files]
-    dts = get_timedate_and_station_code_from_rinex(rfns, just_dt=True)
-    rfn_series = pd.Series(rfns, index=dts)
+    dts = []
+    good_files = []
+    good_rfns = []
+    for i, rfn in enumerate(rfns):
+        try:
+            dt = get_timedate_and_station_code_from_rinex(rfn, just_dt=True)
+            dts.append(dt)
+            good_files.append(files[i])
+            good_rfns.append(rfn)
+        except ValueError:
+            logger.error('{} is non standard rfn, skipping...'.format(rfn))
+            continue
+    # dts = get_timedate_and_station_code_from_rinex(rfns, just_dt=True)
+    rfn_series = pd.Series(good_rfns, index=dts)
     df = rfn_series.to_frame('rfn')
-    df['files'] = files
+    df['files'] = good_files
     df = df.sort_index()
     mask = (df.index >= date_range[0]) & (
             df.index <= date_range[1])
