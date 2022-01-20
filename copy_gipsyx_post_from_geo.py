@@ -124,6 +124,13 @@ def copy_post_from_geo(remote_path, station, days):
                 print('{} final solution not found in {}'.format(curr_sta,
                       src_rigid_path))
                 continue
+            for filepath in filepaths:
+                filename = filepath.as_posix().split('/')[-1]
+                print(filename)
+                src_path = src_rigid_path / filename
+                dst_path = workpath / curr_sta / 'gipsyx_solutions'
+                dst_path.mkdir(parents=True, exist_ok=True)
+                copy_with_progress(src_path, dst_path)
             try:
                 filepaths = path_glob(src_rigid_path, '*PWV*.nc')
             except FileNotFoundError:
