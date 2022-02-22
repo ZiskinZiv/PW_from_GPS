@@ -4318,7 +4318,7 @@ def add_features_and_produce_X_y(hdf, fdf, window_size=25, seed=42,
         window_factor = 72 / window_size
         slice_range = int(window_size * window_factor)
         sliced = df.iloc[r - slice_range:r + slice_range]
-        # if tides inside this date range, continue:
+        # if tides inside this date range, continue_pw_anom:
         # try:
         if not (y_pos.loc[good_dts].index.intersection(sliced.index)).empty:
             # print('#')

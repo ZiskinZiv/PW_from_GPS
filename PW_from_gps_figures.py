@@ -2234,7 +2234,7 @@ def plot_ims_T_lapse_rate(ims_path=ims_path, dt='2013-10-19T22:00:00',
 
 
 def plot_figure_9(hydro_path=hydro_path, gis_path=gis_path, pw_anom=False,
-                  max_flow_thresh=None, wv_name='pw', save=True):
+                  max_flow_thresh=None, wv_name='pwv', save=True):
     from hydro_procedures import get_hydro_near_GNSS
     from hydro_procedures import loop_over_gnss_hydro_and_aggregate
     import matplotlib.pyplot as plt
@@ -2265,11 +2265,11 @@ def plot_figure_9(hydro_path=hydro_path, gis_path=gis_path, pw_anom=False,
     xlabels = [x.replace('−', '') for x in labels]
     ax.set_xticklabels(xlabels)
     fig.canvas.draw()
-    if wv_name == 'pw':
+    if wv_name == 'pwv':
         if pw_anom:
-            ax.set_ylabel('PW anomalies [mm]')
+            ax.set_ylabel('PWV anomalies [mm]')
         else:
-            ax.set_ylabel('PW [mm]')
+            ax.set_ylabel('PWV [mm]')
     elif wv_name == 'iwv':
         if pw_anom:
             ax.set_ylabel(r'IWV anomalies [kg$\cdot$m$^{-2}$]')
