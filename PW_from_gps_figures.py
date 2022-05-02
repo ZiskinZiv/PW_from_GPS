@@ -6421,7 +6421,7 @@ def plot_typical_tide_event_with_PWV(work_path=work_yuval,
 
 
 def plot_hydro_pressure_anomalies(hydro_path=hydro_path, std=False,
-                                  fontsize=16, save=True):
+                                  fontsize=16, days_prior=6, days_post=4, save=True):
     import xarray as xr
     import pandas as pd
     import numpy as np
@@ -6437,13 +6437,13 @@ def plot_hydro_pressure_anomalies(hydro_path=hydro_path, std=False,
     bd = feats['bet-dagan']
     dts_ranges = []
     for dt in dts:
-        prior = dt - pd.Timedelta(3, unit='D')
-        after = dt + pd.Timedelta(1, unit='D')
+        prior = dt - pd.Timedelta(days_prior, unit='D')
+        after = dt + pd.Timedelta(days_post, unit='D')
         dt_range = pd.date_range(start=prior, end=after, freq='H')
         bd_range = bd.sel(time=dt_range)
         dts_ranges.append(bd_range.values)
     df = pd.DataFrame(dts_ranges).T
-    df.index = np.linspace(-3, 1, len(df))
+    df.index = np.linspace(-1*days_prior, days_post, len(df))
     fig, ax = plt.subplots(figsize=(8, 6))
     ts = df.T.mean() #.shift(periods=-1, freq='15D')
     ts_std = df.T.std()
@@ -6463,14 +6463,15 @@ def plot_hydro_pressure_anomalies(hydro_path=hydro_path, std=False,
     fig.tight_layout()
     fig.subplots_adjust(right=0.946)
     if save:
-        filename = 'Pressure_anoms_3_prior_flood.png'
+        filename = 'Pressure_anoms_{}_prior_flood.png'.format(days_prior)
         plt.savefig(savefig_path / filename, bbox_inches='tight', pad_inches=0.1)
     return df
 
 
 def plot_hydro_pwv_anomalies_with_station_mean(work_path=work_yuval,
                                                hydro_path=hydro_path,
-                                               days_prior=3, fontsize=14,
+                                               days_prior=6, days_post=4,
+                                               fontsize=14,
                                                save=True, smoothed=False,
                                                wv_label='PWV'):
     import xarray as xr
@@ -6491,6 +6492,7 @@ def plot_hydro_pwv_anomalies_with_station_mean(work_path=work_yuval,
         dfs = dfs.reset_index(drop=True)
         dfs.index = np.linspace(df.index[0], df.index[-1], dfs.index.size)
         return dfs
+
     sns.set_style('whitegrid')
     sns.set_style('ticks')
     cmap = 'jet' #sns.color_palette('gist_rainbow_r', as_cmap=True)
@@ -6506,6 +6508,7 @@ def plot_hydro_pwv_anomalies_with_station_mean(work_path=work_yuval,
         df, _, _ = produce_pwv_days_before_tide_events(pw_da, df_da,
                                                        plot=False,
                                                        days_prior=days_prior,
+                                                       days_after=days_post,
                                                        drop_thresh=0.75,
                                                        max_gap='6H')
         df_list.append(df)
@@ -6517,7 +6520,7 @@ def plot_hydro_pwv_anomalies_with_station_mean(work_path=work_yuval,
     df_mean.columns = [x.upper() for x in df_mean.columns]
     df_mean.index = pd.to_timedelta(df_mean.index, unit='D')
     df_mean = df_mean.resample('30T').mean()
-    df_mean.index = np.linspace(-3, 1, len(df_mean.index))
+    df_mean.index = np.linspace(-1*days_prior, days_post, len(df_mean.index))
     # weights = df.count(axis=1).shift(periods=-1, freq='15D').astype(int)
     fig = plt.figure(figsize=(5, 8))
     grid = plt.GridSpec(
@@ -6585,7 +6588,7 @@ def plot_hydro_pwv_anomalies_with_station_mean(work_path=work_yuval,
     ax_group.axvline(0, color='k', ls='--', lw=1.5)
     # ax_heat.axvline(0, color='r', ls='--')
     ax_group.grid(True)
-    fig.tight_layout()
+    # fig.tight_layout()
     fig.subplots_adjust(right=0.946)
     if save:
         filename = 'PWV_anoms_{}_prior_flood.png'.format(days_prior)
