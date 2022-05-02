@@ -4,6 +4,13 @@
 Created on Thu Nov 21 14:08:43 2019
 to produce X and y use combine_pos_neg_from_nc_file or
 prepare_X_y_for_holdout_test
+Fig 9. (main results best hp):
+dss=load_nested_CV_test_results_from_all_models(path=hydro_ml_path, best=True,neg=1,splits=5)
+plot_nested_CV_test_scores(dss, feats=['doy', 'pressure', 'pwv', 'pressure+doy', 'pwv+pressure', 'pwv+pressure+doy'])
+Fig 10. (imbalanced set test results-no CV):
+dss=run_holdout_shuffled_tests_on_all_models_and_features()
+df=convert_da_to_long_form_df(dss)
+sns.catplot(data=df,y='value',x='features',row='model',col='scorer',kind='bar')
 @author: ziskin
 """
 
@@ -1789,6 +1796,7 @@ def smart_add_dataarray_to_ds_list(dsl, da_name='feature_importances'):
         new_dsl.append(ds)
     return new_dsl
 
+
 def load_ML_run_results(path=hydro_ml_path, prefix='CVR',
                         change_DOY_to_doy=True):
     from aux_gps import path_glob
@@ -1876,15 +1884,26 @@ def plot_nested_CV_test_scores(dss, feats=None, fontsize=16,
             patch.set_x(patch.get_x() + diff * .5)
 
 
-    def show_values_on_bars(axs, fs=12, fw='bold', exclude_bar_num=None):
+    def show_values_on_bars(axs, fs=12, fw='bold', exclude_bar_num=None,
+                            middle=False):
         import numpy as np
-        def _show_on_single_plot(ax, exclude_bar_num=3):
+        def _show_on_single_plot(ax, exclude_bar_num=3, middle=middle):
             for i, p in enumerate(ax.patches):
                 if i != exclude_bar_num and exclude_bar_num is not None:
-                    _x = p.get_x() + p.get_width() / 2
-                    _y = p.get_y() + p.get_height()
+                    if not middle:
+                        # plot just to the left of the middle of the bar
+                        _x = p.get_x() + p.get_width() / 2
+                        x_offset = -0.005
+                        y_offset = 0.01
+                        _y = p.get_y() + p.get_height()
+                    else:
+                        # plot right above the bar
+                        _x = p.get_x() + p.get_width()
+                        _y = p.get_y() + p.get_height()
+                        x_offset = 0.0
+                        y_offset = 0.005
                     value = '{:.2f}'.format(p.get_height())
-                    ax.text(_x, _y, value, ha="right",
+                    ax.text(_x + x_offset, _y + y_offset, value, ha="right",
                             fontsize=fs, fontweight=fw, zorder=20)
 
         if isinstance(axs, np.ndarray):
@@ -1892,8 +1911,12 @@ def plot_nested_CV_test_scores(dss, feats=None, fontsize=16,
                 _show_on_single_plot(ax, exclude_bar_num)
         else:
             _show_on_single_plot(axs, exclude_bar_num)
-
-    splits = dss['outer_split'].size
+    try:
+        splits = dss['outer_split'].size
+        middle = False
+    except KeyError:
+        splits = 'None'
+        middle = True
     try:
         assert 'best' in dss.attrs['comment']
         best = True
@@ -1930,6 +1953,13 @@ def plot_nested_CV_test_scores(dss, feats=None, fontsize=16,
         da = xr.concat([da, da_empty], 'features')
         da = da.reindex(features=['doy', 'pressure', 'pwv',
                                   'empty', 'pwv+pressure', 'pwv+pressure+doy'])
+    elif len(feats) == 6:
+            da_empty = da.isel(features=0).copy(
+                data=np.zeros(da.isel(features=0).shape))
+            da_empty['features'] = 'empty'
+            da = xr.concat([da, da_empty], 'features')
+            da = da.reindex(features=['doy', 'pressure', 'pwv',
+                                      'empty', 'pressure+doy', 'pwv+pressure', 'pwv+pressure+doy'])
     da.name = 'feature groups'
     df = convert_da_to_long_form_df(da, value_name='score',
                                     var_name='feature groups')
@@ -1940,6 +1970,9 @@ def plot_nested_CV_test_scores(dss, feats=None, fontsize=16,
     if len(feats) == 5:
         cmap = ['tab:purple', 'tab:brown', 'tab:blue', 'tab:blue',
                 'tab:orange', 'tab:green']
+    elif len(feats) == 6:
+            cmap = ['tab:purple', 'tab:brown', 'tab:blue', 'tab:blue',
+                    'tab:red', 'tab:orange', 'tab:green']
     fg = sns.FacetGrid(data=df, row='model', col='scorer', height=4, aspect=0.9)
     # fg.map_dataframe(sns.stripplot, x="test_score", y="score", hue="features",
     #                  data=df, dodge=True, alpha=1, zorder=1, palette=cmap)
@@ -1958,10 +1991,11 @@ def plot_nested_CV_test_scores(dss, feats=None, fontsize=16,
     fg.set_ylabels('score')
     [x.grid(True) for x in fg.axes.flatten()]
     handles, labels = fg.axes[0, 0].get_legend_handles_labels()
-    if len(feats) == 5:
+    if len(feats) == 5 or len(feats) == 6:
         del handles[3]
         del labels[3]
-    show_values_on_bars(fg.axes, fs=fontsize-4, exclude_bar_num=3)
+    show_values_on_bars(fg.axes, fs=fontsize-7, exclude_bar_num=3, fw='bold',
+                        middle=middle)
     for i in range(fg.axes.shape[0]):  # i is rows
         model = dss['model'].isel(model=i).item()
         if model == 'SVC':
@@ -3342,6 +3376,106 @@ def prepare_X_y_for_holdout_test(features='pwv+doy', model_name='SVC',
     return X, y
 
 
+def run_holdout_shuffled_tests_on_all_models_and_features(path=hydro_path, samples=1, test_size=0.25):
+    """fit model with best HP on balanced set and test it on imbalanced set for
+    each model, feature group"""
+    import xarray as xr
+    from sklearn.model_selection import train_test_split
+    from aux_gps import get_all_possible_combinations_from_list
+    feats = get_all_possible_combinations_from_list(
+        ['pwv', 'pressure', 'doy'], reduce_single_list=True, combine_by_sep='+')
+    models = ['MLP', 'SVC', 'RF']
+    model_list = []
+    # model_list2 = []
+    for model_name in models:
+        feat_list = []
+        # feat_list2 = []
+        for feat in feats:
+            # get balanced X, y and fit model:
+            X, y = prepare_X_y_for_holdout_test(features=feat, model_name=model_name,
+                                                path=hydro_path, drop_hours=None,
+                                                negative_samples=1)
+            X_train, X_test, y_train, y_test = train_test_split(
+                    X, y, test_size=test_size, random_state=42)
+            ml = ML_Classifier_Switcher()
+            model = ml.pick_model(model_name)
+            model.set_params(**best_hp_models_dict[model_name])
+            model.fit(X_train, y_train)
+            # now produce imbalanced set:
+            X_im, y_im = prepare_imbalanced_X_y(path=path, negative_samples=25,
+                                                features=feat, model_name=model_name)
+            # keep only samples not in train:
+            sample_list = list(set(X_im.sample.values).difference(set(X_train.sample.values)))
+            X_im = X_im.sel(sample=sample_list)
+            y_im = y_im.sel(sample=sample_list)
+            # print(model_name, X_im.shape, y_im.shape)
+            # no shuffeling, i.e., samples=1
+            tests_df = holdout_shuffled_test_for_imbalanced(fitted_model=model, X_im=X_im, y_im=y_im, samples=1)
+            # best.index.name = 'scorer'
+            if samples == 1:
+                ds = tests_df.T.set_index('scorer').to_xarray()
+            else:
+                ds = tests_df.to_xarray()
+            # roc.index.name = 'FPR'
+            # roc_da = roc.to_xarray().to_array('scorer')
+            feat_list.append(ds)
+            # feat_list2.append(roc_da)
+        dsf = xr.concat(feat_list, 'features')
+        # dsf2 = xr.concat(feat_list2, 'features')
+        dsf['features'] = feats
+        # dsf2['features'] = feats
+        model_list.append(dsf)
+        # model_list2.append(dsf2)
+    dss = xr.concat(model_list, 'model')
+    # rocs = xr.concat(model_list2, 'model')
+    dss['model'] = models
+    # rocs['model'] = models
+    # dss['roc'] = rocs
+    return dss
+
+
+def prepare_imbalanced_X_y(path=hydro_path, negative_samples=25,
+                           features='pwv+doy', model_name='SVC'):
+    import xarray as xr
+    # combine X,y and split them according to test ratio and seed:
+    X, y = combine_pos_neg_from_nc_file(path, negative_sample_num=negative_samples)
+    # re arange X features according to model:
+    feats = features.split('+')
+    if model_name == 'RF' and 'doy' in feats:
+        if isinstance(feats, list):
+            feats.remove('doy')
+            feats.append('DOY')
+        elif isinstance(feats, str):
+            feats = 'DOY'
+    elif model_name != 'RF' and 'doy' in feats:
+        if isinstance(feats, list):
+            feats.remove('doy')
+            feats.append('doy_sin')
+            feats.append('doy_cos')
+        elif isinstance(feats, str):
+            feats = ['doy_sin']
+            feats.append('doy_cos')
+    if isinstance(X, list):
+        Xs = []
+        for X1 in X:
+            Xs.append(select_features_from_X(X1, feats))
+        X = Xs
+    else:
+        X = select_features_from_X(X, feats)
+    # now concat all X and y lists into imbalanced classes:
+    # if len(X) == 1 or len(y) == 1:
+    #     return X, y
+    inds = [x for x in range(len(X))][1:]
+    X_new = [X[0]]
+    y_new = [y[0]]
+    for ind in inds:
+        X_new.append(X[ind].where(y[ind]==0).dropna('sample'))
+        y_new.append(y[ind][y[ind]==0])
+    X_new = xr.concat(X_new, 'sample')
+    y_new = xr.concat(y_new, 'sample')
+    return X_new, y_new
+
+
 def CV_test_after_GridSearchCV(path=hydro_path, gr_path=hydro_ml_path/'nested4',
                                model_name='SVC', features='pwv', params=None,
                                verbose=False, drop_hours=None, PI=None,
@@ -3601,6 +3735,44 @@ def run_test_on_CV_split(X_train, y_train, X_test, y_test, param_df,
         return best_df, roc_df, pi_mean_da, pi_std_da
     else:
         return best_df, roc_df
+
+
+def holdout_shuffled_test_for_imbalanced(fitted_model, X_im, y_im, verbose=True,
+                                         samples=10):
+    # from sklearn.metrics import roc_curve
+    # from sklearn.metrics import roc_auc_score
+    import pandas as pd
+    # import numpy as np
+    dfX = X_im.to_dataset('feature').to_dataframe()
+    test_scores = []
+    # mean_fpr = np.linspace(0, 1, 100)
+    # tprs = []
+    # roc_aucs = []
+    scorer_names = [x for x in scorer_order]
+    scorer_list = []
+    for i, scorer in enumerate([scorers(x) for x in scorer_order]):
+        if verbose:
+            print('{} scorer'.format(scorer))
+        for j in range(samples):
+            y_test = y_im.to_dataframe('y').sample(frac=1, random_state=j)
+            y_pred = fitted_model.predict(dfX.sample(frac=1, random_state=j).values)
+        # fpr, tpr, _ = roc_curve(y_test, y_pred)
+        # interp_tpr = np.interp(mean_fpr, fpr, tpr)
+        # interp_tpr[0] = 0.0
+        # roc_auc = roc_auc_score(y_test, y_pred)
+        # roc_aucs.append(roc_auc)
+        # tprs.append(interp_tpr)
+            score = scorer_function(scorer_names[i], y_test, y_pred)
+            test_scores.append(score)
+            scorer_list.append(scorer_names[i])
+    # roc_df = pd.DataFrame(tprs).T
+    # roc_df.columns = [x for x in best_df.index]
+    # roc_df.index = mean_fpr
+    # best_df['holdout_test_scores'] = test_scores
+    # best_df['roc_auc_score'] = roc_aucs
+    tests_df = pd.DataFrame([scorer_list, test_scores])
+    tests_df.index = ['scorer', 'test_score']
+    return tests_df
 
 
 def holdout_test(path=hydro_path, gr_path=hydro_ml_path/'holdout',
