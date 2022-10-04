@@ -9,8 +9,13 @@ dss=load_nested_CV_test_results_from_all_models(path=hydro_ml_path, best=True,ne
 plot_nested_CV_test_scores(dss, feats=['doy', 'pressure', 'pwv', 'pressure+doy', 'pwv+pressure', 'pwv+pressure+doy'])
 Fig 10. (imbalanced set test results-no CV):
 dss=run_holdout_shuffled_tests_on_all_models_and_features()
-df=convert_da_to_long_form_df(dss)
-sns.catplot(data=df,y='value',x='features',row='model',col='scorer',kind='bar')
+plot_nested_CV_test_scores(dss, feats=['doy', 'pressure', 'pwv', 'pressure+doy', 'pwv+pressure', 'pwv+pressure+doy'])
+Fig. 20,21 (ROC plots for all):
+plot_ROC_from_dss(dss,feats=['pwv','pwv+pressure','pwv+pressure+doy'],best=None)
+Fig 12 (permutation plots):
+dss=load_nested_CV_test_results_from_all_models(path=hydro_ml_path, best=True,
+                                                neg=1,splits=5, permutation=True)
+plot_permutation_test_results_from_dss(dss,feats=['pwv','pwv+pressure','pwv+pressure+doy'])
 @author: ziskin
 """
 
@@ -2003,8 +2008,8 @@ def plot_nested_CV_test_scores(dss, feats=None, fontsize=16,
         for j in range(fg.axes.shape[1]):  # j is cols
             ax = fg.axes[i, j]
             scorer = dss['scorer'].isel(scorer=j).item()
-            title = '{} | scorer={}'.format(model, scorer)
-            ax.set_title(title, fontsize=fontsize)
+            title = '{} | metric={}'.format(model, scorer)
+            ax.set_title(title, fontsize=fontsize, pad=10)
             ax.set_xlabel('')
             ax.set_ylim(0, 1)
             change_width(ax, 0.110)
@@ -2452,7 +2457,7 @@ def plot_ROC_from_dss(dss, feats=None, fontsize=16, save=True, wv_label='pwv',
                 else:
                     title = '{}'.format(model)
             else:
-                title = '{} | scorer={}'.format(model, scorer)
+                title = '{} | metric={}'.format(model, scorer)
             ax.set_title(title, fontsize=fontsize)
             handles, labels = ax.get_legend_handles_labels()
             hands = handles[0:3]
@@ -3233,7 +3238,7 @@ def plot_permutation_test_results_from_dss(dss, feats=None, fontsize=14,
             # handles, labels, title = get_legend_labels_handles_title_seaborn_histplot(ax)
             if model == 'SVC':
                 model = 'SVM'
-            title = '{} | scorer={}'.format(model, scorer)
+            title = '{} | metric={}'.format(model, scorer)
             ax.set_title(title, fontsize=fontsize)
             # ax.set_xlim(-0.3, 1)
     fg.set_ylabels('Density', fontsize=fontsize)
@@ -3376,7 +3381,7 @@ def prepare_X_y_for_holdout_test(features='pwv+doy', model_name='SVC',
     return X, y
 
 
-def run_holdout_shuffled_tests_on_all_models_and_features(path=hydro_path, samples=1, test_size=0.25):
+def run_holdout_shuffled_tests_on_all_models_and_features(path=hydro_path, samples=1, test_size=0.33):
     """fit model with best HP on balanced set and test it on imbalanced set for
     each model, feature group"""
     import xarray as xr
