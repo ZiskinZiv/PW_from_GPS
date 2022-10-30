@@ -5,15 +5,15 @@ Created on Fri Oct 28 13:03:47 2022
 
 @author: shlomi
 """
-import ftplib
+# import ftplib
 # import subprocess
 from pathlib import Path
 import click
 from loguru import logger
 
 savepath = Path('/mnt/DATA/Work_Files/PW_yuval/Etkes')
-ftp = ftplib.FTP("ftp.etkes.com")
-ftp.login("Uni", "Uni")
+# ftp = ftplib.FTP("ftp.etkes.com")
+# ftp.login("Uni", "Uni")
 
 # ftp.dir()
 
@@ -30,11 +30,21 @@ def main_program(*args, **kwargs):
     return
 
 
+def login_ftp(addr='ftp.etkes.com',user='Uni', password='Uni', cwd=None):
+    import ftplib
+    ftp = ftplib.FTP(addr)
+    ftp.login(user, password)
+    if cwd is not None:
+        ftp.cwd('{}'.format(cwd))
+        logger.info('CWD is now {}.'.format(ftp.pwd()))
+    return ftp
+
+
 def getDirnamesFilenamesFromFTP(ftp, switch_to=None):
     import pandas as pd
     if switch_to is not None:
         ftp.cwd('{}'.format(switch_to))
-        logger.info('CWD to {}.'.format(switch_to))
+        logger.info('CWD is now {}.'.format(ftp.pwd()))
     ls = []
     ftp.retrlines('MLSD', ls.append)
     d=pd.DataFrame(ls)
@@ -53,6 +63,9 @@ def selectDirsOrFiles(df, pick='dir'):
 
 
 def main_dir_loop(savepath):
+    import pandas as pd
+    ftp = login_ftp()
+    start = pd.Timestamp.now()
     station_dirs = getDirnamesFilenamesFromFTP(ftp)
     station_dirs = selectDirsOrFiles(station_dirs, 'dir')
     for station in station_dirs:
@@ -86,11 +99,23 @@ def main_dir_loop(savepath):
                     except IndexError:
                         logger.warning('Files not Found in {}, skipping...'.format(ftp.pwd()))
                         ftp.cwd('..')
+                        check_time = pd.Timestamp.now()
+                        if (check_time - start).total_seconds() > 27:
+                            logger.warning('reestablishing FTP connection.')
+                            cwd = ftp.pwd()
+                            ftp = login_ftp(cwd=cwd)
+                            start = pd.Timestamp.now()
                         continue
                     local_filename = station_year_savepath/file
                     if local_filename.is_file():
                         logger.warning('{} already exists, skipping...'.format(local_filename))
                         ftp.cwd('..')
+                        check_time = pd.Timestamp.now()
+                        if (check_time - start).total_seconds() > 27:
+                            logger.warning('reestablishing FTP connection.')
+                            cwd = ftp.pwd()
+                            ftp = login_ftp(cwd=cwd)
+                            start = pd.Timestamp.now()
                         continue
                     with open(local_filename, "wb") as f:
                         ftp.retrbinary(f"RETR {file}", f.write)
@@ -99,6 +124,7 @@ def main_dir_loop(savepath):
                     #     + '/{}'.format(file)\
                     #     + ' --ftp-user="Uni" --ftp-password="Uni"'
                     logger.info('{} was copied to {}.'.format(file, station_year_savepath))
+                    start = pd.Timestamp.now()
                     # subprocess.run(command, shell=True, check=True)
                     ftp.cwd('..')
                 ftp.cwd('..')
