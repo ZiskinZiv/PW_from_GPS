@@ -19,14 +19,17 @@ savepath = Path('/mnt/DATA/Work_Files/PW_yuval/Etkes')
 
 
 @click.command()
-@click.option('--savepath', '-s', help='a full path to download the files, e.g., /home/ziskin/Work_Files/PW_yuval/IMS_T/10mins.',
+@click.option('--savepath', '-sa', help='a full path to download the files, e.g., /home/ziskin/Work_Files/PW_yuval/IMS_T/10mins.',
               type=click.Path(exists=True), default=savepath)
+@click.option('--station', '-sta', help='an Etkes station to start from the download, e.g., Arav',
+              type=str, default='AFUL')
 
 
 def main_program(*args, **kwargs):
     from pathlib import Path
     savepath = Path(kwargs['savepath'])
-    main_dir_loop(savepath)
+    station = kwargs['station']
+    main_dir_loop(savepath, station)
     return
 
 
@@ -62,12 +65,17 @@ def selectDirsOrFiles(df, pick='dir'):
     return df['name'].unique()
 
 
-def main_dir_loop(savepath):
+def main_dir_loop(savepath, station):
     import pandas as pd
     ftp = login_ftp()
     start = pd.Timestamp.now()
     station_dirs = getDirnamesFilenamesFromFTP(ftp)
     station_dirs = selectDirsOrFiles(station_dirs, 'dir')
+    if station is not None:
+        print(station, type(station))
+        ind = station_dirs.tolist().index(station)
+        station_dirs = station_dirs[ind:]
+        logger.info('Starting from station {}.'.format(station))
     for station in station_dirs:
         # print(ftp.pwd())
         years = getDirnamesFilenamesFromFTP(ftp, switch_to=station)
